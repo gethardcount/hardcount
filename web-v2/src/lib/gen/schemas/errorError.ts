@@ -33,9 +33,13 @@ export type ErrorError = {
   /** What went wrong, written for a person to read. */
   message: string;
   /**
-     * This request's id (`req_…`), the same value as the
-     * `Hardcount-Request-Id` response header. On a replayed
-     * `Idempotency-Key` answer it is the first request's id.
+     * The id of the request that produced this answer
+     * (`req_…`). It is normally the same value as the
+     * `Hardcount-Request-Id` response header. On an answer
+     * replayed for a repeated `Idempotency-Key`, the body is the
+     * first request's, so this is the first request's id, while
+     * the `Hardcount-Request-Id` header holds the new request's
+     * id.
      */
   request_id: string;
   /**

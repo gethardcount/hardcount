@@ -17,7 +17,9 @@ import type { AttentionSeverity } from './attentionSeverity';
 /**
  * Why an invoice needs your attention now, and what to do about it.
  * Hardcount works it out each time the invoice is read, from the
- * invoice's tax and payment state; it is never stored. The invoice
+ * invoice's tax and payment state and related facts (the customer's
+ * card, the dunning run, disputes, refunds made in Stripe); it is never
+ * stored. The invoice
  * leaves it out when nothing needs attention. `GET /v1/invoices`,
  * `GET /v1/invoices/{id}` and the finalize, retry-tax and
  * rotate-public-token responses carry it; the other invoice responses
@@ -50,14 +52,15 @@ export interface Attention {
      */
   code?: string;
   /**
-     * A link to documentation about this reason. Absent when there is
-     * no page for it.
+     * A link to documentation about this reason. No such pages are
+     * published yet, so this release always leaves it out.
      */
   doc_url?: string;
   /**
-     * Dotted path to the field you need to edit to fix the cause, for
-     * example `customer.address.postal_code`. Absent when the fix is not
-     * one field.
+     * Dotted path to the field to edit to fix the cause. Today only
+     * `tax_location_required` sets it, always to
+     * `customer.address.postal_code`, even when the tax ID is what is
+     * wrong. Absent otherwise.
      */
   param?: string;
   /**
@@ -70,17 +73,20 @@ export interface Attention {
      */
   detail?: string;
   /**
-     * The provider's own response (a Stripe Tax error, or Stripe's last
-     * payment error), exactly as received. Present only when Hardcount
-     * called the provider.
+     * The provider's response as Hardcount recorded it: the Stripe Tax
+     * error (cleaned of its JSON envelope and cut to 500 bytes),
+     * or the invoice's `last_payment_error`. Absent when Hardcount did
+     * not call the provider or recorded no response.
      */
   provider_response?: string;
   /**
      * When the condition started, so you can sort by age. For a tax
-     * reason it is when tax was deferred, and for
-     * `amount_below_minimum` when Stripe refused the amount. Otherwise
-     * it is when the invoice last changed; on a test clock, when it was
-     * issued or its last charge failed. Absent when it is not known.
+     * reason it is when tax was deferred, for `amount_below_minimum`
+     * when Stripe refused the amount, for `dispute_lost` when the
+     * dispute closed, and for `refunded_in_stripe` when the refund was
+     * made. Otherwise it is when the invoice last changed; on a test
+     * clock, when it was issued or its last charge failed. Absent when
+     * it is not known.
      */
   since?: string;
   /**

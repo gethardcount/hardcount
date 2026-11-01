@@ -59,21 +59,30 @@ export interface UsageEvent {
      * built is stored and not billed (see `billing_status`).
      */
   timestamp: string;
-  /** How the event arrived. `backfill` means `POST /v1/usage-events/backfill`. */
+  /**
+     * How the event arrived. `api`: `POST /v1/usage-events`, the batch
+     * route or the LiteLLM integration. `backfill`:
+     * `POST /v1/usage-events/backfill`, or released held usage.
+     * Absent on the rows of `GET /v1/usage-events`, which does not
+     * return it.
+     */
   origin?: UsageEventOrigin;
   /**
      * What serving this event cost you at your provider, in US cents as
      * a decimal string (e.g. "0.45"), set when the event arrived: from
-     * your provider cost rates, or the cost the sender reported (see
-     * `provider_cost_source`). Absent when the cost is unknown or the
-     * event has no costed dimensions.
+     * your provider cost rates, or the cost LiteLLM reported for the
+     * call (see `provider_cost_source`). Absent when no rate matched
+     * or the cost was too large to store, and when the source is
+     * `not_applicable`.
      */
   provider_cost_cents?: string;
   /**
      * Where `provider_cost_cents` came from: `table` (your provider
-     * cost rates), `observed` (the cost the sender reported), or
-     * `not_applicable` (the meter has no costed dimensions). Absent when
-     * the cost is unknown.
+     * cost rates), `observed` (the cost LiteLLM reported for the
+     * call), or `not_applicable`: the event lacks a `provider` or
+     * `token_type` dimension, or has neither `model` nor `model_raw`,
+     * so no rate can apply. Absent when the event has those
+     * dimensions but no rate matched.
      */
   provider_cost_source?: UsageEventProviderCostSource;
   billing_status?: UsageBillingStatus;

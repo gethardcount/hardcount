@@ -14,7 +14,8 @@
 /**
  * The state of the invoice's payment.
  * - `pending`: nothing has been charged yet, or a charge is about to
- *   be sent.
+ *   be sent. Also the status after Stripe refused the amount as below
+ *   its minimum charge (see `amount_below_minimum`).
  * - `processing`: Stripe is still working on a charge.
  * - `succeeded`: the invoice is paid.
  * - `failed`: the last charge was declined or refused. Dunning, when

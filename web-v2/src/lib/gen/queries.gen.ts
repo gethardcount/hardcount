@@ -699,8 +699,8 @@ export const getListCustomersUrl = (params?: ListCustomersParams,) => {
 /**
  * Customers in the mode of your API key, newest first unless you choose
  * a sort. The list answer leaves out `additional_emails`,
- * `email_status`, `dunning_policy_id` and `stripe_customer_id`: get one
- * customer for those.
+ * `email_status`, the bounce fields, `dunning_policy_id` and
+ * `stripe_customer_id`: get one customer for those.
  * @summary List customers
  */
 export const listCustomers = async (params?: ListCustomersParams, options?: RequestInit): Promise<ListCustomers200> => {
@@ -996,17 +996,20 @@ export const getUpdateCustomerUrl = (id: string,) => {
  *   account and mode, or the call returns 404. The change applies to the
  *   next dunning run, not to runs already started.
  * - `additional_emails` replaces the whole CC list; `[]` clears it.
- *   Entries are lowercased, deduplicated, capped at 10 and may not equal
- *   the primary email.
+ *   Entries are lowercased and deduplicated, and may not equal the
+ *   primary email. More than 10 after deduplication is refused with
+ *   422.
  * - A new `email` that is already on the CC list is refused with 422
  *   unless you send a new `additional_emails` too. Changing the email
  *   sets `email_status` back to `unknown`, after the answer is built:
  *   the answer still shows the earlier `email_status`.
  *
- * Name and email changes are copied to the linked Stripe customer when
- * there is one. A Stripe failure is logged and does not fail the call.
- * The change is written to the audit log (it records that the email
- * changed, not the address).
+ * When the customer has a linked Stripe customer, every update then
+ * sends Stripe the customer's email and the billing profile's fields:
+ * legal name (as the Stripe name), phone, address, tax status and tax
+ * ID. `display_name` is not sent to Stripe. A Stripe failure is
+ * logged and does not fail the call. The change is written to the audit
+ * log (it records that the email changed, not the address).
  * @summary Update a customer
  */
 export const updateCustomer = async (id: string,
@@ -1084,13 +1087,18 @@ export const getUpsertCustomerBillingProfileUrl = (id: string,) => {
  * the server: `ready` when legal name, address line 1, city and country
  * are all set, otherwise `incomplete`.
  *
- * Checks, each answered with 422 and `param` set to the field: `country`
- * must be an ISO 3166 alpha-2 code; `currency` must be a supported ISO
- * 4217 code (zero-decimal currencies such as JPY are refused); `phone`
- * is 7 to 20 digits, spaces or `+-()`; `tax_id` must match `tax_id_type`
- * when the type is `eu_vat`, `in_gst` or `au_abn`; `tax_status: exempt`
- * needs `tax_exempt_reason`; `tax_status: reverse_charge` needs
- * `tax_id`. Country, currency and tax ID are stored in upper case.
+ * Checks, each answered with 422 and `param` set to the field:
+ *
+ * - `country` must be two letters (only the format is checked).
+ * - `currency` must be a supported ISO 4217 code. Zero-decimal
+ *   currencies such as JPY are refused.
+ * - `phone` is 7 to 20 digits, spaces or `+-()`.
+ * - `tax_id` must match `tax_id_type` when the type is `eu_vat`,
+ *   `in_gst` or `au_abn`.
+ * - `tax_status: exempt` needs `tax_exempt_reason`, and
+ *   `tax_status: reverse_charge` needs `tax_id`.
+ *
+ * Country, currency and tax ID are stored in upper case.
  *
  * A currency that differs from the plan currency of a draft, trialing or
  * active subscription is refused with 409 `invalid_state`, because
@@ -1409,9 +1417,8 @@ export const getGetCustomerUsageUrl = (id: string,
  *
  * With neither, each subscription is rated over its own current billing
  * period, and `period` runs from the earliest start to the latest end of
- * those periods. Which cycle is current is read at the customer's
- * current time (the test clock's time for a customer on a test clock). A
- * trialing subscription's first cycle starts when its trial ends.
+ * those periods. A trialing subscription's current period is its first
+ * paid period, which starts when the trial ends.
  *
  * With both, the window is `[from, to)`, at most one year long, and the
  * amounts are an estimate at each subscription's current prices.
@@ -2086,7 +2093,10 @@ export const getGetPublicCostDashboardUrl = (token: string,) => {
  * for both. A customer with no active or trialing subscription gets 200
  * with `billing_period.source` `no_subscription`: `subscriptions`,
  * `usage` and `totals` are empty, and `credits` still lists the credit
- * balance. Limited to 60 requests a minute per IP address.
+ * balance.
+ *
+ * Limited to 60 requests a minute per IP address. The limit is shared
+ * with the hosted invoice and payment-update pages.
  * @summary Get a customer's public cost dashboard
  */
 export const getPublicCostDashboard = async (token: string, options?: RequestInit): Promise<GetPublicCostDashboard200> => {
@@ -2478,11 +2488,15 @@ export const getGetPublicPaymentUpdateUrl = (token: string,) => {
 /**
  * Public: no API key. The token from the link in a payment setup email
  * is the only credential. Hardcount sends that email when an invoice has
- * no payment method to charge; the link is the server's
+ * no payment method to charge, and again on each
+ * `POST /v1/invoices/{id}/resend-setup-link`. The link is the server's
  * `PAYMENT_UPDATE_URL` with `?token=` and the token. The token is valid
  * for 24 hours, and starting checkout uses it up. Share the page link
- * with customers instead of calling this route. Limited to 60 requests a
- * minute per IP address.
+ * with customers instead of calling this route.
+ *
+ * Limited to 60 requests a minute per IP address. The limit is shared
+ * with the checkout call below, the hosted invoice page and the public
+ * cost dashboard.
  * @summary Get what the payment-update page shows
  */
 export const getPublicPaymentUpdate = async (token: string, options?: RequestInit): Promise<PublicPaymentUpdate> => {
@@ -3376,8 +3390,11 @@ export const getAdjustCreditsUrl = () => {
 /**
  * Writes one `adjustment` entry to the customer's credit ledger in
  * `currency`. A positive amount adds credit in that currency; a
- * negative amount removes credit in that currency only. The audit
- * log records it as
+ * negative amount removes credit in that currency only, taken from
+ * the customer's grants in the order invoices draw them (promotional
+ * credit first, then the soonest to expire). The answer carries no
+ * `metadata`; the ledger list shows which grants a removal drew from
+ * (`drained_blocks`). The audit log records it as
  * `credit.adjustment` or `credit.deduction`.
  *
  * Errors (422, `param` names the field): `customer_id`, `currency` or
@@ -3695,8 +3712,11 @@ export const getCreateWebhookEndpointUrl = () => {
  * (`whsec_…`). The secret is shown only here: store it, and use it to
  * check the `Hardcount-Signature` header of each delivery.
  *
- * The URL must be `https://`. Hardcount looks up its host and refuses
- * one that points to a private network address. `events` lists the
+ * The URL must be `https://` on a public address: Hardcount looks up
+ * its host and refuses one that points to a private network address.
+ * Outside production (`APP_ENV` is not `production`), a `localhost`
+ * or loopback URL (`127.0.0.1`, `::1`) is accepted too, over `http://`
+ * or `https://`; in production it is refused. `events` lists the
  * event types to send. Leave it out, or send `[]`, for every event
  * (`*`). A prefix such as `invoice.*` matches every event whose type
  * starts with `invoice.`. An event type Hardcount never sends is
@@ -4833,11 +4853,14 @@ export const getStreamWebhookEventsUrl = () => {
  * key with `apikey:read`. It has no 30-second request timeout.
  *
  * On connect, the server sends the 50 newest events, newest first.
- * It then sends a frame for each new event, replay, and delivery
- * result. Every frame is `event: webhook_event` with a JSON
- * `data:` line. A comment line `: heartbeat` is sent every 15
- * seconds to keep proxies from closing the connection. The same
- * event can arrive more than once; de-duplicate by `event_id`.
+ * It then sends a frame for each new event and replay (status
+ * `pending`), and for each delivery that succeeds or fails for good.
+ * A failed attempt that will be retried sends no frame. Every frame is
+ * `event: webhook_event` with a JSON `data:` line. A comment line
+ * `: heartbeat` is sent every 15 seconds to keep proxies from closing
+ * the connection. The same event can arrive more than once;
+ * de-duplicate by `event_id`. A client that reads too slowly can miss
+ * frames: reconnect to get the newest 50 again.
  *
  * Live frames are not filtered by mode: check `livemode` on each
  * frame. The first batch holds only the caller's mode. Live frames
@@ -5038,13 +5061,15 @@ export const getReceivePostmarkWebhookUrl = () => {
  *
  * Each record is matched to the email Hardcount sent through the
  * `hc-outbox-id` key in its `Metadata`. A delivery, hard bounce or
- * spam complaint updates that email's delivery state. A bounce or
- * complaint also marks the customers who use that address as bounced
- * or complained.
+ * spam complaint updates that email's delivery state when the record
+ * is about the email's main recipient, not a copy. A bounce or
+ * complaint also marks the account's customers who use that address
+ * as bounced or complained, when `HARDCOUNT_EMAIL_BIDX_KEY` is set.
  *
  * A body that a retry cannot fix is answered 200, so Postmark stops
  * retrying: over 64 KB, invalid JSON, or no known Hardcount email id
- * in its metadata. Errors use the usual error body.
+ * in its metadata. A soft bounce is answered 200 as `ignored`. Errors
+ * use the usual error body.
  * @summary Receive a Postmark delivery webhook
  */
 export const receivePostmarkWebhook = async (receivePostmarkWebhookBody: ReceivePostmarkWebhookBody, options?: RequestInit): Promise<ReceivePostmarkWebhook200> => {
@@ -5854,12 +5879,16 @@ export const getCreateSubscriptionUrl = () => {
  * All the plans must share one billing interval, one base-fee timing
  * (in advance or in arrears) and one currency. The currency must also
  * match the customer's billing profile and the customer's other
- * subscriptions. No two live subscriptions of a customer may bill the
- * same meter. The customer and the plans must not be archived.
+ * `draft`, `trialing` and `active` subscriptions; canceled ones do not
+ * count. No two of the plans may bill the same meter, and none may
+ * bill a meter that another `draft`, `trialing` or `active`
+ * subscription of the customer bills. The customer and the plans must
+ * not be archived.
  *
  * An `active` subscription whose plans bill a non-zero base fee in
  * advance gets its first invoice in the same transaction; it is then
- * collected like any other invoice. A customer on a test clock gives
+ * collected like any other invoice. A `trialing` subscription gets
+ * that invoice when its trial ends. A customer on a test clock gives
  * the subscription its clock, and the subscription starts at the
  * clock's time.
  *
@@ -6049,8 +6078,9 @@ export const getActivateSubscriptionUrl = (id: string,) => {
  * first period starts today in your account's billing time zone (the
  * clock's day for a customer on a test clock). A non-zero base fee
  * billed in advance is invoiced in the same transaction. The plans'
- * currency must still match the customer's billing profile and other
- * subscriptions. Takes no body.
+ * currency must still match the customer's billing profile and the
+ * customer's other `draft`, `trialing` and `active` subscriptions.
+ * Takes no body.
  *
  * Sends the `subscription.activated` webhook event.
  * @summary Activate a draft subscription
@@ -6326,12 +6356,22 @@ export const getCancelSubscriptionUrl = (id: string,) => {
  * Cancels the subscription immediately. Works on `draft`, `trialing`
  * and `active` subscriptions. Takes no body.
  *
- * In the same transaction, Hardcount writes the final invoice for the
- * part of the current period that has been used, and credits the
- * unused part of any base fee that was billed in advance. If a
- * billing period has already ended, it is billed first. If a
+ * In the transaction that cancels it, Hardcount writes the final
+ * invoice for the part of the current period that has been used
+ * (usage, and base fees billed in arrears, prorated to the cancel),
+ * and the relief for any base fee billed in advance: a credit note
+ * for the unused part, written as a draft, or a void of an unpaid
+ * invoice of which nothing was used. After the transaction commits,
+ * the credit notes are issued, which is when the balance credit and
+ * the tax reversal happen (a failed issue is retried), and then the
+ * final invoice is collected, so that credit reduces it. A trial that
+ * never became active is canceled with no invoice.
+ *
+ * If a billing period has already ended, it is billed first. If a
  * scheduled cancel was already due, that cancel takes effect at its
- * scheduled time and the canceled subscription is returned.
+ * scheduled time and the canceled subscription is returned. The
+ * canceled subscription keeps its last `current_billing_period_*`
+ * and `next_billing_at`; nothing is billed at that time.
  *
  * Sends the `subscription.canceled` webhook event.
  * @summary Cancel a subscription now
@@ -6666,10 +6706,12 @@ export const getResumeSubscriptionCollectionUrl = (id: string,) => {
 /**
  * Ends a collection pause. The period that is running bills
  * normally; a period that ended during the pause keeps its draft
- * invoice. Sends the `subscription.collection_resumed` webhook
- * event. If the pause had already ended (its `resumes_at` has
- * passed), the event says what ended it: `triggered_by` is `payment`
- * or `schedule`, not `operator`. Calling it on a subscription that is
+ * invoice. It works on a canceled subscription too, whose pause
+ * still holds its unpaid invoices. Sends the
+ * `subscription.collection_resumed` webhook event. If the pause had
+ * already ended (its `resumes_at` has passed), the event says what
+ * ended it: `triggered_by` is `payment` or `schedule`, not
+ * `operator`. Calling it on a subscription that is
  * not paused returns the subscription unchanged and sends no event.
  * @summary Resume collection
  */
@@ -6821,7 +6863,8 @@ export const getExtendSubscriptionTrialUrl = (id: string,) => {
 
 /**
  * Moves the end of the trial later. The first paid period is moved
- * to start at the new trial end. A cancel scheduled with
+ * to start at the beginning of the new trial end's day, in your
+ * account's billing time zone. A cancel scheduled with
  * `at_period_end` moves with the trial. To shorten a trial, use
  * `POST /v1/subscriptions/{id}/end-trial`.
  *
@@ -7058,16 +7101,19 @@ export const getAddSubscriptionItemUrl = (id: string,) => {
 
 /**
  * Adds a plan to the subscription as a new item. The plan must use
- * the same billing interval and currency as the other items, and
- * must not share meters with the customer's other live
- * subscriptions. A period that ended and is not invoiced yet is
- * billed first.
+ * the same billing interval, base-fee timing and currency as the
+ * other items. It must not bill a meter that another item of this
+ * subscription, or another `draft`, `trialing` or `active`
+ * subscription of the customer, bills. A period that ended and is
+ * not invoiced yet is billed first. The subscription must not be
+ * `canceled`.
  *
  * On an active subscription, a plan whose base fee is billed in
- * advance is charged for the rest of the current period, in the
- * same transaction as the add. An item added on the first day of the
- * period (in your account's billing time zone) pays for the whole
- * period. A plan billed in arrears is billed at the end of the
+ * advance is charged for the rest of the current period, on an
+ * invoice written in the same transaction as the add, when the
+ * period's base-fee invoice exists. An item added on the first day
+ * of the period (in your account's billing time zone) pays for the
+ * whole period. A plan billed in arrears is billed at the end of the
  * period for the days it was on the subscription.
  *
  * Sends the `subscription.item.added` webhook event.
@@ -7159,9 +7205,12 @@ export const getUpdateSubscriptionItemUrl = (id: string,
  *
  * For a change that takes effect now on a plan billed in advance,
  * Hardcount settles the rest of the period at once. An increase is
- * invoiced. A decrease is credited to the customer's balance with a
- * credit note, or reduces the amount due when the period's invoice
- * is still unpaid. `proration` in the response describes the result.
+ * invoiced in the same transaction as the change. A decrease is
+ * credited with credit notes on the invoices that charged the item,
+ * written in the same transaction as drafts and issued right after
+ * it commits (a failed issue is retried): on a paid invoice the
+ * credit goes to the customer's balance, on an unpaid one it reduces
+ * the amount due. `proration` in the response describes the result.
  * A plan billed in arrears is settled at the end of the period.
  *
  * Changes to one subscription's items run one at a time, and each is
@@ -7252,9 +7301,12 @@ export const getRemoveSubscriptionItemUrl = (id: string,
  * no body.
  *
  * On an active subscription, the unused part of a base fee billed in
- * advance is credited in the same transaction. A plan billed in
- * arrears is billed at the end of the period for the days it was on
- * the subscription.
+ * advance is credited with credit notes on the invoices that charged
+ * the item: written in the same transaction as drafts, and issued
+ * right after it commits (a failed issue is retried). On a paid
+ * invoice the credit goes to the customer's balance, on an unpaid
+ * one it reduces the amount due. A plan billed in arrears is billed
+ * at the end of the period for the days it was on the subscription.
  *
  * Sends the `subscription.item.removed` webhook event.
  * @summary Remove a subscription item
@@ -7332,7 +7384,8 @@ export const getCancelSubscriptionItemPendingChangeUrl = (id: string,
 /**
  * Cancels the plan change scheduled on an item. Calling it on an item
  * with no scheduled change returns the item unchanged. Sends the
- * `subscription.pending_change.canceled` webhook event.
+ * `subscription.pending_change.canceled` webhook event, and writes an
+ * audit log entry, also when no change was scheduled.
  *
  * If the period has already ended, the change has taken effect and
  * the request answers 409.
@@ -7612,7 +7665,8 @@ export const getListUsageEventsUrl = (params?: ListUsageEventsParams,) => {
 /**
  * Lists the usage events of this account and mode, newest first by
  * `timestamp`. The filters combine; `total` counts every matching
- * event. Needs usage read permission.
+ * event. The rows carry no `origin` and no `billing_status`. Needs
+ * usage read permission.
  * @summary List usage events
  */
 export const listUsageEvents = async (params?: ListUsageEventsParams, options?: RequestInit): Promise<ListUsageEvents200> => {
@@ -8010,7 +8064,8 @@ export const getReleaseHeldUsageUrl = () => {
  * them. A released row counts toward
  * the billing period its time falls in only if that period's invoice
  * has not been built yet; Hardcount does not move it onto a later
- * invoice. Writes an audit log entry. Requires usage write permission.
+ * invoice. A call that takes any rows writes an audit log entry.
+ * Requires usage write permission.
  * @summary Release held usage
  */
 export const releaseHeldUsage = async (releaseHeldUsageBody: ReleaseHeldUsageBody, options?: RequestInit): Promise<HeldUsageReleaseResult> => {
@@ -8084,8 +8139,8 @@ export const getDiscardHeldUsageUrl = () => {
 /**
  * Marks the held rows for one external customer ID (and one event
  * name, when given) as discarded. They are never billed. The rows stay
- * stored as a record. Writes an audit log entry. Requires usage write
- * permission.
+ * stored as a record. A call that discards any rows writes an audit
+ * log entry. Requires usage write permission.
  * @summary Discard held usage
  */
 export const discardHeldUsage = async (discardHeldUsageBody: DiscardHeldUsageBody, options?: RequestInit): Promise<DiscardHeldUsage200> => {
@@ -8870,7 +8925,11 @@ export const getAddInvoiceLineItemUrl = (id: string,) => {
  * Adds one line to a `draft` invoice and recomputes its subtotal,
  * total and amount due. `amount_cents` is `quantity` ×
  * `unit_amount_cents`, and the line takes the invoice's currency. Only
- * draft invoices accept new lines. Tax is calculated at finalize.
+ * draft invoices accept new lines. On an invoice you created, tax is
+ * calculated at finalize. On a draft the billing engine made, finalize
+ * keeps the tax the draft was built with, so an added line is taxed
+ * only if the draft's tax is still pending and is then calculated
+ * again.
  * @summary Add a line item to a draft invoice
  */
 export const addInvoiceLineItem = async (id: string,
@@ -9039,7 +9098,8 @@ export const getResendInvoiceSetupLinkUrl = (id: string,) => {
  * customer has no card on file: a single-use link to the
  * payment-update page (`PAYMENT_UPDATE_URL`), sent to the customer's
  * email address only, with no copies. Once a card is added, the
- * automatic charge collects the invoice.
+ * automatic charge collects a `finalized` invoice; a written-off one
+ * is not charged automatically.
  *
  * Works on unpaid invoices that are `finalized` or `uncollectible`.
  * This is different from `POST /v1/invoices/{id}/send`, which emails
@@ -9231,7 +9291,7 @@ export const getRecordInvoicePaymentUrl = (id: string,) => {
  * `invoice.paid` and `invoice.payment_recorded` webhook events; the
  * second carries `recovered_from`, the status the invoice was paid
  * from. The optional `note` is stored in the audit log, cut to 500
- * characters.
+ * bytes.
  *
  * On a written-off invoice, read its `recovery_warning` first: it says
  * when the payment will not reconcile on its own. The payment is still
@@ -10319,8 +10379,10 @@ export const getIssueCreditNoteUrl = (id: string,) => {
  *   with `unknown`: the customer may already be refunded. Retry either
  *   with `POST /v1/credit-notes/{id}/retry-refund`.
  * - If the invoice's charge is still running, or the invoice is still
- *   a draft, nothing changes and the note stays `draft`. Hardcount issues
- *   it later.
+ *   a draft, nothing changes and the note stays `draft`. Hardcount
+ *   issues it later on its own only when `issue_pending` is true (a
+ *   note Hardcount created); otherwise issue it again once the charge
+ *   has settled.
  * - If the invoice was voided, the draft is voided instead and
  *   returned with `status` `voided`.
  * @summary Issue a draft credit note
@@ -10763,15 +10825,19 @@ export const getFinalizeInvoiceUrl = (id: string,) => {
  * 2. Otherwise the saved card is charged with a Stripe PaymentIntent.
  *    A successful charge marks the invoice paid, sends `invoice.paid`
  *    and `payment.succeeded`, and queues a receipt email to the
- *    customer when they have an email address. A declined charge sets `payment_status` to `failed`,
- *    sends `payment.failed`, and starts dunning when the customer's
- *    policy is enabled.
- * 3. With no card on file, the customer is emailed a link to add one,
- *    once (`no_pm_notified_at`), and dunning starts when the policy is
- *    enabled.
+ *    customer when they have an email address. A declined charge sets
+ *    `payment_status` to `failed`, sends `payment.failed`, and starts
+ *    dunning when the customer's policy is enabled.
+ * 3. With no card on file, the customer is emailed a link to add one
+ *    when they have an email address, and `no_pm_notified_at` records
+ *    it. This automatic email goes once;
+ *    `POST /v1/invoices/{id}/resend-setup-link` sends it again.
+ *    Dunning starts when the policy is enabled.
  * 4. When Stripe is not connected for the invoice's mode, the customer
- *    is emailed the invoice itself, once (`invoice_emailed_at`), and
- *    dunning starts when the policy is enabled.
+ *    is emailed the invoice itself, card or not, when they have an
+ *    email address and the server can send email. `invoice_emailed_at`
+ *    records it, and it goes once. Dunning starts when the policy is
+ *    enabled.
  *
  * The response is the invoice after collection: paid, failed, or still
  * queued. A collection step that does not finish is not an error
@@ -10853,18 +10919,20 @@ export const getRetryInvoiceTaxUrl = (id: string,) => {
  * Calculates tax again on a draft invoice whose `tax_status` is
  * `pending`, after you fixed the cause (for example the customer's
  * address). It also refreshes a draft whose Stripe Tax calculation is
- * more than 24 hours old and was never recorded, which finalize
+ * more than 23 hours old and was never recorded, which finalize
  * refuses. The route takes no body.
  *
- * Each call adds one to `tax_retry_count` and rewrites the tax on the
- * lines and the invoice. A retry that succeeds clears
+ * Each call rewrites the tax on the lines and the invoice. A retry of
+ * pending tax adds one to `tax_retry_count`; refreshing an expired
+ * calculation does not. A retry that succeeds clears
  * `tax_pending_reason` and `tax_error_code`. A retry that still fails
  * records the new error code and answers 200 with the updated
  * invoice, so check its `attention`.
  *
  * When the tax resolves on an invoice the billing engine made, the
  * call also finalizes it, unless collection is paused on its
- * subscription. The automatic charge then collects it on its next run.
+ * subscription. If nothing is then due, the invoice is marked paid at
+ * once; otherwise the automatic charge collects it on its next run.
  * An invoice you created stays a draft for you to finalize. If the
  * finalize fails, the call returns 500 or 409 and the invoice stays a
  * draft with its tax saved: finalize it.
@@ -11052,7 +11120,7 @@ export const logout = async ( options?: RequestInit): Promise<void> => {
 
 
 
-export const getLogoutMutationOptions = <TError = InvalidBodyResponse | BodyNotAllowedResponse | RateLimitedResponse | Error,
+export const getLogoutMutationOptions = <TError = InvalidBodyResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext> => {
 
@@ -11081,12 +11149,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type LogoutMutationResult = NonNullable<Awaited<ReturnType<typeof logout>>>
 
-    export type LogoutMutationError = InvalidBodyResponse | BodyNotAllowedResponse | RateLimitedResponse | Error
+    export type LogoutMutationError = InvalidBodyResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Sign out of the dashboard
  */
-export const useLogout = <TError = InvalidBodyResponse | BodyNotAllowedResponse | RateLimitedResponse | Error,
+export const useLogout = <TError = InvalidBodyResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof logout>>,
@@ -11112,8 +11180,8 @@ export const getSwitchSessionModeUrl = () => {
  * request with this session reads and writes that mode's data:
  * customers, invoices, subscriptions, API keys and the rest. No
  * request needs its own mode parameter, and the user does not sign
- * in again. Writes an audit row, filed in test mode whichever mode
- * is chosen.
+ * in again. A body without `livemode` switches to test mode. Writes
+ * an audit row, filed in test mode whichever mode is chosen.
  * @summary Switch the dashboard session between test and live mode
  */
 export const switchSessionMode = async (switchSessionModeBody: SwitchSessionModeBody, options?: RequestInit): Promise<SwitchSessionMode200> => {
@@ -12390,8 +12458,10 @@ export const getDeleteProviderCostUrl = (id: string,) => {
 
 /**
  * Deletes the rate. Usage events it already costed keep their stamped
- * cost. Events that arrive later with its labels get no cost (the margin
- * report counts them in `unresolved_events`) until you set a rate again.
+ * cost. Events that arrive later with its labels get no cost from it.
+ * When no other rate matches them (a rate on the event's other model
+ * label can), they get no cost at all, and the margin report counts
+ * them in `unresolved_events`, until you set a rate again.
  * The delete is recorded in the audit log. Send no body.
  * @summary Delete a provider cost rate
  */
@@ -13279,7 +13349,8 @@ export const getListTestClockSubscriptionsUrl = (id: string,
 
 /**
  * Lists the subscriptions that run on the clock: those of the
- * customers attached to it. Test mode only.
+ * customers attached to it, oldest first. The rows carry no
+ * `current_billing_period_display`. Test mode only.
  * @summary List a test clock's subscriptions
  */
 export const listTestClockSubscriptions = async (id: string,
@@ -14667,8 +14738,9 @@ export const getExportAuditLogCsvUrl = (params?: ExportAuditLogCsvParams,) => {
  * Used by the dashboard; not part of the integration API.
  *
  * Streams the audit log for the caller's mode (test or live), newest
- * first, with no row limit. Settings changes are recorded in test
- * mode, so they appear only in a test-mode export.
+ * first, with no row limit. Settings changes, sign-ins and the other
+ * account events that `GET /v1/audit-log` lists as test-mode rows
+ * appear only in a test-mode export.
  * Takes the same filters as the audit-log list, so the dashboard's
  * filters and its export give the same rows. The date filters are
  * `date_from`/`date_to`; `from`/`to` are ignored here.
@@ -17308,8 +17380,9 @@ export const getConnectStripeUrl = () => {
  * same mode replaces the keys; a webhook secret saved before is kept
  * when the body sends none. Key prefixes must match the mode:
  * `sk_test_`/`rk_test_` and `pk_test_` for test, `sk_live_`/`rk_live_`
- * and `pk_live_` for live. Secrets are stored encrypted and are never
- * returned.
+ * and `pk_live_` for live. The secret key and webhook secret are never
+ * returned. They are stored encrypted when `HARDCOUNT_ENCRYPTION_KEY`
+ * is set, which production requires.
  *
  * Hardcount then calls Stripe to check the key. A failed check still
  * returns 200: the keys are saved and `last_verified_error` says why
@@ -17752,15 +17825,20 @@ export const getListAuditLogUrl = (params?: ListAuditLogParams,) => {
  * Used by the dashboard; not part of the integration API.
  *
  * Returns the account's audit entries in the caller's mode, newest
- * first (by `created_at`, then `id`). All filters are exact matches
- * and can be combined.
+ * first (by `created_at`, then `id`). The `resource_type`,
+ * `resource_id`, `action`, `actor_id` and `test_clock_id` filters are
+ * exact matches. All filters can be combined.
  *
  * Paged with `limit` and `offset`, like every list. Here `total`
  * stops counting at 10,001, so a value above 10,000 means "more than
  * 10,000".
  *
- * Settings changes, sign-ins and team changes are always recorded in
- * test mode, so they do not appear when you read the log in live mode.
+ * Settings changes, sign-ins, sign-outs, mode switches, password
+ * resets and accepted invites are always recorded in test mode, so
+ * they do not appear when you read the log in live mode. The account,
+ * key and owner rows written at setup are in live mode. Every other
+ * row, team invites and removals included, is in the mode the change
+ * was made in.
  * @summary List audit log entries
  */
 export const listAuditLog = async (params?: ListAuditLogParams, options?: RequestInit): Promise<ListAuditLog200> => {

@@ -22,7 +22,9 @@
  *   the subscription `active` and its first paid period starts.
  *   If a cancel is scheduled for the trial end, it becomes
  *   `canceled` instead, with no charge.
- * - `active`: billing. Each period is invoiced when it ends.
+ * - `active`: billing. Usage and base fees billed in arrears are
+ *   invoiced when each period ends; a base fee billed in advance
+ *   when its period starts.
  * - `canceled`: ended at `canceled_at`. It bills nothing more,
  *   and no route makes it `active` again.
  *

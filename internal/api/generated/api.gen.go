@@ -3097,7 +3097,8 @@ type APIKey struct {
 	CreatedAt time.Time `json:"created_at"`
 
 	// ExpiresAt When the key stops working. Also set on the old key during a
-	// rotation grace period. Absent for a key that does not expire.
+	// rotation grace period, and copied to the new key when the old
+	// one had it. Absent for a key that does not expire.
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
 
 	// Id The key's id (`hc_key_…`). Use it to revoke or rotate the key.
@@ -3107,9 +3108,10 @@ type APIKey struct {
 	// its secret part. Enough to tell keys apart; never the full key.
 	KeyPrefix string `json:"key_prefix"`
 
-	// KeyType `secret` can read and change everything in the account.
-	// `ingest` can only send usage events, for LiteLLM or another
-	// gateway.
+	// KeyType `secret` can read and change everything in its mode of the
+	// account, except team members and the test email, which need a
+	// dashboard sign-in. `ingest` can only send usage events and call
+	// `GET /v1/whoami`, for LiteLLM or another gateway.
 	KeyType APIKeyKeyType `json:"key_type"`
 
 	// LastUsedAt When the key last authenticated a request. Each server updates
@@ -3130,9 +3132,10 @@ type APIKey struct {
 	TenantId string `json:"tenant_id"`
 }
 
-// APIKeyKeyType `secret` can read and change everything in the account.
-// `ingest` can only send usage events, for LiteLLM or another
-// gateway.
+// APIKeyKeyType `secret` can read and change everything in its mode of the
+// account, except team members and the test email, which need a
+// dashboard sign-in. `ingest` can only send usage events and call
+// `GET /v1/whoami`, for LiteLLM or another gateway.
 type APIKeyKeyType string
 
 // APIKeyCreated A new API key and its full value. `raw_key` appears only in this answer.
@@ -3284,7 +3287,9 @@ type ActivityPart struct {
 
 // AnalyticsMrrMovementPoint MRR movement in one bucket of `GET /v1/analytics/mrr-movement`: a
 // UTC day, or a UTC month for `12m`. Amounts are in the minor unit of
-// the account's default currency (cents for USD).
+// the account's default currency (cents for USD). Expansion and
+// contraction count only subscriptions that were active for the whole
+// requested window.
 type AnalyticsMrrMovementPoint struct {
 	// Churned MRR of subscriptions canceled in the bucket, as a positive amount in the currency's minor unit.
 	Churned int64 `json:"churned"`
@@ -3309,6 +3314,10 @@ type AnalyticsMrrMovementPoint struct {
 // the whole window, in the minor unit of the account's default
 // currency (cents for USD). `churned` and `contraction` are positive
 // amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
+// Expansion and contraction count only subscriptions that were active
+// for the whole window: a subscription activated or canceled inside
+// it counts only in `new` or `churned`. Test-clock subscriptions are
+// left out.
 type AnalyticsMrrMovementTotals struct {
 	// Churned MRR of subscriptions canceled in the window, as a positive amount in the currency's minor unit.
 	Churned int64 `json:"churned"`
@@ -3330,7 +3339,8 @@ type AnalyticsMrrMovementTotals struct {
 // "The window" is the requested period, ending now. "The previous
 // window" is the one of equal length before it. Money is in the minor
 // unit of `currency` (cents for USD). Rates are fractions, so 0.05
-// means 5%.
+// means 5%. Customers, subscriptions and invoices on test clocks are
+// left out of every figure.
 type AnalyticsOverview struct {
 	// ActiveCustomers Customer records with status `active`. Includes customers with
 	// no subscription or only canceled ones; `live_customers` counts
@@ -3383,13 +3393,20 @@ type AnalyticsOverview struct {
 	// LogoChurnRate Subscriptions canceled in the window, divided by subscriptions active at its start. 0 when none were active.
 	LogoChurnRate float64 `json:"logo_churn_rate"`
 
-	// Mrr MRR of active subscriptions now.
+	// Mrr MRR now, from plan base fees only (base amount times quantity,
+	// yearly plans divided by 12) on `active` subscriptions with plans
+	// in `currency`. Trialing subscriptions and usage charges are not
+	// counted.
 	Mrr int64 `json:"mrr"`
 
 	// MrrMovement How MRR (monthly recurring revenue from plan base fees) changed over
 	// the whole window, in the minor unit of the account's default
 	// currency (cents for USD). `churned` and `contraction` are positive
 	// amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
+	// Expansion and contraction count only subscriptions that were active
+	// for the whole window: a subscription activated or canceled inside
+	// it counts only in `new` or `churned`. Test-clock subscriptions are
+	// left out.
 	MrrMovement AnalyticsMrrMovementTotals `json:"mrr_movement"`
 
 	// MrrPrev MRR at the start of the window, rebuilt from item change history.
@@ -3420,7 +3437,7 @@ type AnalyticsOverview struct {
 		Currency string `json:"currency"`
 	} `json:"outstanding_by_currency"`
 
-	// PaidInvoices Invoices paid in the window.
+	// PaidInvoices Invoices in `currency` paid in the window.
 	PaidInvoices int `json:"paid_invoices"`
 
 	// Period The window an analytics call covers, ending now: the last 7, 30 or
@@ -3428,9 +3445,10 @@ type AnalyticsOverview struct {
 	// other periods use daily buckets.
 	Period AnalyticsPeriod `json:"period"`
 
-	// RefundsNeedingAttention Issued credit notes whose refund failed, has an unknown result,
-	// has been pending for more than 72 hours, or has not started an
-	// hour after issue.
+	// RefundsNeedingAttention Issued credit notes whose refund failed or has an unknown
+	// result, has stayed pending for 72 hours since the note last
+	// changed, or owes a refund that has not started an hour after the
+	// note last changed. Test-clock credit notes are not counted.
 	RefundsNeedingAttention int `json:"refunds_needing_attention"`
 
 	// Revenue What paid the invoices paid in the window (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
@@ -3506,7 +3524,9 @@ type AnalyticsUsagePoint struct {
 
 // Attention Why an invoice needs your attention now, and what to do about it.
 // Hardcount works it out each time the invoice is read, from the
-// invoice's tax and payment state; it is never stored. The invoice
+// invoice's tax and payment state and related facts (the customer's
+// card, the dunning run, disputes, refunds made in Stripe); it is never
+// stored. The invoice
 // leaves it out when nothing needs attention. `GET /v1/invoices`,
 // `GET /v1/invoices/{id}` and the finalize, retry-tax and
 // rotate-public-token responses carry it; the other invoice responses
@@ -3529,8 +3549,8 @@ type Attention struct {
 	// `provider_response`.
 	Detail string `json:"detail,omitempty"`
 
-	// DocUrl A link to documentation about this reason. Absent when there is
-	// no page for it.
+	// DocUrl A link to documentation about this reason. No such pages are
+	// published yet, so this release always leaves it out.
 	DocUrl string `json:"doc_url,omitempty"`
 
 	// DueBy The invoice's payment deadline (its `due_at`). Hardcount does not
@@ -3553,14 +3573,16 @@ type Attention struct {
 	// retry sets it. Absent when no automatic retry is scheduled.
 	NextAttemptAt time.Time `json:"next_attempt_at,omitempty"`
 
-	// Param Dotted path to the field you need to edit to fix the cause, for
-	// example `customer.address.postal_code`. Absent when the fix is not
-	// one field.
+	// Param Dotted path to the field to edit to fix the cause. Today only
+	// `tax_location_required` sets it, always to
+	// `customer.address.postal_code`, even when the tax ID is what is
+	// wrong. Absent otherwise.
 	Param string `json:"param,omitempty"`
 
-	// ProviderResponse The provider's own response (a Stripe Tax error, or Stripe's last
-	// payment error), exactly as received. Present only when Hardcount
-	// called the provider.
+	// ProviderResponse The provider's response as Hardcount recorded it: the Stripe Tax
+	// error (cleaned of its JSON envelope and cut to 500 bytes),
+	// or the invoice's `last_payment_error`. Absent when Hardcount did
+	// not call the provider or recorded no response.
 	ProviderResponse string `json:"provider_response,omitempty"`
 
 	// Reason Why an invoice needs your attention, as a closed code. A code is never
@@ -3571,23 +3593,34 @@ type Attention struct {
 	// - `tax_location_required`: the customer's billing address or tax ID
 	//   is missing or not valid for the tax provider. Edit the billing
 	//   profile.
-	// - `payment_failed`: the card was declined. The decline code is in
-	//   `code`.
+	// - `payment_failed`: the last charge failed. `code` is
+	//   `payment.declined` for a decline, `payment.card_refused` when the
+	//   bank refused the card for good, or
+	//   `payment.authentication_required` when the bank wants the customer
+	//   to confirm the payment. Stripe's own message is in
+	//   `provider_response`.
 	// - `payment_unconfirmed`: a charge got an unclear answer from Stripe.
 	//   Hardcount asks Stripe what happened.
 	// - `payment_anomaly`: money does not reconcile: a double charge, a
-	//   captured amount that differs from the amount booked, or a payment
-	//   on a voided invoice. Shown even on paid and voided invoices.
-	// - `payment_processing`: Stripe is still processing a charge. It
-	//   settles on its own.
+	//   captured amount that differs from the amount booked, a payment in
+	//   another currency, or a payment on a voided invoice. Shown even on
+	//   paid and voided invoices.
+	// - `payment_processing`: a payment may be in progress. Stripe is
+	//   still processing a charge (it settles on its own), the customer
+	//   has the hosted payment page open (`code` `payment.page_open`), or
+	//   a charge is in progress on a written-off invoice (`code`
+	//   `payment.recovery_processing`).
 	// - `payment_scheduled`: the invoice is queued, and the automatic
 	//   charge collects it on its next run.
 	// - `awaiting_payment`: the invoice is unpaid and not queued for an
 	//   automatic charge. Only invoices written by older releases reach
 	//   this state.
-	// - `no_payment_method`: the customer has no card on file. The invoice
-	//   stays queued, and the automatic charge collects it on its first
-	//   run after a card is added.
+	// - `no_payment_method`: the customer has no card ready to charge. The
+	//   invoice stays queued, and the automatic charge collects it on its
+	//   first run after a card is added, unless collection is paused on
+	//   the subscription. When Stripe is not connected for the invoice's
+	//   mode, no card can be added online and the invoice is emailed
+	//   instead. `message` says which applies.
 	// - `dunning_exhausted`: the customer still has no card and automatic
 	//   recovery has ended without collecting; the policy's final action
 	//   ran. If that action paused collection on the subscription, resume
@@ -3599,9 +3632,10 @@ type Attention struct {
 	//   retrying it through the pause, and `message` then says so. With no
 	//   open run it is not charged automatically until collection
 	//   resumes.
-	// - `commit_exposure`: the invoice funded a prepaid commit whose
-	//   credit is already spendable, and the invoice is unpaid. Prepaid
-	//   credit is granted when the invoice is issued, not when it is paid.
+	// - `commit_exposure`: the invoice funded a prepaid commit and is
+	//   unpaid, and the customer can already spend that credit or has
+	//   spent it. Prepaid credit is granted when the invoice is issued,
+	//   not when it is paid.
 	//   This reason is returned only when no other reason applies. When
 	//   one does, the exposure is folded into that reason's `message` and
 	//   `actions` instead, so do not treat this code as the only sign of
@@ -3609,7 +3643,8 @@ type Attention struct {
 	// - `dispute_lost`: the customer disputed a payment on the invoice with
 	//   their bank, and the dispute closed as `lost`, so the bank took the
 	//   money back. Hardcount leaves the invoice paid and moves no money;
-	//   you record the loss. Shown on paid invoices. On an invoice that
+	//   you record the loss. Shown even on paid invoices, which is where
+	//   disputes land. On an invoice that
 	//   bought prepaid credit, the message also says how much of the
 	//   credit is still spendable and names commit relief, because an
 	//   ordinary credit note is refused there. When the invoice also has
@@ -3620,13 +3655,16 @@ type Attention struct {
 	//   in Stripe outside Hardcount, and Hardcount did not record it as a
 	//   credit note: the invoice was not paid yet, the currency differs,
 	//   the invoice bought prepaid credit, Hardcount first saw the refund
-	//   more than a day after it was made, or the refund is more than the
-	//   invoice had left to refund or credit. `code` is
+	//   more than a day after it was made, a credit note on the invoice
+	//   has a failed card refund this refund may replace, or the refund is
+	//   more than the invoice had left to refund or credit. `code` is
 	//   `payment.refunded_in_stripe.` followed by that review reason.
 	//   Record it with a credit note that names the refund
-	//   (`stripe_refund_id` on `POST /v1/credit-notes`) or dismiss it
+	//   (`stripe_refund_id` on `POST /v1/credit-notes`), attach it to the
+	//   credit note whose refund failed
+	//   (`POST /v1/credit-notes/{id}/attach-stripe-refund`), or dismiss it
 	//   (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
-	//   Shown on paid invoices.
+	//   Shown even on paid invoices, which is where refunds land.
 	// - `amount_below_minimum`: Stripe refused to charge the invoice, or
 	//   refused a payment page for it, because the amount is below
 	//   Stripe's minimum charge. The minimum depends on the currency the
@@ -3648,10 +3686,12 @@ type Attention struct {
 	Severity AttentionSeverity `json:"severity"`
 
 	// Since When the condition started, so you can sort by age. For a tax
-	// reason it is when tax was deferred, and for
-	// `amount_below_minimum` when Stripe refused the amount. Otherwise
-	// it is when the invoice last changed; on a test clock, when it was
-	// issued or its last charge failed. Absent when it is not known.
+	// reason it is when tax was deferred, for `amount_below_minimum`
+	// when Stripe refused the amount, for `dispute_lost` when the
+	// dispute closed, and for `refunded_in_stripe` when the refund was
+	// made. Otherwise it is when the invoice last changed; on a test
+	// clock, when it was issued or its last charge failed. Absent when
+	// it is not known.
 	Since time.Time `json:"since,omitempty"`
 }
 
@@ -3682,9 +3722,9 @@ type Attention struct {
 //   - `mark_uncollectible`:
 //     `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
 //     parked invoice (payment status `unknown` with no payment intent
-//     recorded), for a customer who paid another way. Hardcount still
-//     records a payment that Stripe shows, and charges the invoice again
-//     if none appears within 24 hours. The dashboard shows it as a
+//     recorded), for a customer who paid another way. After the
+//     write-off, Hardcount still records a payment that Stripe shows,
+//     but it no longer charges the invoice. The dashboard shows it as a
 //     secondary action.
 type AttentionAction string
 
@@ -3717,9 +3757,9 @@ type AttentionActionItem struct {
 	// - `mark_uncollectible`:
 	//   `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
 	//   parked invoice (payment status `unknown` with no payment intent
-	//   recorded), for a customer who paid another way. Hardcount still
-	//   records a payment that Stripe shows, and charges the invoice again
-	//   if none appears within 24 hours. The dashboard shows it as a
+	//   recorded), for a customer who paid another way. After the
+	//   write-off, Hardcount still records a payment that Stripe shows,
+	//   but it no longer charges the invoice. The dashboard shows it as a
 	//   secondary action.
 	Code AttentionAction `json:"code"`
 
@@ -3736,23 +3776,34 @@ type AttentionActionItem struct {
 //   - `tax_location_required`: the customer's billing address or tax ID
 //     is missing or not valid for the tax provider. Edit the billing
 //     profile.
-//   - `payment_failed`: the card was declined. The decline code is in
-//     `code`.
+//   - `payment_failed`: the last charge failed. `code` is
+//     `payment.declined` for a decline, `payment.card_refused` when the
+//     bank refused the card for good, or
+//     `payment.authentication_required` when the bank wants the customer
+//     to confirm the payment. Stripe's own message is in
+//     `provider_response`.
 //   - `payment_unconfirmed`: a charge got an unclear answer from Stripe.
 //     Hardcount asks Stripe what happened.
 //   - `payment_anomaly`: money does not reconcile: a double charge, a
-//     captured amount that differs from the amount booked, or a payment
-//     on a voided invoice. Shown even on paid and voided invoices.
-//   - `payment_processing`: Stripe is still processing a charge. It
-//     settles on its own.
+//     captured amount that differs from the amount booked, a payment in
+//     another currency, or a payment on a voided invoice. Shown even on
+//     paid and voided invoices.
+//   - `payment_processing`: a payment may be in progress. Stripe is
+//     still processing a charge (it settles on its own), the customer
+//     has the hosted payment page open (`code` `payment.page_open`), or
+//     a charge is in progress on a written-off invoice (`code`
+//     `payment.recovery_processing`).
 //   - `payment_scheduled`: the invoice is queued, and the automatic
 //     charge collects it on its next run.
 //   - `awaiting_payment`: the invoice is unpaid and not queued for an
 //     automatic charge. Only invoices written by older releases reach
 //     this state.
-//   - `no_payment_method`: the customer has no card on file. The invoice
-//     stays queued, and the automatic charge collects it on its first
-//     run after a card is added.
+//   - `no_payment_method`: the customer has no card ready to charge. The
+//     invoice stays queued, and the automatic charge collects it on its
+//     first run after a card is added, unless collection is paused on
+//     the subscription. When Stripe is not connected for the invoice's
+//     mode, no card can be added online and the invoice is emailed
+//     instead. `message` says which applies.
 //   - `dunning_exhausted`: the customer still has no card and automatic
 //     recovery has ended without collecting; the policy's final action
 //     ran. If that action paused collection on the subscription, resume
@@ -3764,9 +3815,10 @@ type AttentionActionItem struct {
 //     retrying it through the pause, and `message` then says so. With no
 //     open run it is not charged automatically until collection
 //     resumes.
-//   - `commit_exposure`: the invoice funded a prepaid commit whose
-//     credit is already spendable, and the invoice is unpaid. Prepaid
-//     credit is granted when the invoice is issued, not when it is paid.
+//   - `commit_exposure`: the invoice funded a prepaid commit and is
+//     unpaid, and the customer can already spend that credit or has
+//     spent it. Prepaid credit is granted when the invoice is issued,
+//     not when it is paid.
 //     This reason is returned only when no other reason applies. When
 //     one does, the exposure is folded into that reason's `message` and
 //     `actions` instead, so do not treat this code as the only sign of
@@ -3774,7 +3826,8 @@ type AttentionActionItem struct {
 //   - `dispute_lost`: the customer disputed a payment on the invoice with
 //     their bank, and the dispute closed as `lost`, so the bank took the
 //     money back. Hardcount leaves the invoice paid and moves no money;
-//     you record the loss. Shown on paid invoices. On an invoice that
+//     you record the loss. Shown even on paid invoices, which is where
+//     disputes land. On an invoice that
 //     bought prepaid credit, the message also says how much of the
 //     credit is still spendable and names commit relief, because an
 //     ordinary credit note is refused there. When the invoice also has
@@ -3785,13 +3838,16 @@ type AttentionActionItem struct {
 //     in Stripe outside Hardcount, and Hardcount did not record it as a
 //     credit note: the invoice was not paid yet, the currency differs,
 //     the invoice bought prepaid credit, Hardcount first saw the refund
-//     more than a day after it was made, or the refund is more than the
-//     invoice had left to refund or credit. `code` is
+//     more than a day after it was made, a credit note on the invoice
+//     has a failed card refund this refund may replace, or the refund is
+//     more than the invoice had left to refund or credit. `code` is
 //     `payment.refunded_in_stripe.` followed by that review reason.
 //     Record it with a credit note that names the refund
-//     (`stripe_refund_id` on `POST /v1/credit-notes`) or dismiss it
+//     (`stripe_refund_id` on `POST /v1/credit-notes`), attach it to the
+//     credit note whose refund failed
+//     (`POST /v1/credit-notes/{id}/attach-stripe-refund`), or dismiss it
 //     (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
-//     Shown on paid invoices.
+//     Shown even on paid invoices, which is where refunds land.
 //   - `amount_below_minimum`: Stripe refused to charge the invoice, or
 //     refused a payment page for it, because the amount is below
 //     Stripe's minimum charge. The minimum depends on the currency the
@@ -3841,7 +3897,9 @@ type AuditLogEntry struct {
 	// IpAddress The client address of the request that made the change. Absent for work with no request.
 	IpAddress string `json:"ip_address,omitempty"`
 
-	// Metadata Action details. A settings change lists each changed field with `from` and `to`. Absent when the action has none.
+	// Metadata Action details. A settings change has `changed`, which lists
+	// each changed field with `from` and `to`. Absent when the action
+	// has none.
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 
 	// RequestId Matches the `Hardcount-Request-Id` header of the request that made the change. Absent for work with no request.
@@ -3882,10 +3940,10 @@ type AuditLogEntryActorType string
 // `GET /v1/audit-log/filters`, for filter menus. Only entries in the
 // caller's mode count.
 type AuditLogFilters struct {
-	// Actions Every `action` value recorded in this mode.
+	// Actions Every `action` value recorded in this mode, sorted A to Z, at most 500.
 	Actions []string `json:"actions"`
 
-	// ResourceTypes Every `resource_type` value recorded in this mode.
+	// ResourceTypes Every `resource_type` value recorded in this mode, sorted A to Z, at most 500.
 	ResourceTypes []string `json:"resource_types"`
 
 	// TestClocks Test clocks seen in the log, most recent activity first, at most 100. Deleted clocks are included.
@@ -4035,12 +4093,12 @@ type CreditGrantBlock struct {
 	// RemainingCents Credit left in the block, `amount_cents` minus `consumed_cents`, in the currency's minor unit.
 	RemainingCents int64 `json:"remaining_cents"`
 
-	// RetiredCents Commit credit taken back when the invoice that paid for it was
+	// RetiredCents Commit credit taken back when the invoice that funded it was
 	// voided, or refunded by a credit note, in the currency's minor
 	// unit.
 	RetiredCents int64 `json:"retired_cents"`
 
-	// SourceInvoiceId For a `commit` block, the invoice that paid for it.
+	// SourceInvoiceId For a `commit` block, the commit invoice whose finalizing made the grant. Absent for other blocks.
 	SourceInvoiceId string `json:"source_invoice_id,omitempty"`
 }
 
@@ -4057,7 +4115,7 @@ type CreditGrants struct {
 
 	// RemainingByCurrency One entry per currency with credit left, ordered by currency.
 	RemainingByCurrency []struct {
-		// CommitRemainingCents Remaining credit the customer paid for (`commit`), in the currency's minor unit.
+		// CommitRemainingCents Remaining prepaid commit credit (`commit`), granted by finalized commit invoices, in the currency's minor unit.
 		CommitRemainingCents int64 `json:"commit_remaining_cents"`
 
 		// Currency The currency, uppercase.
@@ -4085,8 +4143,11 @@ type CreditLedgerEntry struct {
 	// in the currency's minor unit (cents for USD).
 	BalanceAfter int64 `json:"balance_after"`
 
-	// ConsumedCents For entries that add credit, how much has been used or expired,
-	// in the currency's minor unit. Absent when nothing has.
+	// ConsumedCents For entries that add credit, how much of it is gone, in the
+	// currency's minor unit: drawn by invoices, expired, removed by a
+	// negative adjustment, or, for commit credit, taken back when its
+	// invoice was voided or refunded by a credit note. Absent when
+	// nothing is.
 	ConsumedCents int64 `json:"consumed_cents,omitempty"`
 
 	// CreatedAt When the entry was written. For a customer on a test clock, the clock's time.
@@ -4136,37 +4197,51 @@ type CreditLedgerEntry struct {
 	// InvoiceId The invoice the entry comes from: the invoice a `usage` entry
 	// was drawn by, the voided or credited invoice that gave credit
 	// back, or the commit invoice that funded a grant. Absent when no
-	// invoice caused the entry.
+	// invoice caused the entry, and on the `adjustment` that takes
+	// commit credit back after its invoice was voided or refunded:
+	// that invoice is in `metadata.funding_invoice_id`.
 	InvoiceId string `json:"invoice_id,omitempty"`
 
 	// Metadata Facts Hardcount records on the entry, such as which grants a
-	// draw took its credit from. Absent when empty.
+	// draw or a deduction took its credit from (`drained_blocks`).
+	// Absent when empty, and on the answer of
+	// `POST /v1/credits/adjust`, which does not return it; the ledger
+	// list does.
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 
 	// SourceChangeType The kind of subscription item change that produced a proration:
 	// `plan` (the item moved to another plan), `quantity` (its quantity
 	// changed), `add` (the item was added) or `remove` (the item was
-	// removed).
+	// removed). On a credit ledger entry (`source_change_type`) it is
+	// never sent in this version.
 	SourceChangeType ItemChangeType `json:"source_change_type,omitempty"`
 
-	// SourceCreditNoteId The credit note that granted this credit to the balance.
+	// SourceCreditNoteId Recorded on credit that a credit note gave back, but not sent by
+	// any route in this version: the ledger list does not return it,
+	// and the grant and adjust routes never write it. Such an entry
+	// names the invoice in `invoice_id`.
 	SourceCreditNoteId string `json:"source_credit_note_id,omitempty"`
 
-	// SourceInvoiceId For a `commit` grant, the invoice that paid for it.
+	// SourceInvoiceId For a `commit` grant, the commit invoice whose finalizing made
+	// the grant. Absent on other entries.
 	SourceInvoiceId string `json:"source_invoice_id,omitempty"`
 
-	// SourceInvoiceReversalId The voided invoice whose applied credit this entry gave back.
+	// SourceInvoiceReversalId Recorded on credit that a voided invoice gave back, but not sent
+	// by any route in this version: the ledger list does not return
+	// it, and the grant and adjust routes never write it. Such an
+	// entry names the invoice in `invoice_id`.
 	SourceInvoiceReversalId string `json:"source_invoice_reversal_id,omitempty"`
 
-	// SourcePlanChangedAt On a proration credit, when the change that produced it happened.
+	// SourcePlanChangedAt Not sent by any route in this version: no ledger entry is
+	// written with it, so it is always absent.
 	SourcePlanChangedAt time.Time `json:"source_plan_changed_at,omitempty"`
 
-	// SourceSubscriptionId With `source_subscription_item_id`, `source_plan_changed_at` and
-	// `source_change_type`, set on a proration credit: the subscription
-	// change that produced it.
+	// SourceSubscriptionId Not sent by any route in this version: no ledger entry is
+	// written with it, so it is always absent.
 	SourceSubscriptionId string `json:"source_subscription_id,omitempty"`
 
-	// SourceSubscriptionItemId On a proration credit, the subscription item whose change produced it.
+	// SourceSubscriptionItemId Not sent by any route in this version: no ledger entry is
+	// written with it, so it is always absent.
 	SourceSubscriptionItemId string `json:"source_subscription_item_id,omitempty"`
 
 	// TenantId The account the entry belongs to.
@@ -4216,7 +4291,7 @@ type CreditLiveCurrency struct {
 	// EstimatedRemainingCents `balance_cents` minus `unbilled_usage_cents`, floored at zero, in the currency's minor unit. To see how far past zero a customer is, subtract the two parts yourself.
 	EstimatedRemainingCents int64 `json:"estimated_remaining_cents"`
 
-	// UnbilledUsageCents Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it, in the currency's minor unit. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
+	// UnbilledUsageCents Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it, in the currency's minor unit. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage from the trial end on counts, inside its first paid period; trial usage is free.
 	UnbilledUsageCents int64 `json:"unbilled_usage_cents"`
 }
 
@@ -4293,9 +4368,10 @@ type CreditNote struct {
 	RecordedAt time.Time `json:"recorded_at,omitempty"`
 
 	// RecordedFromStripe True when the card refund is a refund made in Stripe outside
-	// Hardcount: recorded from Stripe's refund webhook, or linked with
-	// `stripe_refund_id` at create. Hardcount made no refund call for
-	// it; `stripe_refund_id` names the refund.
+	// Hardcount: recorded from Stripe's refund webhook, linked with
+	// `stripe_refund_id` at create, or attached with
+	// `POST /v1/credit-notes/{id}/attach-stripe-refund`. Hardcount made
+	// no refund call for it; `stripe_refund_id` names the refund.
 	RecordedFromStripe bool `json:"recorded_from_stripe"`
 
 	// RefundAmountCents Part of the total refunded to the card that paid the invoice, in
@@ -4304,11 +4380,12 @@ type CreditNote struct {
 	RefundAmountCents int64 `json:"refund_amount_cents"`
 
 	// RefundStatus The refund part's state at Stripe. `none`: no refund was sent
-	// (no refund part, or the note is not issued yet). `pending`:
-	// Stripe has not finished it. `succeeded` and `failed`: Stripe's
-	// answer. `unknown`: Stripe gave no
-	// clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
-	// a 429), so the customer may already be refunded. Don't refund it
+	// (no refund part, or the note is not issued yet); an issued note
+	// with a refund part stays `none` only when its refund's result
+	// was not recorded. `pending`: Stripe has not finished it.
+	// `succeeded` and `failed`: Stripe's answer. `unknown`: Stripe gave
+	// no clear answer (a timeout, a network error, a Stripe 5xx, a 409
+	// or a 429), so the customer may already be refunded. Don't refund it
 	// again in the Stripe Dashboard. Retry it with
 	// `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
 	// refund at Stripe first and then resends the same request with
@@ -4360,11 +4437,12 @@ type CreditNote struct {
 }
 
 // CreditNoteRefundStatus The refund part's state at Stripe. `none`: no refund was sent
-// (no refund part, or the note is not issued yet). `pending`:
-// Stripe has not finished it. `succeeded` and `failed`: Stripe's
-// answer. `unknown`: Stripe gave no
-// clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
-// a 429), so the customer may already be refunded. Don't refund it
+// (no refund part, or the note is not issued yet); an issued note
+// with a refund part stays `none` only when its refund's result
+// was not recorded. `pending`: Stripe has not finished it.
+// `succeeded` and `failed`: Stripe's answer. `unknown`: Stripe gave
+// no clear answer (a timeout, a network error, a Stripe 5xx, a 409
+// or a 429), so the customer may already be refunded. Don't refund it
 // again in the Stripe Dashboard. Retry it with
 // `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
 // refund at Stripe first and then resends the same request with
@@ -4430,17 +4508,20 @@ type CreditNoteStats struct {
 // `additional_emails`.
 type Customer struct {
 	// AdditionalEmails Addresses copied (CC) on billing documents and billing emails:
-	// invoice, receipt, payment reminder, failed payment and credit
-	// note. Never on emails that carry a link to act on the account,
-	// such as a payment-method link. Lowercase bare addresses, no
-	// duplicates, at most 10, never the primary `email`. Absent when
-	// the list is empty.
+	// invoice, receipt, payment reminder, final notice, failed payment
+	// and credit note. Never on the payment setup emails, whose link
+	// lets the reader add a card. Lowercase bare addresses, no
+	// duplicates, never the primary `email`. At most 10: a create or
+	// update with more is refused with 422. Absent when the list is
+	// empty.
 	AdditionalEmails []string `json:"additional_emails,omitempty"`
 
 	// CreatedAt When the customer was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// DisplayName The name shown on invoices, emails and the dashboard. At most 255 characters.
+	// DisplayName The name shown on invoices, emails and the dashboard. Create
+	// refuses one longer than 255 bytes (UTF-8); an update does not
+	// check the length.
 	DisplayName string `json:"display_name"`
 
 	// DunningPolicyId The dunning policy (the plan for retrying failed payments) this
@@ -4453,10 +4534,12 @@ type Customer struct {
 	Email string `json:"email,omitempty"`
 
 	// EmailBounceReason The reason the email provider gave with the last bounce or spam
-	// report. Absent until one is recorded.
+	// report. Absent until one is recorded, when the report gave no
+	// reason, and again after `email` changes.
 	EmailBounceReason string `json:"email_bounce_reason,omitempty"`
 
-	// EmailLastBouncedAt When the last bounce or spam report was recorded. Absent until one is.
+	// EmailLastBouncedAt When the last bounce or spam report was recorded. Absent until
+	// one is, and again after `email` changes.
 	EmailLastBouncedAt time.Time `json:"email_last_bounced_at,omitempty"`
 
 	// EmailStatus Whether `email` receives mail, learned from bounce and spam
@@ -4467,8 +4550,8 @@ type Customer struct {
 	EmailStatus CustomerEmailStatus `json:"email_status,omitempty"`
 
 	// ExternalId Your own ID for the customer, such as the account ID in your
-	// app. Unique in the account and mode, at most 255 characters,
-	// and fixed after create.
+	// app. Unique in the account and mode, and fixed after create.
+	// Create refuses one longer than 255 bytes (UTF-8).
 	ExternalId string `json:"external_id"`
 
 	// Id The customer's ID, `hc_cus_` and 20 characters.
@@ -4482,9 +4565,11 @@ type Customer struct {
 	// unpaid invoices stay collectible.
 	Status CustomerStatus `json:"status"`
 
-	// StripeCustomerId The Stripe customer linked to this customer. Absent until the
-	// first payment-method action, such as a payment-method link,
-	// creates it.
+	// StripeCustomerId The Stripe customer linked to this customer. Absent until
+	// Hardcount first creates it: when you create a payment-method
+	// link (setup session or setup email), or when the customer opens
+	// Stripe Checkout from a payment-update link or the hosted invoice
+	// page. Set once, never replaced.
 	StripeCustomerId string `json:"stripe_customer_id,omitempty"`
 
 	// TenantId The account the customer belongs to.
@@ -4522,7 +4607,8 @@ type CustomerBillingProfile struct {
 	// City City of the billing address.
 	City string `json:"city,omitempty"`
 
-	// Country ISO 3166 alpha-2 code, such as `US` or `IN`. Stored in upper case.
+	// Country Two letters, an ISO 3166 alpha-2 code such as `US` or `IN`. Only
+	// the format is checked. Stored in upper case.
 	Country string `json:"country,omitempty"`
 
 	// CreatedAt When the profile was first saved.
@@ -4563,8 +4649,8 @@ type CustomerBillingProfile struct {
 	TaxId string `json:"tax_id"`
 
 	// TaxIdType The kind of tax ID, as its Stripe code (for example `eu_vat`,
-	// `in_gst`, `au_abn`). `vat`, `gstin` and `abn` are read as those
-	// codes.
+	// `in_gst`, `au_abn`), stored in lower case. `vat`, `gstin`,
+	// `in_gstin` and `abn` are stored as those codes.
 	TaxIdType string `json:"tax_id_type"`
 
 	// TaxStatus `standard`: tax is worked out as usual. `exempt`: no tax, and
@@ -4604,7 +4690,8 @@ type CustomerBillingProfileInput struct {
 	// City City of the billing address.
 	City string `json:"city,omitempty"`
 
-	// Country ISO 3166 alpha-2 code, such as `US` or `IN`. Stored in upper case.
+	// Country Two letters, an ISO 3166 alpha-2 code such as `US` or `IN`. Only
+	// the format is checked. Stored in upper case.
 	Country string `json:"country,omitempty"`
 
 	// Currency ISO 4217 code, such as `USD`. When set, invoices for this
@@ -4634,8 +4721,8 @@ type CustomerBillingProfileInput struct {
 	TaxId string `json:"tax_id,omitempty"`
 
 	// TaxIdType The kind of tax ID, as its Stripe code (for example `eu_vat`,
-	// `in_gst`, `au_abn`). `vat`, `gstin` and `abn` are read as those
-	// codes.
+	// `in_gst`, `au_abn`), stored in lower case. `vat`, `gstin`,
+	// `in_gstin` and `abn` are stored as those codes.
 	TaxIdType string `json:"tax_id_type,omitempty"`
 
 	// TaxStatus `standard`: tax is worked out as usual. `exempt`: no tax, and
@@ -4751,7 +4838,9 @@ type CustomerPriceOverrideMode string
 // invoice prices it: `GET /v1/customers/{id}/usage`. Only active and
 // trialing subscriptions are counted. Quantities are decimal strings.
 type CustomerUsage struct {
-	// Buckets One entry per UTC day in the period, including days with no usage.
+	// Buckets One entry per UTC day in the period, including days with no
+	// usage. Empty when the customer's plans price no meter, or when
+	// the daily series failed to load (`warnings` then says so).
 	Buckets []struct {
 		// BucketStart The start of the UTC day.
 		BucketStart time.Time `json:"bucket_start"`
@@ -4845,8 +4934,8 @@ type CustomerUsagePeriodSource string
 // CustomerUsageMeter One meter in a customer's usage report: its usage over the window
 // and what that usage costs, split by the price that took it.
 type CustomerUsageMeter struct {
-	// Currency The currency of the plan whose prices took the usage. Empty when
-	// no usage was priced.
+	// Currency The currency of the plan whose rows `prices` shows. Empty (`""`)
+	// when `prices` is empty.
 	Currency string `json:"currency"`
 
 	// EventName The `event_name` usage events send for this meter.
@@ -4926,12 +5015,15 @@ type DisputeWebhookEventData struct {
 
 	// Invoice A bill for one customer, in one currency. The billing engine creates
 	// one at the end of each subscription period (and for a subscription's
-	// start, a change, a cancel or a spend threshold); you can also create
-	// one-off invoices with `POST /v1/invoices`. An invoice starts as a
-	// `draft`, is `finalized` when issued, and ends `paid`, `voided` or
-	// `uncollectible`. Every amount is a whole number in the currency's
-	// minor unit (cents for USD). The invoice routes and the `invoice.*`
-	// and `payment.*` webhook events return it.
+	// start when a fee is billed in advance, a change, a cancel or a spend
+	// threshold); you can also create one-off invoices with
+	// `POST /v1/invoices`. The engine creates its invoices already
+	// `finalized`, or as a `draft` while their tax is pending or collection
+	// is paused on the subscription. An invoice you create starts as a
+	// `draft` until you finalize it. A finalized invoice ends `paid`,
+	// `voided` or `uncollectible`. Every amount is a whole number in the
+	// currency's minor unit (cents for USD). The invoice routes and the
+	// `invoice.*` and `payment.*` webhook events return it.
 	Invoice Invoice `json:"invoice"`
 }
 
@@ -5088,7 +5180,7 @@ type DunningPolicyInput struct {
 	// invoice with no subscription is not affected.
 	FinalSubscriptionAction DunningPolicyInputFinalSubscriptionAction `json:"final_subscription_action,omitempty"`
 
-	// Name A name for the policy, up to 255 characters. Defaults to empty.
+	// Name A name for the policy, up to 255 bytes (a character outside ASCII counts as more than one). Defaults to empty.
 	Name string `json:"name,omitempty"`
 
 	// RetryDays Days to wait before each retry. The first counts from the failed
@@ -5412,9 +5504,13 @@ type Error struct {
 		// sender's body as it comes.
 		Param string `json:"param,omitempty"`
 
-		// RequestId This request's id (`req_…`), the same value as the
-		// `Hardcount-Request-Id` response header. On a replayed
-		// `Idempotency-Key` answer it is the first request's id.
+		// RequestId The id of the request that produced this answer
+		// (`req_…`). It is normally the same value as the
+		// `Hardcount-Request-Id` response header. On an answer
+		// replayed for a repeated `Idempotency-Key`, the body is the
+		// first request's, so this is the first request's id, while
+		// the `Hardcount-Request-Id` header holds the new request's
+		// id.
 		RequestId string `json:"request_id"`
 
 		// Type One of `invalid_request_error`, `authentication_error`,
@@ -5664,7 +5760,8 @@ type HostedInvoice struct {
 
 		// PaymentStatus The state of the invoice's payment.
 		// - `pending`: nothing has been charged yet, or a charge is about to
-		//   be sent.
+		//   be sent. Also the status after Stripe refused the amount as below
+		//   its minimum charge (see `amount_below_minimum`).
 		// - `processing`: Stripe is still working on a charge.
 		// - `succeeded`: the invoice is paid.
 		// - `failed`: the last charge was declined or refused. Dunning, when
@@ -5772,12 +5869,15 @@ type HostedInvoicePayUnavailableReason string
 
 // Invoice A bill for one customer, in one currency. The billing engine creates
 // one at the end of each subscription period (and for a subscription's
-// start, a change, a cancel or a spend threshold); you can also create
-// one-off invoices with `POST /v1/invoices`. An invoice starts as a
-// `draft`, is `finalized` when issued, and ends `paid`, `voided` or
-// `uncollectible`. Every amount is a whole number in the currency's
-// minor unit (cents for USD). The invoice routes and the `invoice.*`
-// and `payment.*` webhook events return it.
+// start when a fee is billed in advance, a change, a cancel or a spend
+// threshold); you can also create one-off invoices with
+// `POST /v1/invoices`. The engine creates its invoices already
+// `finalized`, or as a `draft` while their tax is pending or collection
+// is paused on the subscription. An invoice you create starts as a
+// `draft` until you finalize it. A finalized invoice ends `paid`,
+// `voided` or `uncollectible`. Every amount is a whole number in the
+// currency's minor unit (cents for USD). The invoice routes and the
+// `invoice.*` and `payment.*` webhook events return it.
 type Invoice struct {
 	// AmountDueCents What the customer still owes, in the currency's minor unit (cents
 	// for USD): the total, less customer credit applied
@@ -5794,7 +5894,9 @@ type Invoice struct {
 
 	// Attention Why an invoice needs your attention now, and what to do about it.
 	// Hardcount works it out each time the invoice is read, from the
-	// invoice's tax and payment state; it is never stored. The invoice
+	// invoice's tax and payment state and related facts (the customer's
+	// card, the dunning run, disputes, refunds made in Stripe); it is never
+	// stored. The invoice
 	// leaves it out when nothing needs attention. `GET /v1/invoices`,
 	// `GET /v1/invoices/{id}` and the finalize, retry-tax and
 	// rotate-public-token responses carry it; the other invoice responses
@@ -5806,11 +5908,11 @@ type Invoice struct {
 	AutoChargePending bool `json:"auto_charge_pending,omitempty"`
 
 	// BillToSnapshot The buyer details this invoice was issued with, copied when it
-	// left draft. The PDF, the hosted page and the dashboard show an
-	// issued invoice from this copy, so a later edit to the customer
-	// or billing profile does not change it. Absent on drafts and on
-	// invoices issued before this field existed; those show the
-	// current customer details.
+	// was finalized (or created already finalized). The PDF, the
+	// hosted page and the dashboard show an issued invoice from this
+	// copy, so a later edit to the customer or billing profile does not
+	// change it. Absent on drafts and on invoices issued before this
+	// field existed; those show the current customer details.
 	BillToSnapshot DocumentBillTo `json:"bill_to_snapshot,omitempty"`
 
 	// BillingPeriodDisplay The period as people read it, with its last day included, in `billing_timezone`: for example "Oct 1, 2026 – Oct 31, 2026". `billing_period_start` and `billing_period_end` stay the exact boundaries. Worked out when the invoice is read, so it comes with the same responses as `attention`. Absent when the period starts and ends at the same instant.
@@ -5830,7 +5932,8 @@ type Invoice struct {
 	// - `subscription_cycle`: the invoice for a subscription period that
 	//   ended (a renewal).
 	// - `subscription_create`: the first invoice when a subscription
-	//   starts.
+	//   starts or its trial ends, for the fees its plans bill in advance.
+	//   A subscription billed only in arrears has none.
 	// - `subscription_cancel`: the final invoice when a subscription is
 	//   canceled at once in the middle of a period.
 	// - `subscription_update`: the invoice for a change in the middle of a
@@ -5851,7 +5954,8 @@ type Invoice struct {
 	// the currency's minor unit (cents for USD). Credit is applied when
 	// the invoice is collected (after finalize, or by
 	// `POST /v1/invoices/{id}/collect`). A void gives it back to the
-	// customer's balance.
+	// customer's balance, and a credit note issued before payment can
+	// give part of it back, lowering this figure.
 	CreditsAppliedCents int64 `json:"credits_applied_cents"`
 
 	// Currency The invoice's currency, as an uppercase ISO 4217 code. Every
@@ -5881,9 +5985,9 @@ type Invoice struct {
 	Id string `json:"id"`
 
 	// InvoiceEmailedAt When Hardcount itself emailed the customer this invoice, because
-	// Stripe is not connected for the invoice's mode and the customer
-	// has no card. The email is sent once. An invoice you email with
-	// `POST /v1/invoices/{id}/send` does not set it.
+	// Stripe is not connected for the invoice's mode. The email is sent
+	// once. An invoice you email with `POST /v1/invoices/{id}/send`
+	// does not set it. Absent until then.
 	InvoiceEmailedAt time.Time `json:"invoice_emailed_at,omitempty"`
 
 	// InvoiceNumber The number printed on the invoice: the account's invoice prefix
@@ -5904,8 +6008,11 @@ type Invoice struct {
 	// `POST /v1/invoices` gets a new one when it is finalized.
 	IssuedAt time.Time `json:"issued_at,omitempty"`
 
-	// LastPaymentError Stripe's message for the last failed charge, word for word (it is
-	// written for the cardholder). Absent when no charge has failed.
+	// LastPaymentError The error text recorded with the invoice's last charge attempt
+	// that did not succeed. Usually Stripe's message, which is written
+	// for the cardholder, with card numbers and email addresses masked.
+	// It can also be Hardcount's own text, such as `customer has no
+	// payment method on file`. Absent when there is none.
 	LastPaymentError string `json:"last_payment_error,omitempty"`
 
 	// Memo A note you set when creating the invoice, printed on the PDF and the hosted page. Absent when empty.
@@ -5917,8 +6024,11 @@ type Invoice struct {
 	// NetPaymentTermDays Days from `issued_at` to `due_at`. 0 means due on receipt.
 	NetPaymentTermDays int `json:"net_payment_term_days"`
 
-	// NoPmNotifiedAt When the customer was emailed a link to add a payment method for
-	// this invoice. The email is sent once.
+	// NoPmNotifiedAt When Hardcount automatically emailed the customer a link to add a
+	// payment method for this invoice. The automatic email is sent
+	// once; `POST /v1/invoices/{id}/resend-setup-link` sends it again
+	// and does not change this time. Absent until the automatic email
+	// is sent.
 	NoPmNotifiedAt time.Time `json:"no_pm_notified_at,omitempty"`
 
 	// PaidAt When the invoice was paid. Absent until it is paid.
@@ -5952,7 +6062,8 @@ type Invoice struct {
 
 	// PaymentStatus The state of the invoice's payment.
 	// - `pending`: nothing has been charged yet, or a charge is about to
-	//   be sent.
+	//   be sent. Also the status after Stripe refused the amount as below
+	//   its minimum charge (see `amount_below_minimum`).
 	// - `processing`: Stripe is still working on a charge.
 	// - `succeeded`: the invoice is paid.
 	// - `failed`: the last charge was declined or refused. Dunning, when
@@ -5984,8 +6095,9 @@ type Invoice struct {
 	// PublicToken The token in the hosted invoice page's link, like Stripe's
 	// `hosted_invoice_url`; `GET /v1/public/invoices/{token}` serves
 	// the page's data. Anyone with it can view and pay the invoice, so
-	// share it only with the customer. Created at finalize; absent on
-	// drafts. Replace it with
+	// share it only with the customer. Created when the invoice is
+	// finalized, or created already finalized; absent on drafts.
+	// Replace it with
 	// `POST /v1/invoices/{id}/rotate-public-token`.
 	PublicToken string `json:"public_token,omitempty"`
 
@@ -5999,7 +6111,8 @@ type Invoice struct {
 	// SourceChangeType The kind of subscription item change that produced a proration:
 	// `plan` (the item moved to another plan), `quantity` (its quantity
 	// changed), `add` (the item was added) or `remove` (the item was
-	// removed).
+	// removed). On a credit ledger entry (`source_change_type`) it is
+	// never sent in this version.
 	SourceChangeType ItemChangeType `json:"source_change_type,omitempty"`
 
 	// SourcePlanChangedAt On an invoice for a change in the middle of a period
@@ -6031,7 +6144,9 @@ type Invoice struct {
 	// refused the last charge as below its minimum.
 	StripePaymentIntentId string `json:"stripe_payment_intent_id,omitempty"`
 
-	// SubscriptionId The subscription the invoice bills. An empty string for a one-off invoice.
+	// SubscriptionId The subscription the invoice bills. An empty string when the
+	// invoice bills no subscription. An invoice you create with
+	// `POST /v1/invoices` carries the `subscription_id` you sent.
 	SubscriptionId string `json:"subscription_id"`
 
 	// SubtotalCents The sum of the line amounts, before discount and tax, in the
@@ -6040,8 +6155,9 @@ type Invoice struct {
 	SubtotalCents int64 `json:"subtotal_cents"`
 
 	// SupplierSnapshot Your company details this invoice was issued with, copied when it
-	// left draft. Absent on drafts and on invoices issued before this
-	// field existed. Branding (logo, brand color) is not part of it.
+	// was finalized (or created already finalized). Absent on drafts
+	// and on invoices issued before this field existed. Branding (logo,
+	// brand color) is not part of it.
 	SupplierSnapshot DocumentSupplier `json:"supplier_snapshot,omitempty"`
 
 	// TaxAmountCents Tax on the invoice, in the currency's minor unit (cents for USD).
@@ -6058,7 +6174,9 @@ type Invoice struct {
 	// TaxCountry The country the tax was calculated for. Absent when none was recorded.
 	TaxCountry string `json:"tax_country,omitempty"`
 
-	// TaxDeferredAt When the tax calculation failed and the invoice was held as a draft. Absent unless tax is or was deferred.
+	// TaxDeferredAt When the tax calculation failed and the invoice was held as a
+	// draft. A later successful calculation clears it. Absent unless
+	// tax is deferred.
 	TaxDeferredAt time.Time `json:"tax_deferred_at,omitempty"`
 
 	// TaxErrorCode Why tax could not be calculated, as a code. Set while
@@ -6076,24 +6194,31 @@ type Invoice struct {
 	TaxName string `json:"tax_name,omitempty"`
 
 	// TaxNextRetryAt The earliest time the background retry may calculate tax again,
-	// after a failed attempt. Absent when a retry may run now.
+	// after a failed attempt. Absent when a retry may run now, and when
+	// none is scheduled: an error code Hardcount does not retry, or the
+	// automatic retries are used up.
 	TaxNextRetryAt time.Time `json:"tax_next_retry_at,omitempty"`
 
-	// TaxPendingReason The provider's explanation of why tax could not be calculated, while `tax_status` is `pending`. Absent otherwise.
+	// TaxPendingReason Why tax could not be calculated, while `tax_status` is `pending`:
+	// the provider's error, or Hardcount's own text when the provider
+	// was never called (`tax_error_code` `provider_not_configured`).
+	// Cut to 500 bytes. Absent otherwise.
 	TaxPendingReason string `json:"tax_pending_reason,omitempty"`
 
 	// TaxProvider The tax engine that calculated the tax: `stripe_tax`, `manual` (a
-	// flat rate from the account settings) or `none`. Kept for the
-	// record and never changed afterwards. Absent until tax is
-	// calculated.
+	// flat rate from the account settings) or `none`. A draft's tax can
+	// be calculated again (retry-tax, or finalize of a one-off draft);
+	// once the invoice is finalized it no longer changes. Absent until
+	// tax is calculated.
 	TaxProvider string `json:"tax_provider,omitempty"`
 
 	// TaxRate Tax rate as a percent, up to four decimal places (18.5 means 18.5%).
 	TaxRate float64 `json:"tax_rate"`
 
-	// TaxRetryCount How many times tax was calculated again after the first try:
-	// each `POST /v1/invoices/{id}/retry-tax` and each automatic retry.
-	// Absent when 0.
+	// TaxRetryCount How many times tax was calculated again while it was pending:
+	// each `POST /v1/invoices/{id}/retry-tax` on pending tax, each
+	// automatic retry, and each finalize of a one-off draft whose
+	// earlier calculation failed. Absent when 0.
 	TaxRetryCount int `json:"tax_retry_count,omitempty"`
 
 	// TaxReverseCharge True when reverse charge applies: no tax is charged and the
@@ -6111,10 +6236,13 @@ type Invoice struct {
 	// cannot be finalized, so a wrong tax amount is never sent.
 	TaxStatus InvoiceTaxStatus `json:"tax_status,omitempty"`
 
-	// TaxTransactionId The tax provider's committed transaction (Stripe Tax only),
-	// recorded at finalize. Hardcount reverses it when the invoice is
-	// voided or a credit note is issued. Absent until committed, and
-	// for providers that keep no record.
+	// TaxTransactionId The tax provider's committed transaction (Stripe Tax only). On an
+	// invoice the billing engine creates, it is recorded when the
+	// invoice is built; on one you create, at finalize. When that first
+	// commit fails, a background retry records it later. Hardcount
+	// reverses it when the invoice is voided or a credit note is
+	// issued. Absent until committed, and for providers that keep no
+	// record.
 	TaxTransactionId string `json:"tax_transaction_id,omitempty"`
 
 	// TenantId The account the invoice belongs to. Your API key already decides
@@ -6154,7 +6282,8 @@ type InvoiceTaxErrorCode string
 //   - `subscription_cycle`: the invoice for a subscription period that
 //     ended (a renewal).
 //   - `subscription_create`: the first invoice when a subscription
-//     starts.
+//     starts or its trial ends, for the fees its plans bill in advance.
+//     A subscription billed only in arrears has none.
 //   - `subscription_cancel`: the final invoice when a subscription is
 //     canceled at once in the middle of a period.
 //   - `subscription_update`: the invoice for a change in the middle of a
@@ -6421,7 +6550,8 @@ type InvoiceLineType string
 
 // InvoicePaymentStatus The state of the invoice's payment.
 //   - `pending`: nothing has been charged yet, or a charge is about to
-//     be sent.
+//     be sent. Also the status after Stripe refused the amount as below
+//     its minimum charge (see `amount_below_minimum`).
 //   - `processing`: Stripe is still working on a charge.
 //   - `succeeded`: the invoice is paid.
 //   - `failed`: the last charge was declined or refused. Dunning, when
@@ -6458,16 +6588,19 @@ type InvoicePaymentTimelineDegraded string
 // whole numbers in the currency's minor unit (cents for USD), and
 // tax is not included.
 type InvoicePreview struct {
-	// BillingPeriodEnd End of the window the preview covers (not included).
+	// BillingPeriodEnd End of the period the invoice would bill (not included). Shifts
+	// with `billing_period_start` when a fee is billed in advance.
 	BillingPeriodEnd time.Time `json:"billing_period_end"`
 
-	// BillingPeriodStart Start of the window the preview covers (included).
+	// BillingPeriodStart Start of the period the invoice would bill (included): the
+	// previewed window, or, when a plan on the subscription bills its
+	// fee in advance, the period after it, as on the real invoice.
 	BillingPeriodStart time.Time `json:"billing_period_start"`
 
 	// CustomerId The customer the preview is for.
 	CustomerId string `json:"customer_id"`
 
-	// GeneratedAt When the preview was built. For a customer on a test clock, the clock's time.
+	// GeneratedAt When the preview was built.
 	GeneratedAt time.Time `json:"generated_at"`
 
 	// Lines The lines the invoice would have. An empty list when nothing would be billed.
@@ -6558,9 +6691,11 @@ type InvoiceStatus string
 // recorded from Stripe's `refund.created`, `refund.updated`,
 // `refund.failed` and `charge.refund.updated` webhook events. It holds
 // the refund as the newest of those events showed it. Hardcount's own
-// refunds are never listed here. `outcome` is what Hardcount did when
-// it first saw the refund, and only the operator changes it after
-// that.
+// refunds are never listed here. `outcome` is what Hardcount did with
+// the refund: decided when Hardcount first sees it, or, for a refund
+// first seen in flight (`awaiting`), when a later event shows how it
+// ended. After that only you change it, by recording a flagged refund
+// with a credit note or dismissing it.
 type InvoiceStripeRefund struct {
 	// AmountCents The refunded amount, in the currency's minor unit (cents for USD).
 	AmountCents int64 `json:"amount_cents"`
@@ -6759,12 +6894,15 @@ type InvoiceTimelineEventStatus string
 type InvoiceWithLineItems struct {
 	// Invoice A bill for one customer, in one currency. The billing engine creates
 	// one at the end of each subscription period (and for a subscription's
-	// start, a change, a cancel or a spend threshold); you can also create
-	// one-off invoices with `POST /v1/invoices`. An invoice starts as a
-	// `draft`, is `finalized` when issued, and ends `paid`, `voided` or
-	// `uncollectible`. Every amount is a whole number in the currency's
-	// minor unit (cents for USD). The invoice routes and the `invoice.*`
-	// and `payment.*` webhook events return it.
+	// start when a fee is billed in advance, a change, a cancel or a spend
+	// threshold); you can also create one-off invoices with
+	// `POST /v1/invoices`. The engine creates its invoices already
+	// `finalized`, or as a `draft` while their tax is pending or collection
+	// is paused on the subscription. An invoice you create starts as a
+	// `draft` until you finalize it. A finalized invoice ends `paid`,
+	// `voided` or `uncollectible`. Every amount is a whole number in the
+	// currency's minor unit (cents for USD). The invoice routes and the
+	// `invoice.*` and `payment.*` webhook events return it.
 	Invoice Invoice `json:"invoice"`
 
 	// LineItems The invoice's lines. An empty list when it has none.
@@ -6774,7 +6912,8 @@ type InvoiceWithLineItems struct {
 // ItemChangeType The kind of subscription item change that produced a proration:
 // `plan` (the item moved to another plan), `quantity` (its quantity
 // changed), `add` (the item was added) or `remove` (the item was
-// removed).
+// removed). On a credit ledger entry (`source_change_type`) it is
+// never sent in this version.
 type ItemChangeType string
 
 // ListTotal How many rows match the request's filters, on every page, not only
@@ -6801,15 +6940,18 @@ type LitellmSpendLog struct {
 
 	// CostBreakdown The provider's own cost, in dollars. When present, each event's
 	// provider cost comes from its part (input, output, cache read or
-	// cache write) instead of the provider-costs table. A part that is
-	// missing or negative falls back to the table. `input_cost`
-	// includes cache reads and cache writes, so the input event gets
-	// `input_cost` minus `cache_read_cost` and `cache_creation_cost`.
-	// If there were cache reads but no `cache_read_cost`, or split-off
-	// cache writes but no `cache_creation_cost`, the input-side events
-	// use the provider-costs table. With 1-hour cache writes they
-	// always do: LiteLLM prices `cache_creation_cost` at the 5-minute
-	// rate.
+	// cache write) instead of the provider-costs table. A negative
+	// part falls back to the table. A missing `input_cost` or
+	// `output_cost` reads as 0 and is recorded as a cost of 0; a
+	// missing `cache_read_cost` or `cache_creation_cost` means
+	// unknown. `input_cost` includes cache reads and cache writes, so
+	// the input event gets `input_cost` minus `cache_read_cost` and
+	// `cache_creation_cost`. If there were cache reads but no
+	// `cache_read_cost`, the input and cache-read events use the
+	// provider-costs table; if there were split-off cache writes but
+	// no `cache_creation_cost`, the input and cache-write events do.
+	// With 1-hour cache writes the input and cache-write events always
+	// do: LiteLLM prices `cache_creation_cost` at the 5-minute rate.
 	CostBreakdown struct {
 		// CacheCreationCost LiteLLM's cost of the cache writes, in dollars, priced at the 5-minute rate.
 		CacheCreationCost float32 `json:"cache_creation_cost,omitempty"`
@@ -6842,8 +6984,13 @@ type LitellmSpendLog struct {
 	// Id LiteLLM's call id. Used to build the events' idempotency keys.
 	Id string `json:"id,omitempty"`
 
-	// Metadata `team_id` and `request_tags` become event dimensions;
-	// `usage_object` is read for token counts; other keys are ignored.
+	// Metadata `team_id` and `request_tags` become event dimensions (a list of
+	// tags becomes one sorted, comma-separated string);
+	// `usage_object` is read for token counts; `user_api_key_end_user_id`
+	// names the customer when `user` and `end_user` are empty; a
+	// `user_api_key_request_route` of `/vertex_ai/live` on a
+	// `pass_through_endpoint` record marks Vertex AI Live audio, which
+	// is skipped. Other keys do not change billing.
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 
 	// Model The model the call used, as LiteLLM names it. Each event
@@ -6890,8 +7037,10 @@ type LitellmSpendLog struct {
 		PromptTokensDetails struct {
 			// CacheCreationTokenDetails Anthropic's cache writes by cache lifetime. They become
 			// `cache_write_5m` and `cache_write_1h` events, taken out
-			// of `input`. Without this split, or when it does not add
-			// up to the cache-write count, the writes stay in `input`.
+			// of `input`. Without this split, when it does not add up
+			// to the cache-write count, or when the writes do not fit
+			// in `prompt_tokens` less the cache reads, the writes stay
+			// in `input`.
 			CacheCreationTokenDetails struct {
 				// Ephemeral1hInputTokens Cache writes with a 1-hour lifetime. They become the `cache_write_1h` event.
 				Ephemeral1hInputTokens int64 `json:"ephemeral_1h_input_tokens,omitempty"`
@@ -6968,7 +7117,7 @@ type LitellmSpendResult struct {
 	// never counts here.
 	OutsideSubscription int `json:"outside_subscription"`
 
-	// Skipped Records that bill nothing - a call type with no tokens, zero tokens, a failed call (`status` `failure`) or a LiteLLM response-cache hit.
+	// Skipped Records that bill nothing - a call type Hardcount does not bill (even when it carries tokens), no token counts, a failed call (`status` `failure`) or a LiteLLM response-cache hit.
 	Skipped int `json:"skipped"`
 }
 
@@ -7052,11 +7201,11 @@ type MarginReport struct {
 	// `revenue_currency` (cents for USD).
 	UnattributedRevenueCents int64 `json:"unattributed_revenue_cents"`
 
-	// UnresolvedEvents Usage events in the window that carry `provider`, `model` and
-	// `token_type` labels but have no cost: no rate matched (add a
-	// rate to cost new events), or the cost, quantity ×
-	// `unit_cost_cents`, was too large to record (about $9.2 trillion
-	// or more, either sign).
+	// UnresolvedEvents Usage events in the window that carry `provider` and
+	// `token_type` labels and a `model` or `model_raw` label, but have
+	// no cost: no rate matched (add a rate to cost new events), or the
+	// cost, quantity × `unit_cost_cents`, was too large to record
+	// (about $9.2 trillion or more, either sign).
 	UnresolvedEvents int64 `json:"unresolved_events"`
 }
 
@@ -7082,7 +7231,8 @@ type MemberInvitation struct {
 	// InvitedByEmail The sign-in email of the member who sent the invitation. Absent when that user no longer exists.
 	InvitedByEmail string `json:"invited_by_email,omitempty"`
 
-	// RevokedAt When a member revoked the invitation. Absent unless it was revoked.
+	// RevokedAt When the invitation was revoked, by a member or because its
+	// email could not be queued. Absent unless it was revoked.
 	RevokedAt time.Time `json:"revoked_at,omitempty"`
 
 	// Role Always `member` for an invitation. Roles are recorded but not
@@ -7131,7 +7281,7 @@ type Meter struct {
 	// Id The meter's ID, `hc_mtr_` and 20 characters.
 	Id string `json:"id"`
 
-	// Name The meter's display name, at most 255 characters.
+	// Name The meter's display name, at most 255 bytes (UTF-8).
 	Name string `json:"name"`
 
 	// TenantId The account the meter belongs to.
@@ -7227,7 +7377,8 @@ type Plan struct {
 	// Id The plan's ID, `hc_pln_` and 20 characters.
 	Id string `json:"id"`
 
-	// Name The plan's display name, at most 255 characters.
+	// Name The plan's display name. Create refuses one longer than 255
+	// bytes (UTF-8); an update does not check the length.
 	Name string `json:"name"`
 
 	// Prices The plan's usage prices from now on, in the order they were
@@ -7238,9 +7389,11 @@ type Plan struct {
 	// onto it. Subscriptions already on it keep billing.
 	Status PlanStatus `json:"status"`
 
-	// TaxCode The Stripe product tax code of the base fee, such as
-	// `txcd_10103001`. Absent when the plan uses the account's
-	// `default_product_tax_code`.
+	// TaxCode A Stripe product tax code, such as `txcd_10103001`, read only
+	// by the Stripe Tax provider. Today only the base fee line of the
+	// invoice billed when an in-advance subscription starts carries
+	// it; cycle invoices and usage lines use the account's
+	// `default_product_tax_code`. Absent when not set.
 	TaxCode string `json:"tax_code,omitempty"`
 
 	// TenantId The account the plan belongs to.
@@ -7307,7 +7460,8 @@ type PlanDetail struct {
 	// plan). Always 0 on the answer to a create.
 	LiveSubscriptionCount int `json:"live_subscription_count"`
 
-	// Name The plan's display name, at most 255 characters.
+	// Name The plan's display name. Create refuses one longer than 255
+	// bytes (UTF-8); an update does not check the length.
 	Name string `json:"name"`
 
 	// Prices The plan's usage prices from now on, in the order they were
@@ -7318,9 +7472,11 @@ type PlanDetail struct {
 	// onto it. Subscriptions already on it keep billing.
 	Status PlanDetailStatus `json:"status"`
 
-	// TaxCode The Stripe product tax code of the base fee, such as
-	// `txcd_10103001`. Absent when the plan uses the account's
-	// `default_product_tax_code`.
+	// TaxCode A Stripe product tax code, such as `txcd_10103001`, read only
+	// by the Stripe Tax provider. Today only the base fee line of the
+	// invoice billed when an in-advance subscription starts carries
+	// it; cycle invoices and usage lines use the account's
+	// `default_product_tax_code`. Absent when not set.
 	TaxCode string `json:"tax_code,omitempty"`
 
 	// TenantId The account the plan belongs to.
@@ -7408,11 +7564,11 @@ type PlanPriceMode string
 // PriceInput defines model for PriceInput.
 type PriceInput struct {
 	// DimensionMatch The labels an event must carry for the price to take it.
-	// Values are strings of 1 to 100 characters, keys too; at
-	// most 16 labels. Omitted or `{}` takes every event of the
-	// meter. Two prices of one plan and meter that could both take
-	// one event with the same number of labels are refused (409
-	// `price_conflict`).
+	// At most 16 labels. Each key and each value is a string of 1
+	// to 100 bytes (UTF-8), and a key may not be only spaces.
+	// Omitted or `{}` takes every event of the meter. Two prices of
+	// one plan and meter that could both take one event with the
+	// same number of labels are refused (409 `price_conflict`).
 	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
 
 	// MeterId The meter whose usage the price bills. It must be a meter in
@@ -7587,8 +7743,9 @@ type ProviderCostRateCurrency string
 
 // PublicPaymentUpdate What the payment-update page shows before the customer adds a
 // card: `GET /v1/public/payment-updates/{token}`. The page opens from
-// the link in a payment setup email, which Hardcount sends when an
-// invoice has no payment method to charge.
+// the link in a payment setup email. Hardcount sends one when an
+// invoice has no payment method to charge, and again on each
+// `POST /v1/invoices/{id}/resend-setup-link`.
 type PublicPaymentUpdate struct {
 	// AmountDueCents What is due on the invoice, in the currency's minor unit (cents
 	// for USD). Not cleared when the invoice is voided: check
@@ -7993,25 +8150,35 @@ type SentEmail struct {
 	// InvoiceNumber The number of the invoice the email is about.
 	InvoiceNumber string `json:"invoice_number,omitempty"`
 
-	// LastError Why the last send attempt failed. Absent when no attempt failed.
+	// LastError Why the last send attempt failed, or, on a `skipped` email, why
+	// it was not sent. Cleared when the email is dispatched. Absent
+	// when there is none.
 	LastError string `json:"last_error,omitempty"`
 
 	// Line The email in the words of the activity line standard, the same
 	// as on the invoice's payment timeline: its name and what
 	// happened to it ("Receipt email delivered"), why it was not
-	// sent, the invoice it was about, and who it went to. Dated at the
-	// time on the customer's test clock that caused it, with the real
-	// send time as `recorded_at`. Present for every email type this
-	// list returns.
+	// sent, the invoice it was about, and who it went to. Dated when
+	// the mail server took it, or when it was queued if it was not
+	// sent. For an email caused on a test clock, it is dated at the
+	// clock time instead, with the real send time as `recorded_at`.
+	// Present for every email type this list returns.
 	Line ActivityLine `json:"line,omitempty"`
 
-	// Recipient The address the email was sent to.
+	// Recipient The address the email was sent to: its To address. CC copies
+	// are not listed.
 	Recipient string `json:"recipient"`
 
-	// Status Hardcount's send state. `pending`: queued. `dispatched`: the
-	// mail server accepted it. `failed`: it could not be sent.
-	// `skipped`: Hardcount did not send it, because the invoice was
-	// already paid, voided or uncollectible, or no longer exists.
+	// Status Hardcount's send state. `pending`: queued, or waiting to retry
+	// after a failed attempt. `dispatched`: the mail server accepted
+	// it. `failed`: it could not be sent, and Hardcount stopped
+	// trying.
+	// `skipped`: Hardcount did not send it because its invoice was
+	// paid, voided or marked uncollectible while it waited. Only the
+	// payment requests are skipped (failed payment notice, payment
+	// reminder, final notice, payment setup request); a final notice
+	// or payment setup request still goes out for an uncollectible
+	// invoice.
 	Status SentEmailStatus `json:"status"`
 }
 
@@ -8025,10 +8192,16 @@ type SentEmailDeliveryState string
 // (`dunning_escalation`), or a credit note.
 type SentEmailEmailType string
 
-// SentEmailStatus Hardcount's send state. `pending`: queued. `dispatched`: the
-// mail server accepted it. `failed`: it could not be sent.
-// `skipped`: Hardcount did not send it, because the invoice was
-// already paid, voided or uncollectible, or no longer exists.
+// SentEmailStatus Hardcount's send state. `pending`: queued, or waiting to retry
+// after a failed attempt. `dispatched`: the mail server accepted
+// it. `failed`: it could not be sent, and Hardcount stopped
+// trying.
+// `skipped`: Hardcount did not send it because its invoice was
+// paid, voided or marked uncollectible while it waited. Only the
+// payment requests are skipped (failed payment notice, payment
+// reminder, final notice, payment setup request); a final notice
+// or payment setup request still goes out for an uncollectible
+// invoice.
 type SentEmailStatus string
 
 // StripeConnection The account's own Stripe keys for one mode, without the secrets.
@@ -8048,7 +8221,10 @@ type StripeConnection struct {
 	Id string `json:"id"`
 
 	// LastVerifiedError Why the last Stripe check failed, in Stripe's own words (or the
-	// network error when Stripe was not reached). Absent when it passed.
+	// network error when Stripe was not reached). Also set when Stripe
+	// refuses the key on a charge (401, or 403 for a restricted key);
+	// the next charge that goes through clears that. Absent when the
+	// check passed.
 	LastVerifiedError string `json:"last_verified_error,omitempty"`
 
 	// LastVerifiedErrorKind What kind of failure `last_verified_error` is. `rejected`: Stripe
@@ -8116,12 +8292,15 @@ type StripeConnectionLastVerifiedErrorKind string
 type StripeRefundWebhookEventData struct {
 	// Invoice A bill for one customer, in one currency. The billing engine creates
 	// one at the end of each subscription period (and for a subscription's
-	// start, a change, a cancel or a spend threshold); you can also create
-	// one-off invoices with `POST /v1/invoices`. An invoice starts as a
-	// `draft`, is `finalized` when issued, and ends `paid`, `voided` or
-	// `uncollectible`. Every amount is a whole number in the currency's
-	// minor unit (cents for USD). The invoice routes and the `invoice.*`
-	// and `payment.*` webhook events return it.
+	// start when a fee is billed in advance, a change, a cancel or a spend
+	// threshold); you can also create one-off invoices with
+	// `POST /v1/invoices`. The engine creates its invoices already
+	// `finalized`, or as a `draft` while their tax is pending or collection
+	// is paused on the subscription. An invoice you create starts as a
+	// `draft` until you finalize it. A finalized invoice ends `paid`,
+	// `voided` or `uncollectible`. Every amount is a whole number in the
+	// currency's minor unit (cents for USD). The invoice routes and the
+	// `invoice.*` and `payment.*` webhook events return it.
 	Invoice Invoice `json:"invoice"`
 
 	// Refund A refund made in Stripe outside Hardcount (the Stripe dashboard, or
@@ -8129,9 +8308,11 @@ type StripeRefundWebhookEventData struct {
 	// recorded from Stripe's `refund.created`, `refund.updated`,
 	// `refund.failed` and `charge.refund.updated` webhook events. It holds
 	// the refund as the newest of those events showed it. Hardcount's own
-	// refunds are never listed here. `outcome` is what Hardcount did when
-	// it first saw the refund, and only the operator changes it after
-	// that.
+	// refunds are never listed here. `outcome` is what Hardcount did with
+	// the refund: decided when Hardcount first sees it, or, for a refund
+	// first seen in flight (`awaiting`), when a later event shows how it
+	// ended. After that only you change it, by recording a flagged refund
+	// with a credit note or dismissing it.
 	Refund InvoiceStripeRefund `json:"refund"`
 }
 
@@ -8142,14 +8323,21 @@ type StripeRefundWebhookEventData struct {
 //
 // A subscription bills in one currency, the currency of its plans.
 // All its items share one billing interval and one base-fee timing.
-// Hardcount invoices each period when it ends.
+// Usage, and a base fee billed in arrears, are invoiced when a period
+// ends. A base fee billed in advance is invoiced when its period
+// starts: the first one in the same transaction that creates or
+// activates the subscription or ends its trial, each later one on the
+// invoice that closes the period before.
 type Subscription struct {
 	// ActivatedAt When the subscription became `active`: at creation without a
 	// trial, at activation of a draft, or when its trial ended.
 	// Absent on a draft and while it trials.
 	ActivatedAt time.Time `json:"activated_at,omitempty"`
 
-	// BillingAnchorDay Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions.
+	// BillingAnchorDay Day of the month the subscription bills on (1-31): the day its
+	// first period started, or the day of its last immediate change to
+	// a plan with another billing interval. Absent on a draft and for
+	// calendar-monthly subscriptions.
 	BillingAnchorDay int `json:"billing_anchor_day,omitempty"`
 
 	// BillingFailure Present on a subscription while the billing run is failing on the
@@ -8174,13 +8362,17 @@ type Subscription struct {
 	// `PUT /v1/subscriptions/{id}/billing-thresholds`.
 	BillingThresholds SubscriptionBillingThresholds `json:"billing_thresholds,omitempty"`
 
-	// BillingTime How monthly periods line up. `calendar`: every period ends on
-	// the 1st of a month, in your account's billing time zone, so the
-	// first period runs from the start day to the next 1st.
-	// `anniversary`: each period starts on the day of the month the
-	// subscription started (the last day of a shorter month). A plan
-	// billed yearly always bills from its start date, whatever this
-	// says.
+	// BillingTime How monthly periods line up. The first period starts on the day
+	// the subscription starts to bill: the day it is created or
+	// activated, or, with a trial, the day the trial ends.
+	// `calendar`: every period ends on the 1st of a month, in your
+	// account's billing time zone, so the first period runs from that
+	// day to the next 1st. `anniversary`: each period starts on the
+	// same day of the month as the first one (the last day of a
+	// shorter month). A plan billed yearly always bills a year from
+	// that first day, whatever this says. An immediate change to a
+	// plan with another billing interval starts a new first period at
+	// the change.
 	BillingTime SubscriptionBillingTime `json:"billing_time"`
 
 	// CancelAt The instant a cancel is scheduled for, when it was scheduled
@@ -8211,19 +8403,25 @@ type Subscription struct {
 
 	// CurrentBillingPeriodDisplay The current period as text, with the last day included, in your
 	// account's billing time zone, for example "Oct 1, 2026 – Oct 31,
-	// 2026". Absent when the subscription has no current period, and
-	// when the time zone could not be read.
+	// 2026". Absent when the subscription has no current period, when
+	// the time zone could not be read, and on the rows of
+	// `GET /v1/test-clocks/{id}/subscriptions`.
 	CurrentBillingPeriodDisplay string `json:"current_billing_period_display,omitempty"`
 
 	// CurrentBillingPeriodEnd End of the current period (exclusive): the start of the next
 	// one. While the subscription trials, the end of the first paid
-	// period. Absent on a draft.
+	// period. Absent on a draft. On a canceled subscription it keeps
+	// its last value.
 	CurrentBillingPeriodEnd time.Time `json:"current_billing_period_end,omitempty"`
 
-	// CurrentBillingPeriodStart Start of the current billing period, at the beginning of a day
-	// in your account's billing time zone. While the subscription
-	// trials, it is the start of the first paid period, which begins
-	// when the trial ends. Absent on a draft.
+	// CurrentBillingPeriodStart Start of the current billing period, normally the beginning of
+	// a day in your account's billing time zone. While the
+	// subscription trials, it is the start of the first paid period:
+	// the beginning of the day the trial ends, not `trial_end_at`
+	// itself. After an immediate change to a plan with another billing
+	// interval, a period can start or end at the instant of the
+	// change. Absent on a draft. On a canceled subscription it keeps
+	// its last value.
 	CurrentBillingPeriodStart time.Time `json:"current_billing_period_start,omitempty"`
 
 	// CustomerId The customer the subscription bills (`hc_cus_…`).
@@ -8240,12 +8438,16 @@ type Subscription struct {
 
 	// NextBillingAt When the current period's invoice is due to be built: the end
 	// of the current period. The billing run builds it once the
-	// invoice grace after that time has passed. Absent on a draft.
+	// invoice grace after that time has passed. Absent on a draft. A
+	// canceled subscription keeps its last value, and nothing is
+	// billed at that time.
 	NextBillingAt time.Time `json:"next_billing_at,omitempty"`
 
 	// PauseCollection Present on a subscription while collection is paused. New invoices
 	// are still created, but stay drafts and are not charged. Absent when
-	// collection runs normally.
+	// collection runs normally. A cancel leaves it in place: it still
+	// holds the subscription's unpaid invoices, and
+	// `DELETE /v1/subscriptions/{id}/pause-collection` releases them.
 	PauseCollection SubscriptionPauseCollection `json:"pause_collection,omitempty"`
 
 	// StartedAt When the subscription started: when it was created, or, for a
@@ -8262,7 +8464,9 @@ type Subscription struct {
 	//   the subscription `active` and its first paid period starts.
 	//   If a cancel is scheduled for the trial end, it becomes
 	//   `canceled` instead, with no charge.
-	// - `active`: billing. Each period is invoiced when it ends.
+	// - `active`: billing. Usage and base fees billed in arrears are
+	//   invoiced when each period ends; a base fee billed in advance
+	//   when its period starts.
 	// - `canceled`: ended at `canceled_at`. It bills nothing more,
 	//   and no route makes it `active` again.
 	//
@@ -8279,7 +8483,9 @@ type Subscription struct {
 
 	// TrialEndAt When the trial ends, or ended. The first paid period starts at
 	// the beginning of that day in your account's billing time zone.
-	// Absent when the subscription had no trial.
+	// Ending the trial early (`POST /v1/subscriptions/{id}/end-trial`)
+	// sets it to that moment. Absent when the subscription had no
+	// trial.
 	TrialEndAt time.Time `json:"trial_end_at,omitempty"`
 
 	// TrialStartAt When the trial started. Absent when the subscription had no trial.
@@ -8289,13 +8495,17 @@ type Subscription struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// SubscriptionBillingTime How monthly periods line up. `calendar`: every period ends on
-// the 1st of a month, in your account's billing time zone, so the
-// first period runs from the start day to the next 1st.
-// `anniversary`: each period starts on the day of the month the
-// subscription started (the last day of a shorter month). A plan
-// billed yearly always bills from its start date, whatever this
-// says.
+// SubscriptionBillingTime How monthly periods line up. The first period starts on the day
+// the subscription starts to bill: the day it is created or
+// activated, or, with a trial, the day the trial ends.
+// `calendar`: every period ends on the 1st of a month, in your
+// account's billing time zone, so the first period runs from that
+// day to the next 1st. `anniversary`: each period starts on the
+// same day of the month as the first one (the last day of a
+// shorter month). A plan billed yearly always bills a year from
+// that first day, whatever this says. An immediate change to a
+// plan with another billing interval starts a new first period at
+// the change.
 type SubscriptionBillingTime string
 
 // SubscriptionStatus Where the subscription is in its life.
@@ -8308,7 +8518,9 @@ type SubscriptionBillingTime string
 //     the subscription `active` and its first paid period starts.
 //     If a cancel is scheduled for the trial end, it becomes
 //     `canceled` instead, with no charge.
-//   - `active`: billing. Each period is invoiced when it ends.
+//   - `active`: billing. Usage and base fees billed in arrears are
+//     invoiced when each period ends; a base fee billed in advance
+//     when its period starts.
 //   - `canceled`: ended at `canceled_at`. It bills nothing more,
 //     and no route makes it `active` again.
 //
@@ -8486,7 +8698,9 @@ type SubscriptionNewPeriodInvoiceStatus string
 
 // SubscriptionPauseCollection Present on a subscription while collection is paused. New invoices
 // are still created, but stay drafts and are not charged. Absent when
-// collection runs normally.
+// collection runs normally. A cancel leaves it in place: it still
+// holds the subscription's unpaid invoices, and
+// `DELETE /v1/subscriptions/{id}/pause-collection` releases them.
 type SubscriptionPauseCollection struct {
 	// Behavior What happens to the invoices built during the pause. Only
 	// `keep_as_draft`: they stay drafts, so they are not finalized,
@@ -8615,7 +8829,7 @@ type TenantStatus string
 
 // TenantSettings defines model for TenantSettings.
 type TenantSettings struct {
-	// BrandColor Accent color on invoice PDFs, as `#rrggbb`.
+	// BrandColor Accent color on invoice PDFs, as `#rrggbb`. Stored in lower case.
 	BrandColor string `json:"brand_color,omitempty"`
 
 	// CompanyAddressLine1 First line of your business address, printed as the seller on invoices and credit notes.
@@ -8670,7 +8884,8 @@ type TenantSettings struct {
 
 	// DefaultProductTaxCode Stripe product tax code used when a plan has none, such as
 	// `txcd_10103001`. Empty is allowed. Surrounding whitespace is
-	// trimmed before the check.
+	// trimmed before the check. A save with `tax_provider: stripe_tax`
+	// and no code stores `txcd_10103001` (SaaS, business use).
 	DefaultProductTaxCode string `json:"default_product_tax_code,omitempty"`
 
 	// InvoiceFooter Printed under the totals on invoice PDFs and on the hosted
@@ -8715,7 +8930,8 @@ type TenantSettings struct {
 	// TaxProvider `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.
 	TaxProvider TenantSettingsTaxProvider `json:"tax_provider"`
 
-	// TaxRate Percent, up to 4 decimal places (18.5 = 18.5%). Used by the `manual` provider.
+	// TaxRate Percent, from 0 to 100 (18.5 = 18.5%), stored to 4 decimal
+	// places. Used by the `manual` provider.
 	TaxRate float32 `json:"tax_rate"`
 
 	// TenantId The account these settings belong to. `PUT` refuses it (422).
@@ -8736,9 +8952,10 @@ type TenantSettingsTaxProvider string
 
 // TenantSettingsInput The account's billing settings, as `PUT /v1/settings` takes them.
 // Every field is optional. Fields you leave out keep their stored
-// value. Settings are shared by test and live mode.
+// value. Settings are shared by test and live mode. The length limits
+// count bytes, not characters: an accented letter counts as two.
 type TenantSettingsInput struct {
-	// BrandColor Accent color on invoice PDFs, as `#rrggbb`.
+	// BrandColor Accent color on invoice PDFs, as `#rrggbb`. Stored in lower case.
 	BrandColor string `json:"brand_color,omitempty"`
 
 	// CompanyAddressLine1 First line of your business address, printed as the seller on invoices and credit notes.
@@ -8790,7 +9007,8 @@ type TenantSettingsInput struct {
 
 	// DefaultProductTaxCode Stripe product tax code used when a plan has none, such as
 	// `txcd_10103001`. Empty is allowed. Surrounding whitespace is
-	// trimmed before the check.
+	// trimmed before the check. A save with `tax_provider: stripe_tax`
+	// and no code stores `txcd_10103001` (SaaS, business use).
 	DefaultProductTaxCode string `json:"default_product_tax_code,omitempty"`
 
 	// InvoiceFooter Printed under the totals on invoice PDFs and on the hosted
@@ -8828,7 +9046,8 @@ type TenantSettingsInput struct {
 	// TaxProvider `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.
 	TaxProvider TenantSettingsInputTaxProvider `json:"tax_provider,omitempty"`
 
-	// TaxRate Percent, up to 4 decimal places (18.5 = 18.5%). Used by the `manual` provider.
+	// TaxRate Percent, from 0 to 100 (18.5 = 18.5%), stored to 4 decimal
+	// places. Used by the `manual` provider.
 	TaxRate float32 `json:"tax_rate,omitempty"`
 
 	// Timezone IANA zone name, such as `America/New_York`. `Local` is rejected. All billing date math uses this zone.
@@ -8859,7 +9078,9 @@ type TestClock struct {
 	// advanced.
 	LastAdvanceSummary TestClockAdvanceSummary `json:"last_advance_summary,omitempty"`
 
-	// LastFailureReason Why the last advance failed. Cleared by the next successful advance.
+	// LastFailureReason Why the last advance failed, for a clock in `internal_failure`.
+	// Cleared when you retry the advance, and by the next advance
+	// that succeeds. Absent when there is none.
 	LastFailureReason string `json:"last_failure_reason,omitempty"`
 
 	// Name Your name for the clock. Empty when you gave none.
@@ -8887,7 +9108,8 @@ type TestClockStatus string
 // advanced.
 type TestClockAdvanceSummary struct {
 	// AdvancedFrom The clock's time before the advance. After a retried advance it
-	// equals `advanced_to`.
+	// equals `advanced_to`. When the server restarted during the
+	// advance and resumed it, it is `0001-01-01T00:00:00Z`.
 	AdvancedFrom time.Time `json:"advanced_from"`
 
 	// AdvancedTo The clock's time after the advance.
@@ -8923,7 +9145,9 @@ type TestClockAdvanceSummary struct {
 	// ThresholdsFired Billing-threshold invoices issued.
 	ThresholdsFired int `json:"thresholds_fired"`
 
-	// TrialsActivated Subscriptions whose trial ended in the span and that became `active`.
+	// TrialsActivated Subscriptions whose trial ended by the clock's new time: those
+	// that became `active`, and those a cancel scheduled for the trial
+	// end canceled with no charge.
 	TrialsActivated int `json:"trials_activated"`
 }
 
@@ -9084,20 +9308,27 @@ type UsageEvent struct {
 	// `event_name` you sent.
 	MeterId string `json:"meter_id"`
 
-	// Origin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
+	// Origin How the event arrived. `api`: `POST /v1/usage-events`, the batch
+	// route or the LiteLLM integration. `backfill`:
+	// `POST /v1/usage-events/backfill`, or released held usage.
+	// Absent on the rows of `GET /v1/usage-events`, which does not
+	// return it.
 	Origin UsageEventOrigin `json:"origin,omitempty"`
 
 	// ProviderCostCents What serving this event cost you at your provider, in US cents as
 	// a decimal string (e.g. "0.45"), set when the event arrived: from
-	// your provider cost rates, or the cost the sender reported (see
-	// `provider_cost_source`). Absent when the cost is unknown or the
-	// event has no costed dimensions.
+	// your provider cost rates, or the cost LiteLLM reported for the
+	// call (see `provider_cost_source`). Absent when no rate matched
+	// or the cost was too large to store, and when the source is
+	// `not_applicable`.
 	ProviderCostCents string `json:"provider_cost_cents,omitempty"`
 
 	// ProviderCostSource Where `provider_cost_cents` came from: `table` (your provider
-	// cost rates), `observed` (the cost the sender reported), or
-	// `not_applicable` (the meter has no costed dimensions). Absent when
-	// the cost is unknown.
+	// cost rates), `observed` (the cost LiteLLM reported for the
+	// call), or `not_applicable`: the event lacks a `provider` or
+	// `token_type` dimension, or has neither `model` nor `model_raw`,
+	// so no rate can apply. Absent when the event has those
+	// dimensions but no rate matched.
 	ProviderCostSource UsageEventProviderCostSource `json:"provider_cost_source,omitempty"`
 
 	// Quantity Exact quantity as a decimal string (e.g. "1.5").
@@ -9116,13 +9347,19 @@ type UsageEvent struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// UsageEventOrigin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
+// UsageEventOrigin How the event arrived. `api`: `POST /v1/usage-events`, the batch
+// route or the LiteLLM integration. `backfill`:
+// `POST /v1/usage-events/backfill`, or released held usage.
+// Absent on the rows of `GET /v1/usage-events`, which does not
+// return it.
 type UsageEventOrigin string
 
 // UsageEventProviderCostSource Where `provider_cost_cents` came from: `table` (your provider
-// cost rates), `observed` (the cost the sender reported), or
-// `not_applicable` (the meter has no costed dimensions). Absent when
-// the cost is unknown.
+// cost rates), `observed` (the cost LiteLLM reported for the
+// call), or `not_applicable`: the event lacks a `provider` or
+// `token_type` dimension, or has neither `model` nor `model_raw`,
+// so no rate can apply. Absent when the event has those
+// dimensions but no rate matched.
 type UsageEventProviderCostSource string
 
 // UsageEventBatchEventResult What the batch did with one of its events.
@@ -9269,8 +9506,9 @@ type WebhookEndpoint struct {
 
 	// Url Where Hardcount POSTs each event. It must be `https://` on a
 	// public address. Outside production (`APP_ENV` is not
-	// `production`), `http://localhost` and loopback addresses work
-	// too.
+	// `production`), a `localhost` or loopback URL works too, over
+	// `http://` or `https://`. Each delivery checks the address again,
+	// so a host that later points to a private address is not called.
 	Url string `json:"url"`
 }
 
@@ -9318,7 +9556,9 @@ type WebhookEndpointDelivery struct {
 	// IsReplay The delivery came from a replay.
 	IsReplay bool `json:"is_replay"`
 
-	// NextRetryAt When the next attempt is due, while pending. null once the delivery is finished.
+	// NextRetryAt While pending, when the next attempt is due. While an attempt is
+	// running, it is when a retry takes over if that attempt never
+	// finishes. null once the delivery is finished.
 	NextRetryAt time.Time `json:"next_retry_at"`
 
 	// ReplayOfEventId The original event, when `is_replay` is true. Absent otherwise.
@@ -9387,7 +9627,9 @@ type WebhookEvent struct {
 	// `StripeRefundWebhookEventData`.
 	Payload map[string]interface{} `json:"payload"`
 
-	// ReplayOfEventId Set on a replay. The event the replay was made from. Absent on an original event.
+	// ReplayOfEventId Set on a replay. The original event it copies; a replay of a
+	// replay points to that same original. Absent on an original
+	// event.
 	ReplayOfEventId string `json:"replay_of_event_id,omitempty"`
 
 	// TenantId The account the event belongs to.
@@ -9429,7 +9671,9 @@ type WebhookEventDeliveryAttempt struct {
 	// IsReplay True when the row belongs to a replay of the event.
 	IsReplay bool `json:"is_replay"`
 
-	// NextRetryAt When the next attempt is due, while pending. null once the delivery is finished.
+	// NextRetryAt While pending, when the next attempt is due. While an attempt is
+	// running, it is when a retry takes over if that attempt never
+	// finishes. null once the delivery is finished.
 	NextRetryAt time.Time `json:"next_retry_at"`
 
 	// ReplayEventId The replay's event id when `is_replay` is true; otherwise empty.
@@ -9510,9 +9754,11 @@ type WebhookStreamFrame struct {
 	// ReplayOfEventId The original event, when this frame is about a replay. null otherwise.
 	ReplayOfEventId string `json:"replay_of_event_id"`
 
-	// Status Delivery state. Live frames send `pending`, `succeeded` or
-	// `failed`. Frames in the first batch send `pending`, `failed`,
-	// `delivered` (all deliveries succeeded) or `no_endpoints`.
+	// Status Delivery state. Live frames send `pending` (a new event or
+	// replay), `succeeded` (one delivery got a 2xx answer) or `failed`
+	// (one delivery failed for good). Frames in the first batch send
+	// the event's roll-up over all its deliveries: `pending`, `failed`,
+	// `delivered` (every delivery succeeded) or `no_endpoints`.
 	Status string `json:"status"`
 }
 
@@ -9602,12 +9848,14 @@ type GetAnalyticsUsageParams struct {
 
 // ListApiKeysParams defines parameters for ListApiKeys.
 type ListApiKeysParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -9626,12 +9874,16 @@ type CreateApiKeyJSONBody struct {
 // CreateApiKeyParams defines parameters for CreateApiKey.
 type CreateApiKeyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -9649,12 +9901,16 @@ type RotateApiKeyJSONBody struct {
 // RotateApiKeyParams defines parameters for RotateApiKey.
 type RotateApiKeyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -9671,7 +9927,7 @@ type ListAuditLogParams struct {
 	// Action For example `create`, `update`, `revoke`. See `/v1/audit-log/filters`.
 	Action string `form:"action,omitempty" json:"action,omitempty"`
 
-	// ActorId A user id or an API key id.
+	// ActorId Only entries by this actor, an `actor_id` value such as a user id or an API key id.
 	ActorId string `form:"actor_id,omitempty" json:"actor_id,omitempty"`
 
 	// DateFrom Lower bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (start of day, UTC).
@@ -9683,21 +9939,27 @@ type ListAuditLogParams struct {
 	// TestClockId Only entries made inside this test clock's simulation. Works for deleted clocks too.
 	TestClockId string `form:"test_clock_id,omitempty" json:"test_clock_id,omitempty"`
 
-	// SimFrom Lower bound on `sim_effective_at` (simulated time), inclusive. Excludes entries with no simulated time.
+	// SimFrom Lower bound on `sim_effective_at` (simulated time), inclusive.
+	// RFC3339 or YYYY-MM-DD, like `date_from`. Excludes entries with
+	// no simulated time.
 	SimFrom string `form:"sim_from,omitempty" json:"sim_from,omitempty"`
 
-	// SimTo Upper bound on `sim_effective_at`, inclusive.
+	// SimTo Upper bound on `sim_effective_at`, inclusive. RFC3339 or
+	// YYYY-MM-DD, like `date_to`. Excludes entries with no simulated
+	// time.
 	SimTo string `form:"sim_to,omitempty" json:"sim_to,omitempty"`
 
 	// Order The only supported order. Any other value is a 400.
 	Order ListAuditLogParamsOrder `form:"order,omitempty" json:"order,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -9761,12 +10023,16 @@ type RequestPasswordReset200JSONResponseBodyEmailDelivery string
 // RunBillingParams defines parameters for RunBilling.
 type RunBillingParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -9811,12 +10077,14 @@ type ListCreditNotesParams struct {
 	// Dir Sort direction, `desc` (the default) or `asc`.
 	Dir ListCreditNotesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -9848,7 +10116,8 @@ type CreateCreditNoteJSONBody struct {
 		// OutOfBandAmountCents Optional. Part of the cash paid back outside Hardcount.
 		OutOfBandAmountCents int `json:"out_of_band_amount_cents,omitempty"`
 
-		// Reason Optional. Defaults to the top-level reason.
+		// Reason Optional. Wins over the top-level `reason`. When both
+		// are empty, the note's reason is `commit_relief`.
 		Reason string `json:"reason,omitempty"`
 
 		// RefundAmountCents Optional. Part of the cash refunded to the card. With `out_of_band_amount_cents` it must add up to the cash Hardcount works out. When both are left out, the cash goes to the card if the invoice was paid by card, otherwise out of band.
@@ -9885,7 +10154,10 @@ type CreateCreditNoteJSONBody struct {
 	// OutOfBandAmountCents Part of the total paid back outside Hardcount, in the currency's minor unit (cents for USD). Paid invoices only. Not with commit_relief; put the relief's split inside commit_relief.
 	OutOfBandAmountCents int `json:"out_of_band_amount_cents,omitempty"`
 
-	// Reason Why you are crediting, printed on the note. Required for a line-based note; a relief takes it from `commit_relief.reason` when this is empty.
+	// Reason Why you are crediting, printed on the note. Required for a
+	// line-based note. For a relief, `commit_relief.reason` wins;
+	// this one is used when that is empty, and `commit_relief`
+	// is the reason when both are empty.
 	Reason string `json:"reason,omitempty"`
 
 	// RefundAmountCents Part of the total refunded to the card, in the currency's minor unit (cents for USD). Paid invoices only. Not with commit_relief; put the relief's split inside commit_relief.
@@ -9913,12 +10185,16 @@ type CreateCreditNoteJSONBody struct {
 // CreateCreditNoteParams defines parameters for CreateCreditNote.
 type CreateCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -9936,12 +10212,16 @@ type AttachStripeRefundToCreditNoteJSONBody struct {
 // AttachStripeRefundToCreditNoteParams defines parameters for AttachStripeRefundToCreditNote.
 type AttachStripeRefundToCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -9950,12 +10230,16 @@ type AttachStripeRefundToCreditNoteParams struct {
 // IssueCreditNoteParams defines parameters for IssueCreditNote.
 type IssueCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -9964,12 +10248,16 @@ type IssueCreditNoteParams struct {
 // RetryCreditNoteRefundParams defines parameters for RetryCreditNoteRefund.
 type RetryCreditNoteRefundParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -9987,12 +10275,16 @@ type SendCreditNoteJSONBody struct {
 // SendCreditNoteParams defines parameters for SendCreditNote.
 type SendCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10004,12 +10296,16 @@ type SendCreditNote200JSONResponseBodyStatus string
 // VoidCreditNoteParams defines parameters for VoidCreditNote.
 type VoidCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10034,12 +10330,16 @@ type AdjustCreditsJSONBody struct {
 // AdjustCreditsParams defines parameters for AdjustCredits.
 type AdjustCreditsParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10047,12 +10347,14 @@ type AdjustCreditsParams struct {
 
 // ListCreditBalancesParams defines parameters for ListCreditBalances.
 type ListCreditBalancesParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -10072,7 +10374,9 @@ type GrantCreditsJSONBody struct {
 
 	// Description What the credit is for, shown on the ledger entry.
 	// Required: a grant without one, or with a blank one, is
-	// refused with 422. At most 500 characters.
+	// refused with 422. At most 500 bytes after surrounding
+	// spaces are trimmed (fewer characters when it has
+	// non-ASCII letters).
 	Description string `json:"description,omitempty"`
 
 	// ExpiresAt Optional expiry; must be in the future. Omitted = never
@@ -10093,12 +10397,16 @@ type GrantCreditsJSONBody struct {
 // GrantCreditsParams defines parameters for GrantCredits.
 type GrantCreditsParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10125,12 +10433,14 @@ type ListCreditLedgerEntriesParams struct {
 	// Dir Default desc.
 	Dir ListCreditLedgerEntriesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -10170,12 +10480,14 @@ type ListCustomersParams struct {
 	// than `asc` sorts descending.
 	Dir ListCustomersParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -10184,13 +10496,15 @@ type ListCustomersParamsDir string
 
 // CreateCustomerJSONBody defines parameters for CreateCustomer.
 type CreateCustomerJSONBody struct {
-	// AdditionalEmails Addresses to copy on billing emails, at most 10. Each is
-	// checked like `email`, lowercased and deduplicated. None
-	// may equal `email`.
+	// AdditionalEmails Addresses to copy on billing emails. Each is checked
+	// like `email`, lowercased and deduplicated. None may equal
+	// `email`. More than 10 after deduplication is refused with
+	// 422.
 	AdditionalEmails []string `json:"additional_emails,omitempty"`
 
-	// DisplayName The name shown on invoices, emails and the dashboard. At
-	// most 255 characters.
+	// DisplayName The name shown on invoices, emails and the dashboard.
+	// Spaces at the ends are trimmed; then at most 255 bytes
+	// (UTF-8).
 	DisplayName string `json:"display_name"`
 
 	// Email Where billing emails go. One bare address with a dot in
@@ -10199,8 +10513,8 @@ type CreateCustomerJSONBody struct {
 	Email string `json:"email,omitempty"`
 
 	// ExternalId Your own ID for the customer, such as the account ID in
-	// your app. At most 255 characters after spaces at the ends
-	// are trimmed. Unique in the account and mode.
+	// your app. Spaces at the ends are trimmed; then at most
+	// 255 bytes (UTF-8). Unique in the account and mode.
 	ExternalId string `json:"external_id"`
 
 	// TestClockId Test mode only. Runs the customer on this test clock,
@@ -10212,12 +10526,16 @@ type CreateCustomerJSONBody struct {
 // CreateCustomerParams defines parameters for CreateCustomer.
 type CreateCustomerParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10225,12 +10543,14 @@ type CreateCustomerParams struct {
 
 // ListCustomerPaymentMethodsParams defines parameters for ListCustomerPaymentMethods.
 type ListCustomerPaymentMethodsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -10244,12 +10564,16 @@ type SendCustomerPaymentSetupEmailJSONBody struct {
 // SendCustomerPaymentSetupEmailParams defines parameters for SendCustomerPaymentSetupEmail.
 type SendCustomerPaymentSetupEmailParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10267,12 +10591,16 @@ type CreateCustomerPaymentSetupSessionJSONBody struct {
 // CreateCustomerPaymentSetupSessionParams defines parameters for CreateCustomerPaymentSetupSession.
 type CreateCustomerPaymentSetupSessionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10281,12 +10609,16 @@ type CreateCustomerPaymentSetupSessionParams struct {
 // SetCustomerDefaultPaymentMethodParams defines parameters for SetCustomerDefaultPaymentMethod.
 type SetCustomerDefaultPaymentMethodParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10295,11 +10627,13 @@ type SetCustomerDefaultPaymentMethodParams struct {
 // UpdateCustomerJSONBody defines parameters for UpdateCustomer.
 type UpdateCustomerJSONBody struct {
 	// AdditionalEmails The new CC list, which replaces the whole list. `[]`
-	// clears it. Left out keeps the current list.
+	// clears it. Left out keeps the current list. More than 10
+	// after deduplication is refused with 422.
 	AdditionalEmails []string `json:"additional_emails,omitempty"`
 
 	// DisplayName The new name. Spaces at the ends are trimmed. Empty or
-	// left out keeps the current name.
+	// left out keeps the current name. Unlike create, the
+	// update does not check its length.
 	DisplayName string `json:"display_name,omitempty"`
 
 	// DunningPolicyId Policy ID, or `""` to use the account's default policy.
@@ -10317,12 +10651,16 @@ type UpdateCustomerJSONBody struct {
 // UpdateCustomerParams defines parameters for UpdateCustomer.
 type UpdateCustomerParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10334,12 +10672,16 @@ type UpdateCustomerJSONBodyStatus string
 // UpsertCustomerBillingProfileParams defines parameters for UpsertCustomerBillingProfile.
 type UpsertCustomerBillingProfileParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10359,12 +10701,16 @@ type GetCustomerMarginParams struct {
 // RotateCustomerCostDashboardTokenParams defines parameters for RotateCustomerCostDashboardToken.
 type RotateCustomerCostDashboardTokenParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10372,12 +10718,14 @@ type RotateCustomerCostDashboardTokenParams struct {
 
 // ListCustomerSentEmailsParams defines parameters for ListCustomerSentEmails.
 type ListCustomerSentEmailsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -10394,24 +10742,30 @@ type GetCustomerUsageParams struct {
 
 // ListDunningPoliciesParams defines parameters for ListDunningPolicies.
 type ListDunningPoliciesParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // CreateDunningPolicyParams defines parameters for CreateDunningPolicy.
 type CreateDunningPolicyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10423,12 +10777,16 @@ type DeleteDunningPolicy200JSONResponseBodyStatus string
 // UpdateDunningPolicyParams defines parameters for UpdateDunningPolicy.
 type UpdateDunningPolicyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10437,12 +10795,16 @@ type UpdateDunningPolicyParams struct {
 // SetDefaultDunningPolicyParams defines parameters for SetDefaultDunningPolicy.
 type SetDefaultDunningPolicyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10459,12 +10821,14 @@ type ListDunningRunsParams struct {
 	// State Only runs in this state. Another value answers 400.
 	State ListDunningRunsParamsState `form:"state,omitempty" json:"state,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -10480,12 +10844,16 @@ type ResolveDunningRunJSONBody struct {
 // ResolveDunningRunParams defines parameters for ResolveDunningRun.
 type ResolveDunningRunParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10599,7 +10967,11 @@ type ListInvoicesParams struct {
 	// nothing.
 	PaymentStatus string `form:"payment_status,omitempty" json:"payment_status,omitempty"`
 
-	// Search Case-insensitive substring match on the invoice number or the customer's name or email.
+	// Search Case-insensitive substring match on the invoice number, or on
+	// the customer's name or email only when customer data is not
+	// encrypted. With `HARDCOUNT_ENCRYPTION_KEY` set (required in
+	// production), the name and email are stored encrypted, so only
+	// the invoice number matches.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
 	// From Lower bound on created_at, inclusive. RFC3339 instant or
@@ -10625,12 +10997,14 @@ type ListInvoicesParams struct {
 	// Dir Sort direction, `desc` (the default) or `asc`.
 	Dir ListInvoicesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -10640,12 +11014,16 @@ type ListInvoicesParamsDir string
 // CreateInvoiceParams defines parameters for CreateInvoice.
 type CreateInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10676,12 +11054,16 @@ type CreateInvoicePreviewJSONBody struct {
 // CreateInvoicePreviewParams defines parameters for CreateInvoicePreview.
 type CreateInvoicePreviewParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10690,12 +11072,16 @@ type CreateInvoicePreviewParams struct {
 // CollectInvoicePaymentParams defines parameters for CollectInvoicePayment.
 type CollectInvoicePaymentParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10703,24 +11089,30 @@ type CollectInvoicePaymentParams struct {
 
 // ListInvoiceDisputesParams defines parameters for ListInvoiceDisputes.
 type ListInvoiceDisputesParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // FinalizeInvoiceParams defines parameters for FinalizeInvoice.
 type FinalizeInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10729,12 +11121,16 @@ type FinalizeInvoiceParams struct {
 // AddInvoiceLineItemParams defines parameters for AddInvoiceLineItem.
 type AddInvoiceLineItemParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10743,12 +11139,16 @@ type AddInvoiceLineItemParams struct {
 // MarkInvoiceUncollectibleParams defines parameters for MarkInvoiceUncollectible.
 type MarkInvoiceUncollectibleParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10763,12 +11163,16 @@ type RecordInvoicePaymentJSONBody struct {
 // RecordInvoicePaymentParams defines parameters for RecordInvoicePayment.
 type RecordInvoicePaymentParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10789,12 +11193,16 @@ type RefundInvoiceJSONBody struct {
 // RefundInvoiceParams defines parameters for RefundInvoice.
 type RefundInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10806,12 +11214,16 @@ type RefundInvoiceJSONBodyReason string
 // ResendInvoiceSetupLinkParams defines parameters for ResendInvoiceSetupLink.
 type ResendInvoiceSetupLinkParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10823,12 +11235,16 @@ type ResendInvoiceSetupLink200JSONResponseBodyStatus string
 // RetryInvoiceTaxParams defines parameters for RetryInvoiceTax.
 type RetryInvoiceTaxParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10837,12 +11253,16 @@ type RetryInvoiceTaxParams struct {
 // RotateInvoicePublicTokenParams defines parameters for RotateInvoicePublicToken.
 type RotateInvoicePublicTokenParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10860,12 +11280,16 @@ type SendInvoiceJSONBody struct {
 // SendInvoiceParams defines parameters for SendInvoice.
 type SendInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10876,12 +11300,14 @@ type SendInvoice200JSONResponseBodyStatus string
 
 // ListInvoiceStripeRefundsParams defines parameters for ListInvoiceStripeRefunds.
 type ListInvoiceStripeRefundsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -10894,12 +11320,16 @@ type DismissInvoiceStripeRefundJSONBody struct {
 // DismissInvoiceStripeRefundParams defines parameters for DismissInvoiceStripeRefund.
 type DismissInvoiceStripeRefundParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10908,12 +11338,16 @@ type DismissInvoiceStripeRefundParams struct {
 // VoidInvoiceParams defines parameters for VoidInvoice.
 type VoidInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10928,12 +11362,16 @@ type InviteMemberJSONBody struct {
 // InviteMemberParams defines parameters for InviteMember.
 type InviteMemberParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10941,12 +11379,14 @@ type InviteMemberParams struct {
 
 // ListMetersParams defines parameters for ListMeters.
 type ListMetersParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -10961,7 +11401,8 @@ type CreateMeterJSONBody struct {
 	// Unique in the account and mode.
 	EventName string `json:"event_name"`
 
-	// Name The display name, at most 255 characters.
+	// Name The display name. Spaces at the ends are trimmed; then at
+	// most 255 bytes (UTF-8).
 	Name string `json:"name"`
 
 	// Unit The unit of the quantity, such as `tokens` or `seconds`.
@@ -10972,12 +11413,16 @@ type CreateMeterJSONBody struct {
 // CreateMeterParams defines parameters for CreateMeter.
 type CreateMeterParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -10991,7 +11436,8 @@ type UpdateMeterJSONBody struct {
 	// Aggregation The new aggregation. Refused once the meter has a usage event.
 	Aggregation UpdateMeterJSONBodyAggregation `json:"aggregation,omitempty"`
 
-	// Name The new display name, at most 255 characters. It cannot be empty.
+	// Name The new display name, at most 255 bytes (UTF-8) after
+	// spaces at the ends are trimmed. It cannot be empty.
 	Name string `json:"name,omitempty"`
 
 	// Unit The new unit. Empty sets it to `unit`.
@@ -11001,12 +11447,16 @@ type UpdateMeterJSONBody struct {
 // UpdateMeterParams defines parameters for UpdateMeter.
 type UpdateMeterParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11017,12 +11467,14 @@ type UpdateMeterJSONBodyAggregation string
 
 // ListPlansParams defines parameters for ListPlans.
 type ListPlansParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -11055,7 +11507,8 @@ type CreatePlanJSONBody struct {
 	// Description Your description of the plan.
 	Description string `json:"description,omitempty"`
 
-	// Name The display name, at most 255 characters.
+	// Name The display name. Spaces at the ends are trimmed; then at
+	// most 255 bytes (UTF-8).
 	Name string `json:"name"`
 
 	// Prices The plan's usage prices, created with it in one request.
@@ -11065,21 +11518,25 @@ type CreatePlanJSONBody struct {
 	// Status Optional. A plan is created active; archive it with PATCH.
 	Status CreatePlanJSONBodyStatus `json:"status,omitempty"`
 
-	// TaxCode Stripe product tax code for the base fee, such as
-	// `txcd_10103001`. Empty or omitted means the account's
-	// `default_product_tax_code`.
+	// TaxCode A Stripe product tax code, `txcd_` and 8 digits, such as
+	// `txcd_10103001`. Empty or omitted leaves it unset. See
+	// `tax_code` on Plan for which invoice lines carry it.
 	TaxCode string `json:"tax_code,omitempty"`
 }
 
 // CreatePlanParams defines parameters for CreatePlan.
 type CreatePlanParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11107,28 +11564,34 @@ type UpdatePlanJSONBody struct {
 	// description; an empty string clears it.
 	Description string `json:"description,omitempty"`
 
-	// Name Whitespace is trimmed. Empty or omitted keeps the current name.
+	// Name Whitespace is trimmed. Empty or omitted keeps the current
+	// name. Unlike create, the update does not check its
+	// length.
 	Name string `json:"name,omitempty"`
 
 	// Status `archived` stops new subscriptions and plan changes onto
 	// the plan. `active` brings it back.
 	Status UpdatePlanJSONBodyStatus `json:"status,omitempty"`
 
-	// TaxCode Stripe product tax code. Omit to keep the current code; an
-	// empty string clears it, and the base fee then uses the
-	// account's `default_product_tax_code`.
+	// TaxCode A Stripe product tax code, `txcd_` and 8 digits. Omit to
+	// keep the current code; an empty string clears it. See
+	// `tax_code` on Plan for which invoice lines carry it.
 	TaxCode string `json:"tax_code,omitempty"`
 }
 
 // UpdatePlanParams defines parameters for UpdatePlan.
 type UpdatePlanParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11142,24 +11605,30 @@ type UpdatePlanJSONBodyStatus string
 
 // ListPlanPricesParams defines parameters for ListPlanPrices.
 type ListPlanPricesParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // AddPlanPriceParams defines parameters for AddPlanPrice.
 type AddPlanPriceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11168,12 +11637,16 @@ type AddPlanPriceParams struct {
 // UpdatePlanPriceParams defines parameters for UpdatePlanPrice.
 type UpdatePlanPriceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11187,12 +11660,14 @@ type ListPriceOverridesParams struct {
 	// PriceId Only this price's overrides.
 	PriceId string `form:"price_id,omitempty" json:"price_id,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -11235,12 +11710,16 @@ type CreatePriceOverrideJSONBody struct {
 // CreatePriceOverrideParams defines parameters for CreatePriceOverride.
 type CreatePriceOverrideParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11251,12 +11730,14 @@ type CreatePriceOverrideJSONBodyMode string
 
 // ListProviderCostsParams defines parameters for ListProviderCosts.
 type ListProviderCostsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -11288,12 +11769,16 @@ type UpsertProviderCostJSONBody struct {
 // UpsertProviderCostParams defines parameters for UpsertProviderCost.
 type UpsertProviderCostParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11307,23 +11792,27 @@ type GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource string
 
 // ListRecipesParams defines parameters for ListRecipes.
 type ListRecipesParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListRecipeInstancesParams defines parameters for ListRecipeInstances.
 type ListRecipeInstancesParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -11339,12 +11828,16 @@ type InstantiateRecipeJSONBody struct {
 // InstantiateRecipeParams defines parameters for InstantiateRecipe.
 type InstantiateRecipeParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11362,12 +11855,16 @@ type PreviewRecipeJSONBody struct {
 // PreviewRecipeParams defines parameters for PreviewRecipe.
 type PreviewRecipeParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11376,12 +11873,16 @@ type PreviewRecipeParams struct {
 // UpdateTenantSettingsParams defines parameters for UpdateTenantSettings.
 type UpdateTenantSettingsParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11396,12 +11897,16 @@ type GetEmailSettings200JSONResponseBodyTlsMode string
 // SendTestEmailParams defines parameters for SendTestEmail.
 type SendTestEmailParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11425,12 +11930,16 @@ type ConnectStripeJSONBody struct {
 // ConnectStripeParams defines parameters for ConnectStripe.
 type ConnectStripeParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11448,12 +11957,16 @@ type SetStripeWebhookSecretJSONBody struct {
 // SetStripeWebhookSecretParams defines parameters for SetStripeWebhookSecret.
 type SetStripeWebhookSecretParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11496,12 +12009,14 @@ type ListSubscriptionsParams struct {
 	// Dir Sort direction, `asc` or `desc` (the default). Any other value sorts descending.
 	Dir ListSubscriptionsParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -11563,12 +12078,16 @@ type CreateSubscriptionJSONBody struct {
 // CreateSubscriptionParams defines parameters for CreateSubscription.
 type CreateSubscriptionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11583,12 +12102,16 @@ type CreateSubscriptionJSONBodyStatus string
 // ActivateSubscriptionParams defines parameters for ActivateSubscription.
 type ActivateSubscriptionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11616,12 +12139,16 @@ type SetSubscriptionBillingThresholdsJSONBody struct {
 // SetSubscriptionBillingThresholdsParams defines parameters for SetSubscriptionBillingThresholds.
 type SetSubscriptionBillingThresholdsParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11630,12 +12157,16 @@ type SetSubscriptionBillingThresholdsParams struct {
 // CancelSubscriptionParams defines parameters for CancelSubscription.
 type CancelSubscriptionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11644,12 +12175,16 @@ type CancelSubscriptionParams struct {
 // EndSubscriptionTrialParams defines parameters for EndSubscriptionTrial.
 type EndSubscriptionTrialParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11664,12 +12199,16 @@ type ExtendSubscriptionTrialJSONBody struct {
 // ExtendSubscriptionTrialParams defines parameters for ExtendSubscriptionTrial.
 type ExtendSubscriptionTrialParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11687,12 +12226,16 @@ type AddSubscriptionItemJSONBody struct {
 // AddSubscriptionItemParams defines parameters for AddSubscriptionItem.
 type AddSubscriptionItemParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11713,12 +12256,16 @@ type UpdateSubscriptionItemJSONBody struct {
 // UpdateSubscriptionItemParams defines parameters for UpdateSubscriptionItem.
 type UpdateSubscriptionItemParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11737,12 +12284,16 @@ type PauseSubscriptionCollectionJSONBody struct {
 // PauseSubscriptionCollectionParams defines parameters for PauseSubscriptionCollection.
 type PauseSubscriptionCollectionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11754,12 +12305,16 @@ type PauseSubscriptionCollectionJSONBodyBehavior string
 // RetrySubscriptionBillingParams defines parameters for RetrySubscriptionBilling.
 type RetrySubscriptionBillingParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11777,12 +12332,16 @@ type ScheduleSubscriptionCancelJSONBody struct {
 // ScheduleSubscriptionCancelParams defines parameters for ScheduleSubscriptionCancel.
 type ScheduleSubscriptionCancelParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11790,12 +12349,14 @@ type ScheduleSubscriptionCancelParams struct {
 
 // ListTestClocksParams defines parameters for ListTestClocks.
 type ListTestClocksParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -11804,19 +12365,25 @@ type CreateTestClockJSONBody struct {
 	// FrozenTime The clock's starting time, RFC 3339. Any instant, past or future.
 	FrozenTime time.Time `json:"frozen_time"`
 
-	// Name Your name for the clock. Optional; at most 200 characters.
+	// Name Your name for the clock. Optional; at most 200 bytes
+	// after surrounding spaces are trimmed (fewer characters
+	// when it has non-ASCII letters).
 	Name string `json:"name,omitempty"`
 }
 
 // CreateTestClockParams defines parameters for CreateTestClock.
 type CreateTestClockParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11835,12 +12402,16 @@ type AdvanceTestClockJSONBody struct {
 // AdvanceTestClockParams defines parameters for AdvanceTestClock.
 type AdvanceTestClockParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11848,24 +12419,30 @@ type AdvanceTestClockParams struct {
 
 // ListTestClockCustomersParams defines parameters for ListTestClockCustomers.
 type ListTestClockCustomersParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // RetryTestClockAdvanceParams defines parameters for RetryTestClockAdvance.
 type RetryTestClockAdvanceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -11873,12 +12450,14 @@ type RetryTestClockAdvanceParams struct {
 
 // ListTestClockSubscriptionsParams defines parameters for ListTestClockSubscriptions.
 type ListTestClockSubscriptionsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -11904,12 +12483,14 @@ type ListUsageEventsParams struct {
 	// To Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
 	To string `form:"to,omitempty" json:"to,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -12109,12 +12690,14 @@ type ReleaseHeldUsageJSONBody struct {
 
 // ListWebhookEndpointsParams defines parameters for ListWebhookEndpoints.
 type ListWebhookEndpointsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -12126,19 +12709,25 @@ type CreateWebhookEndpointJSONBody struct {
 	// Events Event types to send. `*` means every event; `invoice.*` means every invoice event. Leave it out or send `[]` for every event.
 	Events []string `json:"events,omitempty"`
 
-	// Url Where to send events. Surrounding spaces are trimmed.
+	// Url Where to send events, an `https://` URL on a public
+	// address (a loopback URL outside production may use
+	// `http://`). Surrounding spaces are trimmed.
 	Url string `json:"url"`
 }
 
 // CreateWebhookEndpointParams defines parameters for CreateWebhookEndpoint.
 type CreateWebhookEndpointParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -12146,12 +12735,14 @@ type CreateWebhookEndpointParams struct {
 
 // GetWebhookEndpointStatsParams defines parameters for GetWebhookEndpointStats.
 type GetWebhookEndpointStatsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -12176,12 +12767,16 @@ type UpdateWebhookEndpointJSONBody struct {
 // UpdateWebhookEndpointParams defines parameters for UpdateWebhookEndpoint.
 type UpdateWebhookEndpointParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -12189,24 +12784,30 @@ type UpdateWebhookEndpointParams struct {
 
 // ListWebhookEndpointDeliveriesParams defines parameters for ListWebhookEndpointDeliveries.
 type ListWebhookEndpointDeliveriesParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ReplayWebhookDeliveryParams defines parameters for ReplayWebhookDelivery.
 type ReplayWebhookDeliveryParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -12215,12 +12816,16 @@ type ReplayWebhookDeliveryParams struct {
 // RotateWebhookEndpointSecretParams defines parameters for RotateWebhookEndpointSecret.
 type RotateWebhookEndpointSecretParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
@@ -12228,24 +12833,30 @@ type RotateWebhookEndpointSecretParams struct {
 
 // ListWebhookEventsParams defines parameters for ListWebhookEvents.
 type ListWebhookEventsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ReplayWebhookEventParams defines parameters for ReplayWebhookEvent.
 type ReplayWebhookEventParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
 	// `Idempotent-Replayed: true` header, instead of running again. A
 	// first answer of 409 or 422 is not kept, so a retry with the same
-	// key runs again. The same key with a different method, path or body
-	// is a 422 with code `idempotency_error`. The other error cases are in
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
 	// docs/api/idempotency.md. The usage routes do not take it: each usage
 	// event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`

@@ -29,7 +29,7 @@ export interface Meter {
      * account and mode, and fixed after create.
      */
   event_name: string;
-  /** The meter's display name, at most 255 characters. */
+  /** The meter's display name, at most 255 bytes (UTF-8). */
   name: string;
   /**
      * The unit of the quantity, such as `tokens` or `seconds`.

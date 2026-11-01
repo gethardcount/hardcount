@@ -12,7 +12,8 @@
  */
 
 /**
- * Rows per page, from 1 to 100. Default 50. Any other value, or one
- * that is not a whole number, is a 422 with `param: limit`.
+ * Rows per page, from 1 to 100. Default 50. Any other value, one that
+ * is not a whole number, or `limit` sent twice is a 422 with
+ * `param: limit`. It is never clamped.
  */
 export type LimitParameter = number;

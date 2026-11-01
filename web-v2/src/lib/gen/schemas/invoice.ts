@@ -25,12 +25,15 @@ import type { RecoveryWarning } from './recoveryWarning';
 /**
  * A bill for one customer, in one currency. The billing engine creates
  * one at the end of each subscription period (and for a subscription's
- * start, a change, a cancel or a spend threshold); you can also create
- * one-off invoices with `POST /v1/invoices`. An invoice starts as a
- * `draft`, is `finalized` when issued, and ends `paid`, `voided` or
- * `uncollectible`. Every amount is a whole number in the currency's
- * minor unit (cents for USD). The invoice routes and the `invoice.*`
- * and `payment.*` webhook events return it.
+ * start when a fee is billed in advance, a change, a cancel or a spend
+ * threshold); you can also create one-off invoices with
+ * `POST /v1/invoices`. The engine creates its invoices already
+ * `finalized`, or as a `draft` while their tax is pending or collection
+ * is paused on the subscription. An invoice you create starts as a
+ * `draft` until you finalize it. A finalized invoice ends `paid`,
+ * `voided` or `uncollectible`. Every amount is a whole number in the
+ * currency's minor unit (cents for USD). The invoice routes and the
+ * `invoice.*` and `payment.*` webhook events return it.
  */
 export interface Invoice {
   /** Unique identifier of the invoice, starting `hc_inv_`. */
@@ -42,7 +45,11 @@ export interface Invoice {
   tenant_id?: string;
   /** The customer the invoice bills. */
   customer_id: string;
-  /** The subscription the invoice bills. An empty string for a one-off invoice. */
+  /**
+     * The subscription the invoice bills. An empty string when the
+     * invoice bills no subscription. An invoice you create with
+     * `POST /v1/invoices` carries the `subscription_id` you sent.
+     */
   subscription_id: string;
   /**
      * The number printed on the invoice: the account's invoice prefix
@@ -83,9 +90,10 @@ export interface Invoice {
   tax_id?: string;
   /**
      * The tax engine that calculated the tax: `stripe_tax`, `manual` (a
-     * flat rate from the account settings) or `none`. Kept for the
-     * record and never changed afterwards. Absent until tax is
-     * calculated.
+     * flat rate from the account settings) or `none`. A draft's tax can
+     * be calculated again (retry-tax, or finalize of a one-off draft);
+     * once the invoice is finalized it no longer changes. Absent until
+     * tax is calculated.
      */
   tax_provider?: string;
   /**
@@ -96,10 +104,13 @@ export interface Invoice {
      */
   tax_calculation_id?: string;
   /**
-     * The tax provider's committed transaction (Stripe Tax only),
-     * recorded at finalize. Hardcount reverses it when the invoice is
-     * voided or a credit note is issued. Absent until committed, and
-     * for providers that keep no record.
+     * The tax provider's committed transaction (Stripe Tax only). On an
+     * invoice the billing engine creates, it is recorded when the
+     * invoice is built; on one you create, at finalize. When that first
+     * commit fails, a background retry records it later. Hardcount
+     * reverses it when the invoice is voided or a credit note is
+     * issued. Absent until committed, and for providers that keep no
+     * record.
      */
   tax_transaction_id?: string;
   /**
@@ -110,15 +121,25 @@ export interface Invoice {
   /** Why the customer is exempt from tax, as recorded on the customer. Absent when they are not exempt. */
   tax_exempt_reason?: string;
   tax_status?: InvoiceTaxStatus;
-  /** When the tax calculation failed and the invoice was held as a draft. Absent unless tax is or was deferred. */
+  /**
+     * When the tax calculation failed and the invoice was held as a
+     * draft. A later successful calculation clears it. Absent unless
+     * tax is deferred.
+     */
   tax_deferred_at?: string;
   /**
-     * How many times tax was calculated again after the first try:
-     * each `POST /v1/invoices/{id}/retry-tax` and each automatic retry.
-     * Absent when 0.
+     * How many times tax was calculated again while it was pending:
+     * each `POST /v1/invoices/{id}/retry-tax` on pending tax, each
+     * automatic retry, and each finalize of a one-off draft whose
+     * earlier calculation failed. Absent when 0.
      */
   tax_retry_count?: number;
-  /** The provider's explanation of why tax could not be calculated, while `tax_status` is `pending`. Absent otherwise. */
+  /**
+     * Why tax could not be calculated, while `tax_status` is `pending`:
+     * the provider's error, or Hardcount's own text when the provider
+     * was never called (`tax_error_code` `provider_not_configured`).
+     * Cut to 500 bytes. Absent otherwise.
+     */
   tax_pending_reason?: string;
   /**
      * Why tax could not be calculated, as a code. Set while
@@ -128,7 +149,9 @@ export interface Invoice {
   tax_error_code?: InvoiceTaxErrorCode;
   /**
      * The earliest time the background retry may calculate tax again,
-     * after a failed attempt. Absent when a retry may run now.
+     * after a failed attempt. Absent when a retry may run now, and when
+     * none is scheduled: an error code Hardcount does not retry, or the
+     * automatic retries are used up.
      */
   tax_next_retry_at?: string;
   /**
@@ -189,7 +212,8 @@ export interface Invoice {
      * the currency's minor unit (cents for USD). Credit is applied when
      * the invoice is collected (after finalize, or by
      * `POST /v1/invoices/{id}/collect`). A void gives it back to the
-     * customer's balance.
+     * customer's balance, and a credit note issued before payment can
+     * give part of it back, lowering this figure.
      */
   credits_applied_cents: number;
   /**
@@ -209,17 +233,18 @@ export interface Invoice {
   billing_timezone?: string;
   /**
      * The buyer details this invoice was issued with, copied when it
-     * left draft. The PDF, the hosted page and the dashboard show an
-     * issued invoice from this copy, so a later edit to the customer
-     * or billing profile does not change it. Absent on drafts and on
-     * invoices issued before this field existed; those show the
-     * current customer details.
+     * was finalized (or created already finalized). The PDF, the
+     * hosted page and the dashboard show an issued invoice from this
+     * copy, so a later edit to the customer or billing profile does not
+     * change it. Absent on drafts and on invoices issued before this
+     * field existed; those show the current customer details.
      */
   bill_to_snapshot?: DocumentBillTo;
   /**
      * Your company details this invoice was issued with, copied when it
-     * left draft. Absent on drafts and on invoices issued before this
-     * field existed. Branding (logo, brand color) is not part of it.
+     * was finalized (or created already finalized). Absent on drafts
+     * and on invoices issued before this field existed. Branding (logo,
+     * brand color) is not part of it.
      */
   supplier_snapshot?: DocumentSupplier;
   /**
@@ -260,8 +285,11 @@ export interface Invoice {
      */
   paid_out_of_band: boolean;
   /**
-     * Stripe's message for the last failed charge, word for word (it is
-     * written for the cardholder). Absent when no charge has failed.
+     * The error text recorded with the invoice's last charge attempt
+     * that did not succeed. Usually Stripe's message, which is written
+     * for the cardholder, with card numbers and email addresses masked.
+     * It can also be Hardcount's own text, such as `customer has no
+     * payment method on file`. Absent when there is none.
      */
   last_payment_error?: string;
   /**
@@ -270,15 +298,18 @@ export interface Invoice {
      */
   auto_charge_pending?: boolean;
   /**
-     * When the customer was emailed a link to add a payment method for
-     * this invoice. The email is sent once.
+     * When Hardcount automatically emailed the customer a link to add a
+     * payment method for this invoice. The automatic email is sent
+     * once; `POST /v1/invoices/{id}/resend-setup-link` sends it again
+     * and does not change this time. Absent until the automatic email
+     * is sent.
      */
   no_pm_notified_at?: string;
   /**
      * When Hardcount itself emailed the customer this invoice, because
-     * Stripe is not connected for the invoice's mode and the customer
-     * has no card. The email is sent once. An invoice you email with
-     * `POST /v1/invoices/{id}/send` does not set it.
+     * Stripe is not connected for the invoice's mode. The email is sent
+     * once. An invoice you email with `POST /v1/invoices/{id}/send`
+     * does not set it. Absent until then.
      */
   invoice_emailed_at?: string;
   /**
@@ -300,8 +331,9 @@ export interface Invoice {
      * The token in the hosted invoice page's link, like Stripe's
      * `hosted_invoice_url`; `GET /v1/public/invoices/{token}` serves
      * the page's data. Anyone with it can view and pay the invoice, so
-     * share it only with the customer. Created at finalize; absent on
-     * drafts. Replace it with
+     * share it only with the customer. Created when the invoice is
+     * finalized, or created already finalized; absent on drafts.
+     * Replace it with
      * `POST /v1/invoices/{id}/rotate-public-token`.
      */
   public_token?: string;

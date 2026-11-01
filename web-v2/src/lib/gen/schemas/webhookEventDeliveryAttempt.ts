@@ -52,7 +52,9 @@ export interface WebhookEventDeliveryAttempt {
      */
   completed_at: string | null;
   /**
-     * When the next attempt is due, while pending. null once the delivery is finished.
+     * While pending, when the next attempt is due. While an attempt is
+     * running, it is when a retry takes over if that attempt never
+     * finishes. null once the delivery is finished.
      * @nullable
      */
   next_retry_at: string | null;

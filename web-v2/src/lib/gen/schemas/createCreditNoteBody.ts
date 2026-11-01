@@ -17,7 +17,12 @@ import type { CreateCreditNoteBodyRefundType } from './createCreditNoteBodyRefun
 export type CreateCreditNoteBody = {
   /** The invoice to credit. It must be `finalized` or `paid`. */
   invoice_id: string;
-  /** Why you are crediting, printed on the note. Required for a line-based note; a relief takes it from `commit_relief.reason` when this is empty. */
+  /**
+     * Why you are crediting, printed on the note. Required for a
+     * line-based note. For a relief, `commit_relief.reason` wins;
+     * this one is used when that is empty, and `commit_relief`
+     * is the reason when both are empty.
+     */
   reason?: string;
   /** The credited amounts, tax included. At least one line for a line-based note; none with `commit_relief`. */
   lines?: CreateCreditNoteBodyLinesItem[];

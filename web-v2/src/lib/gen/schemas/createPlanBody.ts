@@ -22,7 +22,10 @@ export type CreatePlanBody = {
      * mode. Fixed after create.
      */
   code: string;
-  /** The display name, at most 255 characters. */
+  /**
+     * The display name. Spaces at the ends are trimmed; then at
+     * most 255 bytes (UTF-8).
+     */
   name: string;
   /** Your description of the plan. */
   description?: string;
@@ -55,9 +58,9 @@ export type CreatePlanBody = {
   /** Optional. A plan is created active; archive it with PATCH. */
   status?: CreatePlanBodyStatus;
   /**
-     * Stripe product tax code for the base fee, such as
-     * `txcd_10103001`. Empty or omitted means the account's
-     * `default_product_tax_code`.
+     * A Stripe product tax code, `txcd_` and 8 digits, such as
+     * `txcd_10103001`. Empty or omitted leaves it unset. See
+     * `tax_code` on Plan for which invoice lines carry it.
      */
   tax_code?: string;
 };

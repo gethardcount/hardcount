@@ -86,8 +86,8 @@ export interface paths {
          * List customers
          * @description Customers in the mode of your API key, newest first unless you choose
          *     a sort. The list answer leaves out `additional_emails`,
-         *     `email_status`, `dunning_policy_id` and `stripe_customer_id`: get one
-         *     customer for those.
+         *     `email_status`, the bounce fields, `dunning_policy_id` and
+         *     `stripe_customer_id`: get one customer for those.
          */
         get: operations["listCustomers"];
         put?: never;
@@ -167,17 +167,20 @@ export interface paths {
          *       account and mode, or the call returns 404. The change applies to the
          *       next dunning run, not to runs already started.
          *     - `additional_emails` replaces the whole CC list; `[]` clears it.
-         *       Entries are lowercased, deduplicated, capped at 10 and may not equal
-         *       the primary email.
+         *       Entries are lowercased and deduplicated, and may not equal the
+         *       primary email. More than 10 after deduplication is refused with
+         *       422.
          *     - A new `email` that is already on the CC list is refused with 422
          *       unless you send a new `additional_emails` too. Changing the email
          *       sets `email_status` back to `unknown`, after the answer is built:
          *       the answer still shows the earlier `email_status`.
          *
-         *     Name and email changes are copied to the linked Stripe customer when
-         *     there is one. A Stripe failure is logged and does not fail the call.
-         *     The change is written to the audit log (it records that the email
-         *     changed, not the address).
+         *     When the customer has a linked Stripe customer, every update then
+         *     sends Stripe the customer's email and the billing profile's fields:
+         *     legal name (as the Stripe name), phone, address, tax status and tax
+         *     ID. `display_name` is not sent to Stripe. A Stripe failure is
+         *     logged and does not fail the call. The change is written to the audit
+         *     log (it records that the email changed, not the address).
          */
         patch: operations["updateCustomer"];
         trace?: never;
@@ -198,13 +201,18 @@ export interface paths {
          *     the server: `ready` when legal name, address line 1, city and country
          *     are all set, otherwise `incomplete`.
          *
-         *     Checks, each answered with 422 and `param` set to the field: `country`
-         *     must be an ISO 3166 alpha-2 code; `currency` must be a supported ISO
-         *     4217 code (zero-decimal currencies such as JPY are refused); `phone`
-         *     is 7 to 20 digits, spaces or `+-()`; `tax_id` must match `tax_id_type`
-         *     when the type is `eu_vat`, `in_gst` or `au_abn`; `tax_status: exempt`
-         *     needs `tax_exempt_reason`; `tax_status: reverse_charge` needs
-         *     `tax_id`. Country, currency and tax ID are stored in upper case.
+         *     Checks, each answered with 422 and `param` set to the field:
+         *
+         *     - `country` must be two letters (only the format is checked).
+         *     - `currency` must be a supported ISO 4217 code. Zero-decimal
+         *       currencies such as JPY are refused.
+         *     - `phone` is 7 to 20 digits, spaces or `+-()`.
+         *     - `tax_id` must match `tax_id_type` when the type is `eu_vat`,
+         *       `in_gst` or `au_abn`.
+         *     - `tax_status: exempt` needs `tax_exempt_reason`, and
+         *       `tax_status: reverse_charge` needs `tax_id`.
+         *
+         *     Country, currency and tax ID are stored in upper case.
          *
          *     A currency that differs from the plan currency of a draft, trialing or
          *     active subscription is refused with 409 `invalid_state`, because
@@ -263,9 +271,8 @@ export interface paths {
          *
          *     With neither, each subscription is rated over its own current billing
          *     period, and `period` runs from the earliest start to the latest end of
-         *     those periods. Which cycle is current is read at the customer's
-         *     current time (the test clock's time for a customer on a test clock). A
-         *     trialing subscription's first cycle starts when its trial ends.
+         *     those periods. A trialing subscription's current period is its first
+         *     paid period, which starts when the trial ends.
          *
          *     With both, the window is `[from, to)`, at most one year long, and the
          *     amounts are an estimate at each subscription's current prices.
@@ -458,7 +465,10 @@ export interface paths {
          *     for both. A customer with no active or trialing subscription gets 200
          *     with `billing_period.source` `no_subscription`: `subscriptions`,
          *     `usage` and `totals` are empty, and `credits` still lists the credit
-         *     balance. Limited to 60 requests a minute per IP address.
+         *     balance.
+         *
+         *     Limited to 60 requests a minute per IP address. The limit is shared
+         *     with the hosted invoice and payment-update pages.
          */
         get: operations["getPublicCostDashboard"];
         put?: never;
@@ -552,11 +562,15 @@ export interface paths {
          * Get what the payment-update page shows
          * @description Public: no API key. The token from the link in a payment setup email
          *     is the only credential. Hardcount sends that email when an invoice has
-         *     no payment method to charge; the link is the server's
+         *     no payment method to charge, and again on each
+         *     `POST /v1/invoices/{id}/resend-setup-link`. The link is the server's
          *     `PAYMENT_UPDATE_URL` with `?token=` and the token. The token is valid
          *     for 24 hours, and starting checkout uses it up. Share the page link
-         *     with customers instead of calling this route. Limited to 60 requests a
-         *     minute per IP address.
+         *     with customers instead of calling this route.
+         *
+         *     Limited to 60 requests a minute per IP address. The limit is shared
+         *     with the checkout call below, the hosted invoice page and the public
+         *     cost dashboard.
          */
         get: operations["getPublicPaymentUpdate"];
         put?: never;
@@ -754,8 +768,11 @@ export interface paths {
          * Add or remove credit
          * @description Writes one `adjustment` entry to the customer's credit ledger in
          *     `currency`. A positive amount adds credit in that currency; a
-         *     negative amount removes credit in that currency only. The audit
-         *     log records it as
+         *     negative amount removes credit in that currency only, taken from
+         *     the customer's grants in the order invoices draw them (promotional
+         *     credit first, then the soonest to expire). The answer carries no
+         *     `metadata`; the ledger list shows which grants a removal drew from
+         *     (`drained_blocks`). The audit log records it as
          *     `credit.adjustment` or `credit.deduction`.
          *
          *     Errors (422, `param` names the field): `customer_id`, `currency` or
@@ -841,8 +858,11 @@ export interface paths {
          *     (`whsec_…`). The secret is shown only here: store it, and use it to
          *     check the `Hardcount-Signature` header of each delivery.
          *
-         *     The URL must be `https://`. Hardcount looks up its host and refuses
-         *     one that points to a private network address. `events` lists the
+         *     The URL must be `https://` on a public address: Hardcount looks up
+         *     its host and refuses one that points to a private network address.
+         *     Outside production (`APP_ENV` is not `production`), a `localhost`
+         *     or loopback URL (`127.0.0.1`, `::1`) is accepted too, over `http://`
+         *     or `https://`; in production it is refused. `events` lists the
          *     event types to send. Leave it out, or send `[]`, for every event
          *     (`*`). A prefix such as `invoice.*` matches every event whose type
          *     starts with `invoice.`. An event type Hardcount never sends is
@@ -1080,11 +1100,14 @@ export interface paths {
          *     key with `apikey:read`. It has no 30-second request timeout.
          *
          *     On connect, the server sends the 50 newest events, newest first.
-         *     It then sends a frame for each new event, replay, and delivery
-         *     result. Every frame is `event: webhook_event` with a JSON
-         *     `data:` line. A comment line `: heartbeat` is sent every 15
-         *     seconds to keep proxies from closing the connection. The same
-         *     event can arrive more than once; de-duplicate by `event_id`.
+         *     It then sends a frame for each new event and replay (status
+         *     `pending`), and for each delivery that succeeds or fails for good.
+         *     A failed attempt that will be retried sends no frame. Every frame is
+         *     `event: webhook_event` with a JSON `data:` line. A comment line
+         *     `: heartbeat` is sent every 15 seconds to keep proxies from closing
+         *     the connection. The same event can arrive more than once;
+         *     de-duplicate by `event_id`. A client that reads too slowly can miss
+         *     frames: reconnect to get the newest 50 again.
          *
          *     Live frames are not filtered by mode: check `livemode` on each
          *     frame. The first batch holds only the caller's mode. Live frames
@@ -1152,13 +1175,15 @@ export interface paths {
          *
          *     Each record is matched to the email Hardcount sent through the
          *     `hc-outbox-id` key in its `Metadata`. A delivery, hard bounce or
-         *     spam complaint updates that email's delivery state. A bounce or
-         *     complaint also marks the customers who use that address as bounced
-         *     or complained.
+         *     spam complaint updates that email's delivery state when the record
+         *     is about the email's main recipient, not a copy. A bounce or
+         *     complaint also marks the account's customers who use that address
+         *     as bounced or complained, when `HARDCOUNT_EMAIL_BIDX_KEY` is set.
          *
          *     A body that a retry cannot fix is answered 200, so Postmark stops
          *     retrying: over 64 KB, invalid JSON, or no known Hardcount email id
-         *     in its metadata. Errors use the usual error body.
+         *     in its metadata. A soft bounce is answered 200 as `ignored`. Errors
+         *     use the usual error body.
          */
         post: operations["receivePostmarkWebhook"];
         delete?: never;
@@ -1320,12 +1345,16 @@ export interface paths {
          *     All the plans must share one billing interval, one base-fee timing
          *     (in advance or in arrears) and one currency. The currency must also
          *     match the customer's billing profile and the customer's other
-         *     subscriptions. No two live subscriptions of a customer may bill the
-         *     same meter. The customer and the plans must not be archived.
+         *     `draft`, `trialing` and `active` subscriptions; canceled ones do not
+         *     count. No two of the plans may bill the same meter, and none may
+         *     bill a meter that another `draft`, `trialing` or `active`
+         *     subscription of the customer bills. The customer and the plans must
+         *     not be archived.
          *
          *     An `active` subscription whose plans bill a non-zero base fee in
          *     advance gets its first invoice in the same transaction; it is then
-         *     collected like any other invoice. A customer on a test clock gives
+         *     collected like any other invoice. A `trialing` subscription gets
+         *     that invoice when its trial ends. A customer on a test clock gives
          *     the subscription its clock, and the subscription starts at the
          *     clock's time.
          *
@@ -1353,8 +1382,9 @@ export interface paths {
          *     first period starts today in your account's billing time zone (the
          *     clock's day for a customer on a test clock). A non-zero base fee
          *     billed in advance is invoiced in the same transaction. The plans'
-         *     currency must still match the customer's billing profile and other
-         *     subscriptions. Takes no body.
+         *     currency must still match the customer's billing profile and the
+         *     customer's other `draft`, `trialing` and `active` subscriptions.
+         *     Takes no body.
          *
          *     Sends the `subscription.activated` webhook event.
          */
@@ -1444,12 +1474,22 @@ export interface paths {
          * @description Cancels the subscription immediately. Works on `draft`, `trialing`
          *     and `active` subscriptions. Takes no body.
          *
-         *     In the same transaction, Hardcount writes the final invoice for the
-         *     part of the current period that has been used, and credits the
-         *     unused part of any base fee that was billed in advance. If a
-         *     billing period has already ended, it is billed first. If a
+         *     In the transaction that cancels it, Hardcount writes the final
+         *     invoice for the part of the current period that has been used
+         *     (usage, and base fees billed in arrears, prorated to the cancel),
+         *     and the relief for any base fee billed in advance: a credit note
+         *     for the unused part, written as a draft, or a void of an unpaid
+         *     invoice of which nothing was used. After the transaction commits,
+         *     the credit notes are issued, which is when the balance credit and
+         *     the tax reversal happen (a failed issue is retried), and then the
+         *     final invoice is collected, so that credit reduces it. A trial that
+         *     never became active is canceled with no invoice.
+         *
+         *     If a billing period has already ended, it is billed first. If a
          *     scheduled cancel was already due, that cancel takes effect at its
-         *     scheduled time and the canceled subscription is returned.
+         *     scheduled time and the canceled subscription is returned. The
+         *     canceled subscription keeps its last `current_billing_period_*`
+         *     and `next_billing_at`; nothing is billed at that time.
          *
          *     Sends the `subscription.canceled` webhook event.
          */
@@ -1559,10 +1599,12 @@ export interface paths {
          * Resume collection
          * @description Ends a collection pause. The period that is running bills
          *     normally; a period that ended during the pause keeps its draft
-         *     invoice. Sends the `subscription.collection_resumed` webhook
-         *     event. If the pause had already ended (its `resumes_at` has
-         *     passed), the event says what ended it: `triggered_by` is `payment`
-         *     or `schedule`, not `operator`. Calling it on a subscription that is
+         *     invoice. It works on a canceled subscription too, whose pause
+         *     still holds its unpaid invoices. Sends the
+         *     `subscription.collection_resumed` webhook event. If the pause had
+         *     already ended (its `resumes_at` has passed), the event says what
+         *     ended it: `triggered_by` is `payment` or `schedule`, not
+         *     `operator`. Calling it on a subscription that is
          *     not paused returns the subscription unchanged and sends no event.
          */
         delete: operations["resumeSubscriptionCollection"];
@@ -1609,7 +1651,8 @@ export interface paths {
         /**
          * Extend a trial
          * @description Moves the end of the trial later. The first paid period is moved
-         *     to start at the new trial end. A cancel scheduled with
+         *     to start at the beginning of the new trial end's day, in your
+         *     account's billing time zone. A cancel scheduled with
          *     `at_period_end` moves with the trial. To shorten a trial, use
          *     `POST /v1/subscriptions/{id}/end-trial`.
          *
@@ -1672,16 +1715,19 @@ export interface paths {
         /**
          * Add an item to a subscription
          * @description Adds a plan to the subscription as a new item. The plan must use
-         *     the same billing interval and currency as the other items, and
-         *     must not share meters with the customer's other live
-         *     subscriptions. A period that ended and is not invoiced yet is
-         *     billed first.
+         *     the same billing interval, base-fee timing and currency as the
+         *     other items. It must not bill a meter that another item of this
+         *     subscription, or another `draft`, `trialing` or `active`
+         *     subscription of the customer, bills. A period that ended and is
+         *     not invoiced yet is billed first. The subscription must not be
+         *     `canceled`.
          *
          *     On an active subscription, a plan whose base fee is billed in
-         *     advance is charged for the rest of the current period, in the
-         *     same transaction as the add. An item added on the first day of the
-         *     period (in your account's billing time zone) pays for the whole
-         *     period. A plan billed in arrears is billed at the end of the
+         *     advance is charged for the rest of the current period, on an
+         *     invoice written in the same transaction as the add, when the
+         *     period's base-fee invoice exists. An item added on the first day
+         *     of the period (in your account's billing time zone) pays for the
+         *     whole period. A plan billed in arrears is billed at the end of the
          *     period for the days it was on the subscription.
          *
          *     Sends the `subscription.item.added` webhook event.
@@ -1711,9 +1757,12 @@ export interface paths {
          *     no body.
          *
          *     On an active subscription, the unused part of a base fee billed in
-         *     advance is credited in the same transaction. A plan billed in
-         *     arrears is billed at the end of the period for the days it was on
-         *     the subscription.
+         *     advance is credited with credit notes on the invoices that charged
+         *     the item: written in the same transaction as drafts, and issued
+         *     right after it commits (a failed issue is retried). On a paid
+         *     invoice the credit goes to the customer's balance, on an unpaid
+         *     one it reduces the amount due. A plan billed in arrears is billed
+         *     at the end of the period for the days it was on the subscription.
          *
          *     Sends the `subscription.item.removed` webhook event.
          */
@@ -1737,9 +1786,12 @@ export interface paths {
          *
          *     For a change that takes effect now on a plan billed in advance,
          *     Hardcount settles the rest of the period at once. An increase is
-         *     invoiced. A decrease is credited to the customer's balance with a
-         *     credit note, or reduces the amount due when the period's invoice
-         *     is still unpaid. `proration` in the response describes the result.
+         *     invoiced in the same transaction as the change. A decrease is
+         *     credited with credit notes on the invoices that charged the item,
+         *     written in the same transaction as drafts and issued right after
+         *     it commits (a failed issue is retried): on a paid invoice the
+         *     credit goes to the customer's balance, on an unpaid one it reduces
+         *     the amount due. `proration` in the response describes the result.
          *     A plan billed in arrears is settled at the end of the period.
          *
          *     Changes to one subscription's items run one at a time, and each is
@@ -1768,7 +1820,8 @@ export interface paths {
          * Cancel a scheduled plan change
          * @description Cancels the plan change scheduled on an item. Calling it on an item
          *     with no scheduled change returns the item unchanged. Sends the
-         *     `subscription.pending_change.canceled` webhook event.
+         *     `subscription.pending_change.canceled` webhook event, and writes an
+         *     audit log entry, also when no change was scheduled.
          *
          *     If the period has already ended, the change has taken effect and
          *     the request answers 409.
@@ -1815,7 +1868,8 @@ export interface paths {
          * List usage events
          * @description Lists the usage events of this account and mode, newest first by
          *     `timestamp`. The filters combine; `total` counts every matching
-         *     event. Needs usage read permission.
+         *     event. The rows carry no `origin` and no `billing_status`. Needs
+         *     usage read permission.
          */
         get: operations["listUsageEvents"];
         put?: never;
@@ -1967,7 +2021,8 @@ export interface paths {
          *     them. A released row counts toward
          *     the billing period its time falls in only if that period's invoice
          *     has not been built yet; Hardcount does not move it onto a later
-         *     invoice. Writes an audit log entry. Requires usage write permission.
+         *     invoice. A call that takes any rows writes an audit log entry.
+         *     Requires usage write permission.
          */
         post: operations["releaseHeldUsage"];
         delete?: never;
@@ -1989,8 +2044,8 @@ export interface paths {
          * Discard held usage
          * @description Marks the held rows for one external customer ID (and one event
          *     name, when given) as discarded. They are never billed. The rows stay
-         *     stored as a record. Writes an audit log entry. Requires usage write
-         *     permission.
+         *     stored as a record. A call that discards any rows writes an audit
+         *     log entry. Requires usage write permission.
          */
         post: operations["discardHeldUsage"];
         delete?: never;
@@ -2208,7 +2263,11 @@ export interface paths {
          * @description Adds one line to a `draft` invoice and recomputes its subtotal,
          *     total and amount due. `amount_cents` is `quantity` ×
          *     `unit_amount_cents`, and the line takes the invoice's currency. Only
-         *     draft invoices accept new lines. Tax is calculated at finalize.
+         *     draft invoices accept new lines. On an invoice you created, tax is
+         *     calculated at finalize. On a draft the billing engine made, finalize
+         *     keeps the tax the draft was built with, so an added line is taxed
+         *     only if the draft's tax is still pending and is then calculated
+         *     again.
          */
         post: operations["addInvoiceLineItem"];
         delete?: never;
@@ -2272,7 +2331,8 @@ export interface paths {
          *     customer has no card on file: a single-use link to the
          *     payment-update page (`PAYMENT_UPDATE_URL`), sent to the customer's
          *     email address only, with no copies. Once a card is added, the
-         *     automatic charge collects the invoice.
+         *     automatic charge collects a `finalized` invoice; a written-off one
+         *     is not charged automatically.
          *
          *     Works on unpaid invoices that are `finalized` or `uncollectible`.
          *     This is different from `POST /v1/invoices/{id}/send`, which emails
@@ -2360,7 +2420,7 @@ export interface paths {
          *     `invoice.paid` and `invoice.payment_recorded` webhook events; the
          *     second carries `recovered_from`, the status the invoice was paid
          *     from. The optional `note` is stored in the audit log, cut to 500
-         *     characters.
+         *     bytes.
          *
          *     On a written-off invoice, read its `recovery_warning` first: it says
          *     when the payment will not reconcile on its own. The payment is still
@@ -2690,8 +2750,10 @@ export interface paths {
          *       with `unknown`: the customer may already be refunded. Retry either
          *       with `POST /v1/credit-notes/{id}/retry-refund`.
          *     - If the invoice's charge is still running, or the invoice is still
-         *       a draft, nothing changes and the note stays `draft`. Hardcount issues
-         *       it later.
+         *       a draft, nothing changes and the note stays `draft`. Hardcount
+         *       issues it later on its own only when `issue_pending` is true (a
+         *       note Hardcount created); otherwise issue it again once the charge
+         *       has settled.
          *     - If the invoice was voided, the draft is voided instead and
          *       returned with `status` `voided`.
          */
@@ -2843,15 +2905,19 @@ export interface paths {
          *     2. Otherwise the saved card is charged with a Stripe PaymentIntent.
          *        A successful charge marks the invoice paid, sends `invoice.paid`
          *        and `payment.succeeded`, and queues a receipt email to the
-         *        customer when they have an email address. A declined charge sets `payment_status` to `failed`,
-         *        sends `payment.failed`, and starts dunning when the customer's
-         *        policy is enabled.
-         *     3. With no card on file, the customer is emailed a link to add one,
-         *        once (`no_pm_notified_at`), and dunning starts when the policy is
-         *        enabled.
+         *        customer when they have an email address. A declined charge sets
+         *        `payment_status` to `failed`, sends `payment.failed`, and starts
+         *        dunning when the customer's policy is enabled.
+         *     3. With no card on file, the customer is emailed a link to add one
+         *        when they have an email address, and `no_pm_notified_at` records
+         *        it. This automatic email goes once;
+         *        `POST /v1/invoices/{id}/resend-setup-link` sends it again.
+         *        Dunning starts when the policy is enabled.
          *     4. When Stripe is not connected for the invoice's mode, the customer
-         *        is emailed the invoice itself, once (`invoice_emailed_at`), and
-         *        dunning starts when the policy is enabled.
+         *        is emailed the invoice itself, card or not, when they have an
+         *        email address and the server can send email. `invoice_emailed_at`
+         *        records it, and it goes once. Dunning starts when the policy is
+         *        enabled.
          *
          *     The response is the invoice after collection: paid, failed, or still
          *     queued. A collection step that does not finish is not an error
@@ -2881,18 +2947,20 @@ export interface paths {
          * @description Calculates tax again on a draft invoice whose `tax_status` is
          *     `pending`, after you fixed the cause (for example the customer's
          *     address). It also refreshes a draft whose Stripe Tax calculation is
-         *     more than 24 hours old and was never recorded, which finalize
+         *     more than 23 hours old and was never recorded, which finalize
          *     refuses. The route takes no body.
          *
-         *     Each call adds one to `tax_retry_count` and rewrites the tax on the
-         *     lines and the invoice. A retry that succeeds clears
+         *     Each call rewrites the tax on the lines and the invoice. A retry of
+         *     pending tax adds one to `tax_retry_count`; refreshing an expired
+         *     calculation does not. A retry that succeeds clears
          *     `tax_pending_reason` and `tax_error_code`. A retry that still fails
          *     records the new error code and answers 200 with the updated
          *     invoice, so check its `attention`.
          *
          *     When the tax resolves on an invoice the billing engine made, the
          *     call also finalizes it, unless collection is paused on its
-         *     subscription. The automatic charge then collects it on its next run.
+         *     subscription. If nothing is then due, the invoice is marked paid at
+         *     once; otherwise the automatic charge collects it on its next run.
          *     An invoice you created stays a draft for you to finalize. If the
          *     finalize fails, the call returns 500 or 409 and the invoice stays a
          *     draft with its tax saved: finalize it.
@@ -2984,8 +3052,8 @@ export interface paths {
          *     request with this session reads and writes that mode's data:
          *     customers, invoices, subscriptions, API keys and the rest. No
          *     request needs its own mode parameter, and the user does not sign
-         *     in again. Writes an audit row, filed in test mode whichever mode
-         *     is chosen.
+         *     in again. A body without `livemode` switches to test mode. Writes
+         *     an audit row, filed in test mode whichever mode is chosen.
          */
         post: operations["switchSessionMode"];
         delete?: never;
@@ -3355,8 +3423,10 @@ export interface paths {
         /**
          * Delete a provider cost rate
          * @description Deletes the rate. Usage events it already costed keep their stamped
-         *     cost. Events that arrive later with its labels get no cost (the margin
-         *     report counts them in `unresolved_events`) until you set a rate again.
+         *     cost. Events that arrive later with its labels get no cost from it.
+         *     When no other rate matches them (a rate on the event's other model
+         *     label can), they get no cost at all, and the margin report counts
+         *     them in `unresolved_events`, until you set a rate again.
          *     The delete is recorded in the audit log. Send no body.
          */
         delete: operations["deleteProviderCost"];
@@ -3561,7 +3631,8 @@ export interface paths {
         /**
          * List a test clock's subscriptions
          * @description Lists the subscriptions that run on the clock: those of the
-         *     customers attached to it. Test mode only.
+         *     customers attached to it, oldest first. The rows carry no
+         *     `current_billing_period_display`. Test mode only.
          */
         get: operations["listTestClockSubscriptions"];
         put?: never;
@@ -3929,8 +4000,9 @@ export interface paths {
          * @description Used by the dashboard; not part of the integration API.
          *
          *     Streams the audit log for the caller's mode (test or live), newest
-         *     first, with no row limit. Settings changes are recorded in test
-         *     mode, so they appear only in a test-mode export.
+         *     first, with no row limit. Settings changes, sign-ins and the other
+         *     account events that `GET /v1/audit-log` lists as test-mode rows
+         *     appear only in a test-mode export.
          *     Takes the same filters as the audit-log list, so the dashboard's
          *     filters and its export give the same rows. The date filters are
          *     `date_from`/`date_to`; `from`/`to` are ignored here.
@@ -4599,8 +4671,9 @@ export interface paths {
          *     same mode replaces the keys; a webhook secret saved before is kept
          *     when the body sends none. Key prefixes must match the mode:
          *     `sk_test_`/`rk_test_` and `pk_test_` for test, `sk_live_`/`rk_live_`
-         *     and `pk_live_` for live. Secrets are stored encrypted and are never
-         *     returned.
+         *     and `pk_live_` for live. The secret key and webhook secret are never
+         *     returned. They are stored encrypted when `HARDCOUNT_ENCRYPTION_KEY`
+         *     is set, which production requires.
          *
          *     Hardcount then calls Stripe to check the key. A failed check still
          *     returns 200: the keys are saved and `last_verified_error` says why
@@ -4719,15 +4792,20 @@ export interface paths {
          * @description Used by the dashboard; not part of the integration API.
          *
          *     Returns the account's audit entries in the caller's mode, newest
-         *     first (by `created_at`, then `id`). All filters are exact matches
-         *     and can be combined.
+         *     first (by `created_at`, then `id`). The `resource_type`,
+         *     `resource_id`, `action`, `actor_id` and `test_clock_id` filters are
+         *     exact matches. All filters can be combined.
          *
          *     Paged with `limit` and `offset`, like every list. Here `total`
          *     stops counting at 10,001, so a value above 10,000 means "more than
          *     10,000".
          *
-         *     Settings changes, sign-ins and team changes are always recorded in
-         *     test mode, so they do not appear when you read the log in live mode.
+         *     Settings changes, sign-ins, sign-outs, mode switches, password
+         *     resets and accepted invites are always recorded in test mode, so
+         *     they do not appear when you read the log in live mode. The account,
+         *     key and owner rows written at setup are in live mode. Every other
+         *     row, team invites and removals included, is in the mode the change
+         *     was made in.
          */
         get: operations["listAuditLog"];
         put?: never;
@@ -4810,9 +4888,13 @@ export interface components {
                 /** @description What went wrong, written for a person to read. */
                 message: string;
                 /**
-                 * @description This request's id (`req_…`), the same value as the
-                 *     `Hardcount-Request-Id` response header. On a replayed
-                 *     `Idempotency-Key` answer it is the first request's id.
+                 * @description The id of the request that produced this answer
+                 *     (`req_…`). It is normally the same value as the
+                 *     `Hardcount-Request-Id` response header. On an answer
+                 *     replayed for a repeated `Idempotency-Key`, the body is the
+                 *     first request's, so this is the first request's id, while
+                 *     the `Hardcount-Request-Id` header holds the new request's
+                 *     id.
                  */
                 request_id: string;
                 /**
@@ -4883,7 +4965,8 @@ export interface components {
             accepted_at?: string;
             /**
              * Format: date-time
-             * @description When a member revoked the invitation. Absent unless it was revoked.
+             * @description When the invitation was revoked, by a member or because its
+             *     email could not be queued. Absent unless it was revoked.
              */
             revoked_at?: string;
         };
@@ -4924,11 +5007,15 @@ export interface components {
             id: string;
             /**
              * @description Your own ID for the customer, such as the account ID in your
-             *     app. Unique in the account and mode, at most 255 characters,
-             *     and fixed after create.
+             *     app. Unique in the account and mode, and fixed after create.
+             *     Create refuses one longer than 255 bytes (UTF-8).
              */
             external_id: string;
-            /** @description The name shown on invoices, emails and the dashboard. At most 255 characters. */
+            /**
+             * @description The name shown on invoices, emails and the dashboard. Create
+             *     refuses one longer than 255 bytes (UTF-8); an update does not
+             *     check the length.
+             */
             display_name: string;
             /**
              * @description Where billing emails go: invoices, receipts, payment reminders
@@ -4937,11 +5024,12 @@ export interface components {
             email?: string;
             /**
              * @description Addresses copied (CC) on billing documents and billing emails:
-             *     invoice, receipt, payment reminder, failed payment and credit
-             *     note. Never on emails that carry a link to act on the account,
-             *     such as a payment-method link. Lowercase bare addresses, no
-             *     duplicates, at most 10, never the primary `email`. Absent when
-             *     the list is empty.
+             *     invoice, receipt, payment reminder, final notice, failed payment
+             *     and credit note. Never on the payment setup emails, whose link
+             *     lets the reader add a card. Lowercase bare addresses, no
+             *     duplicates, never the primary `email`. At most 10: a create or
+             *     update with more is refused with 422. Absent when the list is
+             *     empty.
              */
             additional_emails?: string[];
             /**
@@ -4975,12 +5063,14 @@ export interface components {
             email_status?: "unknown" | "ok" | "bounced" | "complained";
             /**
              * Format: date-time
-             * @description When the last bounce or spam report was recorded. Absent until one is.
+             * @description When the last bounce or spam report was recorded. Absent until
+             *     one is, and again after `email` changes.
              */
             email_last_bounced_at?: string;
             /**
              * @description The reason the email provider gave with the last bounce or spam
-             *     report. Absent until one is recorded.
+             *     report. Absent until one is recorded, when the report gave no
+             *     reason, and again after `email` changes.
              */
             email_bounce_reason?: string;
             /**
@@ -4990,9 +5080,11 @@ export interface components {
              */
             dunning_policy_id?: string;
             /**
-             * @description The Stripe customer linked to this customer. Absent until the
-             *     first payment-method action, such as a payment-method link,
-             *     creates it.
+             * @description The Stripe customer linked to this customer. Absent until
+             *     Hardcount first creates it: when you create a payment-method
+             *     link (setup session or setup email), or when the customer opens
+             *     Stripe Checkout from a payment-update link or the hosted invoice
+             *     page. Set once, never replaced.
              */
             stripe_customer_id?: string;
             /**
@@ -5034,7 +5126,7 @@ export interface components {
              *     account and mode, and fixed after create.
              */
             event_name: string;
-            /** @description The meter's display name, at most 255 characters. */
+            /** @description The meter's display name, at most 255 bytes (UTF-8). */
             name: string;
             /**
              * @description The unit of the quantity, such as `tokens` or `seconds`.
@@ -5117,7 +5209,10 @@ export interface components {
              *     after create.
              */
             code: string;
-            /** @description The plan's display name, at most 255 characters. */
+            /**
+             * @description The plan's display name. Create refuses one longer than 255
+             *     bytes (UTF-8); an update does not check the length.
+             */
             name: string;
             /**
              * @description ISO 4217 code in upper case, such as `USD`. Fixed after create.
@@ -5160,9 +5255,11 @@ export interface components {
             /** @description Your description of the plan. Absent when empty. */
             description?: string;
             /**
-             * @description The Stripe product tax code of the base fee, such as
-             *     `txcd_10103001`. Absent when the plan uses the account's
-             *     `default_product_tax_code`.
+             * @description A Stripe product tax code, such as `txcd_10103001`, read only
+             *     by the Stripe Tax provider. Today only the base fee line of the
+             *     invoice billed when an in-advance subscription starts carries
+             *     it; cycle invoices and usage lines use the account's
+             *     `default_product_tax_code`. Absent when not set.
              */
             tax_code?: string;
             /**
@@ -5400,7 +5497,9 @@ export interface components {
         /**
          * @description One price to add to a plan: the body of
          *     `POST /v1/plans/{id}/prices`, and one entry of `prices` on
-         *     `POST /v1/plans`. The meter and labels, then the shape.
+         *     `POST /v1/plans`. The meter and labels, then the shape. On
+         *     `POST /v1/plans`, a refused field of a price is named with
+         *     `prices[i].` first, such as `prices[0].meter_id`.
          * @example {
          *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
          *       "dimension_match": {
@@ -5418,11 +5517,11 @@ export interface components {
             meter_id: string;
             /**
              * @description The labels an event must carry for the price to take it.
-             *     Values are strings of 1 to 100 characters, keys too; at
-             *     most 16 labels. Omitted or `{}` takes every event of the
-             *     meter. Two prices of one plan and meter that could both take
-             *     one event with the same number of labels are refused (409
-             *     `price_conflict`).
+             *     At most 16 labels. Each key and each value is a string of 1
+             *     to 100 bytes (UTF-8), and a key may not be only spaces.
+             *     Omitted or `{}` takes every event of the meter. Two prices of
+             *     one plan and meter that could both take one event with the
+             *     same number of labels are refused (409 `price_conflict`).
              */
             dimension_match?: {
                 [key: string]: string;
@@ -5455,7 +5554,11 @@ export interface components {
          *
          *     A subscription bills in one currency, the currency of its plans.
          *     All its items share one billing interval and one base-fee timing.
-         *     Hardcount invoices each period when it ends.
+         *     Usage, and a base fee billed in arrears, are invoiced when a period
+         *     ends. A base fee billed in advance is invoiced when its period
+         *     starts: the first one in the same transaction that creates or
+         *     activates the subscription or ends its trial, each later one on the
+         *     invoice that closes the period before.
          * @example {
          *       "id": "hc_sub_dauq502q3gpgqfoq5c2g",
          *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
@@ -5464,7 +5567,7 @@ export interface components {
          *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
          *       "items": [
          *         {
-         *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+         *           "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
          *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
          *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
          *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -5513,7 +5616,9 @@ export interface components {
              *       the subscription `active` and its first paid period starts.
              *       If a cancel is scheduled for the trial end, it becomes
              *       `canceled` instead, with no charge.
-             *     - `active`: billing. Each period is invoiced when it ends.
+             *     - `active`: billing. Usage and base fees billed in arrears are
+             *       invoiced when each period ends; a base fee billed in advance
+             *       when its period starts.
              *     - `canceled`: ended at `canceled_at`. It bills nothing more,
              *       and no route makes it `active` again.
              *
@@ -5522,13 +5627,17 @@ export interface components {
              */
             status: "draft" | "trialing" | "active" | "canceled";
             /**
-             * @description How monthly periods line up. `calendar`: every period ends on
-             *     the 1st of a month, in your account's billing time zone, so the
-             *     first period runs from the start day to the next 1st.
-             *     `anniversary`: each period starts on the day of the month the
-             *     subscription started (the last day of a shorter month). A plan
-             *     billed yearly always bills from its start date, whatever this
-             *     says.
+             * @description How monthly periods line up. The first period starts on the day
+             *     the subscription starts to bill: the day it is created or
+             *     activated, or, with a trial, the day the trial ends.
+             *     `calendar`: every period ends on the 1st of a month, in your
+             *     account's billing time zone, so the first period runs from that
+             *     day to the next 1st. `anniversary`: each period starts on the
+             *     same day of the month as the first one (the last day of a
+             *     shorter month). A plan billed yearly always bills a year from
+             *     that first day, whatever this says. An immediate change to a
+             *     plan with another billing interval starts a new first period at
+             *     the change.
              * @enum {string}
              */
             billing_time: "calendar" | "anniversary";
@@ -5541,7 +5650,9 @@ export interface components {
              * Format: date-time
              * @description When the trial ends, or ended. The first paid period starts at
              *     the beginning of that day in your account's billing time zone.
-             *     Absent when the subscription had no trial.
+             *     Ending the trial early (`POST /v1/subscriptions/{id}/end-trial`)
+             *     sets it to that moment. Absent when the subscription had no
+             *     trial.
              */
             trial_end_at?: string;
             /**
@@ -5587,34 +5698,47 @@ export interface components {
             billing_thresholds?: components["schemas"]["SubscriptionBillingThresholds"];
             /**
              * Format: date-time
-             * @description Start of the current billing period, at the beginning of a day
-             *     in your account's billing time zone. While the subscription
-             *     trials, it is the start of the first paid period, which begins
-             *     when the trial ends. Absent on a draft.
+             * @description Start of the current billing period, normally the beginning of
+             *     a day in your account's billing time zone. While the
+             *     subscription trials, it is the start of the first paid period:
+             *     the beginning of the day the trial ends, not `trial_end_at`
+             *     itself. After an immediate change to a plan with another billing
+             *     interval, a period can start or end at the instant of the
+             *     change. Absent on a draft. On a canceled subscription it keeps
+             *     its last value.
              */
             current_billing_period_start?: string;
             /**
              * Format: date-time
              * @description End of the current period (exclusive): the start of the next
              *     one. While the subscription trials, the end of the first paid
-             *     period. Absent on a draft.
+             *     period. Absent on a draft. On a canceled subscription it keeps
+             *     its last value.
              */
             current_billing_period_end?: string;
             /**
              * @description The current period as text, with the last day included, in your
              *     account's billing time zone, for example "Oct 1, 2026 – Oct 31,
-             *     2026". Absent when the subscription has no current period, and
-             *     when the time zone could not be read.
+             *     2026". Absent when the subscription has no current period, when
+             *     the time zone could not be read, and on the rows of
+             *     `GET /v1/test-clocks/{id}/subscriptions`.
              */
             current_billing_period_display?: string;
             /**
              * Format: date-time
              * @description When the current period's invoice is due to be built: the end
              *     of the current period. The billing run builds it once the
-             *     invoice grace after that time has passed. Absent on a draft.
+             *     invoice grace after that time has passed. Absent on a draft. A
+             *     canceled subscription keeps its last value, and nothing is
+             *     billed at that time.
              */
             next_billing_at?: string;
-            /** @description Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions. */
+            /**
+             * @description Day of the month the subscription bills on (1-31): the day its
+             *     first period started, or the day of its last immediate change to
+             *     a plan with another billing interval. Absent on a draft and for
+             *     calendar-monthly subscriptions.
+             */
             billing_anchor_day?: number;
             /**
              * @description The test clock the subscription runs on (test mode only),
@@ -5697,6 +5821,7 @@ export interface components {
          *       "quantity": "1200",
          *       "dimensions": {
          *         "model": "gpt-4o",
+         *         "provider": "openai",
          *         "token_type": "input"
          *       },
          *       "idempotency_key": "req-7f3a9c",
@@ -5747,23 +5872,30 @@ export interface components {
              */
             timestamp: string;
             /**
-             * @description How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
+             * @description How the event arrived. `api`: `POST /v1/usage-events`, the batch
+             *     route or the LiteLLM integration. `backfill`:
+             *     `POST /v1/usage-events/backfill`, or released held usage.
+             *     Absent on the rows of `GET /v1/usage-events`, which does not
+             *     return it.
              * @enum {string}
              */
             origin?: "api" | "backfill";
             /**
              * @description What serving this event cost you at your provider, in US cents as
              *     a decimal string (e.g. "0.45"), set when the event arrived: from
-             *     your provider cost rates, or the cost the sender reported (see
-             *     `provider_cost_source`). Absent when the cost is unknown or the
-             *     event has no costed dimensions.
+             *     your provider cost rates, or the cost LiteLLM reported for the
+             *     call (see `provider_cost_source`). Absent when no rate matched
+             *     or the cost was too large to store, and when the source is
+             *     `not_applicable`.
              */
             provider_cost_cents?: string;
             /**
              * @description Where `provider_cost_cents` came from: `table` (your provider
-             *     cost rates), `observed` (the cost the sender reported), or
-             *     `not_applicable` (the meter has no costed dimensions). Absent when
-             *     the cost is unknown.
+             *     cost rates), `observed` (the cost LiteLLM reported for the
+             *     call), or `not_applicable`: the event lacks a `provider` or
+             *     `token_type` dimension, or has neither `model` nor `model_raw`,
+             *     so no rate can apply. Absent when the event has those
+             *     dimensions but no rate matched.
              * @enum {string}
              */
             provider_cost_source?: "table" | "not_applicable" | "observed";
@@ -5966,7 +6098,8 @@ export interface components {
         /**
          * @description The state of the invoice's payment.
          *     - `pending`: nothing has been charged yet, or a charge is about to
-         *       be sent.
+         *       be sent. Also the status after Stripe refused the amount as below
+         *       its minimum charge (see `amount_below_minimum`).
          *     - `processing`: Stripe is still working on a charge.
          *     - `succeeded`: the invoice is paid.
          *     - `failed`: the last charge was declined or refused. Dunning, when
@@ -6007,23 +6140,34 @@ export interface components {
          *     - `tax_location_required`: the customer's billing address or tax ID
          *       is missing or not valid for the tax provider. Edit the billing
          *       profile.
-         *     - `payment_failed`: the card was declined. The decline code is in
-         *       `code`.
+         *     - `payment_failed`: the last charge failed. `code` is
+         *       `payment.declined` for a decline, `payment.card_refused` when the
+         *       bank refused the card for good, or
+         *       `payment.authentication_required` when the bank wants the customer
+         *       to confirm the payment. Stripe's own message is in
+         *       `provider_response`.
          *     - `payment_unconfirmed`: a charge got an unclear answer from Stripe.
          *       Hardcount asks Stripe what happened.
          *     - `payment_anomaly`: money does not reconcile: a double charge, a
-         *       captured amount that differs from the amount booked, or a payment
-         *       on a voided invoice. Shown even on paid and voided invoices.
-         *     - `payment_processing`: Stripe is still processing a charge. It
-         *       settles on its own.
+         *       captured amount that differs from the amount booked, a payment in
+         *       another currency, or a payment on a voided invoice. Shown even on
+         *       paid and voided invoices.
+         *     - `payment_processing`: a payment may be in progress. Stripe is
+         *       still processing a charge (it settles on its own), the customer
+         *       has the hosted payment page open (`code` `payment.page_open`), or
+         *       a charge is in progress on a written-off invoice (`code`
+         *       `payment.recovery_processing`).
          *     - `payment_scheduled`: the invoice is queued, and the automatic
          *       charge collects it on its next run.
          *     - `awaiting_payment`: the invoice is unpaid and not queued for an
          *       automatic charge. Only invoices written by older releases reach
          *       this state.
-         *     - `no_payment_method`: the customer has no card on file. The invoice
-         *       stays queued, and the automatic charge collects it on its first
-         *       run after a card is added.
+         *     - `no_payment_method`: the customer has no card ready to charge. The
+         *       invoice stays queued, and the automatic charge collects it on its
+         *       first run after a card is added, unless collection is paused on
+         *       the subscription. When Stripe is not connected for the invoice's
+         *       mode, no card can be added online and the invoice is emailed
+         *       instead. `message` says which applies.
          *     - `dunning_exhausted`: the customer still has no card and automatic
          *       recovery has ended without collecting; the policy's final action
          *       ran. If that action paused collection on the subscription, resume
@@ -6035,9 +6179,10 @@ export interface components {
          *       retrying it through the pause, and `message` then says so. With no
          *       open run it is not charged automatically until collection
          *       resumes.
-         *     - `commit_exposure`: the invoice funded a prepaid commit whose
-         *       credit is already spendable, and the invoice is unpaid. Prepaid
-         *       credit is granted when the invoice is issued, not when it is paid.
+         *     - `commit_exposure`: the invoice funded a prepaid commit and is
+         *       unpaid, and the customer can already spend that credit or has
+         *       spent it. Prepaid credit is granted when the invoice is issued,
+         *       not when it is paid.
          *       This reason is returned only when no other reason applies. When
          *       one does, the exposure is folded into that reason's `message` and
          *       `actions` instead, so do not treat this code as the only sign of
@@ -6045,7 +6190,8 @@ export interface components {
          *     - `dispute_lost`: the customer disputed a payment on the invoice with
          *       their bank, and the dispute closed as `lost`, so the bank took the
          *       money back. Hardcount leaves the invoice paid and moves no money;
-         *       you record the loss. Shown on paid invoices. On an invoice that
+         *       you record the loss. Shown even on paid invoices, which is where
+         *       disputes land. On an invoice that
          *       bought prepaid credit, the message also says how much of the
          *       credit is still spendable and names commit relief, because an
          *       ordinary credit note is refused there. When the invoice also has
@@ -6056,13 +6202,16 @@ export interface components {
          *       in Stripe outside Hardcount, and Hardcount did not record it as a
          *       credit note: the invoice was not paid yet, the currency differs,
          *       the invoice bought prepaid credit, Hardcount first saw the refund
-         *       more than a day after it was made, or the refund is more than the
-         *       invoice had left to refund or credit. `code` is
+         *       more than a day after it was made, a credit note on the invoice
+         *       has a failed card refund this refund may replace, or the refund is
+         *       more than the invoice had left to refund or credit. `code` is
          *       `payment.refunded_in_stripe.` followed by that review reason.
          *       Record it with a credit note that names the refund
-         *       (`stripe_refund_id` on `POST /v1/credit-notes`) or dismiss it
+         *       (`stripe_refund_id` on `POST /v1/credit-notes`), attach it to the
+         *       credit note whose refund failed
+         *       (`POST /v1/credit-notes/{id}/attach-stripe-refund`), or dismiss it
          *       (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
-         *       Shown on paid invoices.
+         *       Shown even on paid invoices, which is where refunds land.
          *     - `amount_below_minimum`: Stripe refused to charge the invoice, or
          *       refused a payment page for it, because the amount is below
          *       Stripe's minimum charge. The minimum depends on the currency the
@@ -6141,9 +6290,9 @@ export interface components {
          *     - `mark_uncollectible`:
          *       `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
          *       parked invoice (payment status `unknown` with no payment intent
-         *       recorded), for a customer who paid another way. Hardcount still
-         *       records a payment that Stripe shows, and charges the invoice again
-         *       if none appears within 24 hours. The dashboard shows it as a
+         *       recorded), for a customer who paid another way. After the
+         *       write-off, Hardcount still records a payment that Stripe shows,
+         *       but it no longer charges the invoice. The dashboard shows it as a
          *       secondary action.
          * @enum {string}
          */
@@ -6166,7 +6315,9 @@ export interface components {
         /**
          * @description Why an invoice needs your attention now, and what to do about it.
          *     Hardcount works it out each time the invoice is read, from the
-         *     invoice's tax and payment state; it is never stored. The invoice
+         *     invoice's tax and payment state and related facts (the customer's
+         *     card, the dunning run, disputes, refunds made in Stripe); it is never
+         *     stored. The invoice
          *     leaves it out when nothing needs attention. `GET /v1/invoices`,
          *     `GET /v1/invoices/{id}` and the finalize, retry-tax and
          *     rotate-public-token responses carry it; the other invoice responses
@@ -6217,14 +6368,15 @@ export interface components {
              */
             code?: string;
             /**
-             * @description A link to documentation about this reason. Absent when there is
-             *     no page for it.
+             * @description A link to documentation about this reason. No such pages are
+             *     published yet, so this release always leaves it out.
              */
             doc_url?: string;
             /**
-             * @description Dotted path to the field you need to edit to fix the cause, for
-             *     example `customer.address.postal_code`. Absent when the fix is not
-             *     one field.
+             * @description Dotted path to the field to edit to fix the cause. Today only
+             *     `tax_location_required` sets it, always to
+             *     `customer.address.postal_code`, even when the tax ID is what is
+             *     wrong. Absent otherwise.
              */
             param?: string;
             /**
@@ -6237,18 +6389,21 @@ export interface components {
              */
             detail?: string;
             /**
-             * @description The provider's own response (a Stripe Tax error, or Stripe's last
-             *     payment error), exactly as received. Present only when Hardcount
-             *     called the provider.
+             * @description The provider's response as Hardcount recorded it: the Stripe Tax
+             *     error (cleaned of its JSON envelope and cut to 500 bytes),
+             *     or the invoice's `last_payment_error`. Absent when Hardcount did
+             *     not call the provider or recorded no response.
              */
             provider_response?: string;
             /**
              * Format: date-time
              * @description When the condition started, so you can sort by age. For a tax
-             *     reason it is when tax was deferred, and for
-             *     `amount_below_minimum` when Stripe refused the amount. Otherwise
-             *     it is when the invoice last changed; on a test clock, when it was
-             *     issued or its last charge failed. Absent when it is not known.
+             *     reason it is when tax was deferred, for `amount_below_minimum`
+             *     when Stripe refused the amount, for `dispute_lost` when the
+             *     dispute closed, and for `refunded_in_stripe` when the refund was
+             *     made. Otherwise it is when the invoice last changed; on a test
+             *     clock, when it was issued or its last charge failed. Absent when
+             *     it is not known.
              */
             since?: string;
             /**
@@ -6271,7 +6426,8 @@ export interface components {
          *     - `subscription_cycle`: the invoice for a subscription period that
          *       ended (a renewal).
          *     - `subscription_create`: the first invoice when a subscription
-         *       starts.
+         *       starts or its trial ends, for the fees its plans bill in advance.
+         *       A subscription billed only in arrears has none.
          *     - `subscription_cancel`: the final invoice when a subscription is
          *       canceled at once in the middle of a period.
          *     - `subscription_update`: the invoice for a change in the middle of a
@@ -6295,19 +6451,23 @@ export interface components {
          * @description The kind of subscription item change that produced a proration:
          *     `plan` (the item moved to another plan), `quantity` (its quantity
          *     changed), `add` (the item was added) or `remove` (the item was
-         *     removed).
+         *     removed). On a credit ledger entry (`source_change_type`) it is
+         *     never sent in this version.
          * @enum {string}
          */
         ItemChangeType: "plan" | "quantity" | "add" | "remove";
         /**
          * @description A bill for one customer, in one currency. The billing engine creates
          *     one at the end of each subscription period (and for a subscription's
-         *     start, a change, a cancel or a spend threshold); you can also create
-         *     one-off invoices with `POST /v1/invoices`. An invoice starts as a
-         *     `draft`, is `finalized` when issued, and ends `paid`, `voided` or
-         *     `uncollectible`. Every amount is a whole number in the currency's
-         *     minor unit (cents for USD). The invoice routes and the `invoice.*`
-         *     and `payment.*` webhook events return it.
+         *     start when a fee is billed in advance, a change, a cancel or a spend
+         *     threshold); you can also create one-off invoices with
+         *     `POST /v1/invoices`. The engine creates its invoices already
+         *     `finalized`, or as a `draft` while their tax is pending or collection
+         *     is paused on the subscription. An invoice you create starts as a
+         *     `draft` until you finalize it. A finalized invoice ends `paid`,
+         *     `voided` or `uncollectible`. Every amount is a whole number in the
+         *     currency's minor unit (cents for USD). The invoice routes and the
+         *     `invoice.*` and `payment.*` webhook events return it.
          * @example {
          *       "id": "hc_inv_dbj84b2q3gpgqfoq5c40",
          *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
@@ -6378,7 +6538,11 @@ export interface components {
             tenant_id?: string;
             /** @description The customer the invoice bills. */
             customer_id: string;
-            /** @description The subscription the invoice bills. An empty string for a one-off invoice. */
+            /**
+             * @description The subscription the invoice bills. An empty string when the
+             *     invoice bills no subscription. An invoice you create with
+             *     `POST /v1/invoices` carries the `subscription_id` you sent.
+             */
             subscription_id: string;
             /**
              * @description The number printed on the invoice: the account's invoice prefix
@@ -6428,9 +6592,10 @@ export interface components {
             tax_id?: string;
             /**
              * @description The tax engine that calculated the tax: `stripe_tax`, `manual` (a
-             *     flat rate from the account settings) or `none`. Kept for the
-             *     record and never changed afterwards. Absent until tax is
-             *     calculated.
+             *     flat rate from the account settings) or `none`. A draft's tax can
+             *     be calculated again (retry-tax, or finalize of a one-off draft);
+             *     once the invoice is finalized it no longer changes. Absent until
+             *     tax is calculated.
              */
             tax_provider?: string;
             /**
@@ -6441,10 +6606,13 @@ export interface components {
              */
             tax_calculation_id?: string;
             /**
-             * @description The tax provider's committed transaction (Stripe Tax only),
-             *     recorded at finalize. Hardcount reverses it when the invoice is
-             *     voided or a credit note is issued. Absent until committed, and
-             *     for providers that keep no record.
+             * @description The tax provider's committed transaction (Stripe Tax only). On an
+             *     invoice the billing engine creates, it is recorded when the
+             *     invoice is built; on one you create, at finalize. When that first
+             *     commit fails, a background retry records it later. Hardcount
+             *     reverses it when the invoice is voided or a credit note is
+             *     issued. Absent until committed, and for providers that keep no
+             *     record.
              */
             tax_transaction_id?: string;
             /**
@@ -6457,16 +6625,24 @@ export interface components {
             tax_status?: components["schemas"]["InvoiceTaxStatus"];
             /**
              * Format: date-time
-             * @description When the tax calculation failed and the invoice was held as a draft. Absent unless tax is or was deferred.
+             * @description When the tax calculation failed and the invoice was held as a
+             *     draft. A later successful calculation clears it. Absent unless
+             *     tax is deferred.
              */
             tax_deferred_at?: string;
             /**
-             * @description How many times tax was calculated again after the first try:
-             *     each `POST /v1/invoices/{id}/retry-tax` and each automatic retry.
-             *     Absent when 0.
+             * @description How many times tax was calculated again while it was pending:
+             *     each `POST /v1/invoices/{id}/retry-tax` on pending tax, each
+             *     automatic retry, and each finalize of a one-off draft whose
+             *     earlier calculation failed. Absent when 0.
              */
             tax_retry_count?: number;
-            /** @description The provider's explanation of why tax could not be calculated, while `tax_status` is `pending`. Absent otherwise. */
+            /**
+             * @description Why tax could not be calculated, while `tax_status` is `pending`:
+             *     the provider's error, or Hardcount's own text when the provider
+             *     was never called (`tax_error_code` `provider_not_configured`).
+             *     Cut to 500 bytes. Absent otherwise.
+             */
             tax_pending_reason?: string;
             /**
              * @description Why tax could not be calculated, as a code. Set while
@@ -6478,7 +6654,9 @@ export interface components {
             /**
              * Format: date-time
              * @description The earliest time the background retry may calculate tax again,
-             *     after a failed attempt. Absent when a retry may run now.
+             *     after a failed attempt. Absent when a retry may run now, and when
+             *     none is scheduled: an error code Hardcount does not retry, or the
+             *     automatic retries are used up.
              */
             tax_next_retry_at?: string;
             /**
@@ -6547,7 +6725,8 @@ export interface components {
              *     the currency's minor unit (cents for USD). Credit is applied when
              *     the invoice is collected (after finalize, or by
              *     `POST /v1/invoices/{id}/collect`). A void gives it back to the
-             *     customer's balance.
+             *     customer's balance, and a credit note issued before payment can
+             *     give part of it back, lowering this figure.
              */
             credits_applied_cents: number;
             /**
@@ -6569,17 +6748,18 @@ export interface components {
             billing_timezone?: string;
             /**
              * @description The buyer details this invoice was issued with, copied when it
-             *     left draft. The PDF, the hosted page and the dashboard show an
-             *     issued invoice from this copy, so a later edit to the customer
-             *     or billing profile does not change it. Absent on drafts and on
-             *     invoices issued before this field existed; those show the
-             *     current customer details.
+             *     was finalized (or created already finalized). The PDF, the
+             *     hosted page and the dashboard show an issued invoice from this
+             *     copy, so a later edit to the customer or billing profile does not
+             *     change it. Absent on drafts and on invoices issued before this
+             *     field existed; those show the current customer details.
              */
             bill_to_snapshot?: components["schemas"]["DocumentBillTo"];
             /**
              * @description Your company details this invoice was issued with, copied when it
-             *     left draft. Absent on drafts and on invoices issued before this
-             *     field existed. Branding (logo, brand color) is not part of it.
+             *     was finalized (or created already finalized). Absent on drafts
+             *     and on invoices issued before this field existed. Branding (logo,
+             *     brand color) is not part of it.
              */
             supplier_snapshot?: components["schemas"]["DocumentSupplier"];
             /**
@@ -6631,8 +6811,11 @@ export interface components {
              */
             paid_out_of_band: boolean;
             /**
-             * @description Stripe's message for the last failed charge, word for word (it is
-             *     written for the cardholder). Absent when no charge has failed.
+             * @description The error text recorded with the invoice's last charge attempt
+             *     that did not succeed. Usually Stripe's message, which is written
+             *     for the cardholder, with card numbers and email addresses masked.
+             *     It can also be Hardcount's own text, such as `customer has no
+             *     payment method on file`. Absent when there is none.
              */
             last_payment_error?: string;
             /**
@@ -6642,16 +6825,19 @@ export interface components {
             auto_charge_pending?: boolean;
             /**
              * Format: date-time
-             * @description When the customer was emailed a link to add a payment method for
-             *     this invoice. The email is sent once.
+             * @description When Hardcount automatically emailed the customer a link to add a
+             *     payment method for this invoice. The automatic email is sent
+             *     once; `POST /v1/invoices/{id}/resend-setup-link` sends it again
+             *     and does not change this time. Absent until the automatic email
+             *     is sent.
              */
             no_pm_notified_at?: string;
             /**
              * Format: date-time
              * @description When Hardcount itself emailed the customer this invoice, because
-             *     Stripe is not connected for the invoice's mode and the customer
-             *     has no card. The email is sent once. An invoice you email with
-             *     `POST /v1/invoices/{id}/send` does not set it.
+             *     Stripe is not connected for the invoice's mode. The email is sent
+             *     once. An invoice you email with `POST /v1/invoices/{id}/send`
+             *     does not set it. Absent until then.
              */
             invoice_emailed_at?: string;
             /**
@@ -6674,8 +6860,9 @@ export interface components {
              * @description The token in the hosted invoice page's link, like Stripe's
              *     `hosted_invoice_url`; `GET /v1/public/invoices/{token}` serves
              *     the page's data. Anyone with it can view and pay the invoice, so
-             *     share it only with the customer. Created at finalize; absent on
-             *     drafts. Replace it with
+             *     share it only with the customer. Created when the invoice is
+             *     finalized, or created already finalized; absent on drafts.
+             *     Replace it with
              *     `POST /v1/invoices/{id}/rotate-public-token`.
              */
             public_token?: string;
@@ -7040,11 +7227,11 @@ export interface components {
             unattributed_revenue_cents: number;
             /**
              * Format: int64
-             * @description Usage events in the window that carry `provider`, `model` and
-             *     `token_type` labels but have no cost: no rate matched (add a
-             *     rate to cost new events), or the cost, quantity ×
-             *     `unit_cost_cents`, was too large to record (about $9.2 trillion
-             *     or more, either sign).
+             * @description Usage events in the window that carry `provider` and
+             *     `token_type` labels and a `model` or `model_raw` label, but have
+             *     no cost: no rate matched (add a rate to cost new events), or the
+             *     cost, quantity × `unit_cost_cents`, was too large to record
+             *     (about $9.2 trillion or more, either sign).
              */
             unresolved_events: number;
             /**
@@ -7260,7 +7447,7 @@ export interface components {
             balance_cents: number;
             /**
              * Format: int64
-             * @description Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it, in the currency's minor unit. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
+             * @description Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it, in the currency's minor unit. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage from the trial end on counts, inside its first paid period; trial usage is free.
              */
             unbilled_usage_cents: number;
             /**
@@ -8147,7 +8334,10 @@ export interface components {
             state?: string;
             /** @description Postal code of the billing address, where the country has one. */
             postal_code?: string;
-            /** @description ISO 3166 alpha-2 code, such as `US` or `IN`. Stored in upper case. */
+            /**
+             * @description Two letters, an ISO 3166 alpha-2 code such as `US` or `IN`. Only
+             *     the format is checked. Stored in upper case.
+             */
             country?: string;
             /**
              * @description ISO 4217 code, such as `USD`. When set, invoices for this
@@ -8176,8 +8366,8 @@ export interface components {
             tax_id?: string;
             /**
              * @description The kind of tax ID, as its Stripe code (for example `eu_vat`,
-             *     `in_gst`, `au_abn`). `vat`, `gstin` and `abn` are read as those
-             *     codes.
+             *     `in_gst`, `au_abn`), stored in lower case. `vat`, `gstin`,
+             *     `in_gstin` and `abn` are stored as those codes.
              */
             tax_id_type?: string;
         };
@@ -8276,13 +8466,22 @@ export interface components {
              * @enum {string}
              */
             email_type: "invoice" | "payment_receipt" | "payment_failed" | "payment_setup_request" | "dunning_warning" | "dunning_escalation" | "credit_note";
-            /** @description The address the email was sent to. */
+            /**
+             * @description The address the email was sent to: its To address. CC copies
+             *     are not listed.
+             */
             recipient: string;
             /**
-             * @description Hardcount's send state. `pending`: queued. `dispatched`: the
-             *     mail server accepted it. `failed`: it could not be sent.
-             *     `skipped`: Hardcount did not send it, because the invoice was
-             *     already paid, voided or uncollectible, or no longer exists.
+             * @description Hardcount's send state. `pending`: queued, or waiting to retry
+             *     after a failed attempt. `dispatched`: the mail server accepted
+             *     it. `failed`: it could not be sent, and Hardcount stopped
+             *     trying.
+             *     `skipped`: Hardcount did not send it because its invoice was
+             *     paid, voided or marked uncollectible while it waited. Only the
+             *     payment requests are skipped (failed payment notice, payment
+             *     reminder, final notice, payment setup request); a final notice
+             *     or payment setup request still goes out for an uncollectible
+             *     invoice.
              * @enum {string}
              */
             status: "pending" | "dispatched" | "failed" | "skipped";
@@ -8294,7 +8493,11 @@ export interface components {
             delivery_state: "unknown" | "delivered" | "bounced" | "complained";
             /** @description The number of the invoice the email is about. */
             invoice_number?: string;
-            /** @description Why the last send attempt failed. Absent when no attempt failed. */
+            /**
+             * @description Why the last send attempt failed, or, on a `skipped` email, why
+             *     it was not sent. Cleared when the email is dispatched. Absent
+             *     when there is none.
+             */
             last_error?: string;
             /**
              * Format: date-time
@@ -8310,10 +8513,11 @@ export interface components {
              * @description The email in the words of the activity line standard, the same
              *     as on the invoice's payment timeline: its name and what
              *     happened to it ("Receipt email delivered"), why it was not
-             *     sent, the invoice it was about, and who it went to. Dated at the
-             *     time on the customer's test clock that caused it, with the real
-             *     send time as `recorded_at`. Present for every email type this
-             *     list returns.
+             *     sent, the invoice it was about, and who it went to. Dated when
+             *     the mail server took it, or when it was queued if it was not
+             *     sent. For an email caused on a test clock, it is dated at the
+             *     clock time instead, with the real send time as `recorded_at`.
+             *     Present for every email type this list returns.
              */
             line?: components["schemas"]["ActivityLine"];
         };
@@ -8459,7 +8663,11 @@ export interface components {
              *     that no price takes or a meter whose usage went below zero.
              */
             warnings: string[];
-            /** @description One entry per UTC day in the period, including days with no usage. */
+            /**
+             * @description One entry per UTC day in the period, including days with no
+             *     usage. Empty when the customer's plans price no meter, or when
+             *     the daily series failed to load (`warnings` then says so).
+             */
             buckets: {
                 /**
                  * Format: date-time
@@ -8510,8 +8718,8 @@ export interface components {
             /** @description The meter's unit, such as `tokens`. */
             unit: string;
             /**
-             * @description The currency of the plan whose prices took the usage. Empty when
-             *     no usage was priced.
+             * @description The currency of the plan whose rows `prices` shows. Empty (`""`)
+             *     when `prices` is empty.
              */
             currency: string;
             /**
@@ -8576,7 +8784,7 @@ export interface components {
          *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
          *           "items": [
          *             {
-         *               "id": "hc_si_dauq50aq3gpgqfoq5c30",
+         *               "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
          *               "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
          *               "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
          *               "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -8795,7 +9003,9 @@ export interface components {
              * @description The invoice the entry comes from: the invoice a `usage` entry
              *     was drawn by, the voided or credited invoice that gave credit
              *     back, or the commit invoice that funded a grant. Absent when no
-             *     invoice caused the entry.
+             *     invoice caused the entry, and on the `adjustment` that takes
+             *     commit credit back after its invoice was voided or refunded:
+             *     that invoice is in `metadata.funding_invoice_id`.
              */
             invoice_id?: string;
             /**
@@ -8809,7 +9019,10 @@ export interface components {
             expires_at?: string;
             /**
              * @description Facts Hardcount records on the entry, such as which grants a
-             *     draw took its credit from. Absent when empty.
+             *     draw or a deduction took its credit from (`drained_blocks`).
+             *     Absent when empty, and on the answer of
+             *     `POST /v1/credits/adjust`, which does not return it; the ledger
+             *     list does.
              */
             metadata?: {
                 [key: string]: unknown;
@@ -8821,8 +9034,11 @@ export interface components {
             created_at: string;
             /**
              * Format: int64
-             * @description For entries that add credit, how much has been used or expired,
-             *     in the currency's minor unit. Absent when nothing has.
+             * @description For entries that add credit, how much of it is gone, in the
+             *     currency's minor unit: drawn by invoices, expired, removed by a
+             *     negative adjustment, or, for commit credit, taken back when its
+             *     invoice was voided or refunded by a credit note. Absent when
+             *     nothing is.
              */
             consumed_cents?: number;
             /**
@@ -8834,32 +9050,48 @@ export interface components {
              * @enum {string}
              */
             grant_kind?: "commit" | "promotional";
-            /** @description For a `commit` grant, the invoice that paid for it. */
+            /**
+             * @description For a `commit` grant, the commit invoice whose finalizing made
+             *     the grant. Absent on other entries.
+             */
             source_invoice_id?: string;
             /**
-             * @description With `source_subscription_item_id`, `source_plan_changed_at` and
-             *     `source_change_type`, set on a proration credit: the subscription
-             *     change that produced it.
+             * @description Not sent by any route in this version: no ledger entry is
+             *     written with it, so it is always absent.
              */
             source_subscription_id?: string;
-            /** @description On a proration credit, the subscription item whose change produced it. */
+            /**
+             * @description Not sent by any route in this version: no ledger entry is
+             *     written with it, so it is always absent.
+             */
             source_subscription_item_id?: string;
             /**
              * Format: date-time
-             * @description On a proration credit, when the change that produced it happened.
+             * @description Not sent by any route in this version: no ledger entry is
+             *     written with it, so it is always absent.
              */
             source_plan_changed_at?: string;
             source_change_type?: components["schemas"]["ItemChangeType"];
-            /** @description The credit note that granted this credit to the balance. */
+            /**
+             * @description Recorded on credit that a credit note gave back, but not sent by
+             *     any route in this version: the ledger list does not return it,
+             *     and the grant and adjust routes never write it. Such an entry
+             *     names the invoice in `invoice_id`.
+             */
             source_credit_note_id?: string;
-            /** @description The voided invoice whose applied credit this entry gave back. */
+            /**
+             * @description Recorded on credit that a voided invoice gave back, but not sent
+             *     by any route in this version: the ledger list does not return
+             *     it, and the grant and adjust routes never write it. Such an
+             *     entry names the invoice in `invoice_id`.
+             */
             source_invoice_reversal_id?: string;
         };
         /**
          * @description One priced line of a subscription. It pairs a plan with a quantity.
          *     Returned inside a subscription's `items`, and by the item routes.
          * @example {
-         *       "id": "hc_si_dauq50aq3gpgqfoq5c30",
+         *       "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
          *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
          *       "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
          *       "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -8918,7 +9150,9 @@ export interface components {
         /**
          * @description Present on a subscription while collection is paused. New invoices
          *     are still created, but stay drafts and are not charged. Absent when
-         *     collection runs normally.
+         *     collection runs normally. A cancel leaves it in place: it still
+         *     holds the subscription's unpaid invoices, and
+         *     `DELETE /v1/subscriptions/{id}/pause-collection` releases them.
          * @example {
          *       "behavior": "keep_as_draft",
          *       "resumes_at": "2026-12-01T00:00:00Z",
@@ -8962,7 +9196,7 @@ export interface components {
          *       "amount_gte": 50000,
          *       "item_thresholds": [
          *         {
-         *           "subscription_item_id": "hc_si_dauq50aq3gpgqfoq5c30",
+         *           "subscription_item_id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
          *           "usage_gte": "100000000"
          *         }
          *       ]
@@ -8983,7 +9217,7 @@ export interface components {
          * @description A usage threshold on one item: when the item's usage in the period
          *     reaches `usage_gte`, Hardcount invoices the usage so far.
          * @example {
-         *       "subscription_item_id": "hc_si_dauq50aq3gpgqfoq5c30",
+         *       "subscription_item_id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
          *       "usage_gte": "100000000"
          *     }
          */
@@ -9103,7 +9337,7 @@ export interface components {
          *     of the period was settled.
          * @example {
          *       "item": {
-         *         "id": "hc_si_dauq50aq3gpgqfoq5c30",
+         *         "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
          *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
          *         "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
          *         "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -9233,6 +9467,10 @@ export interface components {
          *     the whole window, in the minor unit of the account's default
          *     currency (cents for USD). `churned` and `contraction` are positive
          *     amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
+         *     Expansion and contraction count only subscriptions that were active
+         *     for the whole window: a subscription activated or canceled inside
+         *     it counts only in `new` or `churned`. Test-clock subscriptions are
+         *     left out.
          * @example {
          *       "new": 4900,
          *       "expansion": 2000,
@@ -9271,7 +9509,9 @@ export interface components {
         /**
          * @description MRR movement in one bucket of `GET /v1/analytics/mrr-movement`: a
          *     UTC day, or a UTC month for `12m`. Amounts are in the minor unit of
-         *     the account's default currency (cents for USD).
+         *     the account's default currency (cents for USD). Expansion and
+         *     contraction count only subscriptions that were active for the whole
+         *     requested window.
          * @example {
          *       "date": "2026-10-01",
          *       "new": 4900,
@@ -9386,7 +9626,8 @@ export interface components {
          *     "The window" is the requested period, ending now. "The previous
          *     window" is the one of equal length before it. Money is in the minor
          *     unit of `currency` (cents for USD). Rates are fractions, so 0.05
-         *     means 5%.
+         *     means 5%. Customers, subscriptions and invoices on test clocks are
+         *     left out of every figure.
          * @example {
          *       "period": "30d",
          *       "currency": "USD",
@@ -9442,7 +9683,10 @@ export interface components {
             currency: string;
             /**
              * Format: int64
-             * @description MRR of active subscriptions now.
+             * @description MRR now, from plan base fees only (base amount times quantity,
+             *     yearly plans divided by 12) on `active` subscriptions with plans
+             *     in `currency`. Trialing subscriptions and usage charges are not
+             *     counted.
              */
             mrr: number;
             /**
@@ -9523,7 +9767,7 @@ export interface components {
             active_subscriptions: number;
             /** @description Subscriptions with status `trialing`. */
             trialing_subscriptions: number;
-            /** @description Invoices paid in the window. */
+            /** @description Invoices in `currency` paid in the window. */
             paid_invoices: number;
             /** @description Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies. */
             failed_payments: number;
@@ -9534,9 +9778,10 @@ export interface components {
             /** @description Dunning runs (automatic payment retries) still in progress. */
             dunning_active: number;
             /**
-             * @description Issued credit notes whose refund failed, has an unknown result,
-             *     has been pending for more than 72 hours, or has not started an
-             *     hour after issue.
+             * @description Issued credit notes whose refund failed or has an unknown
+             *     result, has stayed pending for 72 hours since the note last
+             *     changed, or owes a refund that has not started an hour after the
+             *     note last changed. Test-clock credit notes are not counted.
              */
             refunds_needing_attention: number;
             /**
@@ -9879,11 +10124,12 @@ export interface components {
             voided_at?: string;
             /**
              * @description The refund part's state at Stripe. `none`: no refund was sent
-             *     (no refund part, or the note is not issued yet). `pending`:
-             *     Stripe has not finished it. `succeeded` and `failed`: Stripe's
-             *     answer. `unknown`: Stripe gave no
-             *     clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
-             *     a 429), so the customer may already be refunded. Don't refund it
+             *     (no refund part, or the note is not issued yet); an issued note
+             *     with a refund part stays `none` only when its refund's result
+             *     was not recorded. `pending`: Stripe has not finished it.
+             *     `succeeded` and `failed`: Stripe's answer. `unknown`: Stripe gave
+             *     no clear answer (a timeout, a network error, a Stripe 5xx, a 409
+             *     or a 429), so the customer may already be refunded. Don't refund it
              *     again in the Stripe Dashboard. Retry it with
              *     `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
              *     refund at Stripe first and then resends the same request with
@@ -9895,9 +10141,10 @@ export interface components {
             stripe_refund_id?: string;
             /**
              * @description True when the card refund is a refund made in Stripe outside
-             *     Hardcount: recorded from Stripe's refund webhook, or linked with
-             *     `stripe_refund_id` at create. Hardcount made no refund call for
-             *     it; `stripe_refund_id` names the refund.
+             *     Hardcount: recorded from Stripe's refund webhook, linked with
+             *     `stripe_refund_id` at create, or attached with
+             *     `POST /v1/credit-notes/{id}/attach-stripe-refund`. Hardcount made
+             *     no refund call for it; `stripe_refund_id` names the refund.
              */
             recorded_from_stripe: boolean;
             bill_to_snapshot?: components["schemas"]["DocumentBillTo"];
@@ -10310,9 +10557,11 @@ export interface components {
          *     recorded from Stripe's `refund.created`, `refund.updated`,
          *     `refund.failed` and `charge.refund.updated` webhook events. It holds
          *     the refund as the newest of those events showed it. Hardcount's own
-         *     refunds are never listed here. `outcome` is what Hardcount did when
-         *     it first saw the refund, and only the operator changes it after
-         *     that.
+         *     refunds are never listed here. `outcome` is what Hardcount did with
+         *     the refund: decided when Hardcount first sees it, or, for a refund
+         *     first seen in flight (`awaiting`), when a later event shows how it
+         *     ended. After that only you change it, by recording a flagged refund
+         *     with a credit note or dismissing it.
          * @example {
          *       "id": "hc_srf_6f1c0a7e9b2d4c8e1a3b5d7f",
          *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
@@ -11190,7 +11439,7 @@ export interface components {
          *     }
          */
         DunningPolicyInput: {
-            /** @description A name for the policy, up to 255 characters. Defaults to empty. */
+            /** @description A name for the policy, up to 255 bytes (a character outside ASCII counts as more than one). Defaults to empty. */
             name?: string;
             /**
              * @description A disabled policy starts no dunning.
@@ -11341,17 +11590,17 @@ export interface components {
          * @description Totals over every usage event that matches the filters of
          *     `GET /v1/usage-events/aggregate`, with one row per meter.
          * @example {
-         *       "total_events": 4210,
-         *       "total_units": "12500000",
+         *       "total_events": 268,
+         *       "total_units": "805500",
          *       "active_meters": 1,
          *       "active_customers": 1,
          *       "by_meter": [
          *         {
          *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
-         *           "total": "12500000",
+         *           "total": "805500",
          *           "aggregation": "sum",
-         *           "value": "12500000",
-         *           "events": 4210,
+         *           "value": "805500",
+         *           "events": 268,
          *           "customers": 1,
          *           "peak": "48000",
          *           "daily": [
@@ -11519,8 +11768,10 @@ export interface components {
                     /**
                      * @description Anthropic's cache writes by cache lifetime. They become
                      *     `cache_write_5m` and `cache_write_1h` events, taken out
-                     *     of `input`. Without this split, or when it does not add
-                     *     up to the cache-write count, the writes stay in `input`.
+                     *     of `input`. Without this split, when it does not add up
+                     *     to the cache-write count, or when the writes do not fit
+                     *     in `prompt_tokens` less the cache reads, the writes stay
+                     *     in `input`.
                      */
                     cache_creation_token_details?: {
                         /**
@@ -11569,15 +11820,18 @@ export interface components {
             /**
              * @description The provider's own cost, in dollars. When present, each event's
              *     provider cost comes from its part (input, output, cache read or
-             *     cache write) instead of the provider-costs table. A part that is
-             *     missing or negative falls back to the table. `input_cost`
-             *     includes cache reads and cache writes, so the input event gets
-             *     `input_cost` minus `cache_read_cost` and `cache_creation_cost`.
-             *     If there were cache reads but no `cache_read_cost`, or split-off
-             *     cache writes but no `cache_creation_cost`, the input-side events
-             *     use the provider-costs table. With 1-hour cache writes they
-             *     always do: LiteLLM prices `cache_creation_cost` at the 5-minute
-             *     rate.
+             *     cache write) instead of the provider-costs table. A negative
+             *     part falls back to the table. A missing `input_cost` or
+             *     `output_cost` reads as 0 and is recorded as a cost of 0; a
+             *     missing `cache_read_cost` or `cache_creation_cost` means
+             *     unknown. `input_cost` includes cache reads and cache writes, so
+             *     the input event gets `input_cost` minus `cache_read_cost` and
+             *     `cache_creation_cost`. If there were cache reads but no
+             *     `cache_read_cost`, the input and cache-read events use the
+             *     provider-costs table; if there were split-off cache writes but
+             *     no `cache_creation_cost`, the input and cache-write events do.
+             *     With 1-hour cache writes the input and cache-write events always
+             *     do: LiteLLM prices `cache_creation_cost` at the 5-minute rate.
              */
             cost_breakdown?: {
                 /** @description The cost of the whole prompt, in dollars, cache reads and writes included. */
@@ -11598,8 +11852,13 @@ export interface components {
             /** @description Unix seconds. The event time. With neither, the customer's current time is used. */
             endTime?: number;
             /**
-             * @description `team_id` and `request_tags` become event dimensions;
-             *     `usage_object` is read for token counts; other keys are ignored.
+             * @description `team_id` and `request_tags` become event dimensions (a list of
+             *     tags becomes one sorted, comma-separated string);
+             *     `usage_object` is read for token counts; `user_api_key_end_user_id`
+             *     names the customer when `user` and `end_user` are empty; a
+             *     `user_api_key_request_route` of `/vertex_ai/live` on a
+             *     `pass_through_endpoint` record marks Vertex AI Live audio, which
+             *     is skipped. Other keys do not change billing.
              */
             metadata?: {
                 [key: string]: unknown;
@@ -11763,7 +12022,7 @@ export interface components {
              *     `POST /v1/usage-events/held/release`.
              */
             held: number;
-            /** @description Records that bill nothing - a call type with no tokens, zero tokens, a failed call (`status` `failure`) or a LiteLLM response-cache hit. */
+            /** @description Records that bill nothing - a call type Hardcount does not bill (even when it carries tokens), no token counts, a failed call (`status` `failure`) or a LiteLLM response-cache hit. */
             skipped: number;
             /** @description The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0. */
             cache_hits: number;
@@ -11831,9 +12090,10 @@ export interface components {
              */
             key_prefix: string;
             /**
-             * @description `secret` can read and change everything in the account.
-             *     `ingest` can only send usage events, for LiteLLM or another
-             *     gateway.
+             * @description `secret` can read and change everything in its mode of the
+             *     account, except team members and the test email, which need a
+             *     dashboard sign-in. `ingest` can only send usage events and call
+             *     `GET /v1/whoami`, for LiteLLM or another gateway.
              * @enum {string}
              */
             key_type: "secret" | "ingest";
@@ -11851,7 +12111,8 @@ export interface components {
             /**
              * Format: date-time
              * @description When the key stops working. Also set on the old key during a
-             *     rotation grace period. Absent for a key that does not expire.
+             *     rotation grace period, and copied to the new key when the old
+             *     one had it. Absent for a key that does not expire.
              */
             expires_at?: string;
             /**
@@ -11929,7 +12190,8 @@ export interface components {
         /**
          * @description The account's billing settings, as `PUT /v1/settings` takes them.
          *     Every field is optional. Fields you leave out keep their stored
-         *     value. Settings are shared by test and live mode.
+         *     value. Settings are shared by test and live mode. The length limits
+         *     count bytes, not characters: an accented letter counts as two.
          * @example {
          *       "default_currency": "USD",
          *       "timezone": "America/Los_Angeles",
@@ -11994,7 +12256,10 @@ export interface components {
              * @enum {string}
              */
             tax_provider?: "none" | "manual" | "stripe_tax";
-            /** @description Percent, up to 4 decimal places (18.5 = 18.5%). Used by the `manual` provider. */
+            /**
+             * @description Percent, from 0 to 100 (18.5 = 18.5%), stored to 4 decimal
+             *     places. Used by the `manual` provider.
+             */
             tax_rate?: number;
             /** @description Label for the tax line, such as `VAT`. */
             tax_name?: string;
@@ -12008,7 +12273,8 @@ export interface components {
             /**
              * @description Stripe product tax code used when a plan has none, such as
              *     `txcd_10103001`. Empty is allowed. Surrounding whitespace is
-             *     trimmed before the check.
+             *     trimmed before the check. A save with `tax_provider: stripe_tax`
+             *     and no code stores `txcd_10103001` (SaaS, business use).
              */
             default_product_tax_code?: string;
             /** @description Shown on invoices and as the sender name on emails. No line breaks. */
@@ -12039,7 +12305,7 @@ export interface components {
             company_phone?: string;
             /** @description Shown in emails and on the hosted invoice page. PDFs do not print it. */
             logo_url?: string;
-            /** @description Accent color on invoice PDFs, as `#rrggbb`. */
+            /** @description Accent color on invoice PDFs, as `#rrggbb`. Stored in lower case. */
             brand_color?: string;
             /** @description Your own tax number (VAT, EIN, GSTIN), printed on invoices. */
             tax_id?: string;
@@ -12174,7 +12440,10 @@ export interface components {
             verified_at?: string;
             /**
              * @description Why the last Stripe check failed, in Stripe's own words (or the
-             *     network error when Stripe was not reached). Absent when it passed.
+             *     network error when Stripe was not reached). Also set when Stripe
+             *     refuses the key on a charge (401, or 403 for a restricted key);
+             *     the next charge that goes through clears that. Absent when the
+             *     check passed.
              */
             last_verified_error?: string;
             /**
@@ -12334,7 +12603,11 @@ export interface components {
              *     email. Absent when there is none.
              */
             resource_label?: string;
-            /** @description Action details. A settings change lists each changed field with `from` and `to`. Absent when the action has none. */
+            /**
+             * @description Action details. A settings change has `changed`, which lists
+             *     each changed field with `from` and `to`. Absent when the action
+             *     has none.
+             */
             metadata?: {
                 [key: string]: unknown;
             };
@@ -12383,16 +12656,16 @@ export interface components {
          *       ],
          *       "test_clocks": [
          *         {
-         *           "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+         *           "id": "hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d",
          *           "name": "October renewal test"
          *         }
          *       ]
          *     }
          */
         AuditLogFilters: {
-            /** @description Every `action` value recorded in this mode. */
+            /** @description Every `action` value recorded in this mode, sorted A to Z, at most 500. */
             actions: string[];
-            /** @description Every `resource_type` value recorded in this mode. */
+            /** @description Every `resource_type` value recorded in this mode, sorted A to Z, at most 500. */
             resource_types: string[];
             /** @description Test clocks seen in the log, most recent activity first, at most 100. Deleted clocks are included. */
             test_clocks: {
@@ -12433,8 +12706,9 @@ export interface components {
             /**
              * @description Where Hardcount POSTs each event. It must be `https://` on a
              *     public address. Outside production (`APP_ENV` is not
-             *     `production`), `http://localhost` and loopback addresses work
-             *     too.
+             *     `production`), a `localhost` or loopback URL works too, over
+             *     `http://` or `https://`. Each delivery checks the address again,
+             *     so a host that later points to a private address is not called.
              */
             url: string;
             /** @description Your note about the endpoint. Absent when empty. */
@@ -12563,7 +12837,9 @@ export interface components {
             completed_at: string | null;
             /**
              * Format: date-time
-             * @description When the next attempt is due, while pending. null once the delivery is finished.
+             * @description While pending, when the next attempt is due. While an attempt is
+             *     running, it is when a retry takes over if that attempt never
+             *     finishes. null once the delivery is finished.
              */
             next_retry_at: string | null;
         };
@@ -12632,7 +12908,9 @@ export interface components {
             completed_at: string | null;
             /**
              * Format: date-time
-             * @description When the next attempt is due, while pending. null once the delivery is finished.
+             * @description While pending, when the next attempt is due. While an attempt is
+             *     running, it is when a retry takes over if that attempt never
+             *     finishes. null once the delivery is finished.
              */
             next_retry_at: string | null;
             /** @description True when the row belongs to a replay of the event. */
@@ -12710,9 +12988,11 @@ export interface components {
              */
             customer_id: string;
             /**
-             * @description Delivery state. Live frames send `pending`, `succeeded` or
-             *     `failed`. Frames in the first batch send `pending`, `failed`,
-             *     `delivered` (all deliveries succeeded) or `no_endpoints`.
+             * @description Delivery state. Live frames send `pending` (a new event or
+             *     replay), `succeeded` (one delivery got a 2xx answer) or `failed`
+             *     (one delivery failed for good). Frames in the first batch send
+             *     the event's roll-up over all its deliveries: `pending`, `failed`,
+             *     `delivered` (every delivery succeeded) or `no_endpoints`.
              */
             status: string;
             /**
@@ -13014,8 +13294,9 @@ export interface components {
         /**
          * @description What the payment-update page shows before the customer adds a
          *     card: `GET /v1/public/payment-updates/{token}`. The page opens from
-         *     the link in a payment setup email, which Hardcount sends when an
-         *     invoice has no payment method to charge.
+         *     the link in a payment setup email. Hardcount sends one when an
+         *     invoice has no payment method to charge, and again on each
+         *     `POST /v1/invoices/{id}/resend-setup-link`.
          * @example {
          *       "customer_name": "Acme Inc",
          *       "invoice_number": "HC-000001",
@@ -13149,7 +13430,7 @@ export interface components {
             expired_cents: number;
             /**
              * Format: int64
-             * @description Commit credit taken back when the invoice that paid for it was
+             * @description Commit credit taken back when the invoice that funded it was
              *     voided, or refunded by a credit note, in the currency's minor
              *     unit.
              */
@@ -13167,7 +13448,7 @@ export interface components {
              *     Absent when the credit does not expire.
              */
             expires_at?: string;
-            /** @description For a `commit` block, the invoice that paid for it. */
+            /** @description For a `commit` block, the commit invoice whose finalizing made the grant. Absent for other blocks. */
             source_invoice_id?: string;
             /**
              * Format: date-time
@@ -13219,7 +13500,7 @@ export interface components {
                 currency: string;
                 /**
                  * Format: int64
-                 * @description Remaining credit the customer paid for (`commit`), in the currency's minor unit.
+                 * @description Remaining prepaid commit credit (`commit`), granted by finalized commit invoices, in the currency's minor unit.
                  */
                 commit_remaining_cents: number;
                 /**
@@ -13334,7 +13615,11 @@ export interface components {
              * @description When the event was created.
              */
             created_at: string;
-            /** @description Set on a replay. The event the replay was made from. Absent on an original event. */
+            /**
+             * @description Set on a replay. The original event it copies; a replay of a
+             *     replay points to that same original. Absent on an original
+             *     event.
+             */
             replay_of_event_id?: string;
         };
         /**
@@ -13342,7 +13627,7 @@ export interface components {
          *     are billed on its time, not the real time. Returned by the
          *     `/v1/test-clocks` routes.
          * @example {
-         *       "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+         *       "id": "hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d",
          *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
          *       "name": "October renewal walk",
          *       "frozen_time": "2026-11-02T00:00:00Z",
@@ -13394,7 +13679,11 @@ export interface components {
              * @description When the clock last changed, in real time.
              */
             updated_at: string;
-            /** @description Why the last advance failed. Cleared by the next successful advance. */
+            /**
+             * @description Why the last advance failed, for a clock in `internal_failure`.
+             *     Cleared when you retry the advance, and by the next advance
+             *     that succeeds. Absent when there is none.
+             */
             last_failure_reason?: string;
             last_advance_summary?: components["schemas"]["TestClockAdvanceSummary"];
         };
@@ -13421,7 +13710,8 @@ export interface components {
             /**
              * Format: date-time
              * @description The clock's time before the advance. After a retried advance it
-             *     equals `advanced_to`.
+             *     equals `advanced_to`. When the server restarted during the
+             *     advance and resumed it, it is `0001-01-01T00:00:00Z`.
              */
             advanced_from: string;
             /**
@@ -13431,7 +13721,11 @@ export interface components {
             advanced_to: string;
             /** @description Period invoices the advance created. */
             invoices_generated: number;
-            /** @description Subscriptions whose trial ended in the span and that became `active`. */
+            /**
+             * @description Subscriptions whose trial ended by the clock's new time: those
+             *     that became `active`, and those a cancel scheduled for the trial
+             *     end canceled with no charge.
+             */
             trials_activated: number;
             /** @description Collection pauses whose `resumes_at` passed in the span and that were lifted. */
             pauses_resumed: number;
@@ -13509,12 +13803,15 @@ export interface components {
             plan_name: string;
             /**
              * Format: date-time
-             * @description Start of the window the preview covers (included).
+             * @description Start of the period the invoice would bill (included): the
+             *     previewed window, or, when a plan on the subscription bills its
+             *     fee in advance, the period after it, as on the real invoice.
              */
             billing_period_start: string;
             /**
              * Format: date-time
-             * @description End of the window the preview covers (not included).
+             * @description End of the period the invoice would bill (not included). Shifts
+             *     with `billing_period_start` when a fee is billed in advance.
              */
             billing_period_end: string;
             /** @description The lines the invoice would have. An empty list when nothing would be billed. */
@@ -13525,7 +13822,7 @@ export interface components {
             warnings: string[];
             /**
              * Format: date-time
-             * @description When the preview was built. For a customer on a test clock, the clock's time.
+             * @description When the preview was built.
              */
             generated_at: string;
         };
@@ -13625,7 +13922,9 @@ export interface components {
         };
         /**
          * @description No valid credential: the API key or session is missing, wrong,
-         *     expired or revoked.
+         *     expired or revoked. With no API key and no valid session cookie, the
+         *     message starts with `missing credentials`. A wrong, expired and
+         *     revoked key all get the same message, `invalid or expired API key`.
          */
         Unauthorized: {
             headers: {
@@ -13649,6 +13948,16 @@ export interface components {
          * @description Too many requests. Wait for the number of seconds in `Retry-After`,
          *     then retry. The answers that pass the limit carry the
          *     `X-RateLimit-*` headers too.
+         *
+         *     Each API key has its own limit, by default 1,000 requests a minute
+         *     (`HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN`), and 1,000 a second on the
+         *     usage routes (`HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC`). The dashboard
+         *     sessions of one account share one limit per mode. The routes under
+         *     `/v1/auth` and `/v1/bootstrap` (sign-in, password reset, invite
+         *     accept, setup) count per client address, by default 100 a minute
+         *     (`HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN`). The public invoice,
+         *     payment-update and cost-dashboard pages allow 60 a minute per client
+         *     address.
          */
         RateLimited: {
             headers: {
@@ -13675,7 +13984,10 @@ export interface components {
         /**
          * @description The credential is valid but may not call this route. A usage-only
          *     key (`hc_ingest_…`) can only send usage and call `GET /v1/whoami`;
-         *     use a secret key.
+         *     use a secret key. The `message` names the permission the key
+         *     lacks. A browser request that would change data (POST, PUT, PATCH
+         *     or DELETE) from a page on another site gets this 403 too, with the
+         *     message `cross-site request blocked`.
          */
         Forbidden: {
             headers: {
@@ -13719,11 +14031,12 @@ export interface components {
             };
         };
         /**
-         * @description The body is not one valid JSON value, it is empty where the
-         *     operation needs one, or a field has the wrong JSON type (such as a
-         *     string where a number belongs). On a route that takes
-         *     `Idempotency-Key`, a 400 is kept for the key: send the corrected
-         *     request with a new key.
+         * @description The body is not one valid JSON value, it is not a JSON object, it
+         *     is empty where the operation needs one, or a field has the wrong
+         *     JSON type (such as a string where a number belongs). A body over
+         *     1 MB gets 400 too, unless the operation lists a 413. On a route
+         *     that takes `Idempotency-Key`, a 400 is kept for the key: send the
+         *     corrected request with a new key.
          */
         InvalidBody: {
             headers: {
@@ -13747,37 +14060,52 @@ export interface components {
     parameters: {
         /**
          * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-         *     the same value on every retry. For 24 hours, a repeat with the same
-         *     key, method, path and body gets the first response again, with an
+         *     the same value on every retry. Keys are kept per account and mode.
+         *     For 24 hours, a repeat with the same key, method, path and body gets
+         *     the first response again, byte for byte, with an
          *     `Idempotent-Replayed: true` header, instead of running again. A
          *     first answer of 409 or 422 is not kept, so a retry with the same
-         *     key runs again. The same key with a different method, path or body
-         *     is a 422 with code `idempotency_error`. The other error cases are in
+         *     key runs again. A repeat sent while the first request is still
+         *     running waits up to 5 seconds for its answer; if there is none by
+         *     then, it gets 409 with code `conflict_idempotency`. The same key
+         *     with a different method, path or body is a 422 with code
+         *     `idempotency_error`. The other error cases are in
          *     docs/api/idempotency.md. The usage routes do not take it: each usage
          *     event carries its own `idempotency_key`.
          * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
          */
         IdempotencyKey: string;
         /**
-         * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-         *     that is not a whole number, is a 422 with `param: limit`.
+         * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+         *     is not a whole number, or `limit` sent twice is a 422 with
+         *     `param: limit`. It is never clamped.
          */
         Limit: number;
         /**
-         * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-         *     not a whole number, is a 422 with `param: offset`.
+         * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+         *     not a whole number, or `offset` sent twice is a 422 with
+         *     `param: offset`.
          */
         Offset: number;
     };
     requestBodies: never;
     headers: {
-        /** @description Seconds to wait before the next request can pass. */
+        /**
+         * @description Seconds to wait before the next request can pass, rounded up to a
+         *     whole second and at least 1.
+         */
         RetryAfter: number;
-        /** @description How many requests the limit allows in its period. */
+        /**
+         * @description How many requests the limit allows in its period (a minute, or a
+         *     second on the usage routes).
+         */
         RateLimitLimit: number;
         /** @description How many requests are left in the current period. */
         RateLimitRemaining: number;
-        /** @description When the limit is full again, as Unix seconds. */
+        /**
+         * @description When the whole limit is available again, as Unix seconds. One
+         *     request may pass sooner; `Retry-After` says when.
+         */
         RateLimitReset: number;
     };
     pathItems: never;
@@ -13942,13 +14270,15 @@ export interface operations {
                  */
                 dir?: "asc" | "desc";
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -13999,12 +14329,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -14029,13 +14363,14 @@ export interface operations {
                 "application/json": {
                     /**
                      * @description Your own ID for the customer, such as the account ID in
-                     *     your app. At most 255 characters after spaces at the ends
-                     *     are trimmed. Unique in the account and mode.
+                     *     your app. Spaces at the ends are trimmed; then at most
+                     *     255 bytes (UTF-8). Unique in the account and mode.
                      */
                     external_id: string;
                     /**
-                     * @description The name shown on invoices, emails and the dashboard. At
-                     *     most 255 characters.
+                     * @description The name shown on invoices, emails and the dashboard.
+                     *     Spaces at the ends are trimmed; then at most 255 bytes
+                     *     (UTF-8).
                      */
                     display_name: string;
                     /**
@@ -14045,9 +14380,10 @@ export interface operations {
                      */
                     email?: string;
                     /**
-                     * @description Addresses to copy on billing emails, at most 10. Each is
-                     *     checked like `email`, lowercased and deduplicated. None
-                     *     may equal `email`.
+                     * @description Addresses to copy on billing emails. Each is checked
+                     *     like `email`, lowercased and deduplicated. None may equal
+                     *     `email`. More than 10 after deduplication is refused with
+                     *     422.
                      */
                     additional_emails?: string[];
                     /**
@@ -14117,8 +14453,9 @@ export interface operations {
              * @description A field failed validation (`validation_error`, `param` names it):
              *     a missing or too long `external_id` or `display_name`, an invalid
              *     `email` or `additional_emails` entry, an `additional_emails` entry
-             *     equal to `email`, or a `test_clock_id` with no clock in this
-             *     account and mode. An unknown field is refused the same way.
+             *     equal to `email`, more than 10 `additional_emails`, or a
+             *     `test_clock_id` with no clock in this account and mode. An unknown
+             *     field is refused the same way.
              *     `dunning_policy_id` is not a create field: assign a policy with
              *     `PATCH /v1/customers/{id}`.
              */
@@ -14150,12 +14487,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -14313,12 +14654,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -14343,7 +14688,8 @@ export interface operations {
                 "application/json": {
                     /**
                      * @description The new name. Spaces at the ends are trimmed. Empty or
-                     *     left out keeps the current name.
+                     *     left out keeps the current name. Unlike create, the
+                     *     update does not check its length.
                      */
                     display_name?: string;
                     /**
@@ -14361,7 +14707,8 @@ export interface operations {
                     dunning_policy_id?: string;
                     /**
                      * @description The new CC list, which replaces the whole list. `[]`
-                     *     clears it. Left out keeps the current list.
+                     *     clears it. Left out keeps the current list. More than 10
+                     *     after deduplication is refused with 422.
                      */
                     additional_emails?: string[];
                 };
@@ -14463,10 +14810,10 @@ export interface operations {
             };
             /**
              * @description A field failed validation (`validation_error`, `param` names it):
-             *     an invalid `email` or CC entry, a CC entry equal to the email, a
-             *     new email that is on the CC list, or a `status` other than
-             *     `active` or `archived`. An unknown field, such as `external_id`,
-             *     is refused the same way.
+             *     an invalid `email` or CC entry, a CC entry equal to the email,
+             *     more than 10 CC entries, a new email that is on the CC list, or a
+             *     `status` other than `active` or `archived`. An unknown field, such
+             *     as `external_id`, is refused the same way.
              */
             422: {
                 headers: {
@@ -14563,12 +14910,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -14707,7 +15058,7 @@ export interface operations {
                      *       "error": {
                      *         "type": "invalid_request_error",
                      *         "code": "validation_error",
-                     *         "message": "must be an ISO-3166 alpha-2 country code (e.g. \"IN\", \"US\")",
+                     *         "message": "must be an ISO-3166 alpha-2 country code (e.g. 'IN', 'US')",
                      *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
                      *         "param": "country"
                      *       }
@@ -14723,13 +15074,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -14991,7 +15344,7 @@ export interface operations {
                      *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *           "items": [
                      *             {
-                     *               "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *               "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *               "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *               "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *               "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -15087,13 +15440,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -15177,12 +15532,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -15224,7 +15583,7 @@ export interface operations {
                      *     }
                      */
                     "application/json": {
-                        /** @description The address the email was sent to. */
+                        /** @description The customer's email address, which the email was queued for. */
                         to: string;
                         /** @description The email's subject. */
                         subject: string;
@@ -15396,12 +15755,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -15563,7 +15926,7 @@ export interface operations {
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description No such payment method for this customer, or it is already detached. */
+            /** @description No payment method with this ID for this customer. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -15614,12 +15977,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -15844,7 +16211,11 @@ export interface operations {
                             meter_name: string;
                             /** @description The meter's unit, such as `tokens`. */
                             unit: string;
-                            /** @description The currency of the plan whose prices took the usage. */
+                            /**
+                             * @description The currency of the plan that priced the meter's
+                             *     usage. Empty (`""`) when the meter has no usage
+                             *     this period.
+                             */
                             currency: string;
                             /** @description The usage the prices took this period, as a decimal string. */
                             total_quantity: string;
@@ -16082,7 +16453,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Too many requests from this IP address. The public invoice routes allow 60 a minute per IP. Wait for the seconds in `Retry-After`. */
+            /** @description Too many requests from this IP address. The public hosted-invoice, payment-update and cost-dashboard routes share one limit of 60 requests a minute per IP. Wait for the seconds in `Retry-After`. */
             429: {
                 headers: {
                     "Retry-After": components["headers"]["RetryAfter"];
@@ -16147,7 +16518,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Too many requests from this IP address. The public invoice routes allow 60 a minute per IP. Wait for the seconds in `Retry-After`. */
+            /** @description Too many requests from this IP address. The public hosted-invoice, payment-update and cost-dashboard routes share one limit of 60 requests a minute per IP. Wait for the seconds in `Retry-After`. */
             429: {
                 headers: {
                     "Retry-After": components["headers"]["RetryAfter"];
@@ -16269,7 +16640,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Too many requests from this IP address. The public invoice routes allow 60 a minute per IP. Wait for the seconds in `Retry-After`. */
+            /** @description Too many requests from this IP address. The public hosted-invoice, payment-update and cost-dashboard routes share one limit of 60 requests a minute per IP. Wait for the seconds in `Retry-After`. */
             429: {
                 headers: {
                     "Retry-After": components["headers"]["RetryAfter"];
@@ -16427,7 +16798,10 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidBody"];
-            /** @description The token is unknown, expired or already used. Code `invalid_token`. */
+            /**
+             * @description The token is unknown, expired or already used, or its invoice is
+             *     gone. Code `invalid_token`.
+             */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -16522,13 +16896,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -16579,12 +16955,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -16611,7 +16991,10 @@ export interface operations {
                      *     Unique in the account and mode.
                      */
                     event_name: string;
-                    /** @description The display name, at most 255 characters. */
+                    /**
+                     * @description The display name. Spaces at the ends are trimmed; then at
+                     *     most 255 bytes (UTF-8).
+                     */
                     name: string;
                     /**
                      * @description The unit of the quantity, such as `tokens` or `seconds`.
@@ -16769,12 +17152,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -16794,7 +17181,10 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
-                    /** @description The new display name, at most 255 characters. It cannot be empty. */
+                    /**
+                     * @description The new display name, at most 255 bytes (UTF-8) after
+                     *     spaces at the ends are trimmed. It cannot be empty.
+                     */
                     name?: string;
                     /** @description The new unit. Empty sets it to `unit`. */
                     unit?: string;
@@ -16923,13 +17313,15 @@ export interface operations {
                 /** @description Sort direction, `desc` (the default) or `asc`. */
                 dir?: "asc" | "desc";
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -17015,12 +17407,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -17049,7 +17445,12 @@ export interface operations {
                 "application/json": {
                     /** @description The invoice to credit. It must be `finalized` or `paid`. */
                     invoice_id: string;
-                    /** @description Why you are crediting, printed on the note. Required for a line-based note; a relief takes it from `commit_relief.reason` when this is empty. */
+                    /**
+                     * @description Why you are crediting, printed on the note. Required for a
+                     *     line-based note. For a relief, `commit_relief.reason` wins;
+                     *     this one is used when that is empty, and `commit_relief`
+                     *     is the reason when both are empty.
+                     */
                     reason?: string;
                     /** @description The credited amounts, tax included. At least one line for a line-based note; none with `commit_relief`. */
                     lines?: {
@@ -17105,7 +17506,10 @@ export interface operations {
                     commit_relief?: {
                         /** @description Optional. Defaults to the top-level invoice_id. */
                         invoice_id?: string;
-                        /** @description Optional. Defaults to the top-level reason. */
+                        /**
+                         * @description Optional. Wins over the top-level `reason`. When both
+                         *     are empty, the note's reason is `commit_relief`.
+                         */
                         reason?: string;
                         /** @description Commit credits to retire, from 1 to what is left of the commit. */
                         retire_cents?: number;
@@ -17182,8 +17586,9 @@ export interface operations {
              *     invoice is a draft, voided or written off, already fully
              *     credited, or bought prepaid credit (use commit relief when it is
              *     paid, void it when it is unpaid); a relief on an unpaid,
-             *     mixed-line, zero-total or fully used commit; or Stripe is not
-             *     connected for a `stripe_refund_id`. Codes `payment_in_flight` and
+             *     written-off, voided, mixed-line, zero-total or fully used commit;
+             *     or a `stripe_refund_id` that a credit note already records, or
+             *     that is still in flight at Stripe. Codes `payment_in_flight` and
              *     `payment_unidentifiable`: a charge on the invoice is unresolved.
              */
             409: {
@@ -17233,6 +17638,29 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+            /**
+             * @description Code `provider_error`. Stripe could not be asked about the
+             *     `stripe_refund_id`, for example because Stripe is not connected
+             *     for this mode. Nothing was created.
+             */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "provider_error",
+                     *         "message": "Payment provider rejected the request. Please retry; if the problem persists, contact support.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getCreditGrants: {
@@ -17321,12 +17749,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -17382,21 +17814,13 @@ export interface operations {
                      *       "amount_cents": -1000,
                      *       "balance_after": 4000,
                      *       "description": "Goodwill credit reversed after duplicate grant",
-                     *       "metadata": {
-                     *         "drained_blocks": [
-                     *           {
-                     *             "block_id": "hc_ccl_dav2242q3gpgqfoq5c50",
-                     *             "take_cents": 1000
-                     *           }
-                     *         ]
-                     *       },
                      *       "created_at": "2026-10-05T11:20:00Z"
                      *     }
                      */
                     "application/json": components["schemas"]["CreditLedgerEntry"];
                 };
             };
-            /** @description The body is not valid JSON. */
+            /** @description The body is not valid JSON, or a field has a value of the wrong JSON type. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17463,13 +17887,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -17524,13 +17950,15 @@ export interface operations {
                 /** @description Default desc. */
                 dir?: "asc" | "desc";
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -17625,13 +18053,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -17688,12 +18118,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -17717,7 +18151,11 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
-                    /** @description Where to send events. Surrounding spaces are trimmed. */
+                    /**
+                     * @description Where to send events, an `https://` URL on a public
+                     *     address (a loopback URL outside production may use
+                     *     `http://`). Surrounding spaces are trimmed.
+                     */
                     url: string;
                     /** @description Your note about the endpoint, such as what it feeds. */
                     description?: string;
@@ -17761,9 +18199,11 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             /**
-             * @description `url` is missing, is not `https://`, cannot be looked up, or
-             *     points to a private address; an event type is unknown; or the
-             *     body has an unknown field. `param` names the field.
+             * @description `url` is missing, is not `https://` (only a loopback URL
+             *     outside production may use `http://`), is a loopback URL in
+             *     production, cannot be looked up, or points to a private address;
+             *     an event type is unknown; or the body has an unknown field.
+             *     `param` names the field.
              */
             422: {
                 headers: {
@@ -17914,12 +18354,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -18005,9 +18449,11 @@ export interface operations {
                 };
             };
             /**
-             * @description `url` is empty, is not `https://`, cannot be looked up, or points
-             *     to a private address; an event type is unknown; or the body has
-             *     an unknown field. `param` names the field.
+             * @description `url` is empty, is not `https://` (only a loopback URL outside
+             *     production may use `http://`), is a loopback URL in production,
+             *     cannot be looked up, or points to a private address; an event
+             *     type is unknown; or the body has an unknown field. `param` names
+             *     the field.
              */
             422: {
                 headers: {
@@ -18037,12 +18483,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -18102,13 +18552,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -18185,12 +18637,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -18273,13 +18729,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -18325,13 +18783,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -18501,12 +18961,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -18539,7 +19003,11 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the `apikey:read` permission (an ingest key). */
+            /**
+             * @description The caller lacks the `apikey:read` permission (an ingest key), or
+             *     a browser page on another site sent the request
+             *     (`cross-site request blocked`).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -18823,9 +19291,11 @@ export interface operations {
                          */
                         status: "processed" | "skipped" | "ignored";
                         /**
-                         * @description Why the record was skipped or ignored, such as
-                         *     `invalid json`, `no correlation metadata` or
-                         *     `transient bounce`. Absent when it was processed.
+                         * @description Why the record was skipped or ignored:
+                         *     `payload too large`, `invalid json`,
+                         *     `no correlation metadata`, `unknown outbox id`,
+                         *     `record type not ingested` or `transient bounce`.
+                         *     Absent when it was processed.
                          */
                         reason?: string;
                     };
@@ -18879,13 +19349,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -18956,12 +19428,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -18998,7 +19474,10 @@ export interface operations {
                      *     mode. Fixed after create.
                      */
                     code: string;
-                    /** @description The display name, at most 255 characters. */
+                    /**
+                     * @description The display name. Spaces at the ends are trimmed; then at
+                     *     most 255 bytes (UTF-8).
+                     */
                     name: string;
                     /** @description Your description of the plan. */
                     description?: string;
@@ -19039,9 +19518,9 @@ export interface operations {
                      */
                     status?: "active";
                     /**
-                     * @description Stripe product tax code for the base fee, such as
-                     *     `txcd_10103001`. Empty or omitted means the account's
-                     *     `default_product_tax_code`.
+                     * @description A Stripe product tax code, `txcd_` and 8 digits, such as
+                     *     `txcd_10103001`. Empty or omitted leaves it unset. See
+                     *     `tax_code` on Plan for which invoice lines carry it.
                      */
                     tax_code?: string;
                 };
@@ -19127,9 +19606,11 @@ export interface operations {
              *     is outside its limits, `base_bill_timing` is missing with a base
              *     fee above 0 or is `in_advance` with a base of 0), `status` is set
              *     to anything but `active` (a plan is created active; archive it
-             *     with PATCH), or the body has an unknown field (`param` names it,
-             *     `prices[i].` first for a price; the body must use only the fields
-             *     listed here).
+             *     with PATCH), or the body has an unknown field. A failed check on
+             *     a price's field names it with `prices[i].` first, such as
+             *     `prices[0].unit_amount_cents` (i counts from 0). An unknown field
+             *     is named by its bare key at any depth: `price` inside a price
+             *     gives `param: price`, not `prices[0].price`.
              */
             422: {
                 headers: {
@@ -19237,12 +19718,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -19262,7 +19747,11 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
-                    /** @description Whitespace is trimmed. Empty or omitted keeps the current name. */
+                    /**
+                     * @description Whitespace is trimmed. Empty or omitted keeps the current
+                     *     name. Unlike create, the update does not check its
+                     *     length.
+                     */
                     name?: string;
                     /**
                      * @description Whitespace is trimmed. Omit to keep the current
@@ -19287,9 +19776,9 @@ export interface operations {
                      */
                     status?: "active" | "archived";
                     /**
-                     * @description Stripe product tax code. Omit to keep the current code; an
-                     *     empty string clears it, and the base fee then uses the
-                     *     account's `default_product_tax_code`.
+                     * @description A Stripe product tax code, `txcd_` and 8 digits. Omit to
+                     *     keep the current code; an empty string clears it. See
+                     *     `tax_code` on Plan for which invoice lines carry it.
                      */
                     tax_code?: string;
                 };
@@ -19458,13 +19947,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -19556,12 +20047,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -19817,12 +20312,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -19979,13 +20478,15 @@ export interface operations {
                 /** @description Sort direction, `asc` or `desc` (the default). Any other value sorts descending. */
                 dir?: "asc" | "desc";
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -20012,7 +20513,7 @@ export interface operations {
                      *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *           "items": [
                      *             {
-                     *               "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *               "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *               "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *               "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *               "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -20074,12 +20575,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -20173,7 +20678,7 @@ export interface operations {
                      *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *       "items": [
                      *         {
-                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -20223,10 +20728,11 @@ export interface operations {
             /**
              * @description Code `already_exists` (`param: code`): another subscription in
              *     this account and mode has this `code`. Code `invalid_state`: the
-             *     customer or a plan is archived; a plan bills a meter another
-             *     live subscription of the customer already bills; or the plans'
-             *     currency differs from each other, from the customer's billing
-             *     profile or from the customer's other subscriptions.
+             *     customer or a plan is archived; a plan bills a meter that another
+             *     `draft`, `trialing` or `active` subscription of the customer
+             *     already bills; or the plans' currency differs from each other,
+             *     from the customer's billing profile or from the customer's other
+             *     `draft`, `trialing` or `active` subscriptions.
              */
             409: {
                 headers: {
@@ -20253,8 +20759,9 @@ export interface operations {
              *     (empty and null included), or `trial_days` above 0 with
              *     `status: draft`. Also: `code`, `display_name`, `customer_id` or
              *     `items` missing; a `code` with other characters; a repeated or
-             *     unknown plan, or plans with different billing intervals or
-             *     base-fee timings (`param: items`); a `quantity` below 1. Or the
+             *     unknown plan, plans with different billing intervals or
+             *     base-fee timings, or two plans that bill the same meter
+             *     (`param: items`); a `quantity` below 1. Or the
              *     body has an unknown field (`param` names it; the body must use
              *     only the fields listed here). `start_now` is such a field since
              *     2026-10-23: a subscription starts now unless `status` is
@@ -20288,12 +20795,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -20323,7 +20834,7 @@ export interface operations {
                      *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *       "items": [
                      *         {
-                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -20373,7 +20884,8 @@ export interface operations {
             /**
              * @description Code `invalid_state`: the subscription is not a `draft`, or its
              *     plans' currency differs from the customer's billing profile or
-             *     other subscriptions.
+             *     from the customer's other `draft`, `trialing` or `active`
+             *     subscriptions.
              */
             409: {
                 headers: {
@@ -20425,12 +20937,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -20468,7 +20984,7 @@ export interface operations {
                      *         "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *         "items": [
                      *           {
-                     *             "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *             "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *             "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *             "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *             "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -20612,7 +21128,7 @@ export interface operations {
                      *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *       "items": [
                      *         {
-                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -20667,12 +21183,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -20702,7 +21222,7 @@ export interface operations {
                      *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *       "items": [
                      *         {
-                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -20753,7 +21273,9 @@ export interface operations {
             /**
              * @description Code `invalid_state`: the subscription is already `canceled`.
              *     Code `unbilled_period`: a billing period ended and
-             *     could not be invoiced; retry billing first.
+             *     could not be invoiced; retry billing first. Code
+             *     `funding_invoice_tax_pending`: an invoice the relief would credit
+             *     is a draft whose tax is not calculated yet; retry once it is.
              */
             409: {
                 headers: {
@@ -20805,12 +21327,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -20857,7 +21383,7 @@ export interface operations {
                      *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *       "items": [
                      *         {
-                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -20883,7 +21409,7 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
-            /** @description The body is not valid JSON, or `cancel_at` is not an RFC 3339 date-time. */
+            /** @description The body is not valid JSON, a field has a value of the wrong JSON type, or `cancel_at` is not an RFC 3339 date-time. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21002,7 +21528,7 @@ export interface operations {
                      *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *       "items": [
                      *         {
-                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -21104,12 +21630,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -21161,7 +21691,7 @@ export interface operations {
                      *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *       "items": [
                      *         {
-                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -21191,7 +21721,7 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
-            /** @description The body is not valid JSON, or `resumes_at` is not an RFC 3339 date-time. */
+            /** @description The body is not valid JSON, a field has a value of the wrong JSON type, or `resumes_at` is not an RFC 3339 date-time. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21308,7 +21838,7 @@ export interface operations {
                      *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *       "items": [
                      *         {
-                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -21409,12 +21939,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -21444,7 +21978,7 @@ export interface operations {
                      *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *       "items": [
                      *         {
-                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -21547,12 +22081,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -21597,7 +22135,7 @@ export interface operations {
                      *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *       "items": [
                      *         {
-                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -21623,7 +22161,7 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
-            /** @description The body is not valid JSON, or `trial_end` is not an RFC 3339 date-time. */
+            /** @description The body is not valid JSON, a field has a value of the wrong JSON type, or `trial_end` is not an RFC 3339 date-time. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21720,12 +22258,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -21745,7 +22287,7 @@ export interface operations {
                  *       "amount_gte": 50000,
                  *       "item_thresholds": [
                  *         {
-                 *           "subscription_item_id": "hc_si_dauq50aq3gpgqfoq5c30",
+                 *           "subscription_item_id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                  *           "usage_gte": "100000000"
                  *         }
                  *       ]
@@ -21789,7 +22331,7 @@ export interface operations {
                      *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *       "items": [
                      *         {
-                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -21807,7 +22349,7 @@ export interface operations {
                      *         "amount_gte": 50000,
                      *         "item_thresholds": [
                      *           {
-                     *             "subscription_item_id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *             "subscription_item_id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *             "usage_gte": "100000000"
                      *           }
                      *         ]
@@ -21823,7 +22365,7 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
-            /** @description The body is not valid JSON. */
+            /** @description The body is not valid JSON, or a field has a value of the wrong JSON type. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21939,7 +22481,7 @@ export interface operations {
                      *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *       "items": [
                      *         {
-                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -22018,12 +22560,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -22065,7 +22611,7 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "id": "hc_si_dauq50aq3gpgqfoq5c34",
+                     *       "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b1d",
                      *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *       "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *       "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c3k",
@@ -22077,7 +22623,7 @@ export interface operations {
                     "application/json": components["schemas"]["SubscriptionItem"];
                 };
             };
-            /** @description The body is not valid JSON. */
+            /** @description The body is not valid JSON, or a field has a value of the wrong JSON type. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22121,8 +22667,12 @@ export interface operations {
              * @description Code `already_exists`: the subscription already has an item for
              *     this plan. Code `invalid_state`: the subscription is `canceled`;
              *     the plan is archived; the plan's meters (the meters it has a
-             *     price for) overlap another live subscription of the customer; or the plan's
-             *     currency differs from the subscription's. Code
+             *     price for) overlap another item of this subscription or another
+             *     `draft`, `trialing` or `active` subscription of the customer; or
+             *     the plan's currency differs from the subscription's, the
+             *     customer's billing profile or the customer's other `draft`,
+             *     `trialing` or `active` subscriptions.
+             *     Code
              *     `unpaid_invoice_blocks_change`: the invoice for the current
              *     period is unpaid (a written-off invoice is unpaid); settle or
              *     void it first. Code
@@ -22149,9 +22699,10 @@ export interface operations {
                 };
             };
             /**
-             * @description Code `validation_error`: `plan_id` is missing or not found,
-             *     `quantity` is less than 1, or the plan's billing interval
-             *     differs from the other items'.
+             * @description Code `validation_error`: `plan_id` is missing
+             *     (`param: plan_id`); the plan is not found, or its billing interval or
+             *     base-fee timing differs from the other items' (`param: items`);
+             *     or `quantity` is less than 1.
              *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
@@ -22226,7 +22777,9 @@ export interface operations {
             /**
              * @description Code `invalid_state`: this is the last item of an active
              *     subscription. Code `unbilled_period`: a billing period ended and
-             *     could not be invoiced; retry billing first.
+             *     could not be invoiced; retry billing first. Code
+             *     `funding_invoice_tax_pending`: an invoice the credit would go on
+             *     is a draft whose tax is not calculated yet; retry once it is.
              */
             409: {
                 headers: {
@@ -22278,12 +22831,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -22331,7 +22888,7 @@ export interface operations {
                     /**
                      * @example {
                      *       "item": {
-                     *         "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *         "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *         "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *         "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -22356,7 +22913,7 @@ export interface operations {
                     "application/json": components["schemas"]["SubscriptionItemChangeResult"];
                 };
             };
-            /** @description The body is not valid JSON. */
+            /** @description The body is not valid JSON, or a field has a value of the wrong JSON type. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22403,8 +22960,11 @@ export interface operations {
             /**
              * @description Code `invalid_state`: the subscription is not `active`, the new
              *     plan is archived, its meters (the meters it has a price for)
-             *     overlap another live subscription of the customer, or its
-             *     currency differs. Code
+             *     overlap another item of this subscription or another `draft`,
+             *     `trialing` or `active` subscription of the customer, or its
+             *     currency differs from the item's current plan, the other items,
+             *     the customer's billing profile or the customer's other
+             *     subscriptions (`draft`, `trialing` or `active`). Code
              *     `unpaid_invoice_blocks_change`: an increase would charge against
              *     an unpaid invoice for the current period (a written-off invoice
              *     is unpaid); settle or void it first. Code `subscription_period_moved`: the billing period
@@ -22413,7 +22973,10 @@ export interface operations {
              *     subscription's items changed by another request that finished
              *     first; read the subscription again and retry. Code
              *     `unbilled_period`: a billing period ended and could not be
-             *     invoiced; retry billing first.
+             *     invoiced; retry billing first. Code
+             *     `funding_invoice_tax_pending`: an invoice a decrease would
+             *     credit is a draft whose tax is not calculated yet; retry once it
+             *     is.
              */
             409: {
                 headers: {
@@ -22485,7 +23048,7 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *       "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *       "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *       "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -22689,13 +23252,15 @@ export interface operations {
                 /** @description Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included. */
                 to?: string;
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -22722,11 +23287,11 @@ export interface operations {
                      *           "quantity": "350",
                      *           "dimensions": {
                      *             "model": "gpt-4o",
+                     *             "provider": "openai",
                      *             "token_type": "output"
                      *           },
                      *           "idempotency_key": "req-7f3a9c-out",
                      *           "timestamp": "2026-10-12T14:03:07Z",
-                     *           "origin": "api",
                      *           "provider_cost_cents": "0.35",
                      *           "provider_cost_source": "table"
                      *         },
@@ -22738,11 +23303,11 @@ export interface operations {
                      *           "quantity": "1200",
                      *           "dimensions": {
                      *             "model": "gpt-4o",
+                     *             "provider": "openai",
                      *             "token_type": "input"
                      *           },
                      *           "idempotency_key": "req-7f3a9c",
                      *           "timestamp": "2026-10-12T14:03:07Z",
-                     *           "origin": "api",
                      *           "provider_cost_cents": "0.3",
                      *           "provider_cost_source": "table"
                      *         }
@@ -22797,6 +23362,7 @@ export interface operations {
                  *       "quantity": 1200,
                  *       "dimensions": {
                  *         "model": "gpt-4o",
+                 *         "provider": "openai",
                  *         "token_type": "input"
                  *       },
                  *       "idempotency_key": "req-7f3a9c",
@@ -22870,6 +23436,7 @@ export interface operations {
                      *       "quantity": "1200",
                      *       "dimensions": {
                      *         "model": "gpt-4o",
+                     *         "provider": "openai",
                      *         "token_type": "input"
                      *       },
                      *       "idempotency_key": "req-7f3a9c",
@@ -22901,6 +23468,7 @@ export interface operations {
                      *       "quantity": "1200",
                      *       "dimensions": {
                      *         "model": "gpt-4o",
+                     *         "provider": "openai",
                      *         "token_type": "input"
                      *       },
                      *       "idempotency_key": "req-7f3a9c",
@@ -22948,9 +23516,9 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             /**
-             * @description `ingest_unavailable`: a customer or meter lookup, or the read of
-             *     the customer's billing periods, could not be answered. Nothing
-             *     was recorded; retry.
+             * @description `ingest_unavailable`: a customer or meter lookup, the read of
+             *     the customer's billing periods, or the read of the meter's
+             *     aggregation could not be answered. Nothing was recorded; retry.
              */
             503: {
                 headers: {
@@ -22989,6 +23557,7 @@ export interface operations {
                  *         "quantity": 1200,
                  *         "dimensions": {
                  *           "model": "gpt-4o",
+                 *           "provider": "openai",
                  *           "token_type": "input"
                  *         },
                  *         "idempotency_key": "req-7f3a9c",
@@ -23000,6 +23569,7 @@ export interface operations {
                  *         "quantity": 350,
                  *         "dimensions": {
                  *           "model": "gpt-4o",
+                 *           "provider": "openai",
                  *           "token_type": "output"
                  *         },
                  *         "idempotency_key": "req-7f3a9c-out",
@@ -23129,10 +23699,21 @@ export interface operations {
             /**
              * @description Batch rejected — one or more events failed validation and
              *     nothing was ingested. The body is the error envelope (code
-             *     `batch_rejected`) plus `errors[]`, which names every failing
-             *     index (`event[i]: reason`), `ingested: 0` and `total`. An
-             *     unknown field in an event is one of those failures. Fix them
-             *     and retry the whole batch.
+             *     `batch_rejected`) plus `errors[]` (`event[i]: reason`),
+             *     `ingested: 0` and `total`.
+             *
+             *     The events are checked in two rounds, and `errors[]` lists the
+             *     failures of one round only. The first round checks every event
+             *     for: a missing field, a missing, blank or too long
+             *     `idempotency_key`, an unknown field or a `properties` key, the
+             *     `quantity` format and length, the `timestamp` format, and an
+             *     unknown customer or meter. The second round runs only when no
+             *     event failed the first, and checks: more than 16 dimensions or a
+             *     value that is not a scalar, a `quantity` of 10^26 or more or with
+             *     more than 12 decimal places, and a `timestamp` more than 5
+             *     minutes ahead. So a fixed batch can be refused again, for its
+             *     second-round failures. Fix the listed events and retry the
+             *     whole batch.
              */
             422: {
                 headers: {
@@ -23156,8 +23737,9 @@ export interface operations {
                      */
                     "application/json": components["schemas"]["Error"] & {
                         /**
-                         * @description One entry per failing event, `event[i]: reason`,
-                         *     where `i` is its index in the request.
+                         * @description One entry per event that failed the round that
+                         *     refused the batch, `event[i]: reason`, where `i`
+                         *     is its index in the request.
                          */
                         errors: string[];
                         /** @description Always 0. A rejected batch writes nothing. */
@@ -23169,9 +23751,10 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             /**
-             * @description `ingest_unavailable`: a customer or meter lookup, or the read of
-             *     the customer's billing periods, could not be answered. Nothing
-             *     was recorded; retry the whole batch.
+             * @description `ingest_unavailable`: a customer or meter lookup, the read of a
+             *     customer's billing periods, or the read of a meter's aggregation
+             *     could not be answered. Nothing was recorded; retry the whole
+             *     batch.
              */
             503: {
                 headers: {
@@ -23209,6 +23792,7 @@ export interface operations {
                  *       "quantity": "48000",
                  *       "dimensions": {
                  *         "model": "gpt-4o",
+                 *         "provider": "openai",
                  *         "token_type": "input"
                  *       },
                  *       "idempotency_key": "import-2026-09-30-0001",
@@ -23272,6 +23856,7 @@ export interface operations {
                      *       "quantity": "48000",
                      *       "dimensions": {
                      *         "model": "gpt-4o",
+                     *         "provider": "openai",
                      *         "token_type": "input"
                      *       },
                      *       "idempotency_key": "import-2026-09-30-0001",
@@ -23303,6 +23888,7 @@ export interface operations {
                      *       "quantity": "48000",
                      *       "dimensions": {
                      *         "model": "gpt-4o",
+                     *         "provider": "openai",
                      *         "token_type": "input"
                      *       },
                      *       "idempotency_key": "import-2026-09-30-0001",
@@ -23316,7 +23902,7 @@ export interface operations {
                     "application/json": components["schemas"]["UsageEvent"];
                 };
             };
-            /** @description `invalid_request`: the body is not valid JSON. */
+            /** @description `invalid_request`: the body is not valid JSON, or a field other than `quantity` and `timestamp` has a value of the wrong JSON type. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23369,9 +23955,9 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             /**
-             * @description `ingest_unavailable`: the customer or meter lookup, or the read
-             *     of the customer's billing periods, could not be answered.
-             *     Nothing was recorded; retry.
+             * @description `ingest_unavailable`: the customer or meter lookup, the read of
+             *     the customer's billing periods, or the read of the meter's
+             *     aggregation could not be answered. Nothing was recorded; retry.
              */
             503: {
                 headers: {
@@ -23627,17 +24213,17 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "total_events": 4210,
-                     *       "total_units": "12500000",
+                     *       "total_events": 268,
+                     *       "total_units": "805500",
                      *       "active_meters": 1,
                      *       "active_customers": 1,
                      *       "by_meter": [
                      *         {
                      *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
-                     *           "total": "12500000",
+                     *           "total": "805500",
                      *           "aggregation": "sum",
-                     *           "value": "12500000",
-                     *           "events": 4210,
+                     *           "value": "805500",
+                     *           "events": 268,
                      *           "customers": 1,
                      *           "peak": "48000",
                      *           "daily": [
@@ -23699,7 +24285,13 @@ export interface operations {
                  *     nothing.
                  */
                 payment_status?: string;
-                /** @description Case-insensitive substring match on the invoice number or the customer's name or email. */
+                /**
+                 * @description Case-insensitive substring match on the invoice number, or on
+                 *     the customer's name or email only when customer data is not
+                 *     encrypted. With `HARDCOUNT_ENCRYPTION_KEY` set (required in
+                 *     production), the name and email are stored encrypted, so only
+                 *     the invoice number matches.
+                 */
                 search?: string;
                 /**
                  * @description Lower bound on created_at, inclusive. RFC3339 instant or
@@ -23725,13 +24317,15 @@ export interface operations {
                 /** @description Sort direction, `desc` (the default) or `asc`. */
                 dir?: "asc" | "desc";
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -23828,12 +24422,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -24011,12 +24609,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -24362,12 +24964,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -24497,12 +25103,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -24611,12 +25221,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -24772,12 +25386,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -24888,12 +25506,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -25048,12 +25670,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -25218,12 +25844,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -25238,7 +25868,10 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Invoice with its new `public_token`. */
+            /**
+             * @description Invoice with its new `public_token`. Its `updated_at` is the value
+             *     from before the rotation; read the invoice again for the new one.
+             */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -25297,7 +25930,7 @@ export interface operations {
                      *       "public_token": "hc_pinv_c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7019f2c4e1a7b3d5f6081a2b3",
                      *       "net_payment_term_days": 30,
                      *       "created_at": "2026-11-01T00:05:00Z",
-                     *       "updated_at": "2026-11-06T14:00:00Z",
+                     *       "updated_at": "2026-11-01T00:05:03Z",
                      *       "billing_reason": "subscription_cycle",
                      *       "is_simulated": false
                      *     }
@@ -25359,12 +25992,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -25567,12 +26204,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -25884,13 +26525,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -25964,13 +26607,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -26047,12 +26692,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -26222,12 +26871,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -26443,12 +27096,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -26540,7 +27197,12 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The credit note is not a draft (code `invalid_state`). */
+            /**
+             * @description Nothing was issued. Code `invalid_state`: the credit note is not a
+             *     draft. Code `credit_note_exceeds_invoice`: on an unpaid invoice,
+             *     the note is now more than the amount due plus the credit applied
+             *     (the invoice changed after the draft was made).
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -26588,12 +27250,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -26698,7 +27364,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Code `invalid_state`. The note is not issued or its refund did not fail, another note already holds the refund, its row was decided another way, Stripe is not connected, or the note changed since it was read. */
+            /** @description Code `invalid_state`. The note is not issued or its refund did not fail, another note already holds the refund, its row was decided another way, or the note changed since it was read. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -26717,7 +27383,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Code `validation_error`. `stripe_refund_id` is missing; the refund is not of this invoice's payment, was made by Hardcount, has not succeeded, or is in another currency or of another amount (`param` `stripe_refund_id`); or the body has an unknown field. */
+            /** @description Code `validation_error`. `stripe_refund_id` is missing; Stripe has no such refund in this mode; the refund is not of this invoice's payment, was made by Hardcount, has not succeeded, or is in another currency or of another amount (`param` `stripe_refund_id`); or the body has an unknown field. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -26738,6 +27404,29 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+            /**
+             * @description Code `provider_error`. Stripe could not be asked about the
+             *     refund, for example because Stripe is not connected for this
+             *     mode. Nothing changed.
+             */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "provider_error",
+                     *         "message": "Payment provider rejected the request. Please retry; if the problem persists, contact support.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     retryCreditNoteRefund: {
@@ -26746,12 +27435,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -26927,12 +27620,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -27101,12 +27798,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -27215,7 +27916,10 @@ export interface operations {
              *     `invalid_state`: it is not a draft, or its tax is still pending
              *     (the message says whether Hardcount retries it or you must act).
              *     Code `tax_calculation_expired`: its Stripe Tax calculation is
-             *     more than 24 hours old; retry tax, then finalize.
+             *     more than 23 hours old and its tax was never recorded with Stripe
+             *     (Stripe keeps a calculation for 24 hours); retry tax, then
+             *     finalize. Code `invoice_lines_changed`: a line was added to the
+             *     invoice while its tax was being calculated; finalize again.
              */
             409: {
                 headers: {
@@ -27235,7 +27939,14 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The request has a body with a field. This route takes no body (`param` names the field). */
+            /**
+             * @description Code `validation_error`. The request has a body with a field: this
+             *     route takes no body (`param` names the field). Or the invoice's
+             *     prepaid commit line has an expiry that has already passed
+             *     (`param` is `commit_expires_at`): the granted credit would expire
+             *     on arrival. Change the line's expiry, then finalize. Nothing
+             *     changed.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -27264,12 +27975,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -27394,7 +28109,9 @@ export interface operations {
              * @description Code `invalid_state`. The invoice is not a draft, or its tax is
              *     not pending and its calculation is not an expired one. Also
              *     returned when the tax was saved but the invoice's state then
-             *     stopped the finalize.
+             *     stopped the finalize. Code `invoice_lines_changed`: a line was
+             *     added to the invoice while its tax was being calculated, and
+             *     nothing was saved; retry.
              */
             409: {
                 headers: {
@@ -27516,6 +28233,25 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description A browser page on another site sent the request (code `forbidden`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "cross-site request blocked",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description The password is right, but the user belongs to no account (a removed member). Code `invalid_state`. */
             409: {
                 headers: {
@@ -27630,6 +28366,25 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["InvalidBody"];
+            /** @description A browser page on another site sent the request (code `forbidden`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "cross-site request blocked",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             422: components["responses"]["BodyNotAllowed"];
             429: components["responses"]["RateLimited"];
             /** @description The session could not be ended. It still works, and the cookie was not cleared. */
@@ -27692,7 +28447,12 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidBody"];
-            /** @description The request has no session cookie, or its session has ended. */
+            /**
+             * @description The request has no session cookie
+             *     (`missing session — sign in at /login`), or its session has ended
+             *     (`invalid or expired session`). The cookie is checked before the
+             *     body.
+             */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -27705,6 +28465,45 @@ export interface operations {
                      *         "code": "unauthorized",
                      *         "message": "invalid or expired session",
                      *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A browser page on another site sent the request (code `forbidden`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "cross-site request blocked",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The body has an unknown field (`param` names it). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"mode\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "mode"
                      *       }
                      *     }
                      */
@@ -27764,6 +28563,25 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidBody"];
+            /** @description A browser page on another site sent the request (code `forbidden`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "cross-site request blocked",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description `email` is empty, or the body has an unknown field. `param` names it. */
             422: {
                 headers: {
@@ -27835,6 +28653,25 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidBody"];
+            /** @description A browser page on another site sent the request (code `forbidden`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "cross-site request blocked",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /**
              * @description `token` or `password` is empty, the password fails the check
              *     (`param: password`), the token is unknown, expired or already
@@ -28048,6 +28885,25 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidBody"];
+            /** @description A browser page on another site sent the request (code `forbidden`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "cross-site request blocked",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /**
              * @description The token is unknown, expired, revoked or already used
              *     (`param: token`), a new account's password fails the check
@@ -28162,12 +29018,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -28216,7 +29076,11 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description The caller is not a dashboard session (an API key). */
+            /**
+             * @description The caller is not a dashboard session (an API key), or a browser
+             *     page on another site sent the request
+             *     (`cross-site request blocked`).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -28306,7 +29170,11 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description The caller is not a dashboard session (an API key). */
+            /**
+             * @description The caller is not a dashboard session (an API key), or a browser
+             *     page on another site sent the request
+             *     (`cross-site request blocked`).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -28369,7 +29237,11 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description The caller is not a dashboard session (an API key). */
+            /**
+             * @description The caller is not a dashboard session (an API key), or a browser
+             *     page on another site sent the request
+             *     (`cross-site request blocked`).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -28504,12 +29376,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -28608,13 +29484,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -28677,12 +29555,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -28985,12 +29867,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -29031,7 +29917,9 @@ export interface operations {
                     /**
                      * @description What the credit is for, shown on the ledger entry.
                      *     Required: a grant without one, or with a blank one, is
-                     *     refused with 422. At most 500 characters.
+                     *     refused with 422. At most 500 bytes after surrounding
+                     *     spaces are trimmed (fewer characters when it has
+                     *     non-ASCII letters).
                      */
                     description?: string;
                     /**
@@ -29106,7 +29994,7 @@ export interface operations {
              * @description A field failed validation (`param` names it): `customer_id` or
              *     `description` missing; a missing or unsupported `currency`;
              *     `amount_cents` not above 0 or above 100000000; a `description`
-             *     over 500 characters; an `expires_at` not in the future; a
+             *     over 500 bytes; an `expires_at` not in the future; a
              *     `grant_kind` other than `promotional`. Or the body has an unknown
              *     field (`param` names it; the body must use only the fields
              *     listed here).
@@ -29259,13 +30147,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -29285,7 +30175,7 @@ export interface operations {
                      * @example {
                      *       "data": [
                      *         {
-                     *           "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *           "id": "hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d",
                      *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *           "name": "October renewal walk",
                      *           "frozen_time": "2026-11-02T00:00:00Z",
@@ -29347,12 +30237,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -29371,7 +30265,11 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
-                    /** @description Your name for the clock. Optional; at most 200 characters. */
+                    /**
+                     * @description Your name for the clock. Optional; at most 200 bytes
+                     *     after surrounding spaces are trimmed (fewer characters
+                     *     when it has non-ASCII letters).
+                     */
                     name?: string;
                     /**
                      * Format: date-time
@@ -29390,7 +30288,7 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *       "id": "hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d",
                      *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *       "name": "October renewal walk",
                      *       "frozen_time": "2026-10-01T00:00:00Z",
@@ -29424,9 +30322,9 @@ export interface operations {
                 };
             };
             /**
-             * @description `frozen_time` is missing, or `name` is longer than 200
-             *     characters (`param` names the field). Or the body has an
-             *     unknown field (`param` names it).
+             * @description `frozen_time` is missing, or `name` is longer than 200 bytes
+             *     (`param` names the field). Or the body has an unknown field
+             *     (`param` names it).
              */
             422: {
                 headers: {
@@ -29470,7 +30368,7 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *       "id": "hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d",
                      *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *       "name": "October renewal walk",
                      *       "frozen_time": "2026-11-02T00:00:00Z",
@@ -29640,13 +30538,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -29676,7 +30576,7 @@ export interface operations {
                      *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
                      *           "items": [
                      *             {
-                     *               "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *               "id": "hc_si_3f9c0e2a1b4d5c6e7f8a9b0c",
                      *               "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *               "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
                      *               "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
@@ -29692,9 +30592,8 @@ export interface operations {
                      *           "cancel_at_period_end": false,
                      *           "current_billing_period_start": "2026-11-01T00:00:00Z",
                      *           "current_billing_period_end": "2026-12-01T00:00:00Z",
-                     *           "current_billing_period_display": "Nov 1, 2026 – Nov 30, 2026",
                      *           "next_billing_at": "2026-12-01T00:00:00Z",
-                     *           "test_clock_id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *           "test_clock_id": "hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d",
                      *           "created_at": "2026-10-01T00:00:00Z",
                      *           "updated_at": "2026-11-01T00:00:00Z"
                      *         }
@@ -29757,12 +30656,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -29801,7 +30704,7 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *       "id": "hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d",
                      *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *       "name": "October renewal walk",
                      *       "frozen_time": "2026-11-02T00:00:00Z",
@@ -29909,12 +30812,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -29937,7 +30844,7 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *       "id": "hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d",
                      *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
                      *       "name": "October renewal walk",
                      *       "frozen_time": "2026-11-02T00:00:00Z",
@@ -30052,13 +30959,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -30088,7 +30997,7 @@ export interface operations {
                      *           "email": "billing@acme.example",
                      *           "status": "active",
                      *           "email_status": "unknown",
-                     *           "test_clock_id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *           "test_clock_id": "hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d",
                      *           "created_at": "2026-10-28T15:01:00Z",
                      *           "updated_at": "2026-10-28T15:01:00Z"
                      *         }
@@ -30149,13 +31058,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -30330,13 +31241,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -30560,12 +31473,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -30747,12 +31664,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -30854,8 +31775,9 @@ export interface operations {
              * @description Nothing is installed (`already_exists`). Either a meter with the
              *     recipe's `event_name` has another aggregation, so the recipe
              *     cannot use it (`param: meter`), or another install that ran at the
-             *     same time created the meter, the plan code or this recipe's
-             *     install first (retry).
+             *     same time created the meter (`param: event_name`), the plan code
+             *     (`param: code`) or this recipe's install (`param: recipe_key`)
+             *     first. Retry those.
              */
             409: {
                 headers: {
@@ -30867,7 +31789,7 @@ export interface operations {
                      *       "error": {
                      *         "type": "invalid_request_error",
                      *         "code": "already_exists",
-                     *         "message": "Meter \"gpu_seconds\" already exists and adds up usage another way (usage aggregation: recipe wants sum, existing is max), so the recipe can\"\"t use it. Its aggregation can change only until the meter has a usage event; after that it is fixed.",
+                     *         "message": "Meter \"gpu_seconds\" already exists and adds up usage another way (usage aggregation: recipe wants sum, existing is max), so the recipe can't use it. Its aggregation can change only until the meter has a usage event; after that it is fixed.",
                      *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
                      *         "param": "meter"
                      *       }
@@ -30879,6 +31801,9 @@ export interface operations {
             /**
              * @description An override failed the recipe's rules, or the body has an unknown
              *     field (`validation_error`, `param` is `overrides` or the field).
+             *     The plan the overrides make must also pass the checks of
+             *     `POST /v1/plans`: a `plan_code` longer than 100 bytes, for
+             *     example, is refused with `param: code`.
              */
             422: {
                 headers: {
@@ -31536,13 +32461,15 @@ export interface operations {
                 /** @description Only runs in this state. Another value answers 400. */
                 state?: "active" | "escalated" | "resolved";
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -31742,12 +32669,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -31921,13 +32852,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -31986,12 +32919,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -32056,7 +32993,7 @@ export interface operations {
              *     field was sent (`final_action`, `retry_schedule`,
              *     `max_retry_attempts`, `grace_period_days`), `retry_days` is
              *     missing, out of bounds or not whole days, an unknown final
-             *     action, a `name` over 255 characters, a field the server sets
+             *     action, a `name` over 255 bytes, a field the server sets
              *     (`id`, `is_default`, `seeded` and the like), or an unknown field.
              */
             422: {
@@ -32251,12 +33188,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -32367,12 +33308,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -32460,13 +33405,15 @@ export interface operations {
                 /** @description Only this price's overrides. */
                 price_id?: string;
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -32522,12 +33469,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -32913,13 +33864,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -32988,12 +33941,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -33054,7 +34011,11 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the `apikey:write` permission (an ingest key). */
+            /**
+             * @description The caller lacks the `apikey:write` permission (an ingest key), or
+             *     a browser page on another site sent the request
+             *     (`cross-site request blocked`).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -33135,7 +34096,11 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the `apikey:write` permission (an ingest key). */
+            /**
+             * @description The caller lacks the `apikey:write` permission (an ingest key), or
+             *     a browser page on another site sent the request
+             *     (`cross-site request blocked`).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -33183,12 +34148,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -33255,7 +34224,11 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the `apikey:write` permission (an ingest key). */
+            /**
+             * @description The caller lacks the `apikey:write` permission (an ingest key), or
+             *     a browser page on another site sent the request
+             *     (`cross-site request blocked`).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -33415,12 +34388,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -33486,7 +34463,11 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the `apikey:write` permission (an ingest key). */
+            /**
+             * @description The caller lacks the `apikey:write` permission (an ingest key), or
+             *     a browser page on another site sent the request
+             *     (`cross-site request blocked`).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -33612,12 +34593,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -33648,7 +34633,12 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description The caller is an API key, not a dashboard session. */
+            /**
+             * @description The caller is an API key, not a dashboard session (an ingest key
+             *     gets the `apikey:write` permission message instead), or a browser
+             *     page on another site sent the request
+             *     (`cross-site request blocked`).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -33762,12 +34752,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -33830,7 +34824,11 @@ export interface operations {
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description A key is missing or has the wrong prefix for the mode, or the body has an unknown field. `error.param` names the field. */
+            /**
+             * @description A key is missing or has the wrong prefix for the mode,
+             *     `webhook_secret` does not start with `whsec_`, or the body has
+             *     an unknown field. `error.param` names the field.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -33859,12 +34857,16 @@ export interface operations {
             header?: {
                 /**
                  * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
+                 *     the same value on every retry. Keys are kept per account and mode.
+                 *     For 24 hours, a repeat with the same key, method, path and body gets
+                 *     the first response again, byte for byte, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. A
                  *     first answer of 409 or 422 is not kept, so a retry with the same
-                 *     key runs again. The same key with a different method, path or body
-                 *     is a 422 with code `idempotency_error`. The other error cases are in
+                 *     key runs again. A repeat sent while the first request is still
+                 *     running waits up to 5 seconds for its answer; if there is none by
+                 *     then, it gets 409 with code `conflict_idempotency`. The same key
+                 *     with a different method, path or body is a 422 with code
+                 *     `idempotency_error`. The other error cases are in
                  *     docs/api/idempotency.md. The usage routes do not take it: each usage
                  *     event carries its own `idempotency_key`.
                  * @example 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -33999,7 +35001,10 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description `mode` is not `test` or `live` */
+            /**
+             * @description `mode` is not `test` or `live` (code `invalid_request`), or the
+             *     body is not valid JSON. The body is checked first.
+             */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -34179,7 +35184,7 @@ export interface operations {
                 resource_id?: string;
                 /** @description For example `create`, `update`, `revoke`. See `/v1/audit-log/filters`. */
                 action?: string;
-                /** @description A user id or an API key id. */
+                /** @description Only entries by this actor, an `actor_id` value such as a user id or an API key id. */
                 actor_id?: string;
                 /** @description Lower bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (start of day, UTC). */
                 date_from?: string;
@@ -34187,20 +35192,30 @@ export interface operations {
                 date_to?: string;
                 /** @description Only entries made inside this test clock's simulation. Works for deleted clocks too. */
                 test_clock_id?: string;
-                /** @description Lower bound on `sim_effective_at` (simulated time), inclusive. Excludes entries with no simulated time. */
+                /**
+                 * @description Lower bound on `sim_effective_at` (simulated time), inclusive.
+                 *     RFC3339 or YYYY-MM-DD, like `date_from`. Excludes entries with
+                 *     no simulated time.
+                 */
                 sim_from?: string;
-                /** @description Upper bound on `sim_effective_at`, inclusive. */
+                /**
+                 * @description Upper bound on `sim_effective_at`, inclusive. RFC3339 or
+                 *     YYYY-MM-DD, like `date_to`. Excludes entries with no simulated
+                 *     time.
+                 */
                 sim_to?: string;
                 /** @description The only supported order. Any other value is a 400. */
                 order?: "created_at";
                 /**
-                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                 *     that is not a whole number, is a 422 with `param: limit`.
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
+                 *     is not a whole number, or `limit` sent twice is a 422 with
+                 *     `param: limit`. It is never clamped.
                  */
                 limit?: components["parameters"]["Limit"];
                 /**
-                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                 *     not a whole number, is a 422 with `param: offset`.
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, one that is
+                 *     not a whole number, or `offset` sent twice is a 422 with
+                 *     `param: offset`.
                  */
                 offset?: components["parameters"]["Offset"];
             };
@@ -34285,7 +35300,11 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A date is not RFC3339 or YYYY-MM-DD, a range ends before it starts, or `limit` or `offset` is out of range. `param` names the parameter. */
+            /**
+             * @description A date is not RFC3339 or YYYY-MM-DD, a range ends before it
+             *     starts, `limit` or `offset` is out of range or sent twice, or
+             *     the removed `after` cursor is sent. `param` names the parameter.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -34343,7 +35362,7 @@ export interface operations {
                      *       ],
                      *       "test_clocks": [
                      *         {
-                     *           "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *           "id": "hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d",
                      *           "name": "October renewal test"
                      *         }
                      *       ]

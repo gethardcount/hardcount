@@ -16,7 +16,8 @@ import type { TenantSettingsInputTaxProvider } from './tenantSettingsInputTaxPro
 /**
  * The account's billing settings, as `PUT /v1/settings` takes them.
  * Every field is optional. Fields you leave out keep their stored
- * value. Settings are shared by test and live mode.
+ * value. Settings are shared by test and live mode. The length limits
+ * count bytes, not characters: an accented letter counts as two.
  */
 export interface TenantSettingsInput {
   /** ISO 4217 code, stored in upper case. Zero-decimal currencies (such as JPY) are not supported yet. */
@@ -55,7 +56,8 @@ export interface TenantSettingsInput {
   /** `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax. */
   tax_provider?: TenantSettingsInputTaxProvider;
   /**
-     * Percent, up to 4 decimal places (18.5 = 18.5%). Used by the `manual` provider.
+     * Percent, from 0 to 100 (18.5 = 18.5%), stored to 4 decimal
+     * places. Used by the `manual` provider.
      * @minimum 0
      * @maximum 100
      */
@@ -69,7 +71,8 @@ export interface TenantSettingsInput {
   /**
      * Stripe product tax code used when a plan has none, such as
      * `txcd_10103001`. Empty is allowed. Surrounding whitespace is
-     * trimmed before the check.
+     * trimmed before the check. A save with `tax_provider: stripe_tax`
+     * and no code stores `txcd_10103001` (SaaS, business use).
      * @pattern ^(txcd_[0-9]{8})?$
      */
   default_product_tax_code?: string;
@@ -122,7 +125,7 @@ export interface TenantSettingsInput {
   /** Shown in emails and on the hosted invoice page. PDFs do not print it. */
   logo_url?: string;
   /**
-     * Accent color on invoice PDFs, as `#rrggbb`.
+     * Accent color on invoice PDFs, as `#rrggbb`. Stored in lower case.
      * @pattern ^#[0-9a-fA-F]{6}$
      */
   brand_color?: string;

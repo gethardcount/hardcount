@@ -28,7 +28,7 @@ resource_id?: string;
  */
 action?: string;
 /**
- * A user id or an API key id.
+ * Only entries by this actor, an `actor_id` value such as a user id or an API key id.
  */
 actor_id?: string;
 /**
@@ -44,11 +44,15 @@ date_to?: string;
  */
 test_clock_id?: string;
 /**
- * Lower bound on `sim_effective_at` (simulated time), inclusive. Excludes entries with no simulated time.
+ * Lower bound on `sim_effective_at` (simulated time), inclusive.
+ * RFC3339 or YYYY-MM-DD, like `date_from`. Excludes entries with
+ * no simulated time.
  */
 sim_from?: string;
 /**
- * Upper bound on `sim_effective_at`, inclusive.
+ * Upper bound on `sim_effective_at`, inclusive. RFC3339 or
+ * YYYY-MM-DD, like `date_to`. Excludes entries with no simulated
+ * time.
  */
 sim_to?: string;
 /**
@@ -56,15 +60,17 @@ sim_to?: string;
  */
 order?: ListAuditLogOrder;
 /**
- * Rows per page, from 1 to 100. Default 50. Any other value, or one
- * that is not a whole number, is a 422 with `param: limit`.
+ * Rows per page, from 1 to 100. Default 50. Any other value, one that
+ * is not a whole number, or `limit` sent twice is a 422 with
+ * `param: limit`. It is never clamped.
  * @minimum 1
  * @maximum 100
  */
 limit?: LimitParameter;
 /**
- * Rows to skip, 0 or more. Default 0. A negative value, or one that is
- * not a whole number, is a 422 with `param: offset`.
+ * Rows to skip, 0 or more. Default 0. A negative value, one that is
+ * not a whole number, or `offset` sent twice is a 422 with
+ * `param: offset`.
  * @minimum 0
  */
 offset?: OffsetParameter;

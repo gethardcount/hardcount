@@ -32,7 +32,10 @@ export interface Plan {
      * after create.
      */
   code: string;
-  /** The plan's display name, at most 255 characters. */
+  /**
+     * The plan's display name. Create refuses one longer than 255
+     * bytes (UTF-8); an update does not check the length.
+     */
   name: string;
   /**
      * ISO 4217 code in upper case, such as `USD`. Fixed after create.
@@ -69,9 +72,11 @@ export interface Plan {
   /** Your description of the plan. Absent when empty. */
   description?: string;
   /**
-     * The Stripe product tax code of the base fee, such as
-     * `txcd_10103001`. Absent when the plan uses the account's
-     * `default_product_tax_code`.
+     * A Stripe product tax code, such as `txcd_10103001`, read only
+     * by the Stripe Tax provider. Today only the base fee line of the
+     * invoice billed when an in-advance subscription starts carries
+     * it; cycle invoices and usage lines use the account's
+     * `default_product_tax_code`. Absent when not set.
      */
   tax_code?: string;
   /** When the plan was created. */

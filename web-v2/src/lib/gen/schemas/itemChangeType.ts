@@ -15,7 +15,8 @@
  * The kind of subscription item change that produced a proration:
  * `plan` (the item moved to another plan), `quantity` (its quantity
  * changed), `add` (the item was added) or `remove` (the item was
- * removed).
+ * removed). On a credit ledger entry (`source_change_type`) it is
+ * never sent in this version.
  */
 export type ItemChangeType = typeof ItemChangeType[keyof typeof ItemChangeType];
 

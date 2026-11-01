@@ -26,9 +26,10 @@ export interface APIKey {
      */
   key_prefix: string;
   /**
-     * `secret` can read and change everything in the account.
-     * `ingest` can only send usage events, for LiteLLM or another
-     * gateway.
+     * `secret` can read and change everything in its mode of the
+     * account, except team members and the test email, which need a
+     * dashboard sign-in. `ingest` can only send usage events and call
+     * `GET /v1/whoami`, for LiteLLM or another gateway.
      */
   key_type: APIKeyKeyType;
   /** True for a live-mode key (`…_live_…`), false for a test-mode key. A key reaches only its own mode's data. */
@@ -41,7 +42,8 @@ export interface APIKey {
   created_at: string;
   /**
      * When the key stops working. Also set on the old key during a
-     * rotation grace period. Absent for a key that does not expire.
+     * rotation grace period, and copied to the new key when the old
+     * one had it. Absent for a key that does not expire.
      */
   expires_at?: string;
   /** When the key was revoked. Absent unless it was revoked. A revoked key gets 401. */

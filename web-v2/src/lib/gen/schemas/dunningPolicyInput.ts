@@ -22,7 +22,7 @@ import type { DunningPolicyInputFinalSubscriptionAction } from './dunningPolicyI
  */
 export interface DunningPolicyInput {
   /**
-     * A name for the policy, up to 255 characters. Defaults to empty.
+     * A name for the policy, up to 255 bytes (a character outside ASCII counts as more than one). Defaults to empty.
      * @maxLength 255
      */
   name?: string;

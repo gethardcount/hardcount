@@ -48,6 +48,10 @@ export interface CustomerUsage {
      * that no price takes or a meter whose usage went below zero.
      */
   warnings: string[];
-  /** One entry per UTC day in the period, including days with no usage. */
+  /**
+     * One entry per UTC day in the period, including days with no
+     * usage. Empty when the customer's plans price no meter, or when
+     * the daily series failed to load (`warnings` then says so).
+     */
   buckets: CustomerUsageBucketsItem[];
 }

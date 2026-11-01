@@ -13,7 +13,9 @@
 
 export type CreateTestClockBody = {
   /**
-     * Your name for the clock. Optional; at most 200 characters.
+     * Your name for the clock. Optional; at most 200 bytes
+     * after surrounding spaces are trimmed (fewer characters
+     * when it has non-ASCII letters).
      * @maxLength 200
      */
   name?: string;

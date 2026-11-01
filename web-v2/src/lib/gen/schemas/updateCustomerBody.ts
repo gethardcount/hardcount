@@ -15,7 +15,8 @@ import type { UpdateCustomerBodyStatus } from './updateCustomerBodyStatus';
 export type UpdateCustomerBody = {
   /**
      * The new name. Spaces at the ends are trimmed. Empty or
-     * left out keeps the current name.
+     * left out keeps the current name. Unlike create, the
+     * update does not check its length.
      */
   display_name?: string;
   /**
@@ -32,7 +33,8 @@ export type UpdateCustomerBody = {
   dunning_policy_id?: string;
   /**
      * The new CC list, which replaces the whole list. `[]`
-     * clears it. Left out keeps the current list.
+     * clears it. Left out keeps the current list. More than 10
+     * after deduplication is refused with 422.
      * @maxItems 10
      */
   additional_emails?: string[];

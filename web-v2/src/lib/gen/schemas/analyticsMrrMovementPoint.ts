@@ -14,7 +14,9 @@
 /**
  * MRR movement in one bucket of `GET /v1/analytics/mrr-movement`: a
  * UTC day, or a UTC month for `12m`. Amounts are in the minor unit of
- * the account's default currency (cents for USD).
+ * the account's default currency (cents for USD). Expansion and
+ * contraction count only subscriptions that were active for the whole
+ * requested window.
  */
 export interface AnalyticsMrrMovementPoint {
   /** Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */

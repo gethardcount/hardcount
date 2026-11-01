@@ -65,7 +65,9 @@ export interface CreditLedgerEntry {
      * The invoice the entry comes from: the invoice a `usage` entry
      * was drawn by, the voided or credited invoice that gave credit
      * back, or the commit invoice that funded a grant. Absent when no
-     * invoice caused the entry.
+     * invoice caused the entry, and on the `adjustment` that takes
+     * commit credit back after its invoice was voided or refunded:
+     * that invoice is in `metadata.funding_invoice_id`.
      */
   invoice_id?: string;
   /**
@@ -78,14 +80,20 @@ export interface CreditLedgerEntry {
   expires_at?: string;
   /**
      * Facts Hardcount records on the entry, such as which grants a
-     * draw took its credit from. Absent when empty.
+     * draw or a deduction took its credit from (`drained_blocks`).
+     * Absent when empty, and on the answer of
+     * `POST /v1/credits/adjust`, which does not return it; the ledger
+     * list does.
      */
   metadata?: CreditLedgerEntryMetadata;
   /** When the entry was written. For a customer on a test clock, the clock's time. */
   created_at: string;
   /**
-     * For entries that add credit, how much has been used or expired,
-     * in the currency's minor unit. Absent when nothing has.
+     * For entries that add credit, how much of it is gone, in the
+     * currency's minor unit: drawn by invoices, expired, removed by a
+     * negative adjustment, or, for commit credit, taken back when its
+     * invoice was voided or refunded by a credit note. Absent when
+     * nothing is.
      */
   consumed_cents?: number;
   /**
@@ -96,21 +104,39 @@ export interface CreditLedgerEntry {
      * credit. Absent for other credit.
      */
   grant_kind?: CreditLedgerEntryGrantKind;
-  /** For a `commit` grant, the invoice that paid for it. */
+  /**
+     * For a `commit` grant, the commit invoice whose finalizing made
+     * the grant. Absent on other entries.
+     */
   source_invoice_id?: string;
   /**
-     * With `source_subscription_item_id`, `source_plan_changed_at` and
-     * `source_change_type`, set on a proration credit: the subscription
-     * change that produced it.
+     * Not sent by any route in this version: no ledger entry is
+     * written with it, so it is always absent.
      */
   source_subscription_id?: string;
-  /** On a proration credit, the subscription item whose change produced it. */
+  /**
+     * Not sent by any route in this version: no ledger entry is
+     * written with it, so it is always absent.
+     */
   source_subscription_item_id?: string;
-  /** On a proration credit, when the change that produced it happened. */
+  /**
+     * Not sent by any route in this version: no ledger entry is
+     * written with it, so it is always absent.
+     */
   source_plan_changed_at?: string;
   source_change_type?: ItemChangeType;
-  /** The credit note that granted this credit to the balance. */
+  /**
+     * Recorded on credit that a credit note gave back, but not sent by
+     * any route in this version: the ledger list does not return it,
+     * and the grant and adjust routes never write it. Such an entry
+     * names the invoice in `invoice_id`.
+     */
   source_credit_note_id?: string;
-  /** The voided invoice whose applied credit this entry gave back. */
+  /**
+     * Recorded on credit that a voided invoice gave back, but not sent
+     * by any route in this version: the ledger list does not return
+     * it, and the grant and adjust routes never write it. Such an
+     * entry names the invoice in `invoice_id`.
+     */
   source_invoice_reversal_id?: string;
 }

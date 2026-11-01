@@ -12,7 +12,12 @@
  */
 
 /**
- * `team_id` and `request_tags` become event dimensions;
- * `usage_object` is read for token counts; other keys are ignored.
+ * `team_id` and `request_tags` become event dimensions (a list of
+ * tags becomes one sorted, comma-separated string);
+ * `usage_object` is read for token counts; `user_api_key_end_user_id`
+ * names the customer when `user` and `end_user` are empty; a
+ * `user_api_key_request_route` of `/vertex_ai/live` on a
+ * `pass_through_endpoint` record marks Vertex AI Live audio, which
+ * is skipped. Other keys do not change billing.
  */
 export type LitellmSpendLogMetadata = { [key: string]: unknown };

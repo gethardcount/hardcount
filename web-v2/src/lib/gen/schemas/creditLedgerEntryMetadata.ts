@@ -13,6 +13,9 @@
 
 /**
  * Facts Hardcount records on the entry, such as which grants a
- * draw took its credit from. Absent when empty.
+ * draw or a deduction took its credit from (`drained_blocks`).
+ * Absent when empty, and on the answer of
+ * `POST /v1/credits/adjust`, which does not return it; the ledger
+ * list does.
  */
 export type CreditLedgerEntryMetadata = { [key: string]: unknown };

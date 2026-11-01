@@ -19,7 +19,10 @@ export type CreateMeterBody = {
      * Unique in the account and mode.
      */
   event_name: string;
-  /** The display name, at most 255 characters. */
+  /**
+     * The display name. Spaces at the ends are trimmed; then at
+     * most 255 bytes (UTF-8).
+     */
   name: string;
   /**
      * The unit of the quantity, such as `tokens` or `seconds`.

@@ -14,7 +14,7 @@
 export type CreditGrantsRemainingByCurrencyItem = {
   /** The currency, uppercase. */
   currency: string;
-  /** Remaining credit the customer paid for (`commit`), in the currency's minor unit. */
+  /** Remaining prepaid commit credit (`commit`), granted by finalized commit invoices, in the currency's minor unit. */
   commit_remaining_cents: number;
   /** Remaining free credit (`promotional`), in the currency's minor unit. */
   promotional_remaining_cents: number;

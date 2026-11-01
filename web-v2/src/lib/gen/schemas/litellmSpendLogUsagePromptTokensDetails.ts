@@ -30,8 +30,10 @@ export type LitellmSpendLogUsagePromptTokensDetails = {
   /**
      * Anthropic's cache writes by cache lifetime. They become
      * `cache_write_5m` and `cache_write_1h` events, taken out
-     * of `input`. Without this split, or when it does not add
-     * up to the cache-write count, the writes stay in `input`.
+     * of `input`. Without this split, when it does not add up
+     * to the cache-write count, or when the writes do not fit
+     * in `prompt_tokens` less the cache reads, the writes stay
+     * in `input`.
      */
   cache_creation_token_details?: LitellmSpendLogUsagePromptTokensDetailsCacheCreationTokenDetails;
 };

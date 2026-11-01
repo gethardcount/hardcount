@@ -20,13 +20,19 @@ import type { AnalyticsPeriod } from './analyticsPeriod';
  * "The window" is the requested period, ending now. "The previous
  * window" is the one of equal length before it. Money is in the minor
  * unit of `currency` (cents for USD). Rates are fractions, so 0.05
- * means 5%.
+ * means 5%. Customers, subscriptions and invoices on test clocks are
+ * left out of every figure.
  */
 export interface AnalyticsOverview {
   period: AnalyticsPeriod;
   /** The account's default currency (USD when none is set). Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own. */
   currency: string;
-  /** MRR of active subscriptions now. */
+  /**
+     * MRR now, from plan base fees only (base amount times quantity,
+     * yearly plans divided by 12) on `active` subscriptions with plans
+     * in `currency`. Trialing subscriptions and usage charges are not
+     * counted.
+     */
   mrr: number;
   /** MRR at the start of the window, rebuilt from item change history. */
   mrr_prev: number;
@@ -69,7 +75,7 @@ export interface AnalyticsOverview {
   active_subscriptions: number;
   /** Subscriptions with status `trialing`. */
   trialing_subscriptions: number;
-  /** Invoices paid in the window. */
+  /** Invoices in `currency` paid in the window. */
   paid_invoices: number;
   /** Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies. */
   failed_payments: number;
@@ -80,9 +86,10 @@ export interface AnalyticsOverview {
   /** Dunning runs (automatic payment retries) still in progress. */
   dunning_active: number;
   /**
-     * Issued credit notes whose refund failed, has an unknown result,
-     * has been pending for more than 72 hours, or has not started an
-     * hour after issue.
+     * Issued credit notes whose refund failed or has an unknown
+     * result, has stayed pending for 72 hours since the note last
+     * changed, or owes a refund that has not started an hour after the
+     * note last changed. Test-clock credit notes are not counted.
      */
   refunds_needing_attention: number;
   /** Usage events with a timestamp in the window. */

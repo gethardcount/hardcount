@@ -55,7 +55,10 @@ export interface StripeConnection {
   verified_at?: string;
   /**
      * Why the last Stripe check failed, in Stripe's own words (or the
-     * network error when Stripe was not reached). Absent when it passed.
+     * network error when Stripe was not reached). Also set when Stripe
+     * refuses the key on a charge (401, or 403 for a restricted key);
+     * the next charge that goes through clears that. Absent when the
+     * check passed.
      */
   last_verified_error?: string;
   /**

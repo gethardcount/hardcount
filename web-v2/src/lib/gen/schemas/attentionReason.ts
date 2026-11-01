@@ -20,23 +20,34 @@
  * - `tax_location_required`: the customer's billing address or tax ID
  *   is missing or not valid for the tax provider. Edit the billing
  *   profile.
- * - `payment_failed`: the card was declined. The decline code is in
- *   `code`.
+ * - `payment_failed`: the last charge failed. `code` is
+ *   `payment.declined` for a decline, `payment.card_refused` when the
+ *   bank refused the card for good, or
+ *   `payment.authentication_required` when the bank wants the customer
+ *   to confirm the payment. Stripe's own message is in
+ *   `provider_response`.
  * - `payment_unconfirmed`: a charge got an unclear answer from Stripe.
  *   Hardcount asks Stripe what happened.
  * - `payment_anomaly`: money does not reconcile: a double charge, a
- *   captured amount that differs from the amount booked, or a payment
- *   on a voided invoice. Shown even on paid and voided invoices.
- * - `payment_processing`: Stripe is still processing a charge. It
- *   settles on its own.
+ *   captured amount that differs from the amount booked, a payment in
+ *   another currency, or a payment on a voided invoice. Shown even on
+ *   paid and voided invoices.
+ * - `payment_processing`: a payment may be in progress. Stripe is
+ *   still processing a charge (it settles on its own), the customer
+ *   has the hosted payment page open (`code` `payment.page_open`), or
+ *   a charge is in progress on a written-off invoice (`code`
+ *   `payment.recovery_processing`).
  * - `payment_scheduled`: the invoice is queued, and the automatic
  *   charge collects it on its next run.
  * - `awaiting_payment`: the invoice is unpaid and not queued for an
  *   automatic charge. Only invoices written by older releases reach
  *   this state.
- * - `no_payment_method`: the customer has no card on file. The invoice
- *   stays queued, and the automatic charge collects it on its first
- *   run after a card is added.
+ * - `no_payment_method`: the customer has no card ready to charge. The
+ *   invoice stays queued, and the automatic charge collects it on its
+ *   first run after a card is added, unless collection is paused on
+ *   the subscription. When Stripe is not connected for the invoice's
+ *   mode, no card can be added online and the invoice is emailed
+ *   instead. `message` says which applies.
  * - `dunning_exhausted`: the customer still has no card and automatic
  *   recovery has ended without collecting; the policy's final action
  *   ran. If that action paused collection on the subscription, resume
@@ -48,9 +59,10 @@
  *   retrying it through the pause, and `message` then says so. With no
  *   open run it is not charged automatically until collection
  *   resumes.
- * - `commit_exposure`: the invoice funded a prepaid commit whose
- *   credit is already spendable, and the invoice is unpaid. Prepaid
- *   credit is granted when the invoice is issued, not when it is paid.
+ * - `commit_exposure`: the invoice funded a prepaid commit and is
+ *   unpaid, and the customer can already spend that credit or has
+ *   spent it. Prepaid credit is granted when the invoice is issued,
+ *   not when it is paid.
  *   This reason is returned only when no other reason applies. When
  *   one does, the exposure is folded into that reason's `message` and
  *   `actions` instead, so do not treat this code as the only sign of
@@ -58,7 +70,8 @@
  * - `dispute_lost`: the customer disputed a payment on the invoice with
  *   their bank, and the dispute closed as `lost`, so the bank took the
  *   money back. Hardcount leaves the invoice paid and moves no money;
- *   you record the loss. Shown on paid invoices. On an invoice that
+ *   you record the loss. Shown even on paid invoices, which is where
+ *   disputes land. On an invoice that
  *   bought prepaid credit, the message also says how much of the
  *   credit is still spendable and names commit relief, because an
  *   ordinary credit note is refused there. When the invoice also has
@@ -69,13 +82,16 @@
  *   in Stripe outside Hardcount, and Hardcount did not record it as a
  *   credit note: the invoice was not paid yet, the currency differs,
  *   the invoice bought prepaid credit, Hardcount first saw the refund
- *   more than a day after it was made, or the refund is more than the
- *   invoice had left to refund or credit. `code` is
+ *   more than a day after it was made, a credit note on the invoice
+ *   has a failed card refund this refund may replace, or the refund is
+ *   more than the invoice had left to refund or credit. `code` is
  *   `payment.refunded_in_stripe.` followed by that review reason.
  *   Record it with a credit note that names the refund
- *   (`stripe_refund_id` on `POST /v1/credit-notes`) or dismiss it
+ *   (`stripe_refund_id` on `POST /v1/credit-notes`), attach it to the
+ *   credit note whose refund failed
+ *   (`POST /v1/credit-notes/{id}/attach-stripe-refund`), or dismiss it
  *   (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
- *   Shown on paid invoices.
+ *   Shown even on paid invoices, which is where refunds land.
  * - `amount_below_minimum`: Stripe refused to charge the invoice, or
  *   refused a payment page for it, because the amount is below
  *   Stripe's minimum charge. The minimum depends on the currency the

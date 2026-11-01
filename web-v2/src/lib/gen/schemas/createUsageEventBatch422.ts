@@ -14,8 +14,9 @@ import type { Error } from './error';
 
 export type CreateUsageEventBatch422 = Error & {
   /**
-     * One entry per failing event, `event[i]: reason`,
-     * where `i` is its index in the request.
+     * One entry per event that failed the round that
+     * refused the batch, `event[i]: reason`, where `i`
+     * is its index in the request.
      */
   errors: string[];
   /** Always 0. A rejected batch writes nothing. */

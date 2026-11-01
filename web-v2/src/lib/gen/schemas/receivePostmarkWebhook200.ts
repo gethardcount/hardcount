@@ -21,9 +21,11 @@ export type ReceivePostmarkWebhook200 = {
      */
   status: ReceivePostmarkWebhook200Status;
   /**
-     * Why the record was skipped or ignored, such as
-     * `invalid json`, `no correlation metadata` or
-     * `transient bounce`. Absent when it was processed.
+     * Why the record was skipped or ignored:
+     * `payload too large`, `invalid json`,
+     * `no correlation metadata`, `unknown outbox id`,
+     * `record type not ingested` or `transient bounce`.
+     * Absent when it was processed.
      */
   reason?: string;
 };

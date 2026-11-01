@@ -26,8 +26,9 @@ export interface WebhookEndpoint {
   /**
      * Where Hardcount POSTs each event. It must be `https://` on a
      * public address. Outside production (`APP_ENV` is not
-     * `production`), `http://localhost` and loopback addresses work
-     * too.
+     * `production`), a `localhost` or loopback URL works too, over
+     * `http://` or `https://`. Each delivery checks the address again,
+     * so a host that later points to a private address is not called.
      */
   url: string;
   /** Your note about the endpoint. Absent when empty. */

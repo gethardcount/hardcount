@@ -13,10 +13,10 @@
 
 /**
  * The labels an event must carry for the price to take it.
- * Values are strings of 1 to 100 characters, keys too; at
- * most 16 labels. Omitted or `{}` takes every event of the
- * meter. Two prices of one plan and meter that could both take
- * one event with the same number of labels are refused (409
- * `price_conflict`).
+ * At most 16 labels. Each key and each value is a string of 1
+ * to 100 bytes (UTF-8), and a key may not be only spaces.
+ * Omitted or `{}` takes every event of the meter. Two prices of
+ * one plan and meter that could both take one event with the
+ * same number of labels are refused (409 `price_conflict`).
  */
 export type PriceInputDimensionMatch = {[key: string]: string};

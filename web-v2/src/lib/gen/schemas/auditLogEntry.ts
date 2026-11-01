@@ -51,7 +51,11 @@ export interface AuditLogEntry {
      * email. Absent when there is none.
      */
   resource_label?: string;
-  /** Action details. A settings change lists each changed field with `from` and `to`. Absent when the action has none. */
+  /**
+     * Action details. A settings change has `changed`, which lists
+     * each changed field with `from` and `to`. Absent when the action
+     * has none.
+     */
   metadata?: AuditLogEntryMetadata;
   /** The client address of the request that made the change. Absent for work with no request. */
   ip_address?: string;

@@ -26,8 +26,8 @@ export interface CustomerUsageMeter {
   /** The meter's unit, such as `tokens`. */
   unit: string;
   /**
-     * The currency of the plan whose prices took the usage. Empty when
-     * no usage was priced.
+     * The currency of the plan whose rows `prices` shows. Empty (`""`)
+     * when `prices` is empty.
      */
   currency: string;
   /**

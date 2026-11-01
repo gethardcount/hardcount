@@ -30,13 +30,22 @@ export interface SentEmail {
      * (`dunning_escalation`), or a credit note.
      */
   email_type: SentEmailEmailType;
-  /** The address the email was sent to. */
+  /**
+     * The address the email was sent to: its To address. CC copies
+     * are not listed.
+     */
   recipient: string;
   /**
-     * Hardcount's send state. `pending`: queued. `dispatched`: the
-     * mail server accepted it. `failed`: it could not be sent.
-     * `skipped`: Hardcount did not send it, because the invoice was
-     * already paid, voided or uncollectible, or no longer exists.
+     * Hardcount's send state. `pending`: queued, or waiting to retry
+     * after a failed attempt. `dispatched`: the mail server accepted
+     * it. `failed`: it could not be sent, and Hardcount stopped
+     * trying.
+     * `skipped`: Hardcount did not send it because its invoice was
+     * paid, voided or marked uncollectible while it waited. Only the
+     * payment requests are skipped (failed payment notice, payment
+     * reminder, final notice, payment setup request); a final notice
+     * or payment setup request still goes out for an uncollectible
+     * invoice.
      */
   status: SentEmailStatus;
   /**
@@ -46,7 +55,11 @@ export interface SentEmail {
   delivery_state: SentEmailDeliveryState;
   /** The number of the invoice the email is about. */
   invoice_number?: string;
-  /** Why the last send attempt failed. Absent when no attempt failed. */
+  /**
+     * Why the last send attempt failed, or, on a `skipped` email, why
+     * it was not sent. Cleared when the email is dispatched. Absent
+     * when there is none.
+     */
   last_error?: string;
   /** When the email was queued. */
   created_at: string;
@@ -56,10 +69,11 @@ export interface SentEmail {
      * The email in the words of the activity line standard, the same
      * as on the invoice's payment timeline: its name and what
      * happened to it ("Receipt email delivered"), why it was not
-     * sent, the invoice it was about, and who it went to. Dated at the
-     * time on the customer's test clock that caused it, with the real
-     * send time as `recorded_at`. Present for every email type this
-     * list returns.
+     * sent, the invoice it was about, and who it went to. Dated when
+     * the mail server took it, or when it was queued if it was not
+     * sent. For an email caused on a test clock, it is dated at the
+     * clock time instead, with the real send time as `recorded_at`.
+     * Present for every email type this list returns.
      */
   line?: ActivityLine;
 }

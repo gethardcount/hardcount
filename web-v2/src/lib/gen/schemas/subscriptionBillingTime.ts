@@ -12,13 +12,17 @@
  */
 
 /**
- * How monthly periods line up. `calendar`: every period ends on
- * the 1st of a month, in your account's billing time zone, so the
- * first period runs from the start day to the next 1st.
- * `anniversary`: each period starts on the day of the month the
- * subscription started (the last day of a shorter month). A plan
- * billed yearly always bills from its start date, whatever this
- * says.
+ * How monthly periods line up. The first period starts on the day
+ * the subscription starts to bill: the day it is created or
+ * activated, or, with a trial, the day the trial ends.
+ * `calendar`: every period ends on the 1st of a month, in your
+ * account's billing time zone, so the first period runs from that
+ * day to the next 1st. `anniversary`: each period starts on the
+ * same day of the month as the first one (the last day of a
+ * shorter month). A plan billed yearly always bills a year from
+ * that first day, whatever this says. An immediate change to a
+ * plan with another billing interval starts a new first period at
+ * the change.
  */
 export type SubscriptionBillingTime = typeof SubscriptionBillingTime[keyof typeof SubscriptionBillingTime];
 

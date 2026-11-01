@@ -19,7 +19,11 @@ export type GetPublicCostDashboard200UsageItem = {
   meter_name: string;
   /** The meter's unit, such as `tokens`. */
   unit: string;
-  /** The currency of the plan whose prices took the usage. */
+  /**
+     * The currency of the plan that priced the meter's
+     * usage. Empty (`""`) when the meter has no usage
+     * this period.
+     */
   currency: string;
   /** The usage the prices took this period, as a decimal string. */
   total_quantity: string;

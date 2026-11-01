@@ -26,9 +26,16 @@ export interface InvoicePreview {
   subscription_id: string;
   /** The names of the subscription's plans, comma-separated. */
   plan_name: string;
-  /** Start of the window the preview covers (included). */
+  /**
+     * Start of the period the invoice would bill (included): the
+     * previewed window, or, when a plan on the subscription bills its
+     * fee in advance, the period after it, as on the real invoice.
+     */
   billing_period_start: string;
-  /** End of the window the preview covers (not included). */
+  /**
+     * End of the period the invoice would bill (not included). Shifts
+     * with `billing_period_start` when a fee is billed in advance.
+     */
   billing_period_end: string;
   /** The lines the invoice would have. An empty list when nothing would be billed. */
   lines: InvoicePreviewLine[];
@@ -36,6 +43,6 @@ export interface InvoicePreview {
   totals: InvoicePreviewTotal[];
   /** Ways the real invoice can differ from this preview, in plain words. An empty list when there are none. */
   warnings: string[];
-  /** When the preview was built. For a customer on a test clock, the clock's time. */
+  /** When the preview was built. */
   generated_at: string;
 }

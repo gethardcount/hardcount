@@ -29,7 +29,7 @@ export interface LitellmSpendResult {
      * `POST /v1/usage-events/held/release`.
      */
   held: number;
-  /** Records that bill nothing - a call type with no tokens, zero tokens, a failed call (`status` `failure`) or a LiteLLM response-cache hit. */
+  /** Records that bill nothing - a call type Hardcount does not bill (even when it carries tokens), no token counts, a failed call (`status` `failure`) or a LiteLLM response-cache hit. */
   skipped: number;
   /** The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0. */
   cache_hits: number;

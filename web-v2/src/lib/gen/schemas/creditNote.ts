@@ -96,11 +96,12 @@ export interface CreditNote {
   voided_at?: string;
   /**
      * The refund part's state at Stripe. `none`: no refund was sent
-     * (no refund part, or the note is not issued yet). `pending`:
-     * Stripe has not finished it. `succeeded` and `failed`: Stripe's
-     * answer. `unknown`: Stripe gave no
-     * clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
-     * a 429), so the customer may already be refunded. Don't refund it
+     * (no refund part, or the note is not issued yet); an issued note
+     * with a refund part stays `none` only when its refund's result
+     * was not recorded. `pending`: Stripe has not finished it.
+     * `succeeded` and `failed`: Stripe's answer. `unknown`: Stripe gave
+     * no clear answer (a timeout, a network error, a Stripe 5xx, a 409
+     * or a 429), so the customer may already be refunded. Don't refund it
      * again in the Stripe Dashboard. Retry it with
      * `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
      * refund at Stripe first and then resends the same request with
@@ -111,9 +112,10 @@ export interface CreditNote {
   stripe_refund_id?: string;
   /**
      * True when the card refund is a refund made in Stripe outside
-     * Hardcount: recorded from Stripe's refund webhook, or linked with
-     * `stripe_refund_id` at create. Hardcount made no refund call for
-     * it; `stripe_refund_id` names the refund.
+     * Hardcount: recorded from Stripe's refund webhook, linked with
+     * `stripe_refund_id` at create, or attached with
+     * `POST /v1/credit-notes/{id}/attach-stripe-refund`. Hardcount made
+     * no refund call for it; `stripe_refund_id` names the refund.
      */
   recorded_from_stripe: boolean;
   bill_to_snapshot?: DocumentBillTo;

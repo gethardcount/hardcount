@@ -16,6 +16,10 @@
  * the whole window, in the minor unit of the account's default
  * currency (cents for USD). `churned` and `contraction` are positive
  * amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
+ * Expansion and contraction count only subscriptions that were active
+ * for the whole window: a subscription activated or canceled inside
+ * it counts only in `new` or `churned`. Test-clock subscriptions are
+ * left out.
  */
 export interface AnalyticsMrrMovementTotals {
   /** MRR of subscriptions activated in the window, in the currency's minor unit. */

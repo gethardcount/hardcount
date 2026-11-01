@@ -16,7 +16,9 @@ import type { PriceShape } from './priceShape';
 /**
  * One price to add to a plan: the body of
  * `POST /v1/plans/{id}/prices`, and one entry of `prices` on
- * `POST /v1/plans`. The meter and labels, then the shape.
+ * `POST /v1/plans`. The meter and labels, then the shape. On
+ * `POST /v1/plans`, a refused field of a price is named with
+ * `prices[i].` first, such as `prices[0].meter_id`.
  */
 export type PriceInput = PriceShape & {
   /**
@@ -26,11 +28,11 @@ export type PriceInput = PriceShape & {
   meter_id: string;
   /**
      * The labels an event must carry for the price to take it.
-     * Values are strings of 1 to 100 characters, keys too; at
-     * most 16 labels. Omitted or `{}` takes every event of the
-     * meter. Two prices of one plan and meter that could both take
-     * one event with the same number of labels are refused (409
-     * `price_conflict`).
+     * At most 16 labels. Each key and each value is a string of 1
+     * to 100 bytes (UTF-8), and a key may not be only spaces.
+     * Omitted or `{}` takes every event of the meter. Two prices of
+     * one plan and meter that could both take one event with the
+     * same number of labels are refused (409 `price_conflict`).
      */
   dimension_match?: PriceInputDimensionMatch;
 };

@@ -31,11 +31,15 @@ export interface Customer {
   id: string;
   /**
      * Your own ID for the customer, such as the account ID in your
-     * app. Unique in the account and mode, at most 255 characters,
-     * and fixed after create.
+     * app. Unique in the account and mode, and fixed after create.
+     * Create refuses one longer than 255 bytes (UTF-8).
      */
   external_id: string;
-  /** The name shown on invoices, emails and the dashboard. At most 255 characters. */
+  /**
+     * The name shown on invoices, emails and the dashboard. Create
+     * refuses one longer than 255 bytes (UTF-8); an update does not
+     * check the length.
+     */
   display_name: string;
   /**
      * Where billing emails go: invoices, receipts, payment reminders
@@ -44,11 +48,12 @@ export interface Customer {
   email?: string;
   /**
      * Addresses copied (CC) on billing documents and billing emails:
-     * invoice, receipt, payment reminder, failed payment and credit
-     * note. Never on emails that carry a link to act on the account,
-     * such as a payment-method link. Lowercase bare addresses, no
-     * duplicates, at most 10, never the primary `email`. Absent when
-     * the list is empty.
+     * invoice, receipt, payment reminder, final notice, failed payment
+     * and credit note. Never on the payment setup emails, whose link
+     * lets the reader add a card. Lowercase bare addresses, no
+     * duplicates, never the primary `email`. At most 10: a create or
+     * update with more is refused with 422. Absent when the list is
+     * empty.
      * @maxItems 10
      */
   additional_emails?: string[];
@@ -76,11 +81,15 @@ export interface Customer {
      * does not set `ok` today.
      */
   email_status?: CustomerEmailStatus;
-  /** When the last bounce or spam report was recorded. Absent until one is. */
+  /**
+     * When the last bounce or spam report was recorded. Absent until
+     * one is, and again after `email` changes.
+     */
   email_last_bounced_at?: string;
   /**
      * The reason the email provider gave with the last bounce or spam
-     * report. Absent until one is recorded.
+     * report. Absent until one is recorded, when the report gave no
+     * reason, and again after `email` changes.
      */
   email_bounce_reason?: string;
   /**
@@ -90,9 +99,11 @@ export interface Customer {
      */
   dunning_policy_id?: string;
   /**
-     * The Stripe customer linked to this customer. Absent until the
-     * first payment-method action, such as a payment-method link,
-     * creates it.
+     * The Stripe customer linked to this customer. Absent until
+     * Hardcount first creates it: when you create a payment-method
+     * link (setup session or setup email), or when the customer opens
+     * Stripe Checkout from a payment-update link or the hosted invoice
+     * page. Set once, never replaced.
      */
   stripe_customer_id?: string;
   /**

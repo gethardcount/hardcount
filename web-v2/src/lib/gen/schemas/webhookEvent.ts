@@ -40,6 +40,10 @@ export interface WebhookEvent {
   payload: WebhookEventPayload;
   /** When the event was created. */
   created_at: string;
-  /** Set on a replay. The event the replay was made from. Absent on an original event. */
+  /**
+     * Set on a replay. The original event it copies; a replay of a
+     * replay points to that same original. Absent on an original
+     * event.
+     */
   replay_of_event_id?: string;
 }

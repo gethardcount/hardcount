@@ -63,11 +63,11 @@ export interface MarginReport {
      */
   unattributed_revenue_cents: number;
   /**
-     * Usage events in the window that carry `provider`, `model` and
-     * `token_type` labels but have no cost: no rate matched (add a
-     * rate to cost new events), or the cost, quantity ×
-     * `unit_cost_cents`, was too large to record (about $9.2 trillion
-     * or more, either sign).
+     * Usage events in the window that carry `provider` and
+     * `token_type` labels and a `model` or `model_raw` label, but have
+     * no cost: no rate matched (add a rate to cost new events), or the
+     * cost, quantity × `unit_cost_cents`, was too large to record
+     * (about $9.2 trillion or more, either sign).
      */
   unresolved_events: number;
   /**

@@ -12,10 +12,16 @@
  */
 
 /**
- * Hardcount's send state. `pending`: queued. `dispatched`: the
- * mail server accepted it. `failed`: it could not be sent.
- * `skipped`: Hardcount did not send it, because the invoice was
- * already paid, voided or uncollectible, or no longer exists.
+ * Hardcount's send state. `pending`: queued, or waiting to retry
+ * after a failed attempt. `dispatched`: the mail server accepted
+ * it. `failed`: it could not be sent, and Hardcount stopped
+ * trying.
+ * `skipped`: Hardcount did not send it because its invoice was
+ * paid, voided or marked uncollectible while it waited. Only the
+ * payment requests are skipped (failed payment notice, payment
+ * reminder, final notice, payment setup request); a final notice
+ * or payment setup request still goes out for an uncollectible
+ * invoice.
  */
 export type SentEmailStatus = typeof SentEmailStatus[keyof typeof SentEmailStatus];
 

@@ -37,7 +37,11 @@ export interface TestClock {
   created_at: string;
   /** When the clock last changed, in real time. */
   updated_at: string;
-  /** Why the last advance failed. Cleared by the next successful advance. */
+  /**
+     * Why the last advance failed, for a clock in `internal_failure`.
+     * Cleared when you retry the advance, and by the next advance
+     * that succeeds. Absent when there is none.
+     */
   last_failure_reason?: string;
   last_advance_summary?: TestClockAdvanceSummary;
 }

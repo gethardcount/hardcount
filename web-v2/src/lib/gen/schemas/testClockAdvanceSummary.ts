@@ -19,14 +19,19 @@
 export interface TestClockAdvanceSummary {
   /**
      * The clock's time before the advance. After a retried advance it
-     * equals `advanced_to`.
+     * equals `advanced_to`. When the server restarted during the
+     * advance and resumed it, it is `0001-01-01T00:00:00Z`.
      */
   advanced_from: string;
   /** The clock's time after the advance. */
   advanced_to: string;
   /** Period invoices the advance created. */
   invoices_generated: number;
-  /** Subscriptions whose trial ended in the span and that became `active`. */
+  /**
+     * Subscriptions whose trial ended by the clock's new time: those
+     * that became `active`, and those a cancel scheduled for the trial
+     * end canceled with no charge.
+     */
   trials_activated: number;
   /** Collection pauses whose `resumes_at` passed in the span and that were lifted. */
   pauses_resumed: number;

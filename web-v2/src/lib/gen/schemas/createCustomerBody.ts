@@ -14,13 +14,14 @@
 export type CreateCustomerBody = {
   /**
      * Your own ID for the customer, such as the account ID in
-     * your app. At most 255 characters after spaces at the ends
-     * are trimmed. Unique in the account and mode.
+     * your app. Spaces at the ends are trimmed; then at most
+     * 255 bytes (UTF-8). Unique in the account and mode.
      */
   external_id: string;
   /**
-     * The name shown on invoices, emails and the dashboard. At
-     * most 255 characters.
+     * The name shown on invoices, emails and the dashboard.
+     * Spaces at the ends are trimmed; then at most 255 bytes
+     * (UTF-8).
      */
   display_name: string;
   /**
@@ -30,9 +31,10 @@ export type CreateCustomerBody = {
      */
   email?: string;
   /**
-     * Addresses to copy on billing emails, at most 10. Each is
-     * checked like `email`, lowercased and deduplicated. None
-     * may equal `email`.
+     * Addresses to copy on billing emails. Each is checked
+     * like `email`, lowercased and deduplicated. None may equal
+     * `email`. More than 10 after deduplication is refused with
+     * 422.
      * @maxItems 10
      */
   additional_emails?: string[];

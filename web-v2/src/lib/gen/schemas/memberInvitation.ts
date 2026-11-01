@@ -41,6 +41,9 @@ export interface MemberInvitation {
   created_at: string;
   /** When the invitee accepted. Absent until then. */
   accepted_at?: string;
-  /** When a member revoked the invitation. Absent unless it was revoked. */
+  /**
+     * When the invitation was revoked, by a member or because its
+     * email could not be queued. Absent unless it was revoked.
+     */
   revoked_at?: string;
 }

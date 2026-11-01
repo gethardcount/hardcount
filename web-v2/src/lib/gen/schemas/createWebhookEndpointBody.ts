@@ -12,7 +12,11 @@
  */
 
 export type CreateWebhookEndpointBody = {
-  /** Where to send events. Surrounding spaces are trimmed. */
+  /**
+     * Where to send events, an `https://` URL on a public
+     * address (a loopback URL outside production may use
+     * `http://`). Surrounding spaces are trimmed.
+     */
   url: string;
   /** Your note about the endpoint, such as what it feeds. */
   description?: string;

@@ -14,7 +14,11 @@ import type { UpdatePlanBodyBaseBillTiming } from './updatePlanBodyBaseBillTimin
 import type { UpdatePlanBodyStatus } from './updatePlanBodyStatus';
 
 export type UpdatePlanBody = {
-  /** Whitespace is trimmed. Empty or omitted keeps the current name. */
+  /**
+     * Whitespace is trimmed. Empty or omitted keeps the current
+     * name. Unlike create, the update does not check its
+     * length.
+     */
   name?: string;
   /**
      * Whitespace is trimmed. Omit to keep the current
@@ -34,9 +38,9 @@ export type UpdatePlanBody = {
      */
   status?: UpdatePlanBodyStatus;
   /**
-     * Stripe product tax code. Omit to keep the current code; an
-     * empty string clears it, and the base fee then uses the
-     * account's `default_product_tax_code`.
+     * A Stripe product tax code, `txcd_` and 8 digits. Omit to
+     * keep the current code; an empty string clears it. See
+     * `tax_code` on Plan for which invoice lines carry it.
      */
   tax_code?: string;
 };

@@ -14,15 +14,18 @@
 /**
  * The provider's own cost, in dollars. When present, each event's
  * provider cost comes from its part (input, output, cache read or
- * cache write) instead of the provider-costs table. A part that is
- * missing or negative falls back to the table. `input_cost`
- * includes cache reads and cache writes, so the input event gets
- * `input_cost` minus `cache_read_cost` and `cache_creation_cost`.
- * If there were cache reads but no `cache_read_cost`, or split-off
- * cache writes but no `cache_creation_cost`, the input-side events
- * use the provider-costs table. With 1-hour cache writes they
- * always do: LiteLLM prices `cache_creation_cost` at the 5-minute
- * rate.
+ * cache write) instead of the provider-costs table. A negative
+ * part falls back to the table. A missing `input_cost` or
+ * `output_cost` reads as 0 and is recorded as a cost of 0; a
+ * missing `cache_read_cost` or `cache_creation_cost` means
+ * unknown. `input_cost` includes cache reads and cache writes, so
+ * the input event gets `input_cost` minus `cache_read_cost` and
+ * `cache_creation_cost`. If there were cache reads but no
+ * `cache_read_cost`, the input and cache-read events use the
+ * provider-costs table; if there were split-off cache writes but
+ * no `cache_creation_cost`, the input and cache-write events do.
+ * With 1-hour cache writes the input and cache-write events always
+ * do: LiteLLM prices `cache_creation_cost` at the 5-minute rate.
  */
 export type LitellmSpendLogCostBreakdown = {
   /** The cost of the whole prompt, in dollars, cache reads and writes included. */

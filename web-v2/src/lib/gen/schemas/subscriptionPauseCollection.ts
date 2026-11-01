@@ -16,7 +16,9 @@ import type { SubscriptionPauseCollectionSetBy } from './subscriptionPauseCollec
 /**
  * Present on a subscription while collection is paused. New invoices
  * are still created, but stay drafts and are not charged. Absent when
- * collection runs normally.
+ * collection runs normally. A cancel leaves it in place: it still
+ * holds the subscription's unpaid invoices, and
+ * `DELETE /v1/subscriptions/{id}/pause-collection` releases them.
  */
 export interface SubscriptionPauseCollection {
   /**

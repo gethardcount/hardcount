@@ -18,9 +18,9 @@ import type { AuditLogFiltersTestClocksItem } from './auditLogFiltersTestClocksI
  * caller's mode count.
  */
 export interface AuditLogFilters {
-  /** Every `action` value recorded in this mode. */
+  /** Every `action` value recorded in this mode, sorted A to Z, at most 500. */
   actions: string[];
-  /** Every `resource_type` value recorded in this mode. */
+  /** Every `resource_type` value recorded in this mode, sorted A to Z, at most 500. */
   resource_types: string[];
   /** Test clocks seen in the log, most recent activity first, at most 100. Deleted clocks are included. */
   test_clocks: AuditLogFiltersTestClocksItem[];

@@ -14,6 +14,8 @@ import type { Error } from './error';
 
 /**
  * No valid credential: the API key or session is missing, wrong,
- * expired or revoked.
+ * expired or revoked. With no API key and no valid session cookie, the
+ * message starts with `missing credentials`. A wrong, expired and
+ * revoked key all get the same message, `invalid or expired API key`.
  */
 export type UnauthorizedResponse = Error;

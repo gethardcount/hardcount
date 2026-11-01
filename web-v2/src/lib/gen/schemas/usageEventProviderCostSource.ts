@@ -13,9 +13,11 @@
 
 /**
  * Where `provider_cost_cents` came from: `table` (your provider
- * cost rates), `observed` (the cost the sender reported), or
- * `not_applicable` (the meter has no costed dimensions). Absent when
- * the cost is unknown.
+ * cost rates), `observed` (the cost LiteLLM reported for the
+ * call), or `not_applicable`: the event lacks a `provider` or
+ * `token_type` dimension, or has neither `model` nor `model_raw`,
+ * so no rate can apply. Absent when the event has those
+ * dimensions but no rate matched.
  */
 export type UsageEventProviderCostSource = typeof UsageEventProviderCostSource[keyof typeof UsageEventProviderCostSource];
 

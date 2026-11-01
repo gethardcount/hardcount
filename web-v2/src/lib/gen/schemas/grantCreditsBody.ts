@@ -29,7 +29,9 @@ export type GrantCreditsBody = {
   /**
      * What the credit is for, shown on the ledger entry.
      * Required: a grant without one, or with a blank one, is
-     * refused with 422. At most 500 characters.
+     * refused with 422. At most 500 bytes after surrounding
+     * spaces are trimmed (fewer characters when it has
+     * non-ASCII letters).
      */
   description?: string;
   /**

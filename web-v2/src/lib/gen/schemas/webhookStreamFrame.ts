@@ -27,9 +27,11 @@ export interface WebhookStreamFrame {
      */
   customer_id: string;
   /**
-     * Delivery state. Live frames send `pending`, `succeeded` or
-     * `failed`. Frames in the first batch send `pending`, `failed`,
-     * `delivered` (all deliveries succeeded) or `no_endpoints`.
+     * Delivery state. Live frames send `pending` (a new event or
+     * replay), `succeeded` (one delivery got a 2xx answer) or `failed`
+     * (one delivery failed for good). Frames in the first batch send
+     * the event's roll-up over all its deliveries: `pending`, `failed`,
+     * `delivered` (every delivery succeeded) or `no_endpoints`.
      */
   status: string;
   /**

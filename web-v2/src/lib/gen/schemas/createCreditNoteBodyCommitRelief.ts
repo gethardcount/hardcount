@@ -21,7 +21,10 @@
 export type CreateCreditNoteBodyCommitRelief = {
   /** Optional. Defaults to the top-level invoice_id. */
   invoice_id?: string;
-  /** Optional. Defaults to the top-level reason. */
+  /**
+     * Optional. Wins over the top-level `reason`. When both
+     * are empty, the note's reason is `commit_relief`.
+     */
   reason?: string;
   /** Commit credits to retire, from 1 to what is left of the commit. */
   retire_cents?: number;

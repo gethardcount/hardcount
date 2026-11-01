@@ -12,7 +12,8 @@
  */
 
 /**
- * Rows to skip, 0 or more. Default 0. A negative value, or one that is
- * not a whole number, is a 422 with `param: offset`.
+ * Rows to skip, 0 or more. Default 0. A negative value, one that is
+ * not a whole number, or `offset` sent twice is a 422 with
+ * `param: offset`.
  */
 export type OffsetParameter = number;

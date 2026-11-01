@@ -13,10 +13,11 @@
 import type { Error } from './error';
 
 /**
- * The body is not one valid JSON value, it is empty where the
- * operation needs one, or a field has the wrong JSON type (such as a
- * string where a number belongs). On a route that takes
- * `Idempotency-Key`, a 400 is kept for the key: send the corrected
- * request with a new key.
+ * The body is not one valid JSON value, it is not a JSON object, it
+ * is empty where the operation needs one, or a field has the wrong
+ * JSON type (such as a string where a number belongs). A body over
+ * 1 MB gets 400 too, unless the operation lists a 413. On a route
+ * that takes `Idempotency-Key`, a 400 is kept for the key: send the
+ * corrected request with a new key.
  */
 export type InvalidBodyResponse = Error;

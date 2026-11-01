@@ -12,7 +12,11 @@
  */
 
 /**
- * How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
+ * How the event arrived. `api`: `POST /v1/usage-events`, the batch
+ * route or the LiteLLM integration. `backfill`:
+ * `POST /v1/usage-events/backfill`, or released held usage.
+ * Absent on the rows of `GET /v1/usage-events`, which does not
+ * return it.
  */
 export type UsageEventOrigin = typeof UsageEventOrigin[keyof typeof UsageEventOrigin];
 

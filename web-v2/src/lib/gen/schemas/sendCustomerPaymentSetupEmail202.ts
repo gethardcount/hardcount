@@ -12,7 +12,7 @@
  */
 
 export type SendCustomerPaymentSetupEmail202 = {
-  /** The address the email was sent to. */
+  /** The customer's email address, which the email was queued for. */
   to: string;
   /** The email's subject. */
   subject: string;

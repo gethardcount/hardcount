@@ -67,15 +67,18 @@ export interface LitellmSpendLog {
   /**
      * The provider's own cost, in dollars. When present, each event's
      * provider cost comes from its part (input, output, cache read or
-     * cache write) instead of the provider-costs table. A part that is
-     * missing or negative falls back to the table. `input_cost`
-     * includes cache reads and cache writes, so the input event gets
-     * `input_cost` minus `cache_read_cost` and `cache_creation_cost`.
-     * If there were cache reads but no `cache_read_cost`, or split-off
-     * cache writes but no `cache_creation_cost`, the input-side events
-     * use the provider-costs table. With 1-hour cache writes they
-     * always do: LiteLLM prices `cache_creation_cost` at the 5-minute
-     * rate.
+     * cache write) instead of the provider-costs table. A negative
+     * part falls back to the table. A missing `input_cost` or
+     * `output_cost` reads as 0 and is recorded as a cost of 0; a
+     * missing `cache_read_cost` or `cache_creation_cost` means
+     * unknown. `input_cost` includes cache reads and cache writes, so
+     * the input event gets `input_cost` minus `cache_read_cost` and
+     * `cache_creation_cost`. If there were cache reads but no
+     * `cache_read_cost`, the input and cache-read events use the
+     * provider-costs table; if there were split-off cache writes but
+     * no `cache_creation_cost`, the input and cache-write events do.
+     * With 1-hour cache writes the input and cache-write events always
+     * do: LiteLLM prices `cache_creation_cost` at the 5-minute rate.
      */
   cost_breakdown?: LitellmSpendLogCostBreakdown;
   /** Unix seconds. Event time when `endTime` is absent. */
@@ -83,8 +86,13 @@ export interface LitellmSpendLog {
   /** Unix seconds. The event time. With neither, the customer's current time is used. */
   endTime?: number;
   /**
-     * `team_id` and `request_tags` become event dimensions;
-     * `usage_object` is read for token counts; other keys are ignored.
+     * `team_id` and `request_tags` become event dimensions (a list of
+     * tags becomes one sorted, comma-separated string);
+     * `usage_object` is read for token counts; `user_api_key_end_user_id`
+     * names the customer when `user` and `end_user` are empty; a
+     * `user_api_key_request_route` of `/vertex_ai/live` on a
+     * `pass_through_endpoint` record marks Vertex AI Live audio, which
+     * is skipped. Other keys do not change billing.
      */
   metadata?: LitellmSpendLogMetadata;
 }

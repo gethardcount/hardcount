@@ -15,6 +15,9 @@ import type { Error } from './error';
 /**
  * The credential is valid but may not call this route. A usage-only
  * key (`hc_ingest_…`) can only send usage and call `GET /v1/whoami`;
- * use a secret key.
+ * use a secret key. The `message` names the permission the key
+ * lacks. A browser request that would change data (POST, PUT, PATCH
+ * or DELETE) from a page on another site gets this 403 too, with the
+ * message `cross-site request blocked`.
  */
 export type ForbiddenResponse = Error;

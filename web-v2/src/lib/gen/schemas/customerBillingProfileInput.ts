@@ -32,7 +32,10 @@ export interface CustomerBillingProfileInput {
   state?: string;
   /** Postal code of the billing address, where the country has one. */
   postal_code?: string;
-  /** ISO 3166 alpha-2 code, such as `US` or `IN`. Stored in upper case. */
+  /**
+     * Two letters, an ISO 3166 alpha-2 code such as `US` or `IN`. Only
+     * the format is checked. Stored in upper case.
+     */
   country?: string;
   /**
      * ISO 4217 code, such as `USD`. When set, invoices for this
@@ -60,8 +63,8 @@ export interface CustomerBillingProfileInput {
   tax_id?: string;
   /**
      * The kind of tax ID, as its Stripe code (for example `eu_vat`,
-     * `in_gst`, `au_abn`). `vat`, `gstin` and `abn` are read as those
-     * codes.
+     * `in_gst`, `au_abn`), stored in lower case. `vat`, `gstin`,
+     * `in_gstin` and `abn` are stored as those codes.
      */
   tax_id_type?: string;
 }

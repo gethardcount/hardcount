@@ -16,5 +16,15 @@ import type { Error } from './error';
  * Too many requests. Wait for the number of seconds in `Retry-After`,
  * then retry. The answers that pass the limit carry the
  * `X-RateLimit-*` headers too.
+ *
+ * Each API key has its own limit, by default 1,000 requests a minute
+ * (`HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN`), and 1,000 a second on the
+ * usage routes (`HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC`). The dashboard
+ * sessions of one account share one limit per mode. The routes under
+ * `/v1/auth` and `/v1/bootstrap` (sign-in, password reset, invite
+ * accept, setup) count per client address, by default 100 a minute
+ * (`HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN`). The public invoice,
+ * payment-update and cost-dashboard pages allow 60 a minute per client
+ * address.
  */
 export type RateLimitedResponse = Error;

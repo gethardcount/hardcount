@@ -20,9 +20,11 @@ import type { InvoiceStripeRefundStatus } from './invoiceStripeRefundStatus';
  * recorded from Stripe's `refund.created`, `refund.updated`,
  * `refund.failed` and `charge.refund.updated` webhook events. It holds
  * the refund as the newest of those events showed it. Hardcount's own
- * refunds are never listed here. `outcome` is what Hardcount did when
- * it first saw the refund, and only the operator changes it after
- * that.
+ * refunds are never listed here. `outcome` is what Hardcount did with
+ * the refund: decided when Hardcount first sees it, or, for a refund
+ * first seen in flight (`awaiting`), when a later event shows how it
+ * ended. After that only you change it, by recording a flagged refund
+ * with a credit note or dismissing it.
  */
 export interface InvoiceStripeRefund {
   /** Unique identifier of the refund record, `hc_srf_` and 24 hex characters. */
