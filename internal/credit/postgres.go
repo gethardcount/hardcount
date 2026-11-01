@@ -13,6 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/listorder"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -1628,7 +1629,11 @@ func (s *PostgresStore) ListEntries(ctx context.Context, filter ListFilter) ([]d
 		idx++
 	}
 
-	query += fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", creditEntryOrderBy(filter.Sort, filter.SortDir), idx, idx+1)
+	orderBy, err := creditEntryOrderBy(filter.Sort, filter.SortDir)
+	if err != nil {
+		return nil, err
+	}
+	query += fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", orderBy, idx, idx+1)
 	args = append(args, limit, filter.Offset)
 
 	rows, err := tx.QueryContext(ctx, query, args...)
@@ -1714,29 +1719,21 @@ func (s *PostgresStore) CountEntries(ctx context.Context, filter ListFilter) (in
 	return n, err
 }
 
-// creditEntryOrderBy validates sort + dir against a closed allow-list
-// and adds a deterministic id tie-break matching the primary
-// direction. See invoiceOrderBy for the design rationale.
-func creditEntryOrderBy(sort, dir string) string {
-	col := creditEntrySortColumn(sort)
-	d := "DESC"
-	if dir == "asc" {
-		d = "ASC"
-	}
-	return col + " " + d + ", id " + d
-}
+// creditEntrySort is the credit ledger list's ?sort keys, created_at first
+// (the default). The handler refuses any other key or dir with a 422
+// (listorder).
+var creditEntrySort = listorder.New(
+	listorder.Key{Name: "created_at", Column: "created_at"},
+	listorder.Key{Name: "amount_cents", Column: "amount_cents"},
+	listorder.Key{Name: "amount", Column: "amount_cents"},
+	listorder.Key{Name: "entry_type", Column: "entry_type"},
+	listorder.Key{Name: "expires_at", Column: "expires_at"},
+)
 
-func creditEntrySortColumn(key string) string {
-	switch key {
-	case "amount_cents", "amount":
-		return "amount_cents"
-	case "entry_type":
-		return "entry_type"
-	case "expires_at":
-		return "expires_at"
-	default:
-		return "created_at"
-	}
+// creditEntryOrderBy returns the ORDER BY clause for the ledger list, with
+// an id tie-break in the same direction.
+func creditEntryOrderBy(sort, dir string) (string, error) {
+	return creditEntrySort.OrderBy(sort, dir, "id")
 }
 
 // GrantSummary is one positive credit block with its live drawdown state —

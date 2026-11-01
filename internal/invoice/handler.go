@@ -477,6 +477,13 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ?sort and ?dir are a closed set (invoiceSort): anything else is a 422
+	// naming the allowed values, not the default order without a word.
+	if err := invoiceSort.Validate(r.URL.Query().Get("sort"), r.URL.Query().Get("dir")); err != nil {
+		respond.FromError(w, r, err, "invoice")
+		return
+	}
+
 	filter := ListFilter{
 		TenantID:       tenantID,
 		CustomerID:     r.URL.Query().Get("customer_id"),
@@ -490,9 +497,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		IDs:            ids,
 		Limit:          page.Limit,
 		Offset:         page.Offset,
-		// Sort + direction are validated against a closed set in
-		// the store (invoiceOrderBy). Unknown sort keys silently
-		// default to created_at; unknown dir defaults to desc.
+		// Validated above against invoiceSort.
 		Sort:    r.URL.Query().Get("sort"),
 		SortDir: r.URL.Query().Get("dir"),
 	}

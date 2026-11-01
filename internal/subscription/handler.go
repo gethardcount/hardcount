@@ -548,6 +548,13 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ?sort and ?dir are a closed set (subscriptionSort): anything else is a 422
+	// naming the allowed values, not the default order without a word.
+	if err := subscriptionSort.Validate(r.URL.Query().Get("sort"), r.URL.Query().Get("dir")); err != nil {
+		respond.FromError(w, r, err, "subscription")
+		return
+	}
+
 	subs, total, err := h.svc.List(r.Context(), ListFilter{
 		TenantID:   tenantID,
 		CustomerID: r.URL.Query().Get("customer_id"),

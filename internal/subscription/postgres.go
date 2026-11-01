@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/listorder"
 	"strings"
 	"time"
 
@@ -333,8 +334,12 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.S
 		return nil, 0, err
 	}
 
+	orderBy, err := subscriptionOrderBy(filter.Sort, filter.SortDir)
+	if err != nil {
+		return nil, 0, err
+	}
 	query := `SELECT DISTINCT ` + qualifiedSubCols("s") + ` FROM subscriptions s` + where +
-		` ORDER BY ` + subscriptionOrderBy(filter.Sort, filter.SortDir) +
+		` ORDER BY ` + orderBy +
 		` LIMIT $` + fmt.Sprintf("%d", len(args)+1) + ` OFFSET $` + fmt.Sprintf("%d", len(args)+2)
 	args = append(args, limit, filter.Offset)
 
@@ -3516,35 +3521,23 @@ func scanItemDest(it *domain.SubscriptionItem) []any {
 	}
 }
 
-// subscriptionOrderBy validates sort + dir against a closed allow-list
-// (no SQL injection) and adds a deterministic id tie-break matching
-// the primary direction. Same pattern as invoiceOrderBy. Unknown sort
-// keys default to created_at.
-func subscriptionOrderBy(sort, dir string) string {
-	col := subscriptionSortColumn(sort)
-	d := "DESC"
-	if dir == "asc" {
-		d = "ASC"
-	}
-	return col + " " + d + ", s.id " + d
-}
+// subscriptionSort is the subscription list's ?sort keys, created_at first
+// (the default). display_name is a column on subscriptions itself (subCols),
+// not derived from customers. The handler refuses any other key or dir with
+// a 422 (listorder).
+var subscriptionSort = listorder.New(
+	listorder.Key{Name: "created_at", Column: "s.created_at"},
+	listorder.Key{Name: "next_billing_at", Column: "s.next_billing_at"},
+	listorder.Key{Name: "status", Column: "s.status"},
+	listorder.Key{Name: "display_name", Column: "s.display_name"},
+	listorder.Key{Name: "name", Column: "s.display_name"},
+	listorder.Key{Name: "trial_end_at", Column: "s.trial_end_at"},
+)
 
-func subscriptionSortColumn(key string) string {
-	switch key {
-	case "next_billing_at":
-		return "s.next_billing_at"
-	case "status":
-		return "s.status"
-	case "display_name", "name":
-		// display_name is a column on subscriptions itself (subCols),
-		// not derived from customers — the previous created_at proxy
-		// (and its JOIN-required comment) was wrong about the schema.
-		return "s.display_name"
-	case "trial_end_at":
-		return "s.trial_end_at"
-	default:
-		return "s.created_at"
-	}
+// subscriptionOrderBy returns the ORDER BY clause for the subscription list,
+// with an id tie-break in the same direction (see invoiceOrderBy).
+func subscriptionOrderBy(sort, dir string) (string, error) {
+	return subscriptionSort.OrderBy(sort, dir, "s.id")
 }
 
 func buildSubWhere(f ListFilter) (string, []any) {

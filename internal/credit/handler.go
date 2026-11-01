@@ -179,6 +179,12 @@ func (h *Handler) listEntries(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// ?sort and ?dir are a closed set (creditEntrySort): anything else is a 422
+	// naming the allowed values, not the default order without a word.
+	if err := creditEntrySort.Validate(r.URL.Query().Get("sort"), r.URL.Query().Get("dir")); err != nil {
+		respond.FromError(w, r, err, "credit")
+		return
+	}
 	filter := ListFilter{
 		TenantID:   tenantID,
 		CustomerID: customerID,

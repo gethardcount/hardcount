@@ -15,6 +15,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/crypto"
+	"github.com/gethardcount/hardcount/internal/platform/listorder"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -507,7 +508,11 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.C
 	where, args := creditNoteWhere(filter)
 	idx := len(args) + 1
 	query := `SELECT ` + cnReadCols + ` FROM credit_notes` + where
-	query += fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", creditNoteOrderBy(filter.Sort, filter.SortDir), idx, idx+1)
+	orderBy, err := creditNoteOrderBy(filter.Sort, filter.SortDir)
+	if err != nil {
+		return nil, err
+	}
+	query += fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", orderBy, idx, idx+1)
 	args = append(args, limit, filter.Offset)
 
 	rows, err := tx.QueryContext(ctx, query, args...)
@@ -542,7 +547,7 @@ func (s *PostgresStore) ListIssuedByInvoice(ctx context.Context, tenantID, invoi
 
 	rows, err := tx.QueryContext(ctx, `SELECT `+cnReadCols+` FROM credit_notes
 		WHERE invoice_id = $1 AND status = $2
-		ORDER BY `+creditNoteOrderBy("", ""), invoiceID, domain.CreditNoteIssued)
+		ORDER BY `+creditNoteNewestFirst, invoiceID, domain.CreditNoteIssued)
 	if err != nil {
 		return nil, err
 	}
@@ -1285,29 +1290,24 @@ func (s *PostgresStore) ListLineItems(ctx context.Context, tenantID, creditNoteI
 	return items, rows.Err()
 }
 
-// creditNoteOrderBy validates sort + dir against a closed allow-list
-// and adds a deterministic id tie-break matching the primary
-// direction. See invoiceOrderBy for the design rationale.
-func creditNoteOrderBy(sort, dir string) string {
-	col := creditNoteSortColumn(sort)
-	d := "DESC"
-	if dir == "asc" {
-		d = "ASC"
-	}
-	return col + " " + d + ", id " + d
-}
+// creditNoteSort is the credit-note list's ?sort keys, created_at first
+// (the default). The handler refuses any other key or dir with a 422
+// (listorder).
+var creditNoteSort = listorder.New(
+	listorder.Key{Name: "created_at", Column: "created_at"},
+	listorder.Key{Name: "credit_note_number", Column: "credit_note_number"},
+	listorder.Key{Name: "total_cents", Column: "total_cents"},
+	listorder.Key{Name: "amount", Column: "total_cents"},
+	listorder.Key{Name: "status", Column: "status"},
+	listorder.Key{Name: "issued_at", Column: "issued_at"},
+)
 
-func creditNoteSortColumn(key string) string {
-	switch key {
-	case "credit_note_number":
-		return "credit_note_number"
-	case "total_cents", "amount":
-		return "total_cents"
-	case "status":
-		return "status"
-	case "issued_at":
-		return "issued_at"
-	default:
-		return "created_at"
-	}
+// creditNoteNewestFirst is the list's default order, for the reads that take
+// no ?sort.
+const creditNoteNewestFirst = "created_at DESC, id DESC"
+
+// creditNoteOrderBy returns the ORDER BY clause for the credit-note list,
+// with an id tie-break in the same direction.
+func creditNoteOrderBy(sort, dir string) (string, error) {
+	return creditNoteSort.OrderBy(sort, dir, "id")
 }
