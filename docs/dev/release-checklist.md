@@ -91,6 +91,17 @@ A dunning run is the automatic retries after a failed payment.
 
   Then run `go test ./internal/recipe/ ./internal/integrations/litellm/`.
 
+## The release commit
+
+One pull request, merged before the tag, names the new release everywhere a reader copies it. Change the previous release to the new one in:
+
+- `deploy/compose/quickstart.sh` (`HARDCOUNT_VERSION`) and `deploy/compose/.env.example` (both image lines);
+- `docs/quick-start.md` (step 1 and `--branch`) and `docs/first-invoice.md` (the version and its link);
+- `docs/production-one-vm.md`, `deploy/compose/README.md`, `docs/ops/high-availability.md` and `docs/versioning.md`;
+- `docs/upgrades.md`: the upgrade example moves to the new release, and the going-back example to the previous one.
+
+Then `grep -rn` for the previous release in `docs/` and `deploy/` finds only history (the CHANGELOG, records and decisions). The same pull request turns the CHANGELOG's Unreleased section into the release's, with a **Before upgrading** block: migrations and what can stop them, settings that now refuse a value, anything to add in Stripe, API answers that changed, and the Compose steps.
+
 ## Fresh install and upgrade
 
 These prove that the images the quick start pulls work, and that an existing install can move to them. Use a machine that has Docker but no Hardcount containers or volumes, for example a new VM.

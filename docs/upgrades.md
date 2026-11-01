@@ -37,13 +37,13 @@ data volume. Start from [Install a pinned release](production-one-vm.md#1-instal
 
 These steps follow [Production on one VM](production-one-vm.md), with
 Hardcount in `/opt/hardcount`. Database changes run by themselves as the new
-release starts. This example moves to `v0.9.1`.
+release starts. This example moves to `v0.9.2`.
 
 1. Do the three steps in [Before you upgrade](#before-you-upgrade).
 2. Get the new release's files and point `.env` at its images.
 
    ```bash
-   HARDCOUNT_VERSION=v0.9.1
+   HARDCOUNT_VERSION=v0.9.2
    cd /opt/hardcount
    git fetch --tags
    git checkout "$HARDCOUNT_VERSION"
@@ -78,7 +78,7 @@ release starts. This example moves to `v0.9.1`.
    docker compose exec hardcount-api /usr/local/bin/hardcount version
    ```
 
-   **You see:** `hardcount v0.9.1`, and
+   **You see:** `hardcount v0.9.2`, and
    `curl -fsS http://localhost:8080/health/ready` answers `"status":"ok"`
    again.
 
@@ -197,10 +197,10 @@ On one VM:
    tables a later upgrade creates: the backup carries those rights.
 
 5. Put back the old release's files and images, and start it. This example
-   goes back to `v0.9.0`.
+   goes back to `v0.9.1`.
 
    ```bash
-   HARDCOUNT_VERSION=v0.9.0
+   HARDCOUNT_VERSION=v0.9.1
    cd /opt/hardcount
    git checkout "$HARDCOUNT_VERSION"
    cd deploy/compose
@@ -211,7 +211,7 @@ On one VM:
    ```
 
    **You see:** `state:        up to date, nothing to apply`, then
-   `hardcount v0.9.0`, and `curl -fsS http://localhost:8080/health/ready`
+   `hardcount v0.9.1`, and `curl -fsS http://localhost:8080/health/ready`
    answers `"status":"ok"`.
 
 6. Put back what the restore removed.
