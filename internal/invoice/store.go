@@ -113,7 +113,8 @@ type Store interface {
 
 	// AddLineItemAtomic inserts a line item and recomputes the invoice totals
 	// in one transaction. It locks the invoice row FOR UPDATE, verifies draft
-	// status, inserts the line item (filling InvoiceID, TenantID, and Currency
+	// status and that the operator made the invoice (a subscription's draft is
+	// refused with invoice_not_manual), inserts the line item (filling InvoiceID, TenantID, and Currency
 	// from the locked invoice), recomputes the subtotal from all line items,
 	// and rewrites subtotal/total/amount_due. The lock prevents lost updates
 	// when two clients append lines concurrently. Returns the inserted line

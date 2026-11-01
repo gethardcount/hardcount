@@ -702,7 +702,10 @@ export default function InvoiceDetailPage() {
             <History size={14} className="mr-1.5" />
             Audit log
           </Button>
-          {invoice.status === 'draft' && (
+          {/* Only a draft you created takes lines. A subscription's draft
+              keeps billing's lines and tax, and the server refuses a line
+              on it (409 invoice_not_manual). */}
+          {invoice.status === 'draft' && (!invoice.billing_reason || invoice.billing_reason === 'manual') && (
             <Button variant="outline" size="sm" onClick={() => setShowAddLineItem(true)} disabled={acting}>
               Add line item
             </Button>

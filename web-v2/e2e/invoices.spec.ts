@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { api, apiListAll, usd, usdBalance, uniq } from './fixtures/api'
-import { billedCustomer, createCustomer, invoicesFor, type Invoice } from './fixtures/seed'
+import { billedCustomer, createCustomer, invoicesFor, subscribedCustomer, waitForClockReady, type Invoice } from './fixtures/seed'
 
 // Invoices through the screen: issue one, settle it, correct it, close it.
 // Each journey does the steps an operator does, then reads the API and checks
@@ -268,6 +268,32 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
 // setup links (whoami.can_email_setup_links), and otherwise sends the
 // operator to copy one. CI connects no Stripe and sets no PAYMENT_UPDATE_URL,
 // so both answers are set in the browser: the page must read them on a draft.
+// A subscription's draft (here a renewal billed while collection is paused)
+// keeps billing's lines and tax, so it offers no Add line item and the API
+// refuses a line on it with 409 invoice_not_manual. Finalize would not work
+// its tax out again, so an added line went out untaxed.
+test("a paused subscription's draft renewal takes no new lines", async ({ page }) => {
+  const { clock, customer, subscription } = await subscribedCustomer()
+  await api('PUT', `/subscriptions/${subscription.id}/pause-collection`, { behavior: 'keep_as_draft' })
+  const to = new Date(clock.frozen_time)
+  to.setUTCMonth(to.getUTCMonth() + 1)
+  to.setUTCDate(to.getUTCDate() + 1)
+  await api('POST', `/test-clocks/${clock.id}/advance`, { frozen_time: to.toISOString().replace(/\.\d+Z$/, 'Z') })
+  await waitForClockReady(clock.id)
+  const [renewal] = await invoicesFor(customer.id)
+  expect(renewal.status).toBe('draft')
+
+  await page.goto(`/invoices/${renewal.id}`)
+  await expect(page.getByRole('heading', { level: 1, name: renewal.invoice_number, exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Finalize', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Add line item' })).toHaveCount(0)
+
+  await expect(api('POST', `/invoices/${renewal.id}/line-items`, { description: 'E2E extra', quantity: 1, unit_amount_cents: 500 }))
+    .rejects.toThrow(/returned 409: .*invoice_not_manual/)
+  const after = await getInvoice(renewal.id)
+  expect(after.line_items.map(l => l.description)).not.toContain('E2E extra')
+})
+
 test('finalize confirmation with Stripe connected: the no-card email is promised only when the server can send it', async ({ page }) => {
   const customer = await createCustomer()
   const draft = await api<Invoice>('POST', '/invoices', {

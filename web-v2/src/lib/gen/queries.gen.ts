@@ -8928,11 +8928,12 @@ export const getAddInvoiceLineItemUrl = (id: string,) => {
  * Adds one line to a `draft` invoice and recomputes its subtotal,
  * total and amount due. `amount_cents` is `quantity` ×
  * `unit_amount_cents`, and the line takes the invoice's currency. Only
- * draft invoices accept new lines. On an invoice you created, tax is
- * calculated at finalize. On a draft the billing engine made, finalize
- * keeps the tax the draft was built with, so an added line is taxed
- * only if the draft's tax is still pending and is then calculated
- * again.
+ * draft invoices you created (`billing_reason` `manual`) accept new
+ * lines; their tax is calculated at finalize. A draft the billing
+ * engine made for a subscription, such as a period that closed while
+ * collection was paused, keeps the lines and tax it was built with:
+ * a line added to it answers 409 `invoice_not_manual`. Bill a one-off
+ * charge on its own invoice (`POST /v1/invoices`).
  * @summary Add a line item to a draft invoice
  */
 export const addInvoiceLineItem = async (id: string,

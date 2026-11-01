@@ -38,7 +38,7 @@ More: [Usage events: late usage](usage-events.md#late-usage).
 
 | Status | What it means |
 |---|---|
-| `draft` | Not issued. You can still change it. Nothing is charged or emailed. |
+| `draft` | Not issued. Nothing is charged or emailed. You can add lines to a one-off draft; a subscription's draft keeps the lines and tax billing gave it. |
 | `finalized` | Issued and owed. The dashboard shows it as **Open** while money is due. |
 | `paid` | Settled, by card, by credit, by a credit note, or by a payment you recorded. |
 | `voided` | Canceled, as if it never existed. |

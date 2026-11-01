@@ -2265,11 +2265,12 @@ export interface paths {
          * @description Adds one line to a `draft` invoice and recomputes its subtotal,
          *     total and amount due. `amount_cents` is `quantity` ×
          *     `unit_amount_cents`, and the line takes the invoice's currency. Only
-         *     draft invoices accept new lines. On an invoice you created, tax is
-         *     calculated at finalize. On a draft the billing engine made, finalize
-         *     keeps the tax the draft was built with, so an added line is taxed
-         *     only if the draft's tax is still pending and is then calculated
-         *     again.
+         *     draft invoices you created (`billing_reason` `manual`) accept new
+         *     lines; their tax is calculated at finalize. A draft the billing
+         *     engine made for a subscription, such as a period that closed while
+         *     collection was paused, keeps the lines and tax it was built with:
+         *     a line added to it answers 409 `invoice_not_manual`. Bill a one-off
+         *     charge on its own invoice (`POST /v1/invoices`).
          */
         post: operations["addInvoiceLineItem"];
         delete?: never;
@@ -25344,11 +25345,33 @@ export interface operations {
                 };
             };
             /**
+             * @description `invoice_not_manual`: the draft was made by the billing engine
+             *     for a subscription, so it keeps its lines and tax. Create a
+             *     separate invoice for a one-off charge.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invoice_not_manual",
+                     *         "message": "Lines can be added only to an invoice you create. This draft was made by billing for a subscription, so it keeps billing's lines and tax. For a one-off charge, create a separate invoice.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
              * @description Validation error: the invoice is not a draft, a line field is
              *     invalid (for example a quantity of 0, `param` names the field),
-             *     a commit line on an invoice the billing engine made, a second
-             *     commit line, or the body has an unknown field (`param` names it;
-             *     the body must use only the fields listed here).
+             *     a second commit line, or the body has an unknown field (`param`
+             *     names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
