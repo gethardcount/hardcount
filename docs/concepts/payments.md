@@ -117,6 +117,6 @@ detail.
 | `payment.refunded_in_stripe` | A refund was made in Stripe outside Hardcount. |
 | `payment.duplicate_charge`, `payment.amount_mismatch`, `payment.currency_mismatch`, `payment.received_on_voided_invoice` | Money arrived that does not fit the invoice. Check it in Stripe. |
 
-More: payloads in the [webhook event catalog](../webhooks.md#event-catalog).
+More: every event, with an example message: [Webhook events](../api/webhook-events.md#payments-datainvoice).
 
 **Next:** set it up: [Connect Stripe and take card payments](../guides/connect-stripe.md).

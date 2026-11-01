@@ -23,6 +23,7 @@ the [quick start](quick-start.md).
   [Send usage from LiteLLM](integrations/litellm.md) ·
   [Connect Stripe](guides/connect-stripe.md) ·
   [Test a billing change](guides/test-a-billing-change.md) ·
+  [Receive webhooks](guides/receive-webhooks.md) ·
   [Set up email](ops/email-setup.md) · [Manage API keys](api-keys.md).
 - **API reference:** [The Hardcount API](api-surface.md) ·
   [Authentication and keys](api/authentication.md) ·
@@ -30,7 +31,8 @@ the [quick start](quick-start.md).
   [Rate limits](api/rate-limits.md) · [Pagination](api/pagination.md) ·
   [Timing and limits](api/timing-and-limits.md) ·
   [Two calls in four languages](api/two-calls.md) ·
-  [Webhooks](webhooks.md) · [Versioning](versioning.md) ·
+  [Webhooks](webhooks.md) · [Webhook events](api/webhook-events.md) ·
+  [Versioning](versioning.md) ·
   [Every route: the OpenAPI file](../api/openapi.yaml).
 - **Self-host:** [Overview](self-host.md) ·
   [Production on one VM](production-one-vm.md) ·

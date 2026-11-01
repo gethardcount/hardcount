@@ -25,7 +25,7 @@ paused stays `active` and keeps making invoices; see
 ## What changes a subscription
 
 All the routes are under `/v1/subscriptions`. Each change sends a
-[webhook](../webhooks.md#subscriptions-datasubscription).
+[webhook](../api/webhook-events.md#subscriptions-datasubscription).
 
 | From | Caused by | Webhook | To |
 |---|---|---|---|

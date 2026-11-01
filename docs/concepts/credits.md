@@ -155,7 +155,7 @@ To stop serving a customer whose credit has run out, see
 These follow the settled balance, so they can come weeks after the live
 balance reached 0. Use them for top-up reminders, not to stop usage.
 
-More: payloads in the [webhook event catalog](../webhooks.md#credit-datacredit_balance).
+More: every event, with an example message: [Webhook events](../api/webhook-events.md#credit-datacredit_balance).
 
 **Next:** the payments that settle what credit does not cover:
 [Payments](payments.md).

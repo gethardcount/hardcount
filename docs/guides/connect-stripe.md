@@ -148,7 +148,7 @@ customer holds, then charges the card for the rest.
 - the invoice reads **Paid** in the dashboard, and the payment shows in
   your Stripe dashboard, under **Payments**;
 - your app gets `invoice.paid` and `payment.succeeded`
-  ([webhooks](../webhooks.md)).
+  ([Receive webhooks](receive-webhooks.md)).
 
 To see a failure, save `4000 0000 0000 0341` on another customer. Stripe
 saves it, then declines every charge. The invoice's payment goes to

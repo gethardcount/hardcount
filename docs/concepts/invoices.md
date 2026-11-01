@@ -185,6 +185,6 @@ until you issue it with `POST /v1/credit-notes/{id}/issue`, or at once with
 | `invoice.marked_uncollectible` | The invoice is written off. |
 | `payment.succeeded`, `payment.failed` | A card charge succeeded or failed ([Payments](payments.md#webhooks)). |
 
-More: payloads in the [webhook event catalog](../webhooks.md#event-catalog).
+More: every event, with an example message: [Webhook events](../api/webhook-events.md#invoices-datainvoice).
 
 **Next:** how prepaid credit lowers an invoice: [Credits](credits.md).

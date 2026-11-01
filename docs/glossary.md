@@ -188,7 +188,8 @@ follows.
   check that Hardcount sent it, and sent again on a schedule when your app
   does not answer `2xx`.
   You add the URL as a webhook endpoint. Not to be confused with the
-  webhooks Stripe sends to Hardcount. [More](webhooks.md)
+  webhooks Stripe sends to Hardcount. [More](guides/receive-webhooks.md), and
+  [every event](api/webhook-events.md)
 
 ## Credits
 
