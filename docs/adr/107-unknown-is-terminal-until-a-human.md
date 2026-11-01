@@ -471,7 +471,7 @@ The release checklist adds the live test-mode charge with `4000002500003155`
 that this ADR asked for.
 
 The flag needs `payment_method_types=[card]` on the same request (fixed
-2026-11-02, #PRNUM). Without it, a PaymentIntent takes the payment methods set in
+2026-11-02, #1570). Without it, a PaymentIntent takes the payment methods set in
 Stripe's Dashboard (the default since API version 2023-08-16), and Stripe
 refuses the flag with HTTP 400 `invalid_request_error`
 ([changelog](https://docs.stripe.com/changelog/2023-08-16/automatic-payment-methods)).
