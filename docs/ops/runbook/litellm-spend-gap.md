@@ -10,17 +10,25 @@ retries, that usage is lost. Back to the [runbook index](index.md).
   rolling restart:
   `hardcount_http_requests_total{method="POST",path="/v1/integrations/litellm/spend",status="503"}`.
 - LiteLLM's proxy log shows `Generic API Logger Error sending batch`.
-  LiteLLM 1.83.9 never sends a batch again after a timeout or an error
-  answer. LiteLLM 1.84.0 and later
-  send it again after a timeout or a 5xx only while `max_retries` lasts,
-  and never after a 4xx, such as a 400 for a body over 1 MB
-  ([what LiteLLM sends again](../../integrations/litellm.md#what-litellm-sends-again-and-what-is-lost)).
+  - LiteLLM 1.83.9 sends a batch again only after a refused or dropped
+    connection, once, at once.
+  - LiteLLM 1.84.0 and later send it again after a timeout, a connection
+    error or a 5xx, while `max_retries` lasts. A send started because the
+    queue was full gets at most two more tries, within 20 seconds.
+  - No version sends a batch again after a 4xx, such as a 400 or 413 for a
+    body over 1 MB
+    ([what LiteLLM sends again](../../integrations/litellm.md#what-litellm-sends-again-and-what-is-lost)).
+- Or nothing failed at all. LiteLLM can drop calls it queued while a send
+  was in flight
+  ([calls lost when nothing failed](../../integrations/litellm.md#calls-lost-when-nothing-failed)).
+  So compare the two regularly, not only after an outage.
 
 ## Why
 
 Hardcount answered 503 to spend batches while its usage store was unreachable,
-so LiteLLM could send them again. A batch LiteLLM did not send again, or
-whose retries ran out, is lost: every LLM call in it. Hardcount's spend view is then short
+or refused connections while it restarted, so LiteLLM could send them
+again. A batch LiteLLM did not send again, or whose retries ran out, is
+lost: every LLM call in it. Hardcount's spend view is then short
 against LiteLLM's spend page for the period.
 
 ## Check

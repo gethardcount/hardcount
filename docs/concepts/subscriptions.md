@@ -37,15 +37,16 @@ All the routes are under `/v1/subscriptions`. Each change sends a
 | `trialing` | `POST /{id}/end-trial` | `subscription.trial_ended` | `active` |
 | `trialing` | `POST /{id}/extend-trial`, with a later `trial_end` | `subscription.trial_extended` | `trialing` |
 | `draft`, `trialing`, `active` | `POST /{id}/cancel` | `subscription.canceled` | `canceled` |
-| `trialing`, `active` | `POST /{id}/schedule-cancel` | `subscription.cancel_scheduled` | no change yet |
+| `draft`, `trialing`, `active` | `POST /{id}/schedule-cancel` | `subscription.cancel_scheduled` | no change yet |
 | `trialing`, `active` | Hardcount, when the scheduled cancel is due | `subscription.canceled` | `canceled` |
 | `trialing`, `active` | `DELETE /{id}/scheduled-cancel` | `subscription.cancel_cleared` | no change |
 | `active` | Dunning's final action, when the policy says cancel | `subscription.canceled` | `canceled` |
 
 A trial ends whether or not the customer has saved a card. The first
 invoice is then collected like any other. A customer with no card gets an
-email: a link to add a card when Stripe is connected, or the invoice itself
-when it is not.
+email, once email is set up: a link to add a card when Stripe is connected
+and `PAYMENT_UPDATE_URL` is set, or the invoice itself when Stripe is not
+connected.
 
 ## Billing periods
 
@@ -102,9 +103,12 @@ for the days it was on. How depends on when the base fee is billed:
   customer's credit balance, and an unpaid share lowers what the open
   invoice asks for.
 
-An upgrade on a plan billed in advance is refused with
-`409 unpaid_invoice_blocks_change` while the period's invoice is unpaid.
-Settle or void that invoice first.
+On a plan billed in advance, a change that charges more now (an upgrade, a
+larger quantity or an added item) is refused with
+`409 unpaid_invoice_blocks_change` while the period's invoice is unpaid or
+written off. Settle or void that invoice first. A payment still in flight
+on it does not block the change, and neither does an invoice with nothing
+left to pay.
 
 Usage is always billed at the end of the period. Each part of the period
 is billed on the plan that was in force during it.
@@ -139,12 +143,21 @@ $50.00 of base fee.
 
 - **Now:** `POST /v1/subscriptions/{id}/cancel`. Hardcount makes a final
   invoice for the part of the period so far: usage, and a base fee billed
-  in arrears for those days. A base fee paid in advance is credited for the
-  days left. A trial that never became active gets no final invoice.
+  in arrears for those days. For a base fee billed in advance, the days
+  left are given back: a paid share as credit to the customer's balance,
+  and an unpaid share by lowering what the open invoice asks for. A trial
+  that never became active gets no final invoice.
 - **Later:** `POST /v1/subscriptions/{id}/schedule-cancel`, with
   `{"at_period_end": true}` or `{"cancel_at": "2026-09-30T00:00:00Z"}`.
   Until then the subscription bills as usual. On a trial, `at_period_end`
   cancels free when the trial ends.
+  - `cancel_at` must be in the future, and on or after the end of the
+    current period: the period in progress cannot be shortened.
+  - A `cancel_at` inside a later period is accepted. That period is billed
+    up to it, prorated.
+  - On a trial, `cancel_at` must be the trial's end (a free cancel) or on or
+    after the end of the first period.
+  - Any other date is refused with `422`.
 
 ## Pause collection
 

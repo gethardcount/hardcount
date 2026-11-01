@@ -87,7 +87,10 @@ Hardcount does the rest on its own:
   through Stripe.
 - When a charge fails, it starts a dunning run.
 - It writes the credit ledger entries for credit used and credit expired.
-- It sends a webhook for each of these steps.
+- It sends a webhook for each step that changes an invoice, a payment, a
+  subscription or a dunning run. Credit used or expired sends none; the
+  `credit.balance_*` webhooks fire only when a balance crosses a line, such
+  as reaching 0.
 
 ## Test mode and live mode
 

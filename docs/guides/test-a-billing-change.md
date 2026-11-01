@@ -16,8 +16,14 @@ the price on January 15, and you read the January and February invoices.
 - A `tokens` meter. Step 1 of the [first invoice
   page](../first-invoice.md#steps) creates one with a recipe.
 - `curl` and `jq`.
-- Your account's billing timezone is UTC, the default. With another
-  timezone, the periods below start at midnight in that timezone instead.
+- Your account's billing timezone is UTC, the default. The times and
+  outputs below assume it: a subscription's first period starts at
+  midnight in the account's timezone. With another timezone, start the
+  clock at your local midnight and move it to local times. For New York in
+  winter, use `2026-01-01T05:00:00Z` in place of `2026-01-01T00:00:00Z`,
+  and the period starts in the outputs move the same way.
+- No tax set up, so each invoice's total is its usage alone. With tax on,
+  the totals include it.
 
 What a test clock is and what it runs: [Test clocks](../concepts/test-clocks.md).
 

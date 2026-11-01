@@ -25,8 +25,8 @@ Hardcount also makes an invoice:
 - for a plan change that charges the difference now
   ([Subscriptions](subscriptions.md#plan-changes));
 - for the part of a period before a cancel;
-- when a spend threshold is crossed (an invoice made early because usage
-  reached a limit you set);
+- when a spend threshold is crossed: an invoice made early because usage
+  reached a limit you set ([Spend thresholds](#spend-thresholds-an-invoice-made-early));
 - on the first day, for a plan whose base fee is billed in advance.
 
 You make one-off invoices yourself, for example to sell prepaid credit or
@@ -88,6 +88,11 @@ Hardcount works out an invoice in this order:
 5. **Total.** Subtotal plus tax, in `total_amount_cents`. At first,
    `amount_due_cents` is the same.
 
+With tax-inclusive pricing (**Settings → Tax**), your prices already hold
+the tax. Hardcount then takes the tax out of each line instead of adding
+it, so the subtotal is lower than the lines' prices and the total equals
+them.
+
 Then, right after the invoice is finalized, Hardcount collects it:
 
 6. **Credit.** Any credit the customer holds in the invoice's currency
@@ -130,9 +135,30 @@ and `amount_due_cents` is 0. The total stays $28.84.
 - **Hosted invoice page:** a public page for one issued invoice, which the
   customer opens without signing in. Its address is
   `HOSTED_INVOICE_BASE_URL` + `/invoice/` + the invoice's `public_token`.
-  A draft has no page. While money is due and no payment is in flight, the
-  page has a **Pay** button that opens Stripe Checkout. Invoice emails link
-  to it.
+  A draft has no page. Invoice emails link to it. The page has a **Pay**
+  button, which opens Stripe Checkout, when all of these hold:
+  - the invoice is `finalized`, so not paid, voided or written off;
+  - money is due;
+  - no payment is in flight;
+  - Stripe is connected in the invoice's mode.
+
+## Spend thresholds: an invoice made early
+
+A spend threshold makes Hardcount invoice a subscription's usage before
+its period ends. It bills sooner; it never stops usage. Set it with
+`PUT /v1/subscriptions/{id}/billing-thresholds`:
+
+- `amount_gte`: an amount in cents. It is crossed when the period's usage
+  so far reaches it.
+- `item_thresholds`: a list of `{subscription_item_id, usage_gte}`. One is
+  crossed when that item's usage so far reaches `usage_gte`.
+
+When one is crossed, Hardcount issues an invoice for the usage so far,
+with `billing_reason` `threshold` and no base fee, and sends
+`subscription.threshold_crossed`. The period keeps its dates, and the
+period's own invoice bills the rest. A threshold fires at most once a
+period. Usage of a `max` or `last` meter waits for the period's own
+invoice. `DELETE /v1/subscriptions/{id}/billing-thresholds` removes them.
 
 ## Credit notes
 

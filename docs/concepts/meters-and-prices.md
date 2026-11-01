@@ -67,8 +67,9 @@ Each event is billed by at most one price of the customer's plan.
    answers `billing_status: "no_price"`, and shows it as usage with no
    price. The usual cause is a new model name.
 
-Labels are compared as text: the number `1` on an event does not match
-`"1"` on a price.
+A price's labels are always text, and Hardcount compares them as text. So
+an event label sent as a number or as true/false never matches a price:
+the number `1` does not match `"1"`. Send dimension values as strings.
 
 More: [AI pricing reference](../ai-pricing.md#how-hardcount-picks-the-price-for-an-event).
 

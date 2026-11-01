@@ -37,9 +37,12 @@ the [quick start](quick-start.md).
   [Runbook](ops/runbook/index.md).
 - **Internals:** [Architecture](architecture.md) ·
   [How we test](testing.md) · [How Hardcount is engineered](ENGINEERING.md) ·
-  [Benchmarks](benchmarks/failure-correctness.md) ·
+  Benchmarks: [correctness under failure](benchmarks/failure-correctness.md)
+  and [sustained throughput](benchmarks/sustained-throughput.md) ·
   [Design decisions](adr/README.md) · [Records](dev/records/README.md).
 
-The project: [Roadmap](roadmap.md) · [CHANGELOG](../CHANGELOG.md) ·
-[How Hardcount compares](comparison.md). Changing Hardcount itself?
-Contributor docs are in [docs/dev/](dev/README.md).
+The project: [What's in the box](features.md) ·
+[Why Hardcount exists](why-hardcount.md) ·
+[How Hardcount compares](comparison.md) · [Roadmap](roadmap.md) ·
+[CHANGELOG](../CHANGELOG.md). Changing Hardcount itself? Contributor docs
+are in [docs/dev/](dev/README.md).

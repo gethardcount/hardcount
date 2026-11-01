@@ -102,14 +102,18 @@ callback_settings:
     endpoint: "https://<your-hardcount-host>/v1/integrations/litellm/spend"
     headers:
       Authorization: Bearer hc_ingest_test_…   # the usage-only key
-    # LiteLLM 1.84.0 and later read these three. LiteLLM 1.83.9 ignores them.
+    # LiteLLM 1.84.0 and later read these three; 1.83.9 ignores them.
+    # They do not make delivery safe: see "What LiteLLM sends again".
     max_retries: 4
     retry_delay: 5
     timeout: 10
 ```
 
-Start the proxy with a smaller batch size (see
-[Keep each send under 1 MB](#keep-each-send-under-1-mb)):
+Start the proxy with a smaller batch size. It keeps each send under
+Hardcount's limit ([Keep each send under 1 MB](#keep-each-send-under-1-mb)),
+at a cost: more sends start from a full queue, which LiteLLM retries for a
+shorter time
+([What LiteLLM sends again](#what-litellm-sends-again-and-what-is-lost)):
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-…
@@ -127,22 +131,29 @@ DEFAULT_BATCH_SIZE=50 litellm --config litellm_config.yaml
   work.
 - **`Authorization`:** the usage-only key you just created. A secret key
   also works, but it can do everything in the account.
-- **`max_retries`, `retry_delay` and `timeout`:** see
+- **`max_retries`, `retry_delay` and `timeout`:** on 1.83.9 they do
+  nothing. On later versions they cover only some failures: see
   [What LiteLLM sends again, and what is lost](#what-litellm-sends-again-and-what-is-lost).
-  On 1.83.9 they do nothing.
 
 The older form is `success_callback: ["generic_api"]`, with the address in
 the `GENERIC_LOGGER_ENDPOINT` environment variable and the header in
 `GENERIC_LOGGER_HEADERS` (`Authorization=Bearer hc_ingest_test_…`). It
-never sends a batch again, in any LiteLLM version, so use the form above.
+takes no retry settings, so in every LiteLLM version it behaves like 1.83.9
+below: only a refused or dropped connection is tried once more. Use the
+form above.
 With either form, Hardcount accepts a single record, a list of records
 (`json_array`, the default), or `{"events": [...]}`. It refuses
 `log_format: ndjson` when a send holds more than one record.
 
 ### Keep each send under 1 MB
 
-Hardcount refuses a request body over 1 MB with a 400, and LiteLLM never
-sends a 400 again. So a send over 1 MB loses every call in it.
+A send over 1 MB is refused, and LiteLLM never sends a refused send
+again, so every call in it is lost:
+
+- Hardcount answers `400` for a request body over 1 MB.
+- Behind the Compose stack's or the quick start's nginx, nginx answers
+  first, with `413` (`client_max_body_size 1m` in
+  `deploy/compose/nginx.conf`).
 
 LiteLLM sends the calls it has queued when the queue reaches
 `DEFAULT_BATCH_SIZE` calls (512 unless you set it), or every
@@ -153,8 +164,10 @@ At 30 calls a second, 5 seconds of calls is 150 records, and the send is
 refused.
 
 - **Set `DEFAULT_BATCH_SIZE`** in the proxy's environment, as above. With
-  50, a send of short-prompt records is at most about 450 KB (50 × 9 KB),
-  which leaves room for prompts and replies.
+  50, a send of short-prompt records is at most about 450 KB (50 × 9 KB)
+  when no send is waiting to retry, which leaves room for prompts and
+  replies. A send waiting to retry lets the queue grow past that (see
+  [Calls lost when nothing failed](#calls-lost-when-nothing-failed)).
 - **With long prompts, also leave the text out.** Add
   `turn_off_message_logging: true` under `litellm_settings`. LiteLLM then
   puts `redacted-by-litellm` in place of the prompt and the reply. Hardcount
@@ -162,29 +175,56 @@ refused.
   every logging callback of the proxy, not only Hardcount's.
 
 A refused send shows in the proxy's log as `Generic API Logger Error
-sending batch`, and in Hardcount as a 400 on
-`/v1/integrations/litellm/spend` in
-`hardcount_http_requests_total`.
+sending batch`. Hardcount counts its 400 on
+`/v1/integrations/litellm/spend` in `hardcount_http_requests_total`. A 413
+from nginx never reaches Hardcount: look for it in nginx's access log.
 
 ### What LiteLLM sends again, and what is lost
 
-What LiteLLM does after a failed send depends on its version.
+**LiteLLM's delivery to Hardcount can lose calls, in every version.**
+Compare Hardcount's usage with LiteLLM's spend log after any outage, and
+regularly, for example once a day. Send any missing calls again from the
+spend log before the period's invoice is built:
+[LiteLLM spend gap after an outage](../ops/runbook/litellm-spend-gap.md).
 
-| LiteLLM | A timeout, a connection error, or a 5xx such as 503 | A 4xx: 400, 401, 429 |
+LiteLLM starts a send in two ways: every 5 seconds from a timer, or at
+once when its queue reaches `DEFAULT_BATCH_SIZE`. What it does after a
+failed send depends on its version and on how the send started.
+
+| LiteLLM | A timeout, a connection error, or a 5xx such as 503 | A 4xx: 400, 401, 413, 429 |
 |---|---|---|
 | 1.83.9 (tested) | Lost. A refused or dropped connection is tried once more at once; nothing else is sent again. | Lost. |
-| 1.84.0 and later, with `max_retries: 4` and `retry_delay: 5` | Sent again up to 4 times, after 5, 10, 20 and 40 seconds (`retry_delay` doubles each time). Lost if the last try fails. | Lost. Never sent again. |
+| 1.84.0 and later, with `max_retries: 4` and `retry_delay: 5`: a send from the 5-second timer | Sent again up to 4 times, after 5, 10, 20 and 40 seconds (`retry_delay` doubles each time). Lost if the last try fails. | Lost. Never sent again. |
+| 1.84.0 and later: a send started because the queue reached `DEFAULT_BATCH_SIZE` | Sent again after 5 and 15 seconds at most, then lost. This send runs as LiteLLM logging work, which LiteLLM stops after 20 seconds (`LOGGING_WORKER_MAX_TIME_PER_COROUTINE`). | Lost. Never sent again. |
 
-"Lost" means LiteLLM drops the whole send from its queue. Hardcount never
-sees those calls. Hardcount answers 503 while its database is briefly out
-of reach, such as during a restart, so on 1.83.9 a restart loses the calls
-sent in that window. The 1.84.0 row comes from LiteLLM's source, which is
-the same up to 1.106.6, the newest release on 2026-10-31. Hardcount's own
-tests use records from a 1.83.9 proxy.
+With `DEFAULT_BATCH_SIZE=50`, the queue reaches the batch size within the
+5 seconds once the proxy handles more than about 10 calls a second (50
+calls in 5 seconds). From there, most sends get only the shorter retries.
 
-To get lost calls back, send them again from LiteLLM's spend log before the
-period's invoice is built:
-[LiteLLM spend gap after an outage](../ops/runbook/litellm-spend-gap.md).
+"Lost" means LiteLLM drops the whole send from its queue, and Hardcount
+never sees those calls. While Hardcount restarts, it refuses connections.
+It answers 503 only while its database is out of reach, such as during a
+failover.
+
+The 1.84.0 rows come from LiteLLM's source, which is the same up to
+1.106.6, the newest release on 2026-10-31. Hardcount's own tests use
+records from a 1.83.9 proxy.
+
+### Calls lost when nothing failed
+
+In every version, LiteLLM empties its whole queue when a send ends, and
+keeps no copy of the calls that were not in that send:
+
+- **A call queued while a send is in flight, or waiting to retry, can be
+  dropped,** even when the send succeeds. The send's end empties the queue
+  with that call still in it, unless a later send already carried it.
+- **While a send waits to retry,** each new call past `DEFAULT_BATCH_SIZE`
+  starts another send of the whole queue, which keeps growing. Such a send
+  can pass 1 MB and be refused, and a refused send is never sent again.
+
+The rows that do arrive are counted once: a call sent twice comes back as
+`deduplicated`. The calls LiteLLM dropped are found only by comparing with
+its spend log, as above.
 
 ## 3. Set `user` on every call
 
@@ -283,9 +323,14 @@ Each event also carries these labels (dimensions):
   prices for them (audio tokens, an older snapshot). To charge such a name
   its own rate, add a price that names its `model_raw`
   ([how](../ai-pricing.md#price-one-platforms-model-name-differently)).
-- `model_raw`: the model name exactly as LiteLLM sent it. A proxy sends
-  the `model` of the `model_list` entry, such as
-  `anthropic/claude-sonnet-4-5-20250929`.
+- `model_raw`: the model name exactly as LiteLLM sent it. The name
+  depends on the route. On the proxy's own routes, such as
+  `/v1/chat/completions`, `/v1/messages` and `/v1/responses`, it is the
+  `model` of the `model_list` entry, such as
+  `anthropic/claude-sonnet-4-5-20250929`. On a pass-through route, such as
+  `/anthropic/v1/messages`, it is the name the client sent, with no
+  prefix, such as `claude-sonnet-4-5-20250929`. A price on `model_raw` must name each form
+  your traffic shows.
 - `context_tier`, on Claude Haiku 5.5 events only: `prompt_up_to_100k` or
   `prompt_over_100k`. Haiku 5.5 has a higher price when the prompt (input,
   cache reads and cache writes) is over 100,000 tokens. Provider costs have
@@ -462,6 +507,7 @@ at all?
 | Status | Meaning | What to do |
 |---|---|---|
 | 400 | The body is not valid JSON, or it is over 1 MB. The batch was not saved. | Fix the request. A batch over 1 MB gets this answer every time, so have LiteLLM send fewer records at once ([how](#keep-each-send-under-1-mb)). |
+| 413, from nginx | Behind the Compose stack's or the quick start's nginx, the body is over 1 MB. The batch did not reach Hardcount. | The same as a 400 over 1 MB. |
 | 401 | The API key is missing, wrong, revoked or expired. The batch was not saved. | Fix the `Authorization` header. |
 | 403 | The key cannot send usage. Every Hardcount key type can, so this does not happen with a key Hardcount made. The batch was not saved. | Use a usage-only or secret key. |
 | `429 rate_limited` | Too many requests. The batch was not saved. | Send the whole batch again after `Retry-After` seconds. |
@@ -471,7 +517,8 @@ at all?
 When you send a batch again, rows that were saved before the failure come
 back as `deduplicated`. LiteLLM sends a batch again only in the cases in
 [What LiteLLM sends again, and what is lost](#what-litellm-sends-again-and-what-is-lost):
-never after a 4xx, and never on 1.83.9.
+never after a 4xx, and on 1.83.9 only after a refused or dropped
+connection.
 
 ## Usage for a customer Hardcount does not know yet
 

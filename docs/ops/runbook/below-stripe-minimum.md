@@ -28,8 +28,8 @@ One of these:
   automatically, starts no payment recovery, and does not email the
   customer about it. A payment recovery already running on the invoice ends
   with resolution `amount_below_minimum`, at once or at its next scheduled
-  step, so its final action (by default, pausing the subscription) does not
-  run.
+  step, so its policy's final action (a pause, a cancel or a write-off, if
+  the policy has one) does not run.
 - **Hardcount learns the minimum from Stripe's answer**, so the invoice is first
   charged once. For a customer with no card on file, Hardcount learns it when
   the customer clicks Pay on the hosted page, or when a card is saved and

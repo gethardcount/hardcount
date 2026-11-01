@@ -125,6 +125,9 @@ it.
 - **More than about 1,000 customers to poll each minute?** Poll less often,
   or raise `HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN` on your Hardcount server
   ([Settings](settings.md)).
+- **In production, the limit needs Redis.** While Redis is down, every
+  read answers `429` with `Retry-After: 60`. The poller below then waits,
+  and keeps each customer's last figure.
 
 ### A poller you can run
 
@@ -206,9 +209,9 @@ dictionary, and call `may_serve()` from the request path.
 
 ## When the read fails
 
-The read answers `500` when Hardcount cannot work the figure out. It never
-returns part of a figure. A read that takes longer than 30 seconds answers
-`504`, and one over the rate limit answers `429`.
+The read answers `500` when Hardcount cannot work the figure out,
+including when it is cut off at 30 seconds. It never returns part of a
+figure. A read over the rate limit answers `429`.
 
 - Keep the last figure you stored for that customer. Do not clear it.
 - Go on to the next customer. One failed read must not stop the loop.

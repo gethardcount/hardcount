@@ -62,8 +62,10 @@ knowing if the first one arrived. The idempotency key makes that safe.
 - **Never reuse a key for different usage.** That usage is lost. So do not
   build keys from a batch position or a timestamp that can repeat.
 
-A batch is stored whole or not at all. So when a batch fails, send the
-same batch again: events already stored come back as `deduplicated`.
+A batch is stored whole or not at all. When a batch gets no answer, a
+`5xx` or a `429`, send the same batch again: events already stored come
+back as `deduplicated`. A `422` names the bad events in `errors[]` and
+fails the same way again, so fix those events first.
 
 The usage routes ignore the `Idempotency-Key` header that other write
 routes take. The key in each event is their only one.

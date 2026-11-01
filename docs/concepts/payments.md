@@ -28,10 +28,11 @@ invoice is Hardcount's. To connect Stripe, see
    up, emails the customer. A card the customer adds meanwhile is charged.
    When the retries run out, your dunning policy decides what happens.
 
-With no card saved, step 3 cannot run. Dunning starts at once, and the
-customer gets one email: a link to add a card when Stripe is connected, or
-the invoice itself when it is not. Once they add a card, the next billing
-run charges it.
+With no card saved, step 3 cannot run. Dunning starts at once. Once email
+is set up, the customer gets an email at once: a link to add a card when
+Stripe is connected, or the invoice itself when it is not. Each dunning
+retry then sends a reminder. Once they add a card, the next billing run
+charges it; on a test clock, the next move of the clock does.
 
 An amount below Stripe's minimum charge, such as $0.50 in USD, is not
 charged and starts no retries. The invoice stays open
@@ -55,9 +56,11 @@ beside the invoice's own `status`.
 Dunning is the process of collecting an unpaid invoice. A dunning policy
 sets it up:
 
-- **When to retry:** the days to wait before each retry. Every new account
-  starts with the policy "Default retries", which retries on day 3, 7 and
-  14 after the failed charge.
+- **When to retry:** the days to wait before each retry, in `retry_days`.
+  The first wait counts from the failed charge, and each later one from
+  the retry before it. Every new account starts with the policy "Default
+  retries", `retry_days` `[3, 4, 7]`: retries on day 3, 7 and 14 after the
+  failed charge.
 - **What to do when the retries run out:** pause collection, cancel the
   subscription, write off the invoice, both, or neither. "Default retries"
   does neither: the subscription keeps billing and the invoice stays open.
@@ -108,7 +111,7 @@ detail.
 | `payment.succeeded` | A card charge succeeded. `invoice.paid` comes with it. |
 | `payment.failed` | Stripe declined a charge. |
 | `dunning.started` | Dunning began on an unpaid invoice. |
-| `dunning.escalated` | Every retry failed, and the policy's final action was taken. |
+| `dunning.escalated` | Every retry failed, and the policy's final action was applied, even when that action is to do nothing. |
 | `dunning.resolved` | Dunning ended, for example because the customer paid. |
 | `payment.dispute_opened`, `payment.dispute_closed` | A customer disputed a card payment with their bank, and when Stripe closed the dispute. |
 | `payment.refunded_in_stripe` | A refund was made in Stripe outside Hardcount. |

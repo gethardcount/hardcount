@@ -158,9 +158,9 @@ follows.
 - **proration**: Charging only for the whole days a price was active in a
   billing period. For a plan billed in advance, a change in the middle of a
   period charges the difference now, or credits it on a downgrade, and a
-  short first period is prorated when billed. An upgrade is refused while
-  the period's invoice is unpaid. A plan billed in arrears is prorated by
-  days when the period closes.
+  short first period is prorated when billed. A change that charges more
+  now is refused while the period's invoice is unpaid or written off. A
+  plan billed in arrears is prorated by days when the period closes.
   [More](concepts/subscriptions.md#plan-changes), and
   [the decision](adr/050-unpaid-source-proration-policy.md)
 - **spend threshold**: A limit on one subscription that issues an invoice
@@ -170,7 +170,7 @@ follows.
   usage, and no base fee. The period keeps its dates, and the base fee is
   billed as it would be with no threshold.
   Usage is never blocked.
-  [More](ai-pricing.md#usage-on-a-yearly-plan)
+  [More](concepts/invoices.md#spend-thresholds-an-invoice-made-early)
 - **invoice states (draft, finalized, paid, void, uncollectible)**: Where
   an invoice is in its life. Draft: you can still change it. Finalized:
   issued and owed. Paid. Void: canceled, as if the debt never existed (the
@@ -230,7 +230,7 @@ follows.
   create; either way Hardcount calls nothing at Stripe for it.
   [More](ops/runbook/refund-made-in-stripe.md), and
   [the decision](adr/134-refunds-made-in-stripe-are-recorded.md)
-- **clawback**: Has two meanings. In subscriptions: a paid period billed in
+- **clawback**: Has two meanings. In subscriptions: a period billed in
   advance is cut short (a cancel, a downgrade, a removed item or a plan
   swap). Hardcount then issues a credit note for the unused amount, tax
   included, and reverses that tax. The part already paid goes to the
@@ -347,7 +347,8 @@ follows.
 - **catch-up (catchup)**: The work Hardcount does after a test clock moves
   forward. It runs everything that fell due in the skipped time: trial
   ends, billing periods, pauses that end, thresholds, tax retries, charges,
-  dunning steps and credit expiries. It runs them by kind, not in time
+  credit notes waiting for an invoice to settle, dunning steps and credit
+  expiries. It runs them by kind, not in time
   order, in that order. So one long move can bill the next period before
   dunning's final action runs, and a pause or cancel is then dated at that
   next billing date. To test a policy that pauses or cancels, move the

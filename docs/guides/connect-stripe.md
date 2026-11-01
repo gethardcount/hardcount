@@ -10,8 +10,12 @@ connection, and you connect live mode the same way when you are ready.
 
 ## Before you start
 
-- Hardcount running, and a test secret key in `HARDCOUNT_KEY`
+- Hardcount running, with its address in `HARDCOUNT` and a test secret
+  key in `HARDCOUNT_KEY`
   ([first invoice](../first-invoice.md#before-you-start)).
+- A test customer, with its Hardcount ID (`hc_cus_…`) in `CUSTOMER_ID`
+  for step 3. The [first invoice page](../first-invoice.md#steps) creates
+  one in its step 3.
 - A Stripe account, in test mode.
 - An address Stripe can reach. Stripe sends its webhooks (messages about
   payments) to Hardcount over the internet. On your own computer, the
@@ -30,23 +34,30 @@ How payments work, in short: [Payments](../concepts/payments.md).
 
    **You see:** "Verified as" and your Stripe account's name.
 
-Or with the API. Keep the keys out of your shell history:
+Or with the API. `read -rs` asks for the secret key without showing it,
+so the key is not on your screen and not in the command your shell
+records. Paste the key, then press Enter:
 
 ```bash
-umask 077 && cat > /tmp/stripe-keys.json <<'EOF'
-{"livemode": false, "secret_key": "sk_test_…", "publishable_key": "pk_test_…"}
-EOF
-curl -s -X POST "$HARDCOUNT/v1/settings/stripe" \
-  -H "Authorization: Bearer $HARDCOUNT_KEY" \
-  -H "Content-Type: application/json" \
-  -d @/tmp/stripe-keys.json | jq '{id, stripe_account_name, verified_at, last_verified_error}'
-rm -f /tmp/stripe-keys.json
+read -rs STRIPE_SK
+jq -n --arg sk "$STRIPE_SK" --arg pk "pk_test_…" \
+    '{livemode: false, secret_key: $sk, publishable_key: $pk}' \
+  | curl -s -X POST "$HARDCOUNT/v1/settings/stripe" \
+    -H "Authorization: Bearer $HARDCOUNT_KEY" \
+    -H "Content-Type: application/json" \
+    -d @- | jq '{id, stripe_account_name, verified_at, last_verified_error, last_verified_error_kind}'
+unset STRIPE_SK
 ```
 
 **You see:** the connection's `id` (`hc_spc_…`), your account's name, a
-`verified_at` time and `"last_verified_error": null`. A
-`last_verified_error` with a message means Stripe refused the key: the keys
-are saved, but nothing can be charged until you save working ones.
+`verified_at` time, and `null` for the two error fields. When the check
+fails, the keys are still saved, but nothing can be charged until a check
+passes. `last_verified_error` says why, and `last_verified_error_kind` says
+what to do:
+
+- `rejected`: Stripe refused the key. Save a working key.
+- `unavailable`: Hardcount could not reach Stripe, so the key was not
+  checked. Save the same keys again to check them.
 
 ## 2. Send Stripe's events to Hardcount
 
@@ -84,8 +95,10 @@ stripe listen --forward-to http://localhost:8080/v1/webhooks/stripe/hc_spc_…
 **You see:** the CLI prints a webhook secret (`whsec_…`). Use it in step 2.
 
 Until the secret is saved, Hardcount answers Stripe's webhooks with `404`.
-A customer would then see "card saved" on Stripe's page while Hardcount
-never learns of the card.
+A customer then sees "card saved" on Stripe's page, but Hardcount does not
+learn of the card until Stripe sends the event again. Stripe sends a
+failed delivery again for up to three days in live mode, and for a few
+hours in test mode.
 
 ## 3. Save a customer's card
 
@@ -105,7 +118,8 @@ them a link to it:
 
   **You see:** a `https://checkout.stripe.com/…` address. Send it to the
   customer, or open it yourself in test mode. Add `"return_url"` to the
-  body to choose where Stripe sends them afterwards.
+  body to choose where Stripe sends them afterwards. Hardcount adds
+  `?status=success` or `?status=cancel` to it.
 - **By email from Hardcount:**
   `POST /v1/customers/{customer_id}/payment-methods/send-setup-email`
   sends the link to the customer's email address. It needs email set up
@@ -158,11 +172,11 @@ dashboard. Set these on your Hardcount server, or customers land on
 `http://localhost:5173`, which exists only in local development. The card
 is saved either way.
 
-| Setting | The page after |
-|---|---|
-| `CUSTOMER_PORTAL_URL` | a setup link from step 3. Hardcount adds `/payment-method-added`. |
-| `PAYMENT_UPDATE_RETURN_URL` | the "add a payment method" email Hardcount sends when an invoice finds no card. A full address. |
-| `HOSTED_INVOICE_BASE_URL` | **Pay** on the hosted invoice page. |
+| Setting | The page after | Where the customer lands |
+|---|---|---|
+| `CUSTOMER_PORTAL_URL` | a setup link from step 3, with no `return_url` | `<CUSTOMER_PORTAL_URL>/payment-method-added?status=success` (or `cancel`) |
+| `PAYMENT_UPDATE_RETURN_URL` | the "add a payment method" email Hardcount sends when an invoice finds no card | `<PAYMENT_UPDATE_RETURN_URL>?status=success` (or `cancel`); it is a full address |
+| `HOSTED_INVOICE_BASE_URL` | **Pay** on the hosted invoice page | `<HOSTED_INVOICE_BASE_URL>/invoice/<token>?paid=1`, the invoice's own page |
 
 More: [Settings](../settings.md).
 

@@ -42,8 +42,15 @@ dimension. A LiteLLM proxy does this for you: Hardcount turns a name such as
   `@20250805` or `@default`. Bedrock, Google Cloud and Foundry prefixes are
   removed first. A name Hardcount does not know, such as
   `anthropic/claude-opus-4-9`, is never priced as an older model. It keeps
-  the name LiteLLM sent, prefix included, and has no price until you add one
+  the name LiteLLM sent, and has no price until you add one
   ([how](#price-a-claude-model-hardcount-does-not-know)).
+- **The name LiteLLM sends depends on the route.** On the proxy's own
+  routes, such as `/v1/chat/completions` and `/v1/messages`, it is the
+  `model` of the proxy's `model_list` entry, with its provider prefix:
+  `anthropic/claude-sonnet-4-5-20250929`. On a pass-through route, such as
+  `/anthropic/v1/messages`, it is the name the client sent, with no
+  prefix, such as `claude-sonnet-4-5-20250929`. Both become `claude-sonnet-4.5` in `model`;
+  `model_raw` keeps each as sent.
 - **An OpenAI name matches the longest model in the table it starts with,
   followed by a dash.** So `gpt-4o-audio-preview` and `gpt-4o-2024-05-13`
   are priced as `gpt-4o`, although OpenAI lists other prices for them.
@@ -251,12 +258,13 @@ once a year, on the invoice at the end of the year.
 ## Price a Claude model Hardcount does not know
 
 A Claude name from LiteLLM that Hardcount does not know keeps, in `model`,
-the name exactly as LiteLLM sent it. From a proxy that is the `model` of
-its `model_list` entry, such as `anthropic/claude-opus-4-9`; the event's
-`model_raw` shows the same name. Price it as in [Price a model a recipe
-does not cover](#price-a-model-a-recipe-does-not-cover), with one price for
-each kind of token. This example adds it to the `anthropic_style` plan
-"AI API":
+the name exactly as LiteLLM sent it; the event's `model_raw` shows the same
+name. The name depends on the route: `anthropic/claude-opus-4-9` on the
+proxy's own routes, and `claude-opus-4-9` on a pass-through route such as
+`/anthropic/v1/messages`. Price each name your traffic shows, as in [Price
+a model a recipe does not cover](#price-a-model-a-recipe-does-not-cover),
+with one price for each kind of token. This example adds the first name to
+the `anthropic_style` plan "AI API":
 
 ```bash
 # Your 100 newest plans. With more, add &offset=100 to look further.
@@ -281,7 +289,9 @@ matching, and the usage shows as not billed until you price the new name.
 ## Price one platform's model name differently
 
 Each event keeps the name LiteLLM sent in `model_raw`, such as
-`vertex_ai/claude-opus-4-6@default`. To charge that name another rate,
+`vertex_ai/claude-opus-4-6@default`. That name depends on the route the
+call took, so check the `model_raw` values your usage shows and price each
+one. To charge a name another rate,
 add a price with one more label than the recipe's price for the model:
 `model_raw` beside its labels. The price with more labels wins. This
 example charges Claude Opus 4.6 input tokens sent under that name $5.50
