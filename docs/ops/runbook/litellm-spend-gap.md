@@ -15,8 +15,8 @@ retries, that usage is lost. Back to the [runbook index](index.md).
   - LiteLLM 1.84.0 and later send it again after a timeout, a connection
     error or a 5xx, while `max_retries` lasts. A send started because the
     queue was full gets at most two more tries, within 20 seconds.
-  - No version sends a batch again after a 4xx, such as a 400 or 413 for a
-    body over 1 MB
+  - No version sends a batch again after a 4xx, such as a 413 for a body
+    over 32 MB, or over 1 MB behind the Compose stack's nginx
     ([what LiteLLM sends again](../../integrations/litellm.md#what-litellm-sends-again-and-what-is-lost)).
 - Or nothing failed at all. LiteLLM can drop calls it queued while a send
   was in flight

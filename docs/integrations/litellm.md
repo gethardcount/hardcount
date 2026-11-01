@@ -109,19 +109,20 @@ callback_settings:
     timeout: 10
 ```
 
-Start the proxy with a smaller batch size. It keeps each send under
-Hardcount's limit ([Keep each send under 1 MB](#keep-each-send-under-1-mb)),
-at a cost: more sends start from a full queue, which LiteLLM retries for a
-shorter time
-([What LiteLLM sends again](#what-litellm-sends-again-and-what-is-lost)):
+Start the proxy:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-…
 export LITELLM_MASTER_KEY=sk-…      # the key your app sends to the proxy
-DEFAULT_BATCH_SIZE=50 litellm --config litellm_config.yaml
+litellm --config litellm_config.yaml
 ```
 
 **You see:** the proxy starts on port 4000.
+
+Does the proxy reach Hardcount through the nginx of the Compose stack or
+the quick start? Then start it with `DEFAULT_BATCH_SIZE=50` in front of
+`litellm`, so each send stays under that nginx's 1 MB limit
+([Keep each send under the size limit](#keep-each-send-under-the-size-limit)).
 
 - **`endpoint`:** your Hardcount address. On your own computer it is
   `http://localhost:8080`. If LiteLLM runs in a Docker container and Hardcount
@@ -145,37 +146,49 @@ With either form, Hardcount accepts a single record, a list of records
 (`json_array`, the default), or `{"events": [...]}`. It refuses
 `log_format: ndjson` when a send holds more than one record.
 
-### Keep each send under 1 MB
+### Keep each send under the size limit
 
-A send over 1 MB is refused, and LiteLLM never sends a refused send
-again, so every call in it is lost:
+A send over the size limit is refused, and LiteLLM never sends a refused
+send again, so every call in it is lost. Which limit applies depends on
+the path:
 
-- Hardcount answers `400` for a request body over 1 MB.
-- Behind the Compose stack's or the quick start's nginx, nginx answers
-  first, with `413` (`client_max_body_size 1m` in
-  `deploy/compose/nginx.conf`).
+- **Straight to Hardcount:** 32 MB (33,554,432 bytes) on this route.
+  Over it, Hardcount answers `413 batch_too_large` and saves nothing.
+- **Through the nginx of the Compose stack or the quick start:** 1 MB.
+  nginx answers `413` itself, before Hardcount sees the send
+  (`client_max_body_size 1m` in `deploy/compose/nginx.conf`).
 
 LiteLLM sends the calls it has queued when the queue reaches
 `DEFAULT_BATCH_SIZE` calls (512 unless you set it), or every
 `DEFAULT_FLUSH_INTERVAL_SECONDS` (5 seconds). Each call's record carries
 the prompt and the reply. Even with a one-word prompt, a 1.83.9 record is
-7 to 9 KB. So 1 MB (1,048,576 bytes) holds only about 115 to 150 calls.
-At 30 calls a second, 5 seconds of calls is 150 records, and the send is
-refused.
+7 to 9 KB, so a full default batch is about 4 MB.
 
-- **Set `DEFAULT_BATCH_SIZE`** in the proxy's environment, as above. With
-  50, a send of short-prompt records is at most about 450 KB (50 × 9 KB)
-  when no send is waiting to retry, which leaves room for prompts and
+- **Straight to Hardcount,** a full default batch fits while its records
+  average under 64 KB (32 MB ÷ 512). With longer prompts, use one of the
+  settings below.
+- **Through that nginx,** 1 MB (1,048,576 bytes) holds only about 115 to
+  150 short records. At 30 calls a second, 5 seconds of calls is 150
+  records, and the send is refused.
+
+Two settings keep a send smaller:
+
+- **Set `DEFAULT_BATCH_SIZE`** in the proxy's environment. With 50, a send
+  of short-prompt records is at most about 450 KB (50 × 9 KB) when no send
+  is waiting to retry, which fits through nginx with room for prompts and
   replies. A send waiting to retry lets the queue grow past that (see
-  [Calls lost when nothing failed](#calls-lost-when-nothing-failed)).
-- **With long prompts, also leave the text out.** Add
+  [Calls lost when nothing failed](#calls-lost-when-nothing-failed)). A
+  smaller batch size has a cost: more sends start from a full queue, which
+  LiteLLM retries for a shorter time
+  ([What LiteLLM sends again](#what-litellm-sends-again-and-what-is-lost)).
+- **With long prompts, leave the text out.** Add
   `turn_off_message_logging: true` under `litellm_settings`. LiteLLM then
   puts `redacted-by-litellm` in place of the prompt and the reply. Hardcount
   does not read either, so billing is the same. This setting applies to
   every logging callback of the proxy, not only Hardcount's.
 
 A refused send shows in the proxy's log as `Generic API Logger Error
-sending batch`. Hardcount counts its 400 on
+sending batch`. Hardcount counts its 413 on
 `/v1/integrations/litellm/spend` in `hardcount_http_requests_total`. A 413
 from nginx never reaches Hardcount: look for it in nginx's access log.
 
@@ -197,9 +210,10 @@ failed send depends on its version and on how the send started.
 | 1.84.0 and later, with `max_retries: 4` and `retry_delay: 5`: a send from the 5-second timer | Sent again up to 4 times, after 5, 10, 20 and 40 seconds (`retry_delay` doubles each time). Lost if the last try fails. | Lost. Never sent again. |
 | 1.84.0 and later: a send started because the queue reached `DEFAULT_BATCH_SIZE` | Sent again after 5 and 15 seconds at most, then lost. This send runs as LiteLLM logging work, which LiteLLM stops after 20 seconds (`LOGGING_WORKER_MAX_TIME_PER_COROUTINE`). | Lost. Never sent again. |
 
-With `DEFAULT_BATCH_SIZE=50`, the queue reaches the batch size within the
-5 seconds once the proxy handles more than about 10 calls a second (50
-calls in 5 seconds). From there, most sends get only the shorter retries.
+The queue reaches the batch size within the 5 seconds once the proxy
+handles more than about 100 calls a second with the default 512 (512
+calls in 5 seconds), or more than about 10 with `DEFAULT_BATCH_SIZE=50`.
+From there, most sends get only the shorter retries.
 
 "Lost" means LiteLLM drops the whole send from its queue, and Hardcount
 never sees those calls. While Hardcount restarts, it refuses connections.
@@ -220,7 +234,8 @@ keeps no copy of the calls that were not in that send:
   with that call still in it, unless a later send already carried it.
 - **While a send waits to retry,** each new call past `DEFAULT_BATCH_SIZE`
   starts another send of the whole queue, which keeps growing. Such a send
-  can pass 1 MB and be refused, and a refused send is never sent again.
+  can pass the size limit and be refused, and a refused send is never sent
+  again.
 
 The rows that do arrive are counted once: a call sent twice comes back as
 `deduplicated`. The calls LiteLLM dropped are found only by comparing with
@@ -506,8 +521,9 @@ at all?
 
 | Status | Meaning | What to do |
 |---|---|---|
-| 400 | The body is not valid JSON, or it is over 1 MB. The batch was not saved. | Fix the request. A batch over 1 MB gets this answer every time, so have LiteLLM send fewer records at once ([how](#keep-each-send-under-1-mb)). |
-| 413, from nginx | Behind the Compose stack's or the quick start's nginx, the body is over 1 MB. The batch did not reach Hardcount. | The same as a 400 over 1 MB. |
+| 400 | The body is empty or not valid JSON. The batch was not saved. | Fix the request. |
+| `413 batch_too_large` | The body is over 32 MB. The batch was not saved. | Have LiteLLM send fewer records at once ([how](#keep-each-send-under-the-size-limit)). A batch this size gets this answer every time. |
+| 413, from nginx | Behind the Compose stack's or the quick start's nginx, the body is over 1 MB. The batch did not reach Hardcount. | Have LiteLLM send fewer records at once ([how](#keep-each-send-under-the-size-limit)). |
 | 401 | The API key is missing, wrong, revoked or expired. The batch was not saved. | Fix the `Authorization` header. |
 | 403 | The key cannot send usage. Every Hardcount key type can, so this does not happen with a key Hardcount made. The batch was not saved. | Use a usage-only or secret key. |
 | `429 rate_limited` | Too many requests. The batch was not saved. | Send the whole batch again after `Retry-After` seconds. |

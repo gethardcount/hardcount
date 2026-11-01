@@ -349,9 +349,11 @@ follows.
   ends, billing periods, pauses that end, thresholds, tax retries, charges,
   credit notes waiting for an invoice to settle, dunning steps and credit
   expiries. It runs them by kind, not in time
-  order, in that order. So one long move can bill the next period before
-  dunning's final action runs, and a pause or cancel is then dated at that
-  next billing date. To test a policy that pauses or cancels, move the
+  order, in that order. Hardcount dates dunning's cancel or pause at the
+  escalation, the time of the last retry, never before the current
+  period's start. So one long move that bills the next period first dates
+  the pause or cancel at that next billing date. To test a policy that
+  pauses or cancels, move the
   clock to the invoice's last retry first, then to the next billing date
   ([#1276](https://github.com/gethardcount/hardcount/issues/1276)). The
   clock then returns to `ready`, or to `internal_failure` if a step failed
