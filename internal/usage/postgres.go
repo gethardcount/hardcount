@@ -180,13 +180,19 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 	// price past BIGINT; the stamp is the operator's cost, not what the
 	// customer is billed, so the event is still stored and billed, and the
 	// margin report counts it as unresolved.
+	//
+	// provider and token_type match in any case: the rate's are stored in
+	// lower case (PUT /v1/provider-costs lower-cases them), so the event's
+	// are lower-cased for the compare. An event labelled "Anthropic" or
+	// "Input" matched no rate the operator could save. model stays exact,
+	// as it is stored (ADR-079 D3).
 	err = tx.QueryRowContext(ctx, `
 		WITH rate AS (
 			SELECT r.unit_cost_cents
 			FROM provider_cost_rates r
 			WHERE r.tenant_id = $2
-			  AND r.provider = $6::jsonb->>'provider'
-			  AND r.token_type = $6::jsonb->>'token_type'
+			  AND r.provider = lower($6::jsonb->>'provider')
+			  AND r.token_type = lower($6::jsonb->>'token_type')
 			  AND r.model IN ($6::jsonb->>'model_raw', $6::jsonb->>'model')
 			ORDER BY (r.model IS NOT DISTINCT FROM $6::jsonb->>'model_raw') DESC
 			LIMIT 1
