@@ -976,7 +976,7 @@ test('leaving Settings with unsaved changes asks first', async ({ page }) => {
   expect(saves).toEqual([])
 })
 
-test('a new account: Home welcomes the operator and the setup checklist opens once', async ({ page }) => {
+test('a new account: Home welcomes the operator, and the setup checklist opens when asked', async ({ page }) => {
   // The e2e account already has subscriptions. Answer "none yet" to the one
   // question that makes an account new, so Home shows its first-run state.
   await page.route(
@@ -988,22 +988,23 @@ test('a new account: Home welcomes the operator and the setup checklist opens on
   await expect(welcome).toContainText('Hardcount counts usage, works out each bill, makes the invoice and charges the card through Stripe.')
   await expect(welcome).toContainText('Follow the setup checklist to bill your first test customer.')
 
-  // First visit: the checklist opens by itself, every step with its line.
+  // The checklist never opens by itself: it would cover the page and repeat
+  // the welcome card. The card's button opens it, every step with its line.
   const checklist = page.getByRole('dialog', { name: 'Bill your first customer' })
+  await expect(checklist).toHaveCount(0)
+  await welcome.getByRole('button', { name: 'Open setup checklist' }).click()
   await expect(checklist).toBeVisible()
   await expect(checklist).toContainText("You're in test mode, so nothing here charges real money.")
   await expect(checklist.getByText('Send a usage event', { exact: true })).toBeVisible()
   await expect(checklist.getByText('Your app reports what each customer used; Hardcount prices it.')).toBeVisible()
   await expect(checklist.getByText('Let your app hear about invoices and subscriptions')).toBeVisible()
 
-  // Only once: after closing it, the next visit leaves it closed until asked.
+  // Closed stays closed: the next visit does not open it either.
   await checklist.getByRole('button', { name: 'Collapse checklist' }).click()
   await expect(checklist).toHaveCount(0)
   await page.reload()
   await expect(welcome).toBeVisible()
   await expect(checklist).toHaveCount(0)
-  await welcome.getByRole('button', { name: 'Open setup checklist' }).click()
-  await expect(checklist).toBeVisible()
 })
 
 test('the setup checklist ticks Connect Stripe only for a working key in this mode, and counts test-clock customers', async ({ page }) => {

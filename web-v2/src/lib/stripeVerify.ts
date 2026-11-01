@@ -70,3 +70,23 @@ export function stripeKeyState(
   if (key.last_verified_error && key.last_verified_error_kind !== 'unavailable') return 'refused'
   return 'connected'
 }
+
+// The live-mode banner's sentence when live mode cannot charge cards, or null
+// when it can. The two cases differ on the server. With no live key nothing is
+// charged at all: an owed invoice is emailed for the customer to pay
+// (billing/engine.go emailInvoiceOnce), so "charges will fail" was false. A
+// refused key is still used: the charge is sent and Stripe refuses it. Both
+// stay red, the dashboard's tone for something blocked: amber would read as
+// the test-mode band. Undefined (the keys are still loading) shows nothing.
+export interface LiveStripeBanner {
+  text: string
+  cta: string
+}
+
+export function liveStripeBanner(state: StripeKeyState | undefined): LiveStripeBanner | null {
+  if (state === 'refused') return { text: 'Stripe refused your live key, so card charges fail.', cta: 'Replace key' }
+  if (state === 'none') {
+    return { text: "Stripe isn't connected, so cards can't be charged. Customers get invoices by email to pay.", cta: 'Connect Stripe' }
+  }
+  return null
+}
