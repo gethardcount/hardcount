@@ -59,6 +59,7 @@ import { stripeVerifyNotice, STRIPE_VERIFY_TOAST_BODY } from '@/lib/stripeVerify
 import { CONTENT_BAND } from '@/lib/contentBand'
 import { COMPANY_EMAIL_HINT, CREDIT_LOW_THRESHOLD_HINT, sharedSettingsNotice, invoiceNumberPreview } from '@/lib/settingsCopy'
 import { API_ORIGIN } from '@/lib/apiOrigin'
+import { isLocalAddress, stripeListenCommand, stripeWebhookUrl } from '@/lib/stripeWebhookUrl'
 
 const settingsSchema = z.object({
   company_name: z.string().max(255, 'Must be at most 255 characters'),
@@ -1294,7 +1295,7 @@ function StripeCard({ livemode, current, onChanged }: {
                 Hardcount checks each event Stripe sends against this secret. If Stripe shows failed deliveries to
                 this URL, check that the secret matches the one in Stripe.
               </p>
-              <WebhookUrlRow endpointId={current.id} />
+              <CopyValueRow label="Webhook URL" value={stripeWebhookUrl(API_ORIGIN, current.id)} copied="Webhook URL copied" />
               <Button variant="outline" size="sm" onClick={() => setReplacingWebhook(true)}>
                 Replace webhook secret
               </Button>
@@ -1585,6 +1586,7 @@ function WebhookSetup({ current, onSuccess }: {
   })
   const rotating = !!current.has_webhook_secret
   const [pending, setPending] = useState<WebhookSecretForm | null>(null)
+  const webhookUrl = stripeWebhookUrl(API_ORIGIN, current.id)
 
   const save = useMutation({
     mutationFn: (data: WebhookSecretForm) =>
@@ -1608,6 +1610,31 @@ function WebhookSetup({ current, onSuccess }: {
 
   return (
     <div className="space-y-4">
+      {isLocalAddress(webhookUrl) ? (
+        // Stripe cannot call this computer's address; the Stripe CLI relays
+        // its events here and prints the secret for step B.
+        <div className="p-3 rounded-lg border border-border bg-muted/30 space-y-2">
+          <p className="text-xs text-muted-foreground">
+            <strong className="text-foreground">A.</strong> Hardcount runs on this computer, so Stripe can&rsquo;t
+            send events to it. With the{' '}
+            <a
+              href="https://docs.stripe.com/stripe-cli"
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-2 hover:text-foreground inline-flex items-center gap-1"
+            >
+              Stripe CLI
+              <ExternalLink size={10} />
+            </a>{' '}
+            signed in to your Stripe account, run this and leave it running. It passes Stripe&rsquo;s events on to
+            Hardcount and prints a signing secret (<code className="font-mono">whsec_…</code>) for step B.
+          </p>
+          <CopyValueRow label="Command" value={stripeListenCommand(webhookUrl)} copied="Command copied" />
+          <p className="text-xs text-muted-foreground">
+            On a server Stripe can reach, add the webhook URL in Stripe instead.
+          </p>
+        </div>
+      ) : (
       <div className="p-3 rounded-lg border border-border bg-muted/30 space-y-2">
         <p className="text-xs text-muted-foreground">
           <strong className="text-foreground">A.</strong> In{' '}
@@ -1622,7 +1649,7 @@ function WebhookSetup({ current, onSuccess }: {
           </a>
           , click <em>Add endpoint</em> and paste this URL:
         </p>
-        <WebhookUrlRow endpointId={current.id} />
+        <CopyValueRow label="Webhook URL" value={webhookUrl} copied="Webhook URL copied" />
         <p className="text-xs text-muted-foreground pt-1">Subscribe to these events:</p>
         <ul className="space-y-0.5 pl-1">
           {STRIPE_WEBHOOK_EVENTS.map(e => (
@@ -1636,10 +1663,14 @@ function WebhookSetup({ current, onSuccess }: {
           ))}
         </ul>
       </div>
+      )}
 
       <form onSubmit={onSubmit} className="space-y-2">
         <Label className="text-xs text-foreground">
-          <strong className="text-foreground">B.</strong> Paste the signing secret Stripe shows after saving the endpoint
+          <strong className="text-foreground">B.</strong>{' '}
+          {isLocalAddress(webhookUrl)
+            ? 'Paste the signing secret the command printed'
+            : 'Paste the signing secret Stripe shows after saving the endpoint'}
         </Label>
         <Input
           type="password"
@@ -1761,21 +1792,21 @@ function ReadOnlyRow({ label, value, mono, action }: {
 
 // Just the URL + copy. Event subscription list lives in WebhookSetup (only
 // relevant during setup/rotation, not when reviewing a connected integration).
-function WebhookUrlRow({ endpointId }: { endpointId: string }) {
-  const url = `${API_ORIGIN}/v1/webhooks/stripe/${endpointId}`
+function CopyValueRow({ label, value, copied }: { label: string; value: string; copied: string }) {
   return (
     <div className="py-2.5 px-3 bg-background border border-border rounded-lg">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-0.5">
-            Webhook URL
+            {label}
           </p>
-          <code className="text-xs font-mono text-foreground break-all">{url}</code>
+          <code className="text-xs font-mono text-foreground break-all">{value}</code>
         </div>
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => { navigator.clipboard.writeText(url); toast.success('Webhook URL copied') }}
+          aria-label={`Copy ${label.toLowerCase()}`}
+          onClick={() => { navigator.clipboard.writeText(value); toast.success(copied) }}
         >
           <Copy size={14} />
         </Button>
