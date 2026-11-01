@@ -518,18 +518,18 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ?billing=failing lists the subscriptions whose billing is failing
-	// (ADR-119). It is a closed set: an unknown value is a 400, never an
+	// (ADR-119). It is a closed set: an unknown value is a 422, never an
 	// unfiltered list that looks like "everything is failing".
 	billing := r.URL.Query().Get("billing")
 	if billing != "" && billing != ListBillingFailing {
-		respond.BadRequest(w, r, `billing must be "failing" when set`)
+		respond.ValidationField(w, r, "billing", `billing must be "failing" when set`)
 		return
 	}
 	// ?collection=paused lists live subscriptions whose collection is
 	// paused. Same closed-set rule as ?billing=.
 	collection := r.URL.Query().Get("collection")
 	if collection != "" && collection != ListCollectionPaused {
-		respond.BadRequest(w, r, `collection must be "paused" when set`)
+		respond.ValidationField(w, r, "collection", `collection must be "paused" when set`)
 		return
 	}
 	// ?status= is a closed set too: an unknown value matched no row and
@@ -544,7 +544,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		if status == "paused" {
 			msg += `; paused collection is not a status, use collection=paused`
 		}
-		respond.BadRequest(w, r, msg)
+		respond.ValidationField(w, r, "status", msg)
 		return
 	}
 

@@ -329,7 +329,7 @@ func (h *Handler) listRuns(w http.ResponseWriter, r *http.Request) {
 	switch domain.DunningRunState(state) {
 	case "", domain.DunningActive, domain.DunningEscalated, domain.DunningResolved:
 	default:
-		respond.BadRequest(w, r, "state must be one of active, escalated, resolved")
+		respond.ValidationField(w, r, "state", "state must be one of active, escalated, resolved")
 		return
 	}
 

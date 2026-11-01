@@ -2100,14 +2100,14 @@ export interface paths {
                     /** @description Filter to subscriptions with a live item on this plan. */
                     plan_id?: string;
                     /**
-                     * @description Exact status. Any other value is a 400. Paused collection is not
+                     * @description Exact status. Any other value is a 422. Paused collection is not
                      *     a status: use `collection=paused`.
                      */
                     status?: "draft" | "trialing" | "active" | "canceled";
                     /**
                      * @description `failing` returns only subscriptions that carry a
                      *     `billing_failure`: those waiting for their next billing attempt
-                     *     and those that are parked. Any other value is a 400.
+                     *     and those that are parked. Any other value is a 422.
                      */
                     billing?: "failing";
                     /**
@@ -2115,7 +2115,7 @@ export interface paths {
                      *     `pause_collection` is in force, whether an operator or dunning set
                      *     it. A timed pause ends at `resumes_at` (on the subscription's test
                      *     clock, if it has one), even while the response still carries it.
-                     *     Any other value is a 400.
+                     *     Any other value is a 422.
                      */
                     collection?: "paused";
                     /** @description Case-insensitive substring match on display name or code. */
@@ -16064,6 +16064,7 @@ export interface operations {
         parameters: {
             query?: {
                 invoice_id?: string;
+                /** @description Exact run state. Any other value is a 422. */
                 state?: "active" | "escalated" | "resolved";
                 /**
                  * @description Rows per page, from 1 to 100. Default 50. Any other value, or one

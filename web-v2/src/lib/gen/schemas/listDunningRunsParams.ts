@@ -13,6 +13,9 @@ import type { OffsetParameter } from './offsetParameter';
 
 export type ListDunningRunsParams = {
 invoice_id?: string;
+/**
+ * Exact run state. Any other value is a 422.
+ */
 state?: ListDunningRunsState;
 /**
  * Rows per page, from 1 to 100. Default 50. Any other value, or one

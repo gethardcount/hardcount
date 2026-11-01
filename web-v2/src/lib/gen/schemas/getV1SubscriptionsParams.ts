@@ -21,14 +21,14 @@ customer_id?: string;
  */
 plan_id?: string;
 /**
- * Exact status. Any other value is a 400. Paused collection is not
+ * Exact status. Any other value is a 422. Paused collection is not
  * a status: use `collection=paused`.
  */
 status?: GetV1SubscriptionsStatus;
 /**
  * `failing` returns only subscriptions that carry a
  * `billing_failure`: those waiting for their next billing attempt
- * and those that are parked. Any other value is a 400.
+ * and those that are parked. Any other value is a 422.
  */
 billing?: GetV1SubscriptionsBilling;
 /**
@@ -36,7 +36,7 @@ billing?: GetV1SubscriptionsBilling;
  * `pause_collection` is in force, whether an operator or dunning set
  * it. A timed pause ends at `resumes_at` (on the subscription's test
  * clock, if it has one), even while the response still carries it.
- * Any other value is a 400.
+ * Any other value is a 422.
  */
 collection?: GetV1SubscriptionsCollection;
 /**

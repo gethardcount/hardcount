@@ -108,8 +108,8 @@ func TestList_CollectionPausedFilter(t *testing.T) {
 		t.Fatalf("unfiltered: code %d, rows %v, total %d; want 200 and 7 with sub_cp_elapsed", code, got, total)
 	}
 
-	// "paused" is not a status; asking for it is a 400, not an empty list.
-	if code, _, _ := list("?status=paused"); code != http.StatusBadRequest {
-		t.Fatalf("status=paused: code %d, want 400", code)
+	// "paused" is not a status; asking for it is a 422, not an empty list.
+	if code, _, _ := list("?status=paused"); code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=paused: code %d, want 422", code)
 	}
 }

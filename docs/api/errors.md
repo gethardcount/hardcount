@@ -59,7 +59,7 @@ the API has one.
 
 | `code` | When | What to do |
 |---|---|---|
-| `invalid_request` | The body is not one JSON value, or a field has the wrong JSON type (`invalid JSON body`). The body is over 1 MB. A usage batch has no events or more than 1,000. A filter that takes a fixed set of values got another, such as `status` on the subscription list. | Fix the request |
+| `invalid_request` | The body is not one JSON value, or a field has the wrong JSON type (`invalid JSON body`). The body is over 1 MB. A usage batch has no events or more than 1,000. | Fix the request |
 
 ### 401 Unauthorized
 
@@ -181,7 +181,7 @@ the credit ledger, and report it if the state looks wrong:
 
 | `code` | When | What to do |
 |---|---|---|
-| `validation_error` | A field failed a rule, such as a missing `external_id`, a bad `limit`, a list `sort` or `dir` the list does not take, or a field the operation does not take. `param` names it. | Fix the field |
+| `validation_error` | A field failed a rule, such as a missing `external_id`, a bad `limit`, a list `sort` or `dir` the list does not take, or a field the operation does not take. A filter that takes a fixed set of values got another, such as `status` on the subscription list. `param` names it. | Fix the field |
 | `batch_rejected` | At least one event of a usage batch failed. Nothing was stored. The body lists each failure in `errors`. | Fix the events named, then send the whole batch again |
 | `idempotency_error` | An `Idempotency-Key` was used before with a different method, path or body | Use a new key for a new request |
 | `customer_has_no_subscription` | An invoice preview or a usage summary for a customer with no active subscription | Send `subscription_id`, or a period with `from` and `to` |
