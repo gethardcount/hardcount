@@ -54,22 +54,6 @@ export function onOpenSetupChecklist(handler: () => void): () => void {
   return () => window.removeEventListener(OPEN_EVENT, handler)
 }
 
-// Home opens the checklist by itself once per user, the first time a new
-// account (no subscriptions yet) lands there. Once is remembered in this
-// browser. When storage can't be read we say "already shown": a checklist
-// that pops open on every visit is worse than one that never does.
-const autoOpenedKey = (userID: string) => `hardcount:setup-checklist-auto-opened:${userID}`
-
-export function claimChecklistAutoOpen(userID: string): boolean {
-  try {
-    if (localStorage.getItem(autoOpenedKey(userID)) === '1') return false
-    localStorage.setItem(autoOpenedKey(userID), '1')
-    return true
-  } catch {
-    return false
-  }
-}
-
 export function useOnboardingSteps() {
   const { user } = useAuth()
   const dismissed = useSyncExternalStore(

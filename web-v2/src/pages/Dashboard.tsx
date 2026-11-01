@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils'
 import { Card, CardContent } from '@/components/ui/card'
 import { AlertTriangle, FlaskConical, Info, ListChecks } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { claimChecklistAutoOpen, openSetupChecklist, useOnboardingSteps } from '@/hooks/useOnboardingSteps'
+import { openSetupChecklist, useOnboardingSteps } from '@/hooks/useOnboardingSteps'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
@@ -86,13 +86,10 @@ export default function DashboardPage() {
   const { data: clocks } = useTestClocks()
   const simulatedNote = showSimulatedTotalsNote(user?.livemode ?? false, clocks?.data?.length ?? 0)
 
-  // First run: an account with no subscriptions yet gets a welcome card, and
-  // the setup checklist opens by itself once per user.
-  const { newAccount, show: checklistShown, dismissed: checklistHidden, setDismissed: setChecklistHidden } = useOnboardingSteps()
-  useEffect(() => {
-    if (!user || newAccount !== true || !checklistShown) return
-    if (claimChecklistAutoOpen(user.user_id)) openSetupChecklist()
-  }, [user, newAccount, checklistShown])
+  // First run: an account with no subscriptions yet gets a welcome card whose
+  // button opens the setup checklist. The checklist never opens by itself: it
+  // covered the page (on a phone, all of it) and repeated the welcome card.
+  const { newAccount, dismissed: checklistHidden, setDismissed: setChecklistHidden } = useOnboardingSteps()
 
   const chartData = useMemo(() => chartRes?.data ?? [], [chartRes])
   // The server returns only buckets with revenue; the chart plots every bucket

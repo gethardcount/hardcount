@@ -28,6 +28,7 @@ import { isNavActive, isTestMode, SETTINGS_NAV, visibleNav } from '@/lib/navigat
 import { HardcountLogo } from '@/components/HardcountLogo'
 import { OnboardingLauncher, SetupChecklistPanel } from '@/components/OnboardingLauncher'
 import { useOnboardingSteps } from '@/hooks/useOnboardingSteps'
+import { liveStripeBanner } from '@/lib/stripeVerify'
 import { ScrollPane } from '@/components/ui/scroll-pane'
 import { DiscardChangesDialog, hasUnsavedChanges } from '@/components/UnsavedChangesGuard'
 
@@ -256,6 +257,7 @@ export function Layout({ children }: { children: ReactNode }) {
   // Drives the live-mode Stripe-missing hard-blocker. The launcher itself
   // calls the same hook — React Query dedupes by key, so no duplicate fetches.
   const { liveStripe, offerShowAgain: offerShowChecklist, setDismissed: setChecklistHidden } = useOnboardingSteps()
+  const liveBanner = liveStripeBanner(liveStripe)
 
   const handleLogout = async () => {
     await logout()
@@ -522,27 +524,24 @@ export function Layout({ children }: { children: ReactNode }) {
             Mirrors Stripe's persistent chrome — the single strongest guard
             against "did I just do that on live?" operator confusion. */}
         <div className="sticky top-0 z-20">
-          {/* Hard blocker — live mode without a Stripe live credential means
-              every real charge will 4xx. Non-dismissible; the only fix is to
-              connect Stripe. Mutually exclusive with the test-mode banner
-              (this only fires in live mode). */}
-          {user && user.livemode && (liveStripe === 'none' || liveStripe === 'refused') && (
+          {/* Live mode that cannot charge cards: no live key, or one Stripe
+              refused (liveStripeBanner says what each means). Non-dismissible;
+              the fix is in Settings. Mutually exclusive with the test-mode
+              banner (this only fires in live mode). */}
+          {user && user.livemode && liveBanner && (
             <div
               role="alert"
               className="flex items-center justify-center gap-2 bg-destructive px-4 py-1.5 text-xs font-medium text-destructive-foreground"
             >
               <AlertTriangle size={14} aria-hidden="true" />
               <span>
-                <strong className="font-semibold">Live mode:</strong>{' '}
-                {liveStripe === 'refused'
-                  ? 'Stripe refused your live key, so charges will fail.'
-                  : "Stripe isn't connected for live payments, so charges will fail."}
+                <strong className="font-semibold">Live mode:</strong> {liveBanner.text}
               </span>
               <Link
                 to="/settings?tab=payments"
                 className="ml-1 underline decoration-destructive-foreground/50 underline-offset-2 hover:decoration-destructive-foreground"
               >
-                {liveStripe === 'refused' ? 'Replace key' : 'Connect Stripe'}
+                {liveBanner.cta}
               </Link>
             </div>
           )}

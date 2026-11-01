@@ -3,7 +3,7 @@
 // kind the server records.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { stripeKeyState, stripeVerifyNotice } from '../src/lib/stripeVerify.ts'
+import { liveStripeBanner, stripeKeyState, stripeVerifyNotice } from '../src/lib/stripeVerify.ts'
 
 test('a refused key asks for the current keys, red, with Stripe named in Details', () => {
   const n = stripeVerifyNotice('rejected')
@@ -56,4 +56,21 @@ test('a mode is connected only by its own key that Stripe did not refuse', () =>
   assert.equal(stripeKeyState([test, refused], true), 'refused')
   assert.equal(stripeKeyState([oldFailed], true), 'refused', 'a failure from before the kind was recorded reads as refused')
   assert.equal(stripeKeyState([unchecked], true), 'connected', 'a key Stripe could not check was not refused')
+})
+
+test('the live banner says what happens without a usable live key', () => {
+  // No key: nothing is charged; the invoice is emailed. Nothing "fails".
+  const none = liveStripeBanner('none')
+  assert.ok(none)
+  assert.doesNotMatch(none.text, /fail/)
+  assert.match(none.text, /cards can't be charged/)
+  assert.match(none.text, /by email/)
+  assert.equal(none.cta, 'Connect Stripe')
+  // A refused key is still used, so its charges do fail.
+  const refused = liveStripeBanner('refused')
+  assert.ok(refused)
+  assert.match(refused.text, /charges fail/)
+  assert.equal(refused.cta, 'Replace key')
+  assert.equal(liveStripeBanner('connected'), null)
+  assert.equal(liveStripeBanner(undefined), null, 'no banner while the keys are still loading')
 })
