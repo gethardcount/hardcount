@@ -189,6 +189,13 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// ?sort and ?dir are a closed set (customerSort): anything else is a 422
+	// naming the allowed values, not the default order without a word.
+	if err := customerSort.Validate(r.URL.Query().Get("sort"), r.URL.Query().Get("dir")); err != nil {
+		respond.FromError(w, r, err, "customer")
+		return
+	}
+
 	filter := ListFilter{
 		TenantID:   tenantID,
 		Status:     r.URL.Query().Get("status"),

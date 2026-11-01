@@ -17,6 +17,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/crypto"
+	"github.com/gethardcount/hardcount/internal/platform/listorder"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -546,7 +547,10 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.I
 	// row. Tie-break direction matches the primary sort direction so
 	// consecutive ties read as a single ordered group rather than
 	// zig-zagging.
-	orderBy := invoiceOrderBy(filter.Sort, filter.SortDir)
+	orderBy, err := invoiceOrderBy(filter.Sort, filter.SortDir)
+	if err != nil {
+		return nil, 0, err
+	}
 	args = append(args, limit, filter.Offset)
 	query := `SELECT ` + invCols + `, ` + invClockCol + ` FROM invoices` + where +
 		` ORDER BY ` + orderBy +
@@ -4520,53 +4524,35 @@ func (s *PostgresStore) GetInvoiceForPeriod(ctx context.Context, tenantID, subsc
 	return inv, err
 }
 
-// invoiceOrderBy returns the ORDER BY clause for the invoice list,
-// validating sort + dir against a closed set. Anything outside the
-// allow-list silently falls back to the default — never interpolate
-// raw user input into SQL.
-//
-// Tie-break on id matches the primary sort direction so a sequence
-// of ties reads as a single ordered group rather than zig-zagging.
-// The id column is monotonic (ulid-prefixed); using it as the
-// secondary sort gives a stable, deterministic order.
-func invoiceOrderBy(sort, dir string) string {
-	col := invoiceSortColumn(sort)
-	d := "DESC"
-	if dir == "asc" {
-		d = "ASC"
-	}
-	return col + " " + d + ", id " + d
-}
-
-// invoiceSortColumn maps the SPA's sort key to a SQL column name.
-// Closed allow-list to prevent injection. Unknown keys default to
-// created_at (the most common sort, matches Stripe Dashboard).
-//
-// amount_due sorts by the invoice's amount as the Invoices list's "Amount"
+// invoiceAmountShown is the invoice's amount as the Invoices list's "Amount"
 // column shows it (invoiceAmountCents in web-v2/src/lib/invoiceTerminal.ts):
 // a paid invoice by what the payment and customer credit paid together, since
 // the settle zeroed its amount_due; every other invoice by amount_due, which a
 // void and a write-off keep. Sorting paid rows by the zeroed figure put a $29
 // paid invoice below a $20 open one (sign-off of #1328).
-func invoiceSortColumn(key string) string {
-	switch key {
-	case "invoice_number":
-		return "invoice_number"
-	case "amount_due_cents", "amount_due":
-		return "(CASE WHEN status = 'paid' THEN amount_paid_cents + credits_applied_cents ELSE amount_due_cents END)"
-	case "billing_period_start", "period":
-		return "billing_period_start"
-	case "due_at":
-		return "due_at"
-	case "issued_at":
-		return "issued_at"
-	case "status":
-		return "status"
-	case "payment_status":
-		return "payment_status"
-	default:
-		return "created_at"
-	}
+const invoiceAmountShown = "(CASE WHEN status = 'paid' THEN amount_paid_cents + credits_applied_cents ELSE amount_due_cents END)"
+
+// invoiceSort is the invoice list's ?sort keys, the default (created_at,
+// as the Stripe Dashboard) first. The handler refuses any other key or dir
+// with a 422 (listorder).
+var invoiceSort = listorder.New(
+	listorder.Key{Name: "created_at", Column: "created_at"},
+	listorder.Key{Name: "invoice_number", Column: "invoice_number"},
+	listorder.Key{Name: "amount_due_cents", Column: invoiceAmountShown},
+	listorder.Key{Name: "amount_due", Column: invoiceAmountShown},
+	listorder.Key{Name: "billing_period_start", Column: "billing_period_start"},
+	listorder.Key{Name: "period", Column: "billing_period_start"},
+	listorder.Key{Name: "due_at", Column: "due_at"},
+	listorder.Key{Name: "issued_at", Column: "issued_at"},
+	listorder.Key{Name: "status", Column: "status"},
+	listorder.Key{Name: "payment_status", Column: "payment_status"},
+)
+
+// invoiceOrderBy returns the ORDER BY clause for the invoice list. The
+// id tie-break follows the primary direction, so a run of ties reads as one
+// ordered group; id is monotonic (ulid-prefixed), so the order is stable.
+func invoiceOrderBy(sort, dir string) (string, error) {
+	return invoiceSort.OrderBy(sort, dir, "id")
 }
 
 func buildInvWhere(f ListFilter) (string, []any) {

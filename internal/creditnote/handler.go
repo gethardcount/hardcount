@@ -241,6 +241,12 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// ?sort and ?dir are a closed set (creditNoteSort): anything else is a 422
+	// naming the allowed values, not the default order without a word.
+	if err := creditNoteSort.Validate(r.URL.Query().Get("sort"), r.URL.Query().Get("dir")); err != nil {
+		respond.FromError(w, r, err, "credit_note")
+		return
+	}
 	filter := ListFilter{
 		TenantID:     tenantID,
 		InvoiceID:    r.URL.Query().Get("invoice_id"),
