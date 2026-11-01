@@ -199,7 +199,7 @@ type CreditNoteInfo struct {
 }
 
 // cnChannelDescription builds the per-channel breakdown line for a
-// post-payment credit note in the POST-PAYMENT ADJUSTMENTS section.
+// post-payment credit note in the REFUNDS AND CREDITS section.
 //
 // A mixed-allocation CN reaches that list via its settled credit /
 // out-of-band leg, so its card leg can be present in ANY refund state —
@@ -851,7 +851,9 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 		}
 
 		if inv.Status != domain.InvoiceVoided {
-			// Post-payment adjustments. A CN is "completed" when at least
+			// Post-payment credit notes, under "Refunds and credits": the
+			// hosted invoice page's heading for the same notes
+			// (hostedinvoice.toViewCreditNotes). A CN is "completed" when at least
 			// one channel has settled — credit-balance and out-of-band
 			// are immediate at Issue time; the Stripe refund leg is
 			// considered settled only on refund_status=succeeded so a
@@ -875,7 +877,7 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 						y += 8
 						setFont(false, 7)
 						setColor(150, 150, 150)
-						textAt(margin, y, "POST-PAYMENT ADJUSTMENTS")
+						textAt(margin, y, "REFUNDS AND CREDITS")
 						y += 12
 					}
 					channelDesc := cnChannelDescription(cn, symbol)

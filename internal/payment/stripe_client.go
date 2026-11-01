@@ -479,6 +479,15 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 		// the hosted invoice page, which the decline's email links to.
 		// https://docs.stripe.com/payments/without-card-authentication
 		ErrorOnRequiresAction: stripe.Bool(true),
+		// Required with ErrorOnRequiresAction. Without it Stripe uses the
+		// payment methods set in its Dashboard, and refuses that flag with
+		// HTTP 400 (invalid_request_error) on every charge: "you can't use
+		// error_on_requires_action. Use payment_method_types with
+		// error_on_requires_action"
+		// (https://docs.stripe.com/changelog/2023-08-16/automatic-payment-methods).
+		// Hardcount takes cards only, as the three Checkout Session creates
+		// say.
+		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
 		Params: stripe.Params{
 			IdempotencyKey: stripe.String(SentIdempotencyKey(params.IdempotencyKey, params.PaymentMethodID)),
 			Metadata:       metadata,

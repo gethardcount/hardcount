@@ -543,25 +543,41 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 	// X" plus dunning's "Action required — payment retry for invoice X
 	// (Attempt N of M)".
 	charged, err := a.charger.ChargeInvoiceForDunningRetry(chargeCtx, tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
-	// A definite decline carries its PI id across the boundary (typed dunning
-	// wrapper, no payment import in dunning) so the failed retry's timeline
-	// row can be matched to its exact payment_intent.payment_failed webhook
-	// twin. A hard decline is flagged so the customer's warning asks for a
-	// different card (#966), and authentication_required so it asks for the
-	// confirmation; the next retry's RetryBlockingDecline read is what stops
-	// the card being charged again. RetryPayment classifies the rest.
-	var pe *payment.PaymentError
-	if errors.As(err, &pe) && !pe.Unknown && pe.PaymentIntentID != "" {
-		return &dunning.RetryError{
-			PaymentIntentID: pe.PaymentIntentID,
-			Err:             err,
-			Ask:             domain.DeclineAskOf(pe.DeclineCode),
-		}
+	if re := definiteRetryFailure(err); re != nil {
+		return re
 	}
 	if err != nil {
 		return err
 	}
 	return a.chargedOutcome(ctx, tenantID, charged, hold, release)
+}
+
+// definiteRetryFailure wraps a charge Stripe definitely refused for dunning
+// (a typed wrapper, so dunning does not import payment); nil for any other
+// result, which RetryPayment classifies.
+//
+//   - PaymentIntentID: a decline carries its PaymentIntent, so the failed
+//     retry's timeline row matches its payment_intent.payment_failed twin.
+//   - Ask: a hard decline asks the customer for a different card (#966), and
+//     authentication_required asks for the confirmation; the next retry's
+//     RetryBlockingDecline read is what stops the card being charged again.
+//   - NoReason: the warning email's reason line is Stripe's card message,
+//     the one message Stripe says can be shown to the customer
+//     (payment.PaymentError.CardMessage), as in the payment-failed email. Any
+//     other refusal (an invalid_request_error, which has no PaymentIntent)
+//     is worded for the developer, and its sentence used to reach the
+//     customer as the email's "Reason:".
+func definiteRetryFailure(err error) *dunning.RetryError {
+	var pe *payment.PaymentError
+	if !errors.As(err, &pe) || pe.Unknown {
+		return nil
+	}
+	return &dunning.RetryError{
+		PaymentIntentID: pe.PaymentIntentID,
+		Err:             err,
+		Ask:             domain.DeclineAskOf(pe.DeclineCode),
+		NoReason:        pe.CardMessage == "",
+	}
 }
 
 // chargedOutcome is what a charge that returned no error did, read from the
