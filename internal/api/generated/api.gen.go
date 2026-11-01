@@ -286,15 +286,18 @@ func (e AttentionSeverity) Valid() bool {
 
 // Defines values for AuditLogEntryActorType.
 const (
-	AuditLogEntryActorTypeApiKey AuditLogEntryActorType = "api_key"
-	AuditLogEntryActorTypeSystem AuditLogEntryActorType = "system"
-	AuditLogEntryActorTypeUser   AuditLogEntryActorType = "user"
+	AuditLogEntryActorTypeApiKey   AuditLogEntryActorType = "api_key"
+	AuditLogEntryActorTypeCustomer AuditLogEntryActorType = "customer"
+	AuditLogEntryActorTypeSystem   AuditLogEntryActorType = "system"
+	AuditLogEntryActorTypeUser     AuditLogEntryActorType = "user"
 )
 
 // Valid indicates whether the value is a known member of the AuditLogEntryActorType enum.
 func (e AuditLogEntryActorType) Valid() bool {
 	switch e {
 	case AuditLogEntryActorTypeApiKey:
+		return true
+	case AuditLogEntryActorTypeCustomer:
 		return true
 	case AuditLogEntryActorTypeSystem:
 		return true
@@ -2227,13 +2230,13 @@ func (e CreateApiKeyJSONBodyKeyType) Valid() bool {
 
 // Defines values for ListAuditLogParamsOrder.
 const (
-	CreatedAt ListAuditLogParamsOrder = "created_at"
+	ListAuditLogParamsOrderCreatedAt ListAuditLogParamsOrder = "created_at"
 )
 
 // Valid indicates whether the value is a known member of the ListAuditLogParamsOrder enum.
 func (e ListAuditLogParamsOrder) Valid() bool {
 	switch e {
-	case CreatedAt:
+	case ListAuditLogParamsOrderCreatedAt:
 		return true
 	default:
 		return false
@@ -2255,14 +2258,14 @@ func (e CheckPasswordResetToken200JSONResponseBodyValid) Valid() bool {
 	}
 }
 
-// Defines values for PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery.
+// Defines values for RequestPasswordReset200JSONResponseBodyEmailDelivery.
 const (
-	NotConfigured PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery = "not_configured"
-	Ok            PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery = "ok"
+	NotConfigured RequestPasswordReset200JSONResponseBodyEmailDelivery = "not_configured"
+	Ok            RequestPasswordReset200JSONResponseBodyEmailDelivery = "ok"
 )
 
-// Valid indicates whether the value is a known member of the PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery enum.
-func (e PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery) Valid() bool {
+// Valid indicates whether the value is a known member of the RequestPasswordReset200JSONResponseBodyEmailDelivery enum.
+func (e RequestPasswordReset200JSONResponseBodyEmailDelivery) Valid() bool {
 	switch e {
 	case NotConfigured:
 		return true
@@ -2324,6 +2327,36 @@ func (e ListCreditNotesParamsRefundStatus) Valid() bool {
 	}
 }
 
+// Defines values for ListCreditNotesParamsSort.
+const (
+	ListCreditNotesParamsSortAmount           ListCreditNotesParamsSort = "amount"
+	ListCreditNotesParamsSortCreatedAt        ListCreditNotesParamsSort = "created_at"
+	ListCreditNotesParamsSortCreditNoteNumber ListCreditNotesParamsSort = "credit_note_number"
+	ListCreditNotesParamsSortIssuedAt         ListCreditNotesParamsSort = "issued_at"
+	ListCreditNotesParamsSortStatus           ListCreditNotesParamsSort = "status"
+	ListCreditNotesParamsSortTotalCents       ListCreditNotesParamsSort = "total_cents"
+)
+
+// Valid indicates whether the value is a known member of the ListCreditNotesParamsSort enum.
+func (e ListCreditNotesParamsSort) Valid() bool {
+	switch e {
+	case ListCreditNotesParamsSortAmount:
+		return true
+	case ListCreditNotesParamsSortCreatedAt:
+		return true
+	case ListCreditNotesParamsSortCreditNoteNumber:
+		return true
+	case ListCreditNotesParamsSortIssuedAt:
+		return true
+	case ListCreditNotesParamsSortStatus:
+		return true
+	case ListCreditNotesParamsSortTotalCents:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListCreditNotesParamsDir.
 const (
 	ListCreditNotesParamsDirAsc  ListCreditNotesParamsDir = "asc"
@@ -2342,46 +2375,46 @@ func (e ListCreditNotesParamsDir) Valid() bool {
 	}
 }
 
-// Defines values for PostV1CreditNotesJSONBodyRefundType.
+// Defines values for CreateCreditNoteJSONBodyRefundType.
 const (
-	PostV1CreditNotesJSONBodyRefundTypeCredit PostV1CreditNotesJSONBodyRefundType = "credit"
-	PostV1CreditNotesJSONBodyRefundTypeRefund PostV1CreditNotesJSONBodyRefundType = "refund"
+	CreateCreditNoteJSONBodyRefundTypeCredit CreateCreditNoteJSONBodyRefundType = "credit"
+	CreateCreditNoteJSONBodyRefundTypeRefund CreateCreditNoteJSONBodyRefundType = "refund"
 )
 
-// Valid indicates whether the value is a known member of the PostV1CreditNotesJSONBodyRefundType enum.
-func (e PostV1CreditNotesJSONBodyRefundType) Valid() bool {
+// Valid indicates whether the value is a known member of the CreateCreditNoteJSONBodyRefundType enum.
+func (e CreateCreditNoteJSONBodyRefundType) Valid() bool {
 	switch e {
-	case PostV1CreditNotesJSONBodyRefundTypeCredit:
+	case CreateCreditNoteJSONBodyRefundTypeCredit:
 		return true
-	case PostV1CreditNotesJSONBodyRefundTypeRefund:
+	case CreateCreditNoteJSONBodyRefundTypeRefund:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for PostV1CreditNotesIdSend200JSONResponseBodyStatus.
+// Defines values for SendCreditNote200JSONResponseBodyStatus.
 const (
-	PostV1CreditNotesIdSend200JSONResponseBodyStatusSent PostV1CreditNotesIdSend200JSONResponseBodyStatus = "sent"
+	SendCreditNote200JSONResponseBodyStatusSent SendCreditNote200JSONResponseBodyStatus = "sent"
 )
 
-// Valid indicates whether the value is a known member of the PostV1CreditNotesIdSend200JSONResponseBodyStatus enum.
-func (e PostV1CreditNotesIdSend200JSONResponseBodyStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the SendCreditNote200JSONResponseBodyStatus enum.
+func (e SendCreditNote200JSONResponseBodyStatus) Valid() bool {
 	switch e {
-	case PostV1CreditNotesIdSend200JSONResponseBodyStatusSent:
+	case SendCreditNote200JSONResponseBodyStatusSent:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for PostV1CreditsGrantJSONBodyGrantKind.
+// Defines values for GrantCreditsJSONBodyGrantKind.
 const (
-	Promotional PostV1CreditsGrantJSONBodyGrantKind = "promotional"
+	Promotional GrantCreditsJSONBodyGrantKind = "promotional"
 )
 
-// Valid indicates whether the value is a known member of the PostV1CreditsGrantJSONBodyGrantKind enum.
-func (e PostV1CreditsGrantJSONBodyGrantKind) Valid() bool {
+// Valid indicates whether the value is a known member of the GrantCreditsJSONBodyGrantKind enum.
+func (e GrantCreditsJSONBodyGrantKind) Valid() bool {
 	switch e {
 	case Promotional:
 		return true
@@ -2414,6 +2447,33 @@ func (e ListCreditLedgerEntriesParamsEntryType) Valid() bool {
 	}
 }
 
+// Defines values for ListCreditLedgerEntriesParamsSort.
+const (
+	ListCreditLedgerEntriesParamsSortAmount      ListCreditLedgerEntriesParamsSort = "amount"
+	ListCreditLedgerEntriesParamsSortAmountCents ListCreditLedgerEntriesParamsSort = "amount_cents"
+	ListCreditLedgerEntriesParamsSortCreatedAt   ListCreditLedgerEntriesParamsSort = "created_at"
+	ListCreditLedgerEntriesParamsSortEntryType   ListCreditLedgerEntriesParamsSort = "entry_type"
+	ListCreditLedgerEntriesParamsSortExpiresAt   ListCreditLedgerEntriesParamsSort = "expires_at"
+)
+
+// Valid indicates whether the value is a known member of the ListCreditLedgerEntriesParamsSort enum.
+func (e ListCreditLedgerEntriesParamsSort) Valid() bool {
+	switch e {
+	case ListCreditLedgerEntriesParamsSortAmount:
+		return true
+	case ListCreditLedgerEntriesParamsSortAmountCents:
+		return true
+	case ListCreditLedgerEntriesParamsSortCreatedAt:
+		return true
+	case ListCreditLedgerEntriesParamsSortEntryType:
+		return true
+	case ListCreditLedgerEntriesParamsSortExpiresAt:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListCreditLedgerEntriesParamsDir.
 const (
 	ListCreditLedgerEntriesParamsDirAsc  ListCreditLedgerEntriesParamsDir = "asc"
@@ -2432,18 +2492,48 @@ func (e ListCreditLedgerEntriesParamsDir) Valid() bool {
 	}
 }
 
-// Defines values for GetV1CustomersParamsDir.
+// Defines values for ListCustomersParamsSort.
 const (
-	GetV1CustomersParamsDirAsc  GetV1CustomersParamsDir = "asc"
-	GetV1CustomersParamsDirDesc GetV1CustomersParamsDir = "desc"
+	ListCustomersParamsSortCreatedAt   ListCustomersParamsSort = "created_at"
+	ListCustomersParamsSortDisplayName ListCustomersParamsSort = "display_name"
+	ListCustomersParamsSortEmail       ListCustomersParamsSort = "email"
+	ListCustomersParamsSortExternalId  ListCustomersParamsSort = "external_id"
+	ListCustomersParamsSortName        ListCustomersParamsSort = "name"
+	ListCustomersParamsSortStatus      ListCustomersParamsSort = "status"
 )
 
-// Valid indicates whether the value is a known member of the GetV1CustomersParamsDir enum.
-func (e GetV1CustomersParamsDir) Valid() bool {
+// Valid indicates whether the value is a known member of the ListCustomersParamsSort enum.
+func (e ListCustomersParamsSort) Valid() bool {
 	switch e {
-	case GetV1CustomersParamsDirAsc:
+	case ListCustomersParamsSortCreatedAt:
 		return true
-	case GetV1CustomersParamsDirDesc:
+	case ListCustomersParamsSortDisplayName:
+		return true
+	case ListCustomersParamsSortEmail:
+		return true
+	case ListCustomersParamsSortExternalId:
+		return true
+	case ListCustomersParamsSortName:
+		return true
+	case ListCustomersParamsSortStatus:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListCustomersParamsDir.
+const (
+	ListCustomersParamsDirAsc  ListCustomersParamsDir = "asc"
+	ListCustomersParamsDirDesc ListCustomersParamsDir = "desc"
+)
+
+// Valid indicates whether the value is a known member of the ListCustomersParamsDir enum.
+func (e ListCustomersParamsDir) Valid() bool {
+	switch e {
+	case ListCustomersParamsDirAsc:
+		return true
+	case ListCustomersParamsDirDesc:
 		return true
 	default:
 		return false
@@ -2540,18 +2630,60 @@ func (e ResolveDunningRunJSONBodyResolution) Valid() bool {
 	}
 }
 
-// Defines values for GetV1InvoicesParamsDir.
+// Defines values for ListInvoicesParamsSort.
 const (
-	GetV1InvoicesParamsDirAsc  GetV1InvoicesParamsDir = "asc"
-	GetV1InvoicesParamsDirDesc GetV1InvoicesParamsDir = "desc"
+	ListInvoicesParamsSortAmountDue          ListInvoicesParamsSort = "amount_due"
+	ListInvoicesParamsSortAmountDueCents     ListInvoicesParamsSort = "amount_due_cents"
+	ListInvoicesParamsSortBillingPeriodStart ListInvoicesParamsSort = "billing_period_start"
+	ListInvoicesParamsSortCreatedAt          ListInvoicesParamsSort = "created_at"
+	ListInvoicesParamsSortDueAt              ListInvoicesParamsSort = "due_at"
+	ListInvoicesParamsSortInvoiceNumber      ListInvoicesParamsSort = "invoice_number"
+	ListInvoicesParamsSortIssuedAt           ListInvoicesParamsSort = "issued_at"
+	ListInvoicesParamsSortPaymentStatus      ListInvoicesParamsSort = "payment_status"
+	ListInvoicesParamsSortPeriod             ListInvoicesParamsSort = "period"
+	ListInvoicesParamsSortStatus             ListInvoicesParamsSort = "status"
 )
 
-// Valid indicates whether the value is a known member of the GetV1InvoicesParamsDir enum.
-func (e GetV1InvoicesParamsDir) Valid() bool {
+// Valid indicates whether the value is a known member of the ListInvoicesParamsSort enum.
+func (e ListInvoicesParamsSort) Valid() bool {
 	switch e {
-	case GetV1InvoicesParamsDirAsc:
+	case ListInvoicesParamsSortAmountDue:
 		return true
-	case GetV1InvoicesParamsDirDesc:
+	case ListInvoicesParamsSortAmountDueCents:
+		return true
+	case ListInvoicesParamsSortBillingPeriodStart:
+		return true
+	case ListInvoicesParamsSortCreatedAt:
+		return true
+	case ListInvoicesParamsSortDueAt:
+		return true
+	case ListInvoicesParamsSortInvoiceNumber:
+		return true
+	case ListInvoicesParamsSortIssuedAt:
+		return true
+	case ListInvoicesParamsSortPaymentStatus:
+		return true
+	case ListInvoicesParamsSortPeriod:
+		return true
+	case ListInvoicesParamsSortStatus:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListInvoicesParamsDir.
+const (
+	ListInvoicesParamsDirAsc  ListInvoicesParamsDir = "asc"
+	ListInvoicesParamsDirDesc ListInvoicesParamsDir = "desc"
+)
+
+// Valid indicates whether the value is a known member of the ListInvoicesParamsDir enum.
+func (e ListInvoicesParamsDir) Valid() bool {
+	switch e {
+	case ListInvoicesParamsDirAsc:
+		return true
+	case ListInvoicesParamsDirDesc:
 		return true
 	default:
 		return false
@@ -2597,13 +2729,13 @@ func (e ResendInvoiceSetupLink200JSONResponseBodyStatus) Valid() bool {
 	}
 }
 
-// Defines values for PostV1InvoicesIdSend200JSONResponseBodyStatus.
+// Defines values for SendInvoice200JSONResponseBodyStatus.
 const (
-	Sent PostV1InvoicesIdSend200JSONResponseBodyStatus = "sent"
+	Sent SendInvoice200JSONResponseBodyStatus = "sent"
 )
 
-// Valid indicates whether the value is a known member of the PostV1InvoicesIdSend200JSONResponseBodyStatus enum.
-func (e PostV1InvoicesIdSend200JSONResponseBodyStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the SendInvoice200JSONResponseBodyStatus enum.
+func (e SendInvoice200JSONResponseBodyStatus) Valid() bool {
 	switch e {
 	case Sent:
 		return true
@@ -2612,40 +2744,40 @@ func (e PostV1InvoicesIdSend200JSONResponseBodyStatus) Valid() bool {
 	}
 }
 
-// Defines values for PostV1MetersJSONBodyAggregation.
+// Defines values for CreateMeterJSONBodyAggregation.
 const (
-	PostV1MetersJSONBodyAggregationCount PostV1MetersJSONBodyAggregation = "count"
-	PostV1MetersJSONBodyAggregationLast  PostV1MetersJSONBodyAggregation = "last"
-	PostV1MetersJSONBodyAggregationMax   PostV1MetersJSONBodyAggregation = "max"
-	PostV1MetersJSONBodyAggregationSum   PostV1MetersJSONBodyAggregation = "sum"
+	CreateMeterJSONBodyAggregationCount CreateMeterJSONBodyAggregation = "count"
+	CreateMeterJSONBodyAggregationLast  CreateMeterJSONBodyAggregation = "last"
+	CreateMeterJSONBodyAggregationMax   CreateMeterJSONBodyAggregation = "max"
+	CreateMeterJSONBodyAggregationSum   CreateMeterJSONBodyAggregation = "sum"
 )
 
-// Valid indicates whether the value is a known member of the PostV1MetersJSONBodyAggregation enum.
-func (e PostV1MetersJSONBodyAggregation) Valid() bool {
+// Valid indicates whether the value is a known member of the CreateMeterJSONBodyAggregation enum.
+func (e CreateMeterJSONBodyAggregation) Valid() bool {
 	switch e {
-	case PostV1MetersJSONBodyAggregationCount:
+	case CreateMeterJSONBodyAggregationCount:
 		return true
-	case PostV1MetersJSONBodyAggregationLast:
+	case CreateMeterJSONBodyAggregationLast:
 		return true
-	case PostV1MetersJSONBodyAggregationMax:
+	case CreateMeterJSONBodyAggregationMax:
 		return true
-	case PostV1MetersJSONBodyAggregationSum:
+	case CreateMeterJSONBodyAggregationSum:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for PatchV1MetersIdJSONBodyAggregation.
+// Defines values for UpdateMeterJSONBodyAggregation.
 const (
-	Count PatchV1MetersIdJSONBodyAggregation = "count"
-	Last  PatchV1MetersIdJSONBodyAggregation = "last"
-	Max   PatchV1MetersIdJSONBodyAggregation = "max"
-	Sum   PatchV1MetersIdJSONBodyAggregation = "sum"
+	Count UpdateMeterJSONBodyAggregation = "count"
+	Last  UpdateMeterJSONBodyAggregation = "last"
+	Max   UpdateMeterJSONBodyAggregation = "max"
+	Sum   UpdateMeterJSONBodyAggregation = "sum"
 )
 
-// Valid indicates whether the value is a known member of the PatchV1MetersIdJSONBodyAggregation enum.
-func (e PatchV1MetersIdJSONBodyAggregation) Valid() bool {
+// Valid indicates whether the value is a known member of the UpdateMeterJSONBodyAggregation enum.
+func (e UpdateMeterJSONBodyAggregation) Valid() bool {
 	switch e {
 	case Count:
 		return true
@@ -2660,51 +2792,51 @@ func (e PatchV1MetersIdJSONBodyAggregation) Valid() bool {
 	}
 }
 
-// Defines values for PostV1PlansJSONBodyBaseBillTiming.
+// Defines values for CreatePlanJSONBodyBaseBillTiming.
 const (
-	PostV1PlansJSONBodyBaseBillTimingInAdvance PostV1PlansJSONBodyBaseBillTiming = "in_advance"
-	PostV1PlansJSONBodyBaseBillTimingInArrears PostV1PlansJSONBodyBaseBillTiming = "in_arrears"
+	CreatePlanJSONBodyBaseBillTimingInAdvance CreatePlanJSONBodyBaseBillTiming = "in_advance"
+	CreatePlanJSONBodyBaseBillTimingInArrears CreatePlanJSONBodyBaseBillTiming = "in_arrears"
 )
 
-// Valid indicates whether the value is a known member of the PostV1PlansJSONBodyBaseBillTiming enum.
-func (e PostV1PlansJSONBodyBaseBillTiming) Valid() bool {
+// Valid indicates whether the value is a known member of the CreatePlanJSONBodyBaseBillTiming enum.
+func (e CreatePlanJSONBodyBaseBillTiming) Valid() bool {
 	switch e {
-	case PostV1PlansJSONBodyBaseBillTimingInAdvance:
+	case CreatePlanJSONBodyBaseBillTimingInAdvance:
 		return true
-	case PostV1PlansJSONBodyBaseBillTimingInArrears:
+	case CreatePlanJSONBodyBaseBillTimingInArrears:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for PostV1PlansJSONBodyBillingInterval.
+// Defines values for CreatePlanJSONBodyBillingInterval.
 const (
-	PostV1PlansJSONBodyBillingIntervalMonthly PostV1PlansJSONBodyBillingInterval = "monthly"
-	PostV1PlansJSONBodyBillingIntervalYearly  PostV1PlansJSONBodyBillingInterval = "yearly"
+	CreatePlanJSONBodyBillingIntervalMonthly CreatePlanJSONBodyBillingInterval = "monthly"
+	CreatePlanJSONBodyBillingIntervalYearly  CreatePlanJSONBodyBillingInterval = "yearly"
 )
 
-// Valid indicates whether the value is a known member of the PostV1PlansJSONBodyBillingInterval enum.
-func (e PostV1PlansJSONBodyBillingInterval) Valid() bool {
+// Valid indicates whether the value is a known member of the CreatePlanJSONBodyBillingInterval enum.
+func (e CreatePlanJSONBodyBillingInterval) Valid() bool {
 	switch e {
-	case PostV1PlansJSONBodyBillingIntervalMonthly:
+	case CreatePlanJSONBodyBillingIntervalMonthly:
 		return true
-	case PostV1PlansJSONBodyBillingIntervalYearly:
+	case CreatePlanJSONBodyBillingIntervalYearly:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for PostV1PlansJSONBodyStatus.
+// Defines values for CreatePlanJSONBodyStatus.
 const (
-	PostV1PlansJSONBodyStatusActive PostV1PlansJSONBodyStatus = "active"
+	CreatePlanJSONBodyStatusActive CreatePlanJSONBodyStatus = "active"
 )
 
-// Valid indicates whether the value is a known member of the PostV1PlansJSONBodyStatus enum.
-func (e PostV1PlansJSONBodyStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the CreatePlanJSONBodyStatus enum.
+func (e CreatePlanJSONBodyStatus) Valid() bool {
 	switch e {
-	case PostV1PlansJSONBodyStatusActive:
+	case CreatePlanJSONBodyStatusActive:
 		return true
 	default:
 		return false
@@ -2768,33 +2900,33 @@ func (e CreatePriceOverrideJSONBodyMode) Valid() bool {
 	}
 }
 
-// Defines values for PutV1ProviderCostsJSONBodyCurrency.
+// Defines values for UpsertProviderCostJSONBodyCurrency.
 const (
-	PutV1ProviderCostsJSONBodyCurrencyUSD PutV1ProviderCostsJSONBodyCurrency = "USD"
+	UpsertProviderCostJSONBodyCurrencyUSD UpsertProviderCostJSONBodyCurrency = "USD"
 )
 
-// Valid indicates whether the value is a known member of the PutV1ProviderCostsJSONBodyCurrency enum.
-func (e PutV1ProviderCostsJSONBodyCurrency) Valid() bool {
+// Valid indicates whether the value is a known member of the UpsertProviderCostJSONBodyCurrency enum.
+func (e UpsertProviderCostJSONBodyCurrency) Valid() bool {
 	switch e {
-	case PutV1ProviderCostsJSONBodyCurrencyUSD:
+	case UpsertProviderCostJSONBodyCurrencyUSD:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource.
+// Defines values for GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource.
 const (
-	GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSourceNoSubscription GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource = "no_subscription"
-	GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSourceSubscription   GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource = "subscription"
+	GetPublicCostDashboard200JSONResponseBodyBillingPeriodSourceNoSubscription GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource = "no_subscription"
+	GetPublicCostDashboard200JSONResponseBodyBillingPeriodSourceSubscription   GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource = "subscription"
 )
 
-// Valid indicates whether the value is a known member of the GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource enum.
-func (e GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource) Valid() bool {
+// Valid indicates whether the value is a known member of the GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource enum.
+func (e GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource) Valid() bool {
 	switch e {
-	case GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSourceNoSubscription:
+	case GetPublicCostDashboard200JSONResponseBodyBillingPeriodSourceNoSubscription:
 		return true
-	case GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSourceSubscription:
+	case GetPublicCostDashboard200JSONResponseBodyBillingPeriodSourceSubscription:
 		return true
 	default:
 		return false
@@ -2879,37 +3011,37 @@ func (e SetStripeWebhookSecretParamsMode) Valid() bool {
 	}
 }
 
-// Defines values for GetV1SubscriptionsParamsStatus.
+// Defines values for ListSubscriptionsParamsStatus.
 const (
-	GetV1SubscriptionsParamsStatusActive   GetV1SubscriptionsParamsStatus = "active"
-	GetV1SubscriptionsParamsStatusCanceled GetV1SubscriptionsParamsStatus = "canceled"
-	GetV1SubscriptionsParamsStatusDraft    GetV1SubscriptionsParamsStatus = "draft"
-	GetV1SubscriptionsParamsStatusTrialing GetV1SubscriptionsParamsStatus = "trialing"
+	ListSubscriptionsParamsStatusActive   ListSubscriptionsParamsStatus = "active"
+	ListSubscriptionsParamsStatusCanceled ListSubscriptionsParamsStatus = "canceled"
+	ListSubscriptionsParamsStatusDraft    ListSubscriptionsParamsStatus = "draft"
+	ListSubscriptionsParamsStatusTrialing ListSubscriptionsParamsStatus = "trialing"
 )
 
-// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsStatus enum.
-func (e GetV1SubscriptionsParamsStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the ListSubscriptionsParamsStatus enum.
+func (e ListSubscriptionsParamsStatus) Valid() bool {
 	switch e {
-	case GetV1SubscriptionsParamsStatusActive:
+	case ListSubscriptionsParamsStatusActive:
 		return true
-	case GetV1SubscriptionsParamsStatusCanceled:
+	case ListSubscriptionsParamsStatusCanceled:
 		return true
-	case GetV1SubscriptionsParamsStatusDraft:
+	case ListSubscriptionsParamsStatusDraft:
 		return true
-	case GetV1SubscriptionsParamsStatusTrialing:
+	case ListSubscriptionsParamsStatusTrialing:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for GetV1SubscriptionsParamsBilling.
+// Defines values for ListSubscriptionsParamsBilling.
 const (
-	Failing GetV1SubscriptionsParamsBilling = "failing"
+	Failing ListSubscriptionsParamsBilling = "failing"
 )
 
-// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsBilling enum.
-func (e GetV1SubscriptionsParamsBilling) Valid() bool {
+// Valid indicates whether the value is a known member of the ListSubscriptionsParamsBilling enum.
+func (e ListSubscriptionsParamsBilling) Valid() bool {
 	switch e {
 	case Failing:
 		return true
@@ -2918,13 +3050,13 @@ func (e GetV1SubscriptionsParamsBilling) Valid() bool {
 	}
 }
 
-// Defines values for GetV1SubscriptionsParamsCollection.
+// Defines values for ListSubscriptionsParamsCollection.
 const (
-	Paused GetV1SubscriptionsParamsCollection = "paused"
+	Paused ListSubscriptionsParamsCollection = "paused"
 )
 
-// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsCollection enum.
-func (e GetV1SubscriptionsParamsCollection) Valid() bool {
+// Valid indicates whether the value is a known member of the ListSubscriptionsParamsCollection enum.
+func (e ListSubscriptionsParamsCollection) Valid() bool {
 	switch e {
 	case Paused:
 		return true
@@ -2933,14 +3065,44 @@ func (e GetV1SubscriptionsParamsCollection) Valid() bool {
 	}
 }
 
-// Defines values for GetV1SubscriptionsParamsDir.
+// Defines values for ListSubscriptionsParamsSort.
 const (
-	Asc  GetV1SubscriptionsParamsDir = "asc"
-	Desc GetV1SubscriptionsParamsDir = "desc"
+	ListSubscriptionsParamsSortCreatedAt     ListSubscriptionsParamsSort = "created_at"
+	ListSubscriptionsParamsSortDisplayName   ListSubscriptionsParamsSort = "display_name"
+	ListSubscriptionsParamsSortName          ListSubscriptionsParamsSort = "name"
+	ListSubscriptionsParamsSortNextBillingAt ListSubscriptionsParamsSort = "next_billing_at"
+	ListSubscriptionsParamsSortStatus        ListSubscriptionsParamsSort = "status"
+	ListSubscriptionsParamsSortTrialEndAt    ListSubscriptionsParamsSort = "trial_end_at"
 )
 
-// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsDir enum.
-func (e GetV1SubscriptionsParamsDir) Valid() bool {
+// Valid indicates whether the value is a known member of the ListSubscriptionsParamsSort enum.
+func (e ListSubscriptionsParamsSort) Valid() bool {
+	switch e {
+	case ListSubscriptionsParamsSortCreatedAt:
+		return true
+	case ListSubscriptionsParamsSortDisplayName:
+		return true
+	case ListSubscriptionsParamsSortName:
+		return true
+	case ListSubscriptionsParamsSortNextBillingAt:
+		return true
+	case ListSubscriptionsParamsSortStatus:
+		return true
+	case ListSubscriptionsParamsSortTrialEndAt:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListSubscriptionsParamsDir.
+const (
+	Asc  ListSubscriptionsParamsDir = "asc"
+	Desc ListSubscriptionsParamsDir = "desc"
+)
+
+// Valid indicates whether the value is a known member of the ListSubscriptionsParamsDir enum.
+func (e ListSubscriptionsParamsDir) Valid() bool {
 	switch e {
 	case Asc:
 		return true
@@ -2951,31 +3113,31 @@ func (e GetV1SubscriptionsParamsDir) Valid() bool {
 	}
 }
 
-// Defines values for PostV1SubscriptionsJSONBodyBillingTime.
+// Defines values for CreateSubscriptionJSONBodyBillingTime.
 const (
-	PostV1SubscriptionsJSONBodyBillingTimeAnniversary PostV1SubscriptionsJSONBodyBillingTime = "anniversary"
-	PostV1SubscriptionsJSONBodyBillingTimeCalendar    PostV1SubscriptionsJSONBodyBillingTime = "calendar"
+	CreateSubscriptionJSONBodyBillingTimeAnniversary CreateSubscriptionJSONBodyBillingTime = "anniversary"
+	CreateSubscriptionJSONBodyBillingTimeCalendar    CreateSubscriptionJSONBodyBillingTime = "calendar"
 )
 
-// Valid indicates whether the value is a known member of the PostV1SubscriptionsJSONBodyBillingTime enum.
-func (e PostV1SubscriptionsJSONBodyBillingTime) Valid() bool {
+// Valid indicates whether the value is a known member of the CreateSubscriptionJSONBodyBillingTime enum.
+func (e CreateSubscriptionJSONBodyBillingTime) Valid() bool {
 	switch e {
-	case PostV1SubscriptionsJSONBodyBillingTimeAnniversary:
+	case CreateSubscriptionJSONBodyBillingTimeAnniversary:
 		return true
-	case PostV1SubscriptionsJSONBodyBillingTimeCalendar:
+	case CreateSubscriptionJSONBodyBillingTimeCalendar:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for PostV1SubscriptionsJSONBodyStatus.
+// Defines values for CreateSubscriptionJSONBodyStatus.
 const (
-	Draft PostV1SubscriptionsJSONBodyStatus = "draft"
+	Draft CreateSubscriptionJSONBodyStatus = "draft"
 )
 
-// Valid indicates whether the value is a known member of the PostV1SubscriptionsJSONBodyStatus enum.
-func (e PostV1SubscriptionsJSONBodyStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the CreateSubscriptionJSONBodyStatus enum.
+func (e CreateSubscriptionJSONBodyStatus) Valid() bool {
 	switch e {
 	case Draft:
 		return true
@@ -2999,28 +3161,28 @@ func (e PauseSubscriptionCollectionJSONBodyBehavior) Valid() bool {
 	}
 }
 
-// Defines values for DeleteV1TestClocksId200JSONResponseBodyStatus.
+// Defines values for DeleteTestClock200JSONResponseBodyStatus.
 const (
-	DeleteV1TestClocksId200JSONResponseBodyStatusDeleted DeleteV1TestClocksId200JSONResponseBodyStatus = "deleted"
+	DeleteTestClock200JSONResponseBodyStatusDeleted DeleteTestClock200JSONResponseBodyStatus = "deleted"
 )
 
-// Valid indicates whether the value is a known member of the DeleteV1TestClocksId200JSONResponseBodyStatus enum.
-func (e DeleteV1TestClocksId200JSONResponseBodyStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the DeleteTestClock200JSONResponseBodyStatus enum.
+func (e DeleteTestClock200JSONResponseBodyStatus) Valid() bool {
 	switch e {
-	case DeleteV1TestClocksId200JSONResponseBodyStatusDeleted:
+	case DeleteTestClock200JSONResponseBodyStatusDeleted:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus.
+// Defines values for DeleteWebhookEndpoint200JSONResponseBodyStatus.
 const (
-	Deleted DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus = "deleted"
+	Deleted DeleteWebhookEndpoint200JSONResponseBodyStatus = "deleted"
 )
 
-// Valid indicates whether the value is a known member of the DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus enum.
-func (e DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the DeleteWebhookEndpoint200JSONResponseBodyStatus enum.
+func (e DeleteWebhookEndpoint200JSONResponseBodyStatus) Valid() bool {
 	switch e {
 	case Deleted:
 		return true
@@ -3068,14 +3230,14 @@ func (e ReceiveStripeWebhook200JSONResponseBodyStatus) Valid() bool {
 	}
 }
 
-// Defines values for GetV1Whoami200JSONResponseBodyKeyType.
+// Defines values for GetWhoami200JSONResponseBodyKeyType.
 const (
-	Ingest GetV1Whoami200JSONResponseBodyKeyType = "ingest"
-	Secret GetV1Whoami200JSONResponseBodyKeyType = "secret"
+	Ingest GetWhoami200JSONResponseBodyKeyType = "ingest"
+	Secret GetWhoami200JSONResponseBodyKeyType = "secret"
 )
 
-// Valid indicates whether the value is a known member of the GetV1Whoami200JSONResponseBodyKeyType enum.
-func (e GetV1Whoami200JSONResponseBodyKeyType) Valid() bool {
+// Valid indicates whether the value is a known member of the GetWhoami200JSONResponseBodyKeyType enum.
+func (e GetWhoami200JSONResponseBodyKeyType) Valid() bool {
 	switch e {
 	case Ingest:
 		return true
@@ -3086,49 +3248,83 @@ func (e GetV1Whoami200JSONResponseBodyKeyType) Valid() bool {
 	}
 }
 
-// APIKey defines model for APIKey.
+// APIKey An API key's details. The key's value is never returned here: only
+// `POST /v1/api-keys` and `POST /v1/api-keys/{id}/rotate` show it,
+// once, as `raw_key`.
 type APIKey struct {
+	// CreatedAt When the key was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// ExpiresAt When the key stops working. Also set on the old key during a rotation grace period.
+	// ExpiresAt When the key stops working. Also set on the old key during a
+	// rotation grace period, and copied to the new key when the old
+	// one had it. Absent for a key that does not expire.
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
-	Id        string    `json:"id"`
 
-	// KeyPrefix The start of the key (type, mode and a few characters), enough to tell keys apart. Never the full key.
+	// Id The key's id (`hc_key_…`). Use it to revoke or rotate the key.
+	Id string `json:"id"`
+
+	// KeyPrefix The key's type and mode prefix plus the first 12 characters of
+	// its secret part. Enough to tell keys apart; never the full key.
 	KeyPrefix string `json:"key_prefix"`
 
-	// KeyType `secret` can read and change everything in the account.
-	// `ingest` can only send usage events, for LiteLLM or another
-	// gateway (ADR-133).
+	// KeyType `secret` can read and change everything in its mode of the
+	// account, except team members and the test email, which need a
+	// dashboard sign-in. `ingest` can only send usage events and call
+	// `GET /v1/whoami`, for LiteLLM or another gateway.
 	KeyType APIKeyKeyType `json:"key_type"`
 
-	// LastUsedAt Updated at most about once per interval, so it can lag a little.
+	// LastUsedAt When the key last authenticated a request. Each server updates
+	// it at most once a minute, so it can lag a little. Absent until
+	// the key is first used.
 	LastUsedAt time.Time `json:"last_used_at,omitempty"`
-	Livemode   bool      `json:"livemode"`
-	Name       string    `json:"name"`
-	RevokedAt  time.Time `json:"revoked_at,omitempty"`
-	TenantId   string    `json:"tenant_id"`
+
+	// Livemode True for a live-mode key (`…_live_…`), false for a test-mode key. A key reaches only its own mode's data.
+	Livemode bool `json:"livemode"`
+
+	// Name The label shown in the key list.
+	Name string `json:"name"`
+
+	// RevokedAt When the key was revoked. Absent unless it was revoked. A revoked key gets 401.
+	RevokedAt time.Time `json:"revoked_at,omitempty"`
+
+	// TenantId The account the key belongs to.
+	TenantId string `json:"tenant_id"`
 }
 
-// APIKeyKeyType `secret` can read and change everything in the account.
-// `ingest` can only send usage events, for LiteLLM or another
-// gateway (ADR-133).
+// APIKeyKeyType `secret` can read and change everything in its mode of the
+// account, except team members and the test email, which need a
+// dashboard sign-in. `ingest` can only send usage events and call
+// `GET /v1/whoami`, for LiteLLM or another gateway.
 type APIKeyKeyType string
 
-// APIKeyCreated defines model for APIKeyCreated.
+// APIKeyCreated A new API key and its full value. `raw_key` appears only in this answer.
 type APIKeyCreated struct {
+	// Key An API key's details. The key's value is never returned here: only
+	// `POST /v1/api-keys` and `POST /v1/api-keys/{id}/rotate` show it,
+	// once, as `raw_key`.
 	Key APIKey `json:"key"`
 
-	// RawKey The full key. Shown only once; store it now.
+	// RawKey The full key: its prefix (`hc_secret_test_`, `hc_ingest_live_`
+	// and so on) and 64 hex characters. Shown only once; store it now.
+	// Hardcount keeps only a salted hash.
 	RawKey string `json:"raw_key"`
 }
 
-// APIKeyRotation defines model for APIKeyRotation.
+// APIKeyRotation The result of rotating a key: the old key as it now stands (revoked,
+// or expiring at the end of the grace period), the new key, and the
+// new key's full value.
 type APIKeyRotation struct {
+	// NewKey An API key's details. The key's value is never returned here: only
+	// `POST /v1/api-keys` and `POST /v1/api-keys/{id}/rotate` show it,
+	// once, as `raw_key`.
 	NewKey APIKey `json:"new_key"`
+
+	// OldKey An API key's details. The key's value is never returned here: only
+	// `POST /v1/api-keys` and `POST /v1/api-keys/{id}/rotate` show it,
+	// once, as `raw_key`.
 	OldKey APIKey `json:"old_key"`
 
-	// RawKey The new key's full value. Shown only once.
+	// RawKey The new key's full value. Shown only once; store it now.
 	RawKey string `json:"raw_key"`
 }
 
@@ -3137,34 +3333,43 @@ type APIKeyRotation struct {
 // `automatic` is anything Hardcount did on its own. Absent when no fact
 // written with the row names one.
 type ActivityActor struct {
+	// Kind The kind of actor.
 	Kind ActivityActorKind `json:"kind"`
-	Name string            `json:"name,omitempty"`
-	Via  ActivityActorVia  `json:"via,omitempty"`
+
+	// Name The person's name or email, the API key's name, or the customer's display name. Absent for `automatic` and when no name is known.
+	Name string `json:"name,omitempty"`
+
+	// Via Where the customer acted. Set only for `customer`.
+	Via ActivityActorVia `json:"via,omitempty"`
 }
 
-// ActivityActorKind defines model for ActivityActor.Kind.
+// ActivityActorKind The kind of actor.
 type ActivityActorKind string
 
-// ActivityActorVia defines model for ActivityActor.Via.
+// ActivityActorVia Where the customer acted. Set only for `customer`.
 type ActivityActorVia string
 
-// ActivityLine One activity row in the words of the activity line standard
-// (ADR-128): a title with no values, the amount when the event moves
-// money, asks for it or cancels money owed, a problem line on failure
-// and warning rows, the meta line's parts and the actor, a tone, and
-// the event's time on the entity's calendar. `recorded_at` is the
-// real-world time, set only for an entity on a test clock.
+// ActivityLine One activity row, with every word written by the server: a title
+// with no values, the amount when the event moves money, asks for it
+// or cancels money owed, a problem line on failure and warning rows,
+// the meta line's parts and the actor, a tone, and the event's time on
+// the entity's calendar. `recorded_at` is the real-world time, set
+// only for an entity on a test clock. The invoice payment timeline and
+// dunning run events carry it.
 type ActivityLine struct {
 	// Actor Who did it. `person` and `api_key` carry the name (a person's email
 	// when they have no name), `customer` says where through `via`, and
 	// `automatic` is anything Hardcount did on its own. Absent when no fact
 	// written with the row names one.
-	Actor  ActivityActor `json:"actor,omitempty"`
+	Actor ActivityActor `json:"actor,omitempty"`
+
+	// Amount An amount on an activity row. The dashboard formats it, for example as `$86.50`.
 	Amount ActivityMoney `json:"amount,omitempty"`
 
 	// Detail The meta line before the actor. Each item is one segment, shown
 	// joined by " · "; a segment's parts read as one phrase, for
 	// example a money part followed by the text " refunded to card".
+	// An empty list when there is nothing to add.
 	Detail [][]ActivityPart `json:"detail"`
 
 	// Id The row's stable key: the event's `id` on an invoice timeline
@@ -3175,11 +3380,19 @@ type ActivityLine struct {
 	Id string `json:"id"`
 
 	// Kind Machine name of the event.
-	Kind       string    `json:"kind"`
+	Kind string `json:"kind"`
+
+	// OccurredAt When the event happened, on the entity's calendar (the test clock's time for an entity on a test clock).
 	OccurredAt time.Time `json:"occurred_at"`
-	Problem    string    `json:"problem,omitempty"`
+
+	// Problem What went wrong or what it means, on failure and warning rows whose title does not say it all. Absent otherwise.
+	Problem string `json:"problem,omitempty"`
+
+	// RecordedAt The real-world time of the event. Set only for an entity on a test clock, when it is known.
 	RecordedAt time.Time `json:"recorded_at,omitempty"`
-	Title      string    `json:"title"`
+
+	// Title What happened, in plain words with no values, for example "Payment failed".
+	Title string `json:"title"`
 
 	// Tone neutral: something happened. success: money arrived, or was
 	// returned as intended. warning: needs a look, or money will not
@@ -3194,54 +3407,99 @@ type ActivityLineTone string
 
 // ActivityLink An object the row's own data names, which still exists.
 type ActivityLink struct {
-	Id    string           `json:"id"`
-	Kind  ActivityLinkKind `json:"kind"`
-	Label string           `json:"label"`
+	// Id The object's id, to fetch or link to it.
+	Id string `json:"id"`
+
+	// Kind The kind of object.
+	Kind ActivityLinkKind `json:"kind"`
+
+	// Label The text to show for the link, such as a credit note number or a subscription's name.
+	Label string `json:"label"`
 }
 
-// ActivityLinkKind defines model for ActivityLink.Kind.
+// ActivityLinkKind The kind of object.
 type ActivityLinkKind string
 
-// ActivityMoney defines model for ActivityMoney.
+// ActivityMoney An amount on an activity row. The dashboard formats it, for example as `$86.50`.
 type ActivityMoney struct {
-	Cents    int64  `json:"cents"`
+	// Cents The amount in the currency's minor unit (cents for USD).
+	Cents int64 `json:"cents"`
+
+	// Currency The currency, as an uppercase ISO 4217 code.
 	Currency string `json:"currency"`
 }
 
 // ActivityPart One piece of a meta segment. Exactly one field is set.
 type ActivityPart struct {
 	// Link An object the row's own data names, which still exists.
-	Link  ActivityLink  `json:"link,omitempty"`
+	Link ActivityLink `json:"link,omitempty"`
+
+	// Money An amount on an activity row. The dashboard formats it, for example as `$86.50`.
 	Money ActivityMoney `json:"money,omitempty"`
-	Text  string        `json:"text,omitempty"`
-	Time  time.Time     `json:"time,omitempty"`
+
+	// Text Plain words to show as they are.
+	Text string `json:"text,omitempty"`
+
+	// Time A time to format for the reader, such as a retry date.
+	Time time.Time `json:"time,omitempty"`
 }
 
-// AnalyticsMrrMovementPoint defines model for AnalyticsMrrMovementPoint.
+// AnalyticsMrrMovementPoint MRR movement in one bucket of `GET /v1/analytics/mrr-movement`: a
+// UTC day, or a UTC month for `12m`. Amounts are in the minor unit of
+// the account's default currency (cents for USD). Expansion and
+// contraction count only subscriptions that were active for the whole
+// requested window.
 type AnalyticsMrrMovementPoint struct {
-	Churned     int64 `json:"churned"`
+	// Churned MRR of subscriptions canceled in the bucket, as a positive amount in the currency's minor unit.
+	Churned int64 `json:"churned"`
+
+	// Contraction MRR removed in the bucket by item removals and plan or quantity decreases, as a positive amount in the currency's minor unit.
 	Contraction int64 `json:"contraction"`
 
 	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC.
-	Date      string `json:"date"`
-	Expansion int64  `json:"expansion"`
-	Net       int64  `json:"net"`
-	New       int64  `json:"new"`
+	Date string `json:"date"`
+
+	// Expansion MRR added in the bucket by item adds and plan or quantity increases, in the currency's minor unit.
+	Expansion int64 `json:"expansion"`
+
+	// Net `new` + `expansion` - `contraction` - `churned` for the bucket, in the currency's minor unit.
+	Net int64 `json:"net"`
+
+	// New MRR of subscriptions activated in the bucket, in the currency's minor unit.
+	New int64 `json:"new"`
 }
 
-// AnalyticsMrrMovementTotals MRR change in cents. `churned` and `contraction` are positive
+// AnalyticsMrrMovementTotals How MRR (monthly recurring revenue from plan base fees) changed over
+// the whole window, in the minor unit of the account's default
+// currency (cents for USD). `churned` and `contraction` are positive
 // amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
+// Expansion and contraction count only subscriptions that were active
+// for the whole window: a subscription activated or canceled inside
+// it counts only in `new` or `churned`. Test-clock subscriptions are
+// left out.
 type AnalyticsMrrMovementTotals struct {
-	Churned     int64 `json:"churned"`
+	// Churned MRR of subscriptions canceled in the window, as a positive amount in the currency's minor unit.
+	Churned int64 `json:"churned"`
+
+	// Contraction MRR removed by item removals and plan or quantity decreases, as a positive amount in the currency's minor unit.
 	Contraction int64 `json:"contraction"`
-	Expansion   int64 `json:"expansion"`
-	Net         int64 `json:"net"`
-	New         int64 `json:"new"`
+
+	// Expansion MRR added by item adds and plan or quantity increases, in the currency's minor unit.
+	Expansion int64 `json:"expansion"`
+
+	// Net The overall change, `new` + `expansion` - `contraction` - `churned`, in the currency's minor unit. Can be negative.
+	Net int64 `json:"net"`
+
+	// New MRR of subscriptions activated in the window, in the currency's minor unit.
+	New int64 `json:"new"`
 }
 
-// AnalyticsOverview "The window" is the requested period, ending now. "The previous
-// window" is the one of equal length before it. Money is in cents of
-// `currency`.
+// AnalyticsOverview The dashboard's headline metrics, from `GET /v1/analytics/overview`.
+// "The window" is the requested period, ending now. "The previous
+// window" is the one of equal length before it. Money is in the minor
+// unit of `currency` (cents for USD). Rates are fractions, so 0.05
+// means 5%. Customers, subscriptions and invoices on test clocks are
+// left out of every figure.
 type AnalyticsOverview struct {
 	// ActiveCustomers Customer records with status `active`. Includes customers with
 	// no subscription or only canceled ones; `live_customers` counts
@@ -3262,11 +3520,14 @@ type AnalyticsOverview struct {
 
 	// CreditBalanceByCurrency Customers' credit balances added up per currency, `currency` first, then largest. A currency whose balance is zero is left out. Customers on a test clock are not counted.
 	CreditBalanceByCurrency []struct {
-		AmountCents int64  `json:"amount_cents"`
-		Currency    string `json:"currency"`
+		// AmountCents Credit customers hold in this currency, in its minor unit (cents for USD).
+		AmountCents int64 `json:"amount_cents"`
+
+		// Currency Three-letter currency code, in upper case.
+		Currency string `json:"currency"`
 	} `json:"credit_balance_by_currency"`
 
-	// Currency The tenant's default currency. Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own.
+	// Currency The account's default currency (USD when none is set). Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own.
 	Currency string `json:"currency"`
 
 	// DunningActive Dunning runs (automatic payment retries) still in progress.
@@ -3291,11 +3552,20 @@ type AnalyticsOverview struct {
 	// LogoChurnRate Subscriptions canceled in the window, divided by subscriptions active at its start. 0 when none were active.
 	LogoChurnRate float64 `json:"logo_churn_rate"`
 
-	// Mrr MRR of active subscriptions now.
+	// Mrr MRR now, from plan base fees only (base amount times quantity,
+	// yearly plans divided by 12) on `active` subscriptions with plans
+	// in `currency`. Trialing subscriptions and usage charges are not
+	// counted.
 	Mrr int64 `json:"mrr"`
 
-	// MrrMovement MRR change in cents. `churned` and `contraction` are positive
+	// MrrMovement How MRR (monthly recurring revenue from plan base fees) changed over
+	// the whole window, in the minor unit of the account's default
+	// currency (cents for USD). `churned` and `contraction` are positive
 	// amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
+	// Expansion and contraction count only subscriptions that were active
+	// for the whole window: a subscription activated or canceled inside
+	// it counts only in `new` or `churned`. Test-clock subscriptions are
+	// left out.
 	MrrMovement AnalyticsMrrMovementTotals `json:"mrr_movement"`
 
 	// MrrPrev MRR at the start of the window, rebuilt from item change history.
@@ -3319,17 +3589,25 @@ type AnalyticsOverview struct {
 	// currency. `currency` comes first, then the largest amount. Empty
 	// when nothing is owed.
 	OutstandingByCurrency []struct {
-		AmountCents int64  `json:"amount_cents"`
-		Currency    string `json:"currency"`
+		// AmountCents Amount due in this currency, in its minor unit (cents for USD).
+		AmountCents int64 `json:"amount_cents"`
+
+		// Currency Three-letter currency code, in upper case.
+		Currency string `json:"currency"`
 	} `json:"outstanding_by_currency"`
 
-	// PaidInvoices Invoices paid in the window.
-	PaidInvoices int             `json:"paid_invoices"`
-	Period       AnalyticsPeriod `json:"period"`
+	// PaidInvoices Invoices in `currency` paid in the window.
+	PaidInvoices int `json:"paid_invoices"`
 
-	// RefundsNeedingAttention Issued credit notes whose refund failed, has an unknown result,
-	// has been pending for more than 72 hours, or has not started an
-	// hour after issue.
+	// Period The window an analytics call covers, ending now: the last 7, 30 or
+	// 90 days, or `12m` for the last 365 days in monthly buckets. The
+	// other periods use daily buckets.
+	Period AnalyticsPeriod `json:"period"`
+
+	// RefundsNeedingAttention Issued credit notes whose refund failed or has an unknown
+	// result, has stayed pending for 72 hours since the note last
+	// changed, or owes a refund that has not started an hour after the
+	// note last changed. Test-clock credit notes are not counted.
 	RefundsNeedingAttention int `json:"refunds_needing_attention"`
 
 	// Revenue What paid the invoices paid in the window (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
@@ -3348,322 +3626,491 @@ type AnalyticsOverview struct {
 	UsageEvents int64 `json:"usage_events"`
 }
 
-// AnalyticsPeriod defines model for AnalyticsPeriod.
+// AnalyticsPeriod The window an analytics call covers, ending now: the last 7, 30 or
+// 90 days, or `12m` for the last 365 days in monthly buckets. The
+// other periods use daily buckets.
 type AnalyticsPeriod string
 
-// AnalyticsRevenuePoint defines model for AnalyticsRevenuePoint.
+// AnalyticsRevenuePoint Paid-invoice revenue in one bucket of `GET /v1/analytics/revenue-chart`:
+// a UTC day, or a UTC month for `12m`. Only invoices in the account's
+// default currency are counted.
 type AnalyticsRevenuePoint struct {
 	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC.
-	Date         string `json:"date"`
-	InvoiceCount int    `json:"invoice_count"`
+	Date string `json:"date"`
 
-	// RevenueCents What paid the invoices paid in the bucket (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
+	// InvoiceCount Invoices paid in the bucket.
+	InvoiceCount int `json:"invoice_count"`
+
+	// RevenueCents What paid the invoices paid in the bucket (payment plus customer
+	// credit applied), in the minor unit of the default currency
+	// (cents for USD). A credit note that lowered an invoice before it
+	// was paid is not counted.
 	RevenueCents int64 `json:"revenue_cents"`
 }
 
-// AnalyticsTopMeter defines model for AnalyticsTopMeter.
+// AnalyticsTopMeter One of the meters with the most usage events in the window, in
+// `GET /v1/analytics/usage`.
 type AnalyticsTopMeter struct {
+	// EventName The event name usage events send to reach this meter.
 	EventName string `json:"event_name"`
-	Events    int64  `json:"events"`
-	MeterId   string `json:"meter_id"`
+
+	// Events Usage events on this meter with a timestamp in the window.
+	Events int64 `json:"events"`
+
+	// MeterId The meter's id (`hc_mtr_…`).
+	MeterId string `json:"meter_id"`
+
+	// MeterName The meter's display name.
 	MeterName string `json:"meter_name"`
 
 	// Quantity Summed quantity, as a decimal string.
 	Quantity string `json:"quantity"`
 }
 
-// AnalyticsUsagePoint defines model for AnalyticsUsagePoint.
+// AnalyticsUsagePoint Usage in one bucket of `GET /v1/analytics/usage`: a UTC day, or a
+// UTC month for `12m`. Events of customers on a test clock are left
+// out.
 type AnalyticsUsagePoint struct {
 	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC.
-	Date   string `json:"date"`
-	Events int64  `json:"events"`
+	Date string `json:"date"`
+
+	// Events Usage events with a timestamp in the bucket, over all meters.
+	Events int64 `json:"events"`
 
 	// Quantity Summed quantity, as a decimal string.
 	Quantity string `json:"quantity"`
 }
 
-// Attention Unified "this invoice needs operator attention" surface.
-// Computed server-side from durable invoice fields
-// (`tax_status`, `tax_error_code`, `payment_status`,
-// `last_payment_error`). Never persisted —
-// always derived. Omitted entirely when the invoice is healthy
-// (matches Stripe's `last_finalization_error: null` ergonomic).
-// See ADR-009.
+// Attention Why an invoice needs your attention now, and what to do about it.
+// Hardcount works it out each time the invoice is read, from the
+// invoice's tax and payment state and related facts (the customer's
+// card, the dunning run, disputes, refunds made in Stripe); it is never
+// stored. The invoice
+// leaves it out when nothing needs attention. `GET /v1/invoices`,
+// `GET /v1/invoices/{id}` and the finalize, retry-tax and
+// rotate-public-token responses carry it; the other invoice responses
+// and the webhook events do not.
 type Attention struct {
-	// Actions Prescribed next steps. First item is the primary CTA; the
-	// rest are secondary.
+	// Actions Recommended next steps. The first is the main one; the rest are
+	// secondary. Absent when there is nothing to do but wait.
 	Actions []AttentionActionItem `json:"actions,omitempty"`
 
-	// Code Open, dotted, provider-specific code (e.g.
-	// `tax.customer_data_invalid`, `payment.declined`).
-	// New codes ship without a contract
-	// bump. Stripe parity.
+	// Code Open, dotted code naming the exact cause, for example
+	// `tax.customer_data_invalid` or `payment.declined`. New codes can
+	// appear in any release, as with Stripe's error codes.
 	Code string `json:"code,omitempty"`
 
 	// Detail Hardcount's own explanation behind `message`: why the state
 	// holds, what Hardcount does on its own, and ids support may ask
 	// for (for example the payment intent ids of a payment
 	// anomaly). Plain text; may contain blank-line paragraph
-	// breaks. Never a provider payload — that is
+	// breaks. Never a provider payload: that is
 	// `provider_response`.
 	Detail string `json:"detail,omitempty"`
 
-	// DocUrl Deep link to operator-facing documentation for this
-	// reason. Stripe parity.
+	// DocUrl A link to documentation about this reason. No such pages are
+	// published yet, so this release always leaves it out.
 	DocUrl string `json:"doc_url,omitempty"`
 
 	// DueBy The invoice's payment deadline (its `due_at`). Hardcount does not
-	// act on this date; it is shown so the operator knows it.
-	// Absent when the invoice has no due date.
+	// act on this date; it is shown so you know it. Absent when the
+	// reason does not show a deadline or the invoice has none.
 	DueBy time.Time `json:"due_by,omitempty"`
 
-	// Message Human-readable copy, safe to render verbatim: one plain
-	// sentence saying what happens and what to do. Facts that must
-	// show up front follow on more lines, separated by a newline
-	// (`\n`), one sentence each and up to three lines in all: the
-	// setup-link email on `no_payment_method` (and on
-	// `dunning_exhausted` when no link can be emailed), and the
-	// prepaid credit at risk on an unpaid commit invoice. A no-card
-	// commit invoice carries all three. Wording may change between
-	// releases; switch on `reason` and `code`, not on this text.
+	// Message Text that is safe to show as it is: one plain sentence saying
+	// what happens and what to do. Facts that must show up front
+	// follow on more lines, separated by a newline (`\n`), one sentence
+	// each and up to three lines in all: the setup-link email on
+	// `no_payment_method` (and on `dunning_exhausted` when no link can
+	// be emailed), and the prepaid credit at risk on an unpaid commit
+	// invoice. A no-card commit invoice carries all three. The wording
+	// can change between releases; switch on `reason` and `code`, not
+	// on this text.
 	Message string `json:"message"`
 
 	// NextAttemptAt When Hardcount will next retry on its own. Today only a tax
 	// retry sets it. Absent when no automatic retry is scheduled.
 	NextAttemptAt time.Time `json:"next_attempt_at,omitempty"`
 
-	// Param Dotted-path pointer at the entity field the operator must
-	// edit to resolve the issue (e.g.
-	// `customer.address.postal_code`). Stripe parity. Empty
-	// when the resolution isn't field-scoped.
+	// Param Dotted path to the field to edit to fix the cause. Today only
+	// `tax_location_required` sets it, always to
+	// `customer.address.postal_code`, even when the tax ID is what is
+	// wrong. Absent otherwise.
 	Param string `json:"param,omitempty"`
 
-	// ProviderResponse The provider's own response (Stripe Tax error envelope,
-	// Stripe's last payment error), exactly as received. Present
-	// only when Hardcount called the provider.
+	// ProviderResponse The provider's response as Hardcount recorded it: the Stripe Tax
+	// error (cleaned of its JSON envelope and cut to 500 bytes),
+	// or the invoice's `last_payment_error`. Absent when Hardcount did
+	// not call the provider or recorded no response.
 	ProviderResponse string `json:"provider_response,omitempty"`
 
-	// Reason Closed, typed code naming why an invoice needs operator
-	// attention. Stable public-API contract — codes are never
-	// repurposed; deprecations keep the code reserved and add a
-	// successor. See `Attention.code` for the open, provider-specific
-	// sub-code. `payment_anomaly` (ADR-068) reports money that does
-	// not reconcile — double charge, captured-vs-booked amount
-	// mismatch, or a payment on a voided invoice — and is surfaced
-	// even on paid/voided invoices. `dunning_exhausted` reports a
-	// no-payment-method invoice whose automatic recovery has ended
-	// without collecting (2026-07-22). `collection_paused` reports an
-	// invoice that is queued for auto-charge but whose subscription
-	// has `pause_collection` set, so the charge sweeps deliberately
-	// skip it (2026-07-28). A dunning run already open on the invoice
-	// keeps retrying it through the pause, and `message` then says so;
-	// with no open run it is not charged automatically until
-	// collection resumes. `commit_exposure` reports an
-	// unpaid invoice that funded a prepaid commit whose credit is
-	// already spendable (ADR-078 funds commits at issue, not at
-	// payment) — note this reason is only returned when no other
-	// reason applies; when one does, the exposure is folded into that
-	// reason's `message` and its `actions` instead, so clients must
-	// not treat the reason code as the presence test for exposure
-	// (2026-08-04). `dispute_lost` reports a payment on the invoice that
-	// the customer disputed with their bank and that the dispute took
-	// back (the dispute closed as `lost`). Hardcount leaves the invoice paid
-	// and moves no money; the operator records the loss. Surfaced on paid
-	// invoices. On an invoice that bought prepaid credit, the message
-	// also says how much of the credit is still spendable and names
-	// commit relief, because an ordinary credit note is refused there.
-	// When the invoice also has `payment_anomaly`, that reason stays and
-	// its message asks the operator to check Stripe before any refund.
-	// The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-	// (2026-10-19). `refunded_in_stripe` reports a refund of the invoice's
-	// payment made in Stripe outside Hardcount that Hardcount did not record
-	// as a credit note: the invoice was not paid yet, the currency
-	// differs, the invoice bought prepaid credit, Hardcount first saw the
-	// refund more than a day after it was made, or the refund is more than
-	// the invoice had left to refund or credit. `code` is
-	// `payment.refunded_in_stripe.` and that review reason. The operator
-	// records it with a credit note that names the refund
-	// (`stripe_refund_id` on `POST /v1/credit-notes`) or dismisses it
-	// (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
-	// Surfaced on paid invoices (2026-10-30). `amount_below_minimum` reports an invoice Stripe
-	// refused to charge, or refused a payment page for, because the amount
-	// is below Stripe's minimum charge. The minimum depends on the
-	// currency the Stripe account settles in; Stripe's reply, in
-	// `provider_response`, names it. Nothing was charged, the invoice
-	// stays `finalized` with `payment_status` `pending`, it is not
-	// charged again automatically, dunning does not start (a run already
-	// open ends), and the customer is not emailed. The operator voids it
-	// or records a payment; Collect payment applies the customer's credit
-	// balance and pays it if that covers the amount, and otherwise asks
-	// Stripe again. Stripe's answer can change (for a converted charge the
-	// minimum is the settlement currency's), and a different answer ends
-	// this reason (2026-10-23).
+	// Reason Why an invoice needs your attention, as a closed code. A code is never
+	// reused for another meaning; a retired code stays reserved.
+	// `Attention.code` carries the open, provider-specific sub-code.
+	// - `tax_calculation_failed`: the tax provider could not calculate
+	//   tax. The cause is in `code`.
+	// - `tax_location_required`: the customer's billing address or tax ID
+	//   is missing or not valid for the tax provider. Edit the billing
+	//   profile.
+	// - `payment_failed`: the last charge failed. `code` is
+	//   `payment.declined` for a decline, `payment.card_refused` when the
+	//   bank refused the card for good, or
+	//   `payment.authentication_required` when the bank wants the customer
+	//   to confirm the payment. Stripe's own message is in
+	//   `provider_response`.
+	// - `payment_unconfirmed`: a charge got an unclear answer from Stripe.
+	//   Hardcount asks Stripe what happened.
+	// - `payment_anomaly`: money does not reconcile: a double charge, a
+	//   captured amount that differs from the amount booked, a payment in
+	//   another currency, or a payment on a voided invoice. Shown even on
+	//   paid and voided invoices.
+	// - `payment_processing`: a payment may be in progress. Stripe is
+	//   still processing a charge (it settles on its own), the customer
+	//   has the hosted payment page open (`code` `payment.page_open`), or
+	//   a charge is in progress on a written-off invoice (`code`
+	//   `payment.recovery_processing`).
+	// - `payment_scheduled`: the invoice is queued, and the automatic
+	//   charge collects it on its next run.
+	// - `awaiting_payment`: the invoice is unpaid and not queued for an
+	//   automatic charge. Only invoices written by older releases reach
+	//   this state.
+	// - `no_payment_method`: the customer has no card ready to charge. The
+	//   invoice stays queued, and the automatic charge collects it on its
+	//   first run after a card is added, unless collection is paused on
+	//   the subscription. When Stripe is not connected for the invoice's
+	//   mode, no card can be added online and the invoice is emailed
+	//   instead. `message` says which applies.
+	// - `dunning_exhausted`: the customer still has no card and automatic
+	//   recovery has ended without collecting; the policy's final action
+	//   ran. If that action paused collection on the subscription, resume
+	//   it too: the automatic charge skips a paused subscription even
+	//   after a card is added.
+	// - `collection_paused`: the invoice is queued for an automatic charge,
+	//   but its subscription has `pause_collection` set, so the automatic
+	//   charge skips it. A dunning run already open on the invoice keeps
+	//   retrying it through the pause, and `message` then says so. With no
+	//   open run it is not charged automatically until collection
+	//   resumes.
+	// - `commit_exposure`: the invoice funded a prepaid commit and is
+	//   unpaid, and the customer can already spend that credit or has
+	//   spent it. Prepaid credit is granted when the invoice is issued,
+	//   not when it is paid.
+	//   This reason is returned only when no other reason applies. When
+	//   one does, the exposure is folded into that reason's `message` and
+	//   `actions` instead, so do not treat this code as the only sign of
+	//   exposure.
+	// - `dispute_lost`: the customer disputed a payment on the invoice with
+	//   their bank, and the dispute closed as `lost`, so the bank took the
+	//   money back. Hardcount leaves the invoice paid and moves no money;
+	//   you record the loss. Shown even on paid invoices, which is where
+	//   disputes land. On an invoice that
+	//   bought prepaid credit, the message also says how much of the
+	//   credit is still spendable and names commit relief, because an
+	//   ordinary credit note is refused there. When the invoice also has
+	//   `payment_anomaly`, that reason stays and its message asks you to
+	//   check Stripe before any refund. The disputes are at
+	//   `GET /v1/invoices/{id}/disputes`.
+	// - `refunded_in_stripe`: a refund of the invoice's payment was made
+	//   in Stripe outside Hardcount, and Hardcount did not record it as a
+	//   credit note: the invoice was not paid yet, the currency differs,
+	//   the invoice bought prepaid credit, Hardcount first saw the refund
+	//   more than a day after it was made, a credit note on the invoice
+	//   has a failed card refund this refund may replace, or the refund is
+	//   more than the invoice had left to refund or credit. `code` is
+	//   `payment.refunded_in_stripe.` followed by that review reason.
+	//   Record it with a credit note that names the refund
+	//   (`stripe_refund_id` on `POST /v1/credit-notes`), attach it to the
+	//   credit note whose refund failed
+	//   (`POST /v1/credit-notes/{id}/attach-stripe-refund`), or dismiss it
+	//   (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
+	//   Shown even on paid invoices, which is where refunds land.
+	// - `amount_below_minimum`: Stripe refused to charge the invoice, or
+	//   refused a payment page for it, because the amount is below
+	//   Stripe's minimum charge. The minimum depends on the currency the
+	//   Stripe account settles in; Stripe's reply, in
+	//   `provider_response`, names it. Nothing was charged, the invoice
+	//   stays `finalized` with `payment_status` `pending`, it is not
+	//   charged again automatically, dunning does not start (a run already
+	//   open ends), and the customer is not emailed. Void it or record a
+	//   payment. `POST /v1/invoices/{id}/collect` applies the customer's
+	//   credit balance and marks the invoice paid if that covers it, and
+	//   otherwise asks Stripe again. Stripe's answer can change (for a
+	//   converted charge the minimum is the settlement currency's), and a
+	//   different answer ends this reason.
 	Reason AttentionReason `json:"reason"`
 
-	// Severity Urgency of an Attention surface. Operators sort/filter on this
-	// and the dashboard renders one colour per level. Priority
-	// descending: Critical > Warning > Info.
+	// Severity How urgent an `Attention` notice is, most urgent first: `critical`,
+	// `warning`, `info`. Sort or filter on it; the dashboard shows one
+	// colour per level.
 	Severity AttentionSeverity `json:"severity"`
 
-	// Since When the attention condition started — operators triage
-	// by age. tax_deferred_at for tax reasons; due_at for
-	// overdue; updated_at as a proxy for payment failures.
+	// Since When the condition started, so you can sort by age. For a tax
+	// reason it is when tax was deferred, for `amount_below_minimum`
+	// when Stripe refused the amount, for `dispute_lost` when the
+	// dispute closed, and for `refunded_in_stripe` when the refund was
+	// made. Otherwise it is when the invoice last changed; on a test
+	// clock, when it was issued or its last charge failed. Absent when
+	// it is not known.
 	Since time.Time `json:"since,omitempty"`
 }
 
-// AttentionAction Operator's recommended next step. Closed enum because every
-// code maps to a concrete server endpoint or frontend route,
-// and audit logs key off the code. `reconcile_payment` opens the
-// payment in Stripe; it is offered on `payment_anomaly`, where the
-// refund or correction is made there. `mark_uncollectible` opens
-// the write-off and is offered only on a parked invoice (payment
-// status unknown with no payment intent recorded), for a customer
-// who paid another way: Hardcount records a payment that Stripe shows,
-// and charges the invoice again if none appears within 24 hours.
-// Dashboards render it as a secondary action. `void_invoice` is offered
-// on prepaid-commit exposure, only while some of the granted
-// credit is still unspent: voiding retires the unspent balance
-// (ADR-078) and is the sole recovery for an unpaid invoice whose
-// credit is already live. Credit the customer has already spent
-// is never clawed back (2026-08-04). It is also offered on
-// `amount_below_minimum`, an amount Stripe will not charge
-// (2026-10-23).
+// AttentionAction A recommended next step, as a closed code. Each code maps to an API
+// route or a dashboard page.
+//   - `edit_billing_profile`: fix the customer's billing address or tax
+//     ID.
+//   - `retry_tax`: `POST /v1/invoices/{id}/retry-tax`.
+//   - `retry_payment` and `charge_now`: `POST /v1/invoices/{id}/collect`.
+//   - `wait_provider`: nothing to do; the provider is expected to answer.
+//   - `rotate_api_key`: replace the Stripe key under Settings.
+//   - `reconcile_payment`: open the payment in Stripe and refund or
+//     correct it there. Offered on `payment_anomaly`.
+//   - `review_registration`: check your tax registrations with the tax
+//     provider.
+//   - `send_reminder`: email the customer. On `no_payment_method` and
+//     `dunning_exhausted` that is the setup link
+//     (`POST /v1/invoices/{id}/resend-setup-link`); otherwise it is the
+//     invoice with its payment link (`POST /v1/invoices/{id}/send`).
+//   - `add_payment_method`: add a card for the customer.
+//   - `update_payment_method`: send the customer a link to replace a
+//     card that was declined.
+//   - `connect_tax_provider`: connect the tax provider under Settings.
+//   - `void_invoice`: `POST /v1/invoices/{id}/void`. Offered on
+//     prepaid-commit exposure while some granted credit is unspent:
+//     voiding retires the unspent balance, and credit already spent is
+//     not taken back. Also offered on `amount_below_minimum`.
+//   - `mark_uncollectible`:
+//     `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
+//     parked invoice (payment status `unknown` with no payment intent
+//     recorded), for a customer who paid another way. After the
+//     write-off, Hardcount still records a payment that Stripe shows,
+//     but it no longer charges the invoice. The dashboard shows it as a
+//     secondary action.
 type AttentionAction string
 
-// AttentionActionItem defines model for AttentionActionItem.
+// AttentionActionItem One recommended next step on an `Attention` notice.
 type AttentionActionItem struct {
-	// Code Operator's recommended next step. Closed enum because every
-	// code maps to a concrete server endpoint or frontend route,
-	// and audit logs key off the code. `reconcile_payment` opens the
-	// payment in Stripe; it is offered on `payment_anomaly`, where the
-	// refund or correction is made there. `mark_uncollectible` opens
-	// the write-off and is offered only on a parked invoice (payment
-	// status unknown with no payment intent recorded), for a customer
-	// who paid another way: Hardcount records a payment that Stripe shows,
-	// and charges the invoice again if none appears within 24 hours.
-	// Dashboards render it as a secondary action. `void_invoice` is offered
-	// on prepaid-commit exposure, only while some of the granted
-	// credit is still unspent: voiding retires the unspent balance
-	// (ADR-078) and is the sole recovery for an unpaid invoice whose
-	// credit is already live. Credit the customer has already spent
-	// is never clawed back (2026-08-04). It is also offered on
-	// `amount_below_minimum`, an amount Stripe will not charge
-	// (2026-10-23).
+	// Code A recommended next step, as a closed code. Each code maps to an API
+	// route or a dashboard page.
+	// - `edit_billing_profile`: fix the customer's billing address or tax
+	//   ID.
+	// - `retry_tax`: `POST /v1/invoices/{id}/retry-tax`.
+	// - `retry_payment` and `charge_now`: `POST /v1/invoices/{id}/collect`.
+	// - `wait_provider`: nothing to do; the provider is expected to answer.
+	// - `rotate_api_key`: replace the Stripe key under Settings.
+	// - `reconcile_payment`: open the payment in Stripe and refund or
+	//   correct it there. Offered on `payment_anomaly`.
+	// - `review_registration`: check your tax registrations with the tax
+	//   provider.
+	// - `send_reminder`: email the customer. On `no_payment_method` and
+	//   `dunning_exhausted` that is the setup link
+	//   (`POST /v1/invoices/{id}/resend-setup-link`); otherwise it is the
+	//   invoice with its payment link (`POST /v1/invoices/{id}/send`).
+	// - `add_payment_method`: add a card for the customer.
+	// - `update_payment_method`: send the customer a link to replace a
+	//   card that was declined.
+	// - `connect_tax_provider`: connect the tax provider under Settings.
+	// - `void_invoice`: `POST /v1/invoices/{id}/void`. Offered on
+	//   prepaid-commit exposure while some granted credit is unspent:
+	//   voiding retires the unspent balance, and credit already spent is
+	//   not taken back. Also offered on `amount_below_minimum`.
+	// - `mark_uncollectible`:
+	//   `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
+	//   parked invoice (payment status `unknown` with no payment intent
+	//   recorded), for a customer who paid another way. After the
+	//   write-off, Hardcount still records a payment that Stripe shows,
+	//   but it no longer charges the invoice. The dashboard shows it as a
+	//   secondary action.
 	Code AttentionAction `json:"code"`
 
-	// Label Default rendering label. UIs are free to substitute
-	// localized copy.
+	// Label A default button label. You can show your own, translated text
+	// instead. Absent when there is none.
 	Label string `json:"label,omitempty"`
 }
 
-// AttentionReason Closed, typed code naming why an invoice needs operator
-// attention. Stable public-API contract — codes are never
-// repurposed; deprecations keep the code reserved and add a
-// successor. See `Attention.code` for the open, provider-specific
-// sub-code. `payment_anomaly` (ADR-068) reports money that does
-// not reconcile — double charge, captured-vs-booked amount
-// mismatch, or a payment on a voided invoice — and is surfaced
-// even on paid/voided invoices. `dunning_exhausted` reports a
-// no-payment-method invoice whose automatic recovery has ended
-// without collecting (2026-07-22). `collection_paused` reports an
-// invoice that is queued for auto-charge but whose subscription
-// has `pause_collection` set, so the charge sweeps deliberately
-// skip it (2026-07-28). A dunning run already open on the invoice
-// keeps retrying it through the pause, and `message` then says so;
-// with no open run it is not charged automatically until
-// collection resumes. `commit_exposure` reports an
-// unpaid invoice that funded a prepaid commit whose credit is
-// already spendable (ADR-078 funds commits at issue, not at
-// payment) — note this reason is only returned when no other
-// reason applies; when one does, the exposure is folded into that
-// reason's `message` and its `actions` instead, so clients must
-// not treat the reason code as the presence test for exposure
-// (2026-08-04). `dispute_lost` reports a payment on the invoice that
-// the customer disputed with their bank and that the dispute took
-// back (the dispute closed as `lost`). Hardcount leaves the invoice paid
-// and moves no money; the operator records the loss. Surfaced on paid
-// invoices. On an invoice that bought prepaid credit, the message
-// also says how much of the credit is still spendable and names
-// commit relief, because an ordinary credit note is refused there.
-// When the invoice also has `payment_anomaly`, that reason stays and
-// its message asks the operator to check Stripe before any refund.
-// The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-// (2026-10-19). `refunded_in_stripe` reports a refund of the invoice's
-// payment made in Stripe outside Hardcount that Hardcount did not record
-// as a credit note: the invoice was not paid yet, the currency
-// differs, the invoice bought prepaid credit, Hardcount first saw the
-// refund more than a day after it was made, or the refund is more than
-// the invoice had left to refund or credit. `code` is
-// `payment.refunded_in_stripe.` and that review reason. The operator
-// records it with a credit note that names the refund
-// (`stripe_refund_id` on `POST /v1/credit-notes`) or dismisses it
-// (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
-// Surfaced on paid invoices (2026-10-30). `amount_below_minimum` reports an invoice Stripe
-// refused to charge, or refused a payment page for, because the amount
-// is below Stripe's minimum charge. The minimum depends on the
-// currency the Stripe account settles in; Stripe's reply, in
-// `provider_response`, names it. Nothing was charged, the invoice
-// stays `finalized` with `payment_status` `pending`, it is not
-// charged again automatically, dunning does not start (a run already
-// open ends), and the customer is not emailed. The operator voids it
-// or records a payment; Collect payment applies the customer's credit
-// balance and pays it if that covers the amount, and otherwise asks
-// Stripe again. Stripe's answer can change (for a converted charge the
-// minimum is the settlement currency's), and a different answer ends
-// this reason (2026-10-23).
+// AttentionReason Why an invoice needs your attention, as a closed code. A code is never
+// reused for another meaning; a retired code stays reserved.
+// `Attention.code` carries the open, provider-specific sub-code.
+//   - `tax_calculation_failed`: the tax provider could not calculate
+//     tax. The cause is in `code`.
+//   - `tax_location_required`: the customer's billing address or tax ID
+//     is missing or not valid for the tax provider. Edit the billing
+//     profile.
+//   - `payment_failed`: the last charge failed. `code` is
+//     `payment.declined` for a decline, `payment.card_refused` when the
+//     bank refused the card for good, or
+//     `payment.authentication_required` when the bank wants the customer
+//     to confirm the payment. Stripe's own message is in
+//     `provider_response`.
+//   - `payment_unconfirmed`: a charge got an unclear answer from Stripe.
+//     Hardcount asks Stripe what happened.
+//   - `payment_anomaly`: money does not reconcile: a double charge, a
+//     captured amount that differs from the amount booked, a payment in
+//     another currency, or a payment on a voided invoice. Shown even on
+//     paid and voided invoices.
+//   - `payment_processing`: a payment may be in progress. Stripe is
+//     still processing a charge (it settles on its own), the customer
+//     has the hosted payment page open (`code` `payment.page_open`), or
+//     a charge is in progress on a written-off invoice (`code`
+//     `payment.recovery_processing`).
+//   - `payment_scheduled`: the invoice is queued, and the automatic
+//     charge collects it on its next run.
+//   - `awaiting_payment`: the invoice is unpaid and not queued for an
+//     automatic charge. Only invoices written by older releases reach
+//     this state.
+//   - `no_payment_method`: the customer has no card ready to charge. The
+//     invoice stays queued, and the automatic charge collects it on its
+//     first run after a card is added, unless collection is paused on
+//     the subscription. When Stripe is not connected for the invoice's
+//     mode, no card can be added online and the invoice is emailed
+//     instead. `message` says which applies.
+//   - `dunning_exhausted`: the customer still has no card and automatic
+//     recovery has ended without collecting; the policy's final action
+//     ran. If that action paused collection on the subscription, resume
+//     it too: the automatic charge skips a paused subscription even
+//     after a card is added.
+//   - `collection_paused`: the invoice is queued for an automatic charge,
+//     but its subscription has `pause_collection` set, so the automatic
+//     charge skips it. A dunning run already open on the invoice keeps
+//     retrying it through the pause, and `message` then says so. With no
+//     open run it is not charged automatically until collection
+//     resumes.
+//   - `commit_exposure`: the invoice funded a prepaid commit and is
+//     unpaid, and the customer can already spend that credit or has
+//     spent it. Prepaid credit is granted when the invoice is issued,
+//     not when it is paid.
+//     This reason is returned only when no other reason applies. When
+//     one does, the exposure is folded into that reason's `message` and
+//     `actions` instead, so do not treat this code as the only sign of
+//     exposure.
+//   - `dispute_lost`: the customer disputed a payment on the invoice with
+//     their bank, and the dispute closed as `lost`, so the bank took the
+//     money back. Hardcount leaves the invoice paid and moves no money;
+//     you record the loss. Shown even on paid invoices, which is where
+//     disputes land. On an invoice that
+//     bought prepaid credit, the message also says how much of the
+//     credit is still spendable and names commit relief, because an
+//     ordinary credit note is refused there. When the invoice also has
+//     `payment_anomaly`, that reason stays and its message asks you to
+//     check Stripe before any refund. The disputes are at
+//     `GET /v1/invoices/{id}/disputes`.
+//   - `refunded_in_stripe`: a refund of the invoice's payment was made
+//     in Stripe outside Hardcount, and Hardcount did not record it as a
+//     credit note: the invoice was not paid yet, the currency differs,
+//     the invoice bought prepaid credit, Hardcount first saw the refund
+//     more than a day after it was made, a credit note on the invoice
+//     has a failed card refund this refund may replace, or the refund is
+//     more than the invoice had left to refund or credit. `code` is
+//     `payment.refunded_in_stripe.` followed by that review reason.
+//     Record it with a credit note that names the refund
+//     (`stripe_refund_id` on `POST /v1/credit-notes`), attach it to the
+//     credit note whose refund failed
+//     (`POST /v1/credit-notes/{id}/attach-stripe-refund`), or dismiss it
+//     (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
+//     Shown even on paid invoices, which is where refunds land.
+//   - `amount_below_minimum`: Stripe refused to charge the invoice, or
+//     refused a payment page for it, because the amount is below
+//     Stripe's minimum charge. The minimum depends on the currency the
+//     Stripe account settles in; Stripe's reply, in
+//     `provider_response`, names it. Nothing was charged, the invoice
+//     stays `finalized` with `payment_status` `pending`, it is not
+//     charged again automatically, dunning does not start (a run already
+//     open ends), and the customer is not emailed. Void it or record a
+//     payment. `POST /v1/invoices/{id}/collect` applies the customer's
+//     credit balance and marks the invoice paid if that covers it, and
+//     otherwise asks Stripe again. Stripe's answer can change (for a
+//     converted charge the minimum is the settlement currency's), and a
+//     different answer ends this reason.
 type AttentionReason string
 
-// AttentionSeverity Urgency of an Attention surface. Operators sort/filter on this
-// and the dashboard renders one colour per level. Priority
-// descending: Critical > Warning > Info.
+// AttentionSeverity How urgent an `Attention` notice is, most urgent first: `critical`,
+// `warning`, `info`. Sort or filter on it; the dashboard shows one
+// colour per level.
 type AttentionSeverity string
 
-// AuditLogEntry defines model for AuditLogEntry.
+// AuditLogEntry One audit log row: who did what to which resource, and when.
+// `GET /v1/audit-log` lists them.
 type AuditLogEntry struct {
-	// Action For example `create`, `update`, `revoke`, `finalize`.
+	// Action What was done, such as `create`, `update`, `revoke`, `finalize`
+	// or `export`. `GET /v1/audit-log/filters` lists the values in use.
 	Action string `json:"action"`
 
-	// ActorId User id, API key id, or `system`.
+	// ActorId The user id, API key id or customer id, or `system`.
 	ActorId string `json:"actor_id"`
 
-	// ActorName Name of the API key, when the actor is a key.
-	ActorName string                 `json:"actor_name,omitempty"`
-	ActorType AuditLogEntryActorType `json:"actor_type"`
-	CreatedAt time.Time              `json:"created_at"`
-	Id        string                 `json:"id"`
-	IpAddress string                 `json:"ip_address,omitempty"`
+	// ActorName A readable name for the actor: the API key's name, the user's
+	// email or the customer's display name. Absent when none is known.
+	ActorName string `json:"actor_name,omitempty"`
 
-	// Metadata Action details. A settings change lists each changed field with `from` and `to`.
+	// ActorType Who did it. `user`: a dashboard member. `api_key`: a request
+	// made with an API key. `customer`: a customer acting on a hosted
+	// page. `system`: Hardcount itself, such as a background job or a
+	// Stripe webhook.
+	ActorType AuditLogEntryActorType `json:"actor_type"`
+
+	// CreatedAt When the entry was written, in real time.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Id The entry's id (`hc_aud_…`).
+	Id string `json:"id"`
+
+	// IpAddress The client address of the request that made the change. Absent for work with no request.
+	IpAddress string `json:"ip_address,omitempty"`
+
+	// Metadata Action details. A settings change has `changed`, which lists
+	// each changed field with `from` and `to`. Absent when the action
+	// has none.
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 
-	// RequestId Matches the `Hardcount-Request-Id` header of the request that made the change.
+	// RequestId Matches the `Hardcount-Request-Id` header of the request that made the change. Absent for work with no request.
 	RequestId string `json:"request_id,omitempty"`
 
-	// ResourceId Can be empty for tenant-wide resources such as settings.
-	ResourceId    string `json:"resource_id"`
-	ResourceLabel string `json:"resource_label,omitempty"`
-	ResourceType  string `json:"resource_type"`
+	// ResourceId The resource's id. Empty for account-wide resources such as settings, and for exports.
+	ResourceId string `json:"resource_id"`
 
-	// SimEffectiveAt Simulated time, for entries made inside a test clock.
+	// ResourceLabel A readable label for the resource, such as an invoice number or
+	// a key's name. For a `user` resource, the user's or invitee's
+	// email. Absent when there is none.
+	ResourceLabel string `json:"resource_label,omitempty"`
+
+	// ResourceType The kind of resource, such as `invoice`, `api_key`, `setting` or `user`.
+	ResourceType string `json:"resource_type"`
+
+	// SimEffectiveAt Simulated time, for entries made inside a test clock. Absent otherwise.
 	SimEffectiveAt time.Time `json:"sim_effective_at,omitempty"`
 
-	// SubjectDeleted The resource no longer exists because its test clock was deleted. The entry is kept.
-	SubjectDeleted bool   `json:"subject_deleted,omitempty"`
-	TenantId       string `json:"tenant_id,omitempty"`
-	TestClockId    string `json:"test_clock_id,omitempty"`
+	// SubjectDeleted True when the resource no longer exists because its test clock
+	// was deleted. The entry is kept. Absent otherwise.
+	SubjectDeleted bool `json:"subject_deleted,omitempty"`
+
+	// TenantId The account the entry belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TestClockId The test clock whose simulation the entry was made in. Absent otherwise.
+	TestClockId string `json:"test_clock_id,omitempty"`
 }
 
-// AuditLogEntryActorType defines model for AuditLogEntry.ActorType.
+// AuditLogEntryActorType Who did it. `user`: a dashboard member. `api_key`: a request
+// made with an API key. `customer`: a customer acting on a hosted
+// page. `system`: Hardcount itself, such as a background job or a
+// Stripe webhook.
 type AuditLogEntryActorType string
 
-// AuditLogFilters defines model for AuditLogFilters.
+// AuditLogFilters The values `GET /v1/audit-log` can filter on, from
+// `GET /v1/audit-log/filters`, for filter menus. Only entries in the
+// caller's mode count.
 type AuditLogFilters struct {
-	Actions       []string `json:"actions"`
+	// Actions Every `action` value recorded in this mode, sorted A to Z, at most 500.
+	Actions []string `json:"actions"`
+
+	// ResourceTypes Every `resource_type` value recorded in this mode, sorted A to Z, at most 500.
 	ResourceTypes []string `json:"resource_types"`
 
-	// TestClocks Test clocks seen in the log, most recent activity first.
+	// TestClocks Test clocks seen in the log, most recent activity first, at most 100. Deleted clocks are included.
 	TestClocks []struct {
-		Id   string `json:"id"`
+		// Id The test clock's id (`hc_tclk_…`).
+		Id string `json:"id"`
+
+		// Name The clock's name, taken from its own audit entries. Empty when the log has none.
 		Name string `json:"name"`
 	} `json:"test_clocks"`
 }
@@ -3705,90 +4152,112 @@ type BillingFailure struct {
 	Parked bool `json:"parked"`
 }
 
-// BootstrapResult defines model for BootstrapResult.
+// BootstrapResult What `POST /v1/bootstrap` returns: the new account, its owner's
+// dashboard sign-in, and one test and one live secret key. This
+// answer is the only place the keys appear.
 type BootstrapResult struct {
+	// Message A reminder to save the credentials now.
 	Message string `json:"message"`
 
-	// OwnerEmail Dashboard login email.
+	// OwnerEmail The owner's dashboard sign-in email.
 	OwnerEmail string `json:"owner_email"`
 
-	// OwnerPassword Dashboard login password (the one you sent, or the generated one).
-	OwnerPassword     string `json:"owner_password"`
-	PasswordGenerated bool   `json:"password_generated"`
+	// OwnerPassword The owner's dashboard password: the one you sent, or the
+	// generated one (24 hex characters).
+	OwnerPassword string `json:"owner_password"`
+
+	// PasswordGenerated True when Hardcount generated `owner_password` because the request sent none.
+	PasswordGenerated bool `json:"password_generated"`
 
 	// SecretKeyLive Live-mode secret key (`hc_secret_live_...`).
 	SecretKeyLive string `json:"secret_key_live"`
 
 	// SecretKeyTest Test-mode secret key (`hc_secret_test_...`).
 	SecretKeyTest string `json:"secret_key_test"`
-	Tenant        Tenant `json:"tenant"`
+
+	// Tenant An account: one business that bills its customers with Hardcount.
+	// It has separate test and live data. `POST /v1/bootstrap` creates
+	// the first one.
+	Tenant Tenant `json:"tenant"`
 }
 
-// CreditBalance A customer's credit balance in one currency and where that credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents.
+// CreditBalance A customer's credit balance in one currency and where that credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents. All amounts are in the currency's minor unit (cents for USD).
 type CreditBalance struct {
+	// BalanceCents The credit left: the sum of the customer's ledger entries in this currency, in its minor unit (cents for USD). A grant past its expiry still counts here until the expiry run writes it off.
 	BalanceCents int64 `json:"balance_cents"`
 
 	// Currency The currency of this balance, uppercase. Each credit ledger entry stores its own currency, and credit pays only invoices in that currency. A customer with credit in two currencies has two balances; they are never added together or converted.
-	Currency   string `json:"currency"`
+	Currency string `json:"currency"`
+
+	// CustomerId The customer (`hc_cus_…`).
 	CustomerId string `json:"customer_id"`
 
-	// TotalDeducted Credit an operator deducted (a negative adjustment).
+	// TotalDeducted Credit an operator deducted (a negative adjustment), in the currency's minor unit.
 	TotalDeducted int64 `json:"total_deducted"`
 
-	// TotalExpired Credit written off by expiry.
+	// TotalExpired Credit written off by expiry, in the currency's minor unit.
 	TotalExpired int64 `json:"total_expired"`
 
-	// TotalGranted Every credit added: grants, positive adjustments, and credit a void or credit note gave back as new credit. Credit a void or credit note put back on the grant it was drawn from is not added again.
+	// TotalGranted Every credit added, in the currency's minor unit: grants, positive adjustments, and credit a void or credit note gave back as new credit. Credit a void or credit note put back on the grant it was drawn from is not added again.
 	TotalGranted int64 `json:"total_granted"`
 
-	// TotalRetired Prepaid commit credit taken back because the invoice that funded it was voided or refunded by a credit note.
+	// TotalRetired Prepaid commit credit taken back because the invoice that funded it was voided or refunded by a credit note, in the currency's minor unit.
 	TotalRetired int64 `json:"total_retired"`
 
-	// TotalUsed Credit applied to invoices, less what a void or credit note put back on the grant it was drawn from.
+	// TotalUsed Credit applied to invoices, less what a void or credit note put back on the grant it was drawn from, in the currency's minor unit.
 	TotalUsed int64 `json:"total_used"`
 }
 
 // CreditGrantBlock One block of credit on a customer's balance (a grant or a positive
-// adjustment) and how much of it is left.
+// adjustment) and how much of it is left. Amounts are in the
+// currency's minor unit (cents for USD).
 type CreditGrantBlock struct {
-	// AmountCents The credit the block started with.
+	// AmountCents The credit the block started with, in the currency's minor unit.
 	AmountCents int64 `json:"amount_cents"`
 
-	// ConsumedCents Everything drawn from the block: used by invoices, expired,
-	// retired and deducted.
-	ConsumedCents int64     `json:"consumed_cents"`
-	CreatedAt     time.Time `json:"created_at"`
+	// ConsumedCents Everything drawn from the block, in the currency's minor unit:
+	// used by invoices, expired, retired and deducted.
+	ConsumedCents int64 `json:"consumed_cents"`
+
+	// CreatedAt When the block was added.
+	CreatedAt time.Time `json:"created_at"`
 
 	// Currency The block's currency, uppercase.
 	Currency string `json:"currency"`
 
-	// DeductedCents The part an operator removed with a negative adjustment.
-	DeductedCents int64  `json:"deducted_cents"`
-	Description   string `json:"description"`
+	// DeductedCents The part an operator removed with a negative adjustment, in the currency's minor unit.
+	DeductedCents int64 `json:"deducted_cents"`
+
+	// Description The description of the ledger entry that added the credit.
+	Description string `json:"description"`
 
 	// EntryType `grant` or `adjustment`.
 	EntryType string `json:"entry_type"`
 
-	// ExpiredCents The part that expired unused.
+	// ExpiredCents The part that expired unused, in the currency's minor unit.
 	ExpiredCents int64 `json:"expired_cents"`
 
 	// ExpiresAt The credit can be drawn up to and including this instant; a
 	// period invoice draws it when its period ends at or before it.
 	// The dashboard sends the local midnight after the picked day.
+	// Absent when the credit does not expire.
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
 
 	// GrantKind Absent for unclassified credit.
 	GrantKind CreditGrantBlockGrantKind `json:"grant_kind,omitempty"`
 
 	// Id The ledger entry that added the credit.
-	Id             string `json:"id"`
-	RemainingCents int64  `json:"remaining_cents"`
+	Id string `json:"id"`
 
-	// RetiredCents Commit credit taken back when the invoice that paid for it was
-	// voided, or refunded by a credit note.
+	// RemainingCents Credit left in the block, `amount_cents` minus `consumed_cents`, in the currency's minor unit.
+	RemainingCents int64 `json:"remaining_cents"`
+
+	// RetiredCents Commit credit taken back when the invoice that funded it was
+	// voided, or refunded by a credit note, in the currency's minor
+	// unit.
 	RetiredCents int64 `json:"retired_cents"`
 
-	// SourceInvoiceId For a `commit` block, the invoice that paid for it.
+	// SourceInvoiceId For a `commit` block, the commit invoice whose finalizing made the grant. Absent for other blocks.
 	SourceInvoiceId string `json:"source_invoice_id,omitempty"`
 }
 
@@ -3796,193 +4265,368 @@ type CreditGrantBlock struct {
 type CreditGrantBlockGrantKind string
 
 // CreditGrants A customer's credit blocks, newest first, with the remaining credit
-// added up by currency and kind.
+// added up by currency and kind. Amounts are in the currency's minor
+// unit (cents for USD).
 type CreditGrants struct {
+	// Grants The customer's credit blocks, newest first. A block with nothing
+	// left is listed only with `include_exhausted=true`.
 	Grants []CreditGrantBlock `json:"grants"`
 
 	// RemainingByCurrency One entry per currency with credit left, ordered by currency.
 	RemainingByCurrency []struct {
-		// CommitRemainingCents Remaining credit the customer paid for (`commit`).
-		CommitRemainingCents int64  `json:"commit_remaining_cents"`
-		Currency             string `json:"currency"`
+		// CommitRemainingCents Remaining prepaid commit credit (`commit`), granted by finalized commit invoices, in the currency's minor unit.
+		CommitRemainingCents int64 `json:"commit_remaining_cents"`
 
-		// OtherRemainingCents Remaining credit with no kind, such as adjustments and credit-note credit.
+		// Currency The currency, uppercase.
+		Currency string `json:"currency"`
+
+		// OtherRemainingCents Remaining credit with no kind, such as adjustments and credit-note credit, in the currency's minor unit.
 		OtherRemainingCents int64 `json:"other_remaining_cents"`
 
-		// PromotionalRemainingCents Remaining free credit (`promotional`).
+		// PromotionalRemainingCents Remaining free credit (`promotional`), in the currency's minor unit.
 		PromotionalRemainingCents int64 `json:"promotional_remaining_cents"`
 	} `json:"remaining_by_currency"`
 }
 
-// CreditLedgerEntry defines model for CreditLedgerEntry.
+// CreditLedgerEntry One entry in a customer's credit ledger: credit added (`grant`, or a
+// positive `adjustment`), drawn by an invoice (`usage`), removed (a
+// negative `adjustment`) or written off (`expiry`). Returned by
+// `POST /v1/credits/grant` and `POST /v1/credits/adjust`, and listed
+// by `GET /v1/credits/ledger/{customer_id}`.
 type CreditLedgerEntry struct {
-	// AmountCents Positive adds credit, negative removes it.
+	// AmountCents Positive adds credit, negative removes it, in the currency's
+	// minor unit (cents for USD).
 	AmountCents int64 `json:"amount_cents"`
 
-	// BalanceAfter The customer's credit balance in this entry's currency after it, in cents.
+	// BalanceAfter The customer's credit balance in this entry's currency after it,
+	// in the currency's minor unit (cents for USD).
 	BalanceAfter int64 `json:"balance_after"`
 
-	// ConsumedCents For entries that add credit, how much has been used or expired.
-	ConsumedCents int64     `json:"consumed_cents,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	// ConsumedCents For entries that add credit, how much of it is gone, in the
+	// currency's minor unit: drawn by invoices, expired, removed by a
+	// negative adjustment, or, for commit credit, taken back when its
+	// invoice was voided or refunded by a credit note. Absent when
+	// nothing is.
+	ConsumedCents int64 `json:"consumed_cents,omitempty"`
+
+	// CreatedAt When the entry was written. For a customer on a test clock, the clock's time.
+	CreatedAt time.Time `json:"created_at"`
 
 	// Currency The entry's currency, uppercase. Credit pays only invoices in its own currency.
-	Currency    string                     `json:"currency"`
-	CustomerId  string                     `json:"customer_id"`
-	Description string                     `json:"description"`
-	EntryType   CreditLedgerEntryEntryType `json:"entry_type"`
+	Currency string `json:"currency"`
+
+	// CustomerId The customer whose credit the entry changes (`hc_cus_…`).
+	CustomerId string `json:"customer_id"`
+
+	// Description What the entry is for: the description you gave a grant or
+	// adjustment, "Applied to invoice" and the invoice number on a
+	// `usage` entry, or "Expired grant" and the grant's ID on an
+	// `expiry` entry.
+	Description string `json:"description"`
+
+	// EntryType - `grant`: credit added, by you with `POST /v1/credits/grant` or
+	//   by Hardcount (a prepaid-commit invoice when it is finalized, a
+	//   credit note, or a void or credit note that gave drawn credit
+	//   back).
+	// - `usage`: credit an invoice drew.
+	// - `expiry`: the unused rest of a grant, written off once its
+	//   `expires_at` passed.
+	// - `adjustment`: credit added or removed with
+	//   `POST /v1/credits/adjust`, or commit credit taken back when its
+	//   invoice was voided or refunded.
+	EntryType CreditLedgerEntryEntryType `json:"entry_type"`
 
 	// ExpiresAt On a grant, its expiry. The credit can be drawn up to and
 	// including this instant; a period invoice draws it when its
 	// period ends at or before it. The dashboard sends the local
-	// midnight after the picked day.
-	ExpiresAt time.Time                  `json:"expires_at,omitempty"`
-	GrantKind CreditLedgerEntryGrantKind `json:"grant_kind,omitempty"`
-	Id        string                     `json:"id"`
-	InvoiceId string                     `json:"invoice_id,omitempty"`
-	Metadata  map[string]interface{}     `json:"metadata,omitempty"`
+	// midnight after the picked day. Absent when the credit does not
+	// expire.
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
 
-	// SourceChangeType Classifies per-item proration artifacts so the dedup index can
-	// distinguish a plan-change and a quantity-change that happen to
-	// share the same `(subscription, item, timestamp)`.
+	// GrantKind On a grant, what the credit cost the customer. `commit`:
+	// prepaid credit granted when a commit invoice was finalized; that
+	// invoice is `source_invoice_id`. `promotional`:
+	// free credit you marked so; invoices draw it before any other
+	// credit. Absent for other credit.
+	GrantKind CreditLedgerEntryGrantKind `json:"grant_kind,omitempty"`
+
+	// Id The entry's ID (`hc_ccl_…`).
+	Id string `json:"id"`
+
+	// InvoiceId The invoice the entry comes from: the invoice a `usage` entry
+	// was drawn by, the voided or credited invoice that gave credit
+	// back, or the commit invoice that funded a grant. Absent when no
+	// invoice caused the entry, and on the `adjustment` that takes
+	// commit credit back after its invoice was voided or refunded:
+	// that invoice is in `metadata.funding_invoice_id`.
+	InvoiceId string `json:"invoice_id,omitempty"`
+
+	// Metadata Facts Hardcount records on the entry, such as which grants a
+	// draw or a deduction took its credit from (`drained_blocks`).
+	// Absent when empty, and on the answer of
+	// `POST /v1/credits/adjust`, which does not return it; the ledger
+	// list does.
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// SourceChangeType The kind of subscription item change that produced a proration:
+	// `plan` (the item moved to another plan), `quantity` (its quantity
+	// changed), `add` (the item was added) or `remove` (the item was
+	// removed). On a credit ledger entry (`source_change_type`) it is
+	// never sent in this version.
 	SourceChangeType ItemChangeType `json:"source_change_type,omitempty"`
 
-	// SourceCreditNoteId The credit note that granted this credit to the balance.
+	// SourceCreditNoteId Recorded on credit that a credit note gave back, but not sent by
+	// any route in this version: the ledger list does not return it,
+	// and the grant and adjust routes never write it. Such an entry
+	// names the invoice in `invoice_id`.
 	SourceCreditNoteId string `json:"source_credit_note_id,omitempty"`
 
-	// SourceInvoiceId For a `commit` grant, the invoice that paid for it.
+	// SourceInvoiceId For a `commit` grant, the commit invoice whose finalizing made
+	// the grant. Absent on other entries.
 	SourceInvoiceId string `json:"source_invoice_id,omitempty"`
 
-	// SourceInvoiceReversalId The voided invoice whose applied credit this entry gave back.
-	SourceInvoiceReversalId string    `json:"source_invoice_reversal_id,omitempty"`
-	SourcePlanChangedAt     time.Time `json:"source_plan_changed_at,omitempty"`
+	// SourceInvoiceReversalId Recorded on credit that a voided invoice gave back, but not sent
+	// by any route in this version: the ledger list does not return
+	// it, and the grant and adjust routes never write it. Such an
+	// entry names the invoice in `invoice_id`.
+	SourceInvoiceReversalId string `json:"source_invoice_reversal_id,omitempty"`
 
-	// SourceSubscriptionId With `source_subscription_item_id`, `source_plan_changed_at` and
-	// `source_change_type`, set on a proration credit: the subscription
-	// change that produced it.
-	SourceSubscriptionId     string `json:"source_subscription_id,omitempty"`
+	// SourcePlanChangedAt Not sent by any route in this version: no ledger entry is
+	// written with it, so it is always absent.
+	SourcePlanChangedAt time.Time `json:"source_plan_changed_at,omitempty"`
+
+	// SourceSubscriptionId Not sent by any route in this version: no ledger entry is
+	// written with it, so it is always absent.
+	SourceSubscriptionId string `json:"source_subscription_id,omitempty"`
+
+	// SourceSubscriptionItemId Not sent by any route in this version: no ledger entry is
+	// written with it, so it is always absent.
 	SourceSubscriptionItemId string `json:"source_subscription_item_id,omitempty"`
-	TenantId                 string `json:"tenant_id,omitempty"`
+
+	// TenantId The account the entry belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
 }
 
-// CreditLedgerEntryEntryType defines model for CreditLedgerEntry.EntryType.
+// CreditLedgerEntryEntryType - `grant`: credit added, by you with `POST /v1/credits/grant` or
+//
+//		by Hardcount (a prepaid-commit invoice when it is finalized, a
+//		credit note, or a void or credit note that gave drawn credit
+//		back).
+//	  - `usage`: credit an invoice drew.
+//	  - `expiry`: the unused rest of a grant, written off once its
+//	    `expires_at` passed.
+//	  - `adjustment`: credit added or removed with
+//	    `POST /v1/credits/adjust`, or commit credit taken back when its
+//	    invoice was voided or refunded.
 type CreditLedgerEntryEntryType string
 
-// CreditLedgerEntryGrantKind defines model for CreditLedgerEntry.GrantKind.
+// CreditLedgerEntryGrantKind On a grant, what the credit cost the customer. `commit`:
+// prepaid credit granted when a commit invoice was finalized; that
+// invoice is `source_invoice_id`. `promotional`:
+// free credit you marked so; invoices draw it before any other
+// credit. Absent for other credit.
 type CreditLedgerEntryGrantKind string
 
-// CreditLiveBalance A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency a live subscription will invoice usage in. Amounts in two currencies are never added together.
+// CreditLiveBalance A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency a live subscription will invoice usage in. Amounts in two currencies are never added together. Returned by `GET /v1/credits/balance/{customer_id}/live`; nothing is stored.
 type CreditLiveBalance struct {
 	// Balances Ordered by currency.
 	Balances []CreditLiveCurrency `json:"balances"`
 
 	// ComputedAt When the server computed these figures.
 	ComputedAt time.Time `json:"computed_at"`
-	CustomerId string    `json:"customer_id"`
+
+	// CustomerId The customer (`hc_cus_…`).
+	CustomerId string `json:"customer_id"`
 }
 
-// CreditLiveCurrency The live position in one currency. `balance_cents` is the credit the customer can spend in it: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet and that will be invoiced in this currency. `estimated_remaining_cents` is the first minus the second, never below zero.
+// CreditLiveCurrency The live position in one currency, in its minor unit (cents for USD). `balance_cents` is the credit the customer can spend in it: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet and that will be invoiced in this currency. `estimated_remaining_cents` is the first minus the second, never below zero.
 type CreditLiveCurrency struct {
-	// BalanceCents Settled ledger balance in this currency, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant). Can be negative.
-	BalanceCents int64  `json:"balance_cents"`
-	Currency     string `json:"currency"`
+	// BalanceCents Settled ledger balance in this currency, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant), in the currency's minor unit. Can be negative.
+	BalanceCents int64 `json:"balance_cents"`
 
-	// EstimatedRemainingCents `balance_cents` minus `unbilled_usage_cents`, floored at zero. To see how far past zero a customer is, subtract the two parts yourself.
+	// Currency The currency of this position, uppercase (for example `USD`).
+	Currency string `json:"currency"`
+
+	// EstimatedRemainingCents `balance_cents` minus `unbilled_usage_cents`, floored at zero, in the currency's minor unit. To see how far past zero a customer is, subtract the two parts yourself.
 	EstimatedRemainingCents int64 `json:"estimated_remaining_cents"`
 
-	// UnbilledUsageCents Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
+	// UnbilledUsageCents Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it, in the currency's minor unit. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage from the trial end on counts, inside its first paid period; trial usage is free.
 	UnbilledUsageCents int64 `json:"unbilled_usage_cents"`
 }
 
 // CreditNote A credit note reduces what a customer owes on an invoice, or gives
-// money back after it was paid. Its total is split three ways: refund
-// to the card (`refund_amount_cents`), credit to the customer's
+// money back after it was paid. On an unpaid invoice it lowers
+// `amount_due_cents`. On a paid invoice its total is split three ways:
+// refund to the card (`refund_amount_cents`), credit to the customer's
 // balance (`credit_amount_cents`), and money returned outside Hardcount
-// (`out_of_band_amount_cents`).
+// (`out_of_band_amount_cents`). Amounts are whole numbers in the
+// currency's minor unit (cents for USD). The credit note routes and
+// `POST /v1/invoices/{id}/refund` return it.
 type CreditNote struct {
-	// BillToSnapshot What an issued invoice or credit note prints about its buyer, copied
-	// when the document was issued (ADR-109). The printed name is
-	// `legal_name` when set, otherwise `display_name`.
+	// BillToSnapshot What an issued invoice or credit note prints about its buyer. It is
+	// copied from the customer and the billing profile when the document
+	// is issued, so a later edit to either does not change it. The printed
+	// name is `legal_name` when set, otherwise `display_name`.
 	BillToSnapshot DocumentBillTo `json:"bill_to_snapshot,omitempty"`
 
-	// CommitRetiredCents Prepaid commit credits this note retired. Absent on other notes.
-	CommitRetiredCents int64     `json:"commit_retired_cents,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	CreditAmountCents  int64     `json:"credit_amount_cents"`
-	CreditNoteNumber   string    `json:"credit_note_number"`
-	Currency           string    `json:"currency"`
-	CustomerId         string    `json:"customer_id"`
-	Id                 string    `json:"id"`
-	InvoiceId          string    `json:"invoice_id"`
+	// CommitRetiredCents Prepaid commit credits this note retired, in the currency's minor unit (cents for USD). Absent on other notes.
+	CommitRetiredCents int64 `json:"commit_retired_cents,omitempty"`
 
-	// IsSimulated True when `issued_at` is test-clock time.
+	// CreatedAt When the note was created. For an invoice on a test clock, the clock's time.
+	CreatedAt time.Time `json:"created_at"`
+
+	// CreditAmountCents Part of the total added to the customer's credit balance, in the
+	// currency's minor unit (cents for USD). 0 on a note against an
+	// unpaid invoice.
+	CreditAmountCents int64 `json:"credit_amount_cents"`
+
+	// CreditNoteNumber The number printed on the note: the account's credit note prefix
+	// (default `CN`), a hyphen and a sequence padded to six digits, for
+	// example `CN-000003`. Test mode and live mode count separately.
+	// Set when the note is created, drafts included.
+	CreditNoteNumber string `json:"credit_note_number"`
+
+	// Currency The invoice's currency, uppercase.
+	Currency string `json:"currency"`
+
+	// CustomerId The invoice's customer.
+	CustomerId string `json:"customer_id"`
+
+	// Id Unique identifier of the credit note, starting `hc_cn_`.
+	Id string `json:"id"`
+
+	// InvoiceId The invoice the note credits.
+	InvoiceId string `json:"invoice_id"`
+
+	// IsSimulated True when the note's dates are test-clock time (its invoice's customer is on a test clock).
 	IsSimulated bool `json:"is_simulated"`
 
-	// IssuePending True on a draft that Hardcount will issue automatically.
-	IssuePending         bool                   `json:"issue_pending"`
-	IssuedAt             time.Time              `json:"issued_at,omitempty"`
-	Metadata             map[string]interface{} `json:"metadata,omitempty"`
-	OutOfBandAmountCents int64                  `json:"out_of_band_amount_cents"`
-	Reason               string                 `json:"reason"`
+	// IssuePending True on a draft that Hardcount will issue automatically, such as the credit for unused time after a plan downgrade.
+	IssuePending bool `json:"issue_pending"`
 
-	// RecordedAt Real-world time the row was written, when `created_at` is test-clock time.
+	// IssuedAt When the note was issued. Absent until it is issued.
+	IssuedAt time.Time `json:"issued_at,omitempty"`
+
+	// Metadata Extra key-value data stored with the note. No API request sets it; it is absent when empty.
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// OutOfBandAmountCents Part of the total paid back outside Hardcount (a bank transfer,
+	// cash), recorded for the books, in the currency's minor unit
+	// (cents for USD). 0 on a note against an unpaid invoice.
+	OutOfBandAmountCents int64 `json:"out_of_band_amount_cents"`
+
+	// Reason Why the note was made, as given when it was created. A refund
+	// made with `POST /v1/invoices/{id}/refund` carries its refund
+	// reason (`duplicate`, `fraudulent`, `requested_by_customer` or
+	// `other`).
+	Reason string `json:"reason"`
+
+	// RecordedAt The real-world time the note was created. It differs from
+	// `created_at` only when the invoice is on a test clock. Absent on
+	// notes created before releases recorded it.
 	RecordedAt time.Time `json:"recorded_at,omitempty"`
 
 	// RecordedFromStripe True when the card refund is a refund made in Stripe outside
-	// Hardcount: recorded from Stripe's refund webhook, or linked with
-	// `stripe_refund_id` at create. Hardcount made no refund call for
-	// it; `stripe_refund_id` names the refund.
-	RecordedFromStripe bool  `json:"recorded_from_stripe"`
-	RefundAmountCents  int64 `json:"refund_amount_cents"`
+	// Hardcount: recorded from Stripe's refund webhook, linked with
+	// `stripe_refund_id` at create, or attached with
+	// `POST /v1/credit-notes/{id}/attach-stripe-refund`. Hardcount made
+	// no refund call for it; `stripe_refund_id` names the refund.
+	RecordedFromStripe bool `json:"recorded_from_stripe"`
 
-	// RefundStatus The refund part's state at Stripe. `unknown`: Stripe gave no
-	// clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
-	// a 429), so the customer may already be refunded. Don't refund it
+	// RefundAmountCents Part of the total refunded to the card that paid the invoice, in
+	// the currency's minor unit (cents for USD). 0 on a note against an
+	// unpaid invoice.
+	RefundAmountCents int64 `json:"refund_amount_cents"`
+
+	// RefundStatus The refund part's state at Stripe. `none`: no refund was sent
+	// (no refund part, or the note is not issued yet); an issued note
+	// with a refund part stays `none` only when its refund's result
+	// was not recorded. `pending`: Stripe has not finished it.
+	// `succeeded` and `failed`: Stripe's answer. `unknown`: Stripe gave
+	// no clear answer (a timeout, a network error, a Stripe 5xx, a 409
+	// or a 429), so the customer may already be refunded. Don't refund it
 	// again in the Stripe Dashboard. Retry it with
 	// `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
 	// refund at Stripe first and then resends the same request with
 	// the same idempotency key.
-	RefundStatus   CreditNoteRefundStatus `json:"refund_status"`
-	Status         CreditNoteStatus       `json:"status"`
-	StripeRefundId string                 `json:"stripe_refund_id,omitempty"`
-	SubtotalCents  int64                  `json:"subtotal_cents"`
+	RefundStatus CreditNoteRefundStatus `json:"refund_status"`
 
-	// SupplierSnapshot What an issued invoice or credit note prints about its seller (the
-	// tenant's company), copied when the document was issued (ADR-109).
+	// Status `draft`: created but not applied; it can be issued or voided.
+	// `issued`: applied to the invoice and final. `voided`: cancelled
+	// before it was issued.
+	Status CreditNoteStatus `json:"status"`
+
+	// StripeRefundId The Stripe refund (`re_…`) of the refund part. Absent until Stripe made one.
+	StripeRefundId string `json:"stripe_refund_id,omitempty"`
+
+	// SubtotalCents The credited amount without its tax, in the currency's minor unit (cents for USD).
+	SubtotalCents int64 `json:"subtotal_cents"`
+
+	// SupplierSnapshot What an issued invoice or credit note prints about its seller: your
+	// company details from the account settings, copied when the document
+	// was issued. A later change to the settings does not change it.
+	// Every field is absent when the setting was empty.
 	SupplierSnapshot DocumentSupplier `json:"supplier_snapshot,omitempty"`
-	TaxAmountCents   int64            `json:"tax_amount_cents"`
+
+	// TaxAmountCents The tax part of the credited amount, in the currency's minor
+	// unit (cents for USD). It is the invoice's own tax share of the
+	// note, so crediting half of an invoice reverses half of its tax.
+	TaxAmountCents int64 `json:"tax_amount_cents"`
 
 	// TaxReversalPending True when the tax reversal failed and will be retried.
 	TaxReversalPending bool `json:"tax_reversal_pending"`
 
-	// TaxTransactionId Tax provider's reversal transaction, set when the note is issued.
-	TaxTransactionId string    `json:"tax_transaction_id,omitempty"`
-	TenantId         string    `json:"tenant_id,omitempty"`
-	TotalCents       int64     `json:"total_cents"`
-	UpdatedAt        time.Time `json:"updated_at"`
-	VoidedAt         time.Time `json:"voided_at,omitempty"`
+	// TaxTransactionId The tax provider's reversal transaction, set when the note is
+	// issued against an invoice whose tax the provider recorded.
+	// Absent otherwise.
+	TaxTransactionId string `json:"tax_transaction_id,omitempty"`
+
+	// TenantId The account the credit note belongs to. Absent when empty.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TotalCents The credited amount with tax, in the currency's minor unit (cents
+	// for USD): the sum of the note's lines.
+	TotalCents int64 `json:"total_cents"`
+
+	// UpdatedAt When the note last changed.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// VoidedAt When the note was voided. Absent unless it is voided.
+	VoidedAt time.Time `json:"voided_at,omitempty"`
 }
 
-// CreditNoteRefundStatus The refund part's state at Stripe. `unknown`: Stripe gave no
-// clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
-// a 429), so the customer may already be refunded. Don't refund it
+// CreditNoteRefundStatus The refund part's state at Stripe. `none`: no refund was sent
+// (no refund part, or the note is not issued yet); an issued note
+// with a refund part stays `none` only when its refund's result
+// was not recorded. `pending`: Stripe has not finished it.
+// `succeeded` and `failed`: Stripe's answer. `unknown`: Stripe gave
+// no clear answer (a timeout, a network error, a Stripe 5xx, a 409
+// or a 429), so the customer may already be refunded. Don't refund it
 // again in the Stripe Dashboard. Retry it with
 // `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
 // refund at Stripe first and then resends the same request with
 // the same idempotency key.
 type CreditNoteRefundStatus string
 
-// CreditNoteStatus defines model for CreditNote.Status.
+// CreditNoteStatus `draft`: created but not applied; it can be issued or voided.
+// `issued`: applied to the invoice and final. `voided`: cancelled
+// before it was issued.
 type CreditNoteStatus string
 
-// CreditNoteStats defines model for CreditNoteStats.
+// CreditNoteStats What `GET /v1/credit-notes/stats` returns: how many credit notes
+// there are in each status, and the money on the issued ones, per
+// currency. It covers every note in this mode.
 type CreditNoteStats struct {
-	// ByCurrency Money on issued notes, one entry per currency, the tenant's
-	// default currency first. Empty when no note is issued.
+	// ByCurrency Money on issued notes, one entry per currency, the account's
+	// default currency first. Empty when no note is issued. Amounts are
+	// in the currency's minor unit (cents for USD) and never added
+	// across currencies.
 	ByCurrency []struct {
 		// CreditedCents Added to customers' credit balances.
-		CreditedCents int64  `json:"credited_cents"`
-		Currency      string `json:"currency"`
+		CreditedCents int64 `json:"credited_cents"`
+
+		// Currency The currency of this entry, uppercase.
+		Currency string `json:"currency"`
 
 		// OutOfBandCents Recorded as paid back outside Stripe.
 		OutOfBandCents int64 `json:"out_of_band_cents"`
@@ -3999,154 +4643,291 @@ type CreditNoteStats struct {
 		// TotalCents Total of the issued notes.
 		TotalCents int64 `json:"total_cents"`
 	} `json:"by_currency"`
-	DraftCount  int `json:"draft_count"`
+
+	// DraftCount Credit notes in `draft`.
+	DraftCount int `json:"draft_count"`
+
+	// IssuedCount Credit notes in `issued`.
 	IssuedCount int `json:"issued_count"`
+
+	// VoidedCount Credit notes in `voided`.
 	VoidedCount int `json:"voided_count"`
 }
 
-// Customer defines model for Customer.
+// Customer A customer you bill: the person or company that subscriptions,
+// invoices, credits and payment methods belong to. Create, list, get
+// and update customers under `/v1/customers`. The
+// `customer.email_bounced` and `customer.email_complained` webhook
+// events carry this object too.
+//
+// Not every route fills every optional field. Get and update return
+// the whole record. The list and create answers leave out
+// `email_status`, the bounce fields, `dunning_policy_id` and
+// `stripe_customer_id`, and the list also leaves out
+// `additional_emails`.
 type Customer struct {
-	// AdditionalEmails CC'd on billing documents and billing-state emails (invoice,
-	// receipt, dunning, payment failed, credit note) — never on
-	// credential-bearing emails (setup links, resets, invites).
-	// Normalized to lowercase bare addresses, deduped, capped at 10,
-	// never equal to the primary email. Stored encrypted at rest.
-	AdditionalEmails []string  `json:"additional_emails,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	DisplayName      string    `json:"display_name"`
+	// AdditionalEmails Addresses copied (CC) on billing documents and billing emails:
+	// invoice, receipt, payment reminder, final notice, failed payment
+	// and credit note. Never on the payment setup emails, whose link
+	// lets the reader add a card. Lowercase bare addresses, no
+	// duplicates, never the primary `email`. At most 10: a create or
+	// update with more is refused with 422. Absent when the list is
+	// empty.
+	AdditionalEmails []string `json:"additional_emails,omitempty"`
 
-	// DunningPolicyId Assigned dunning policy; absent means the tenant default.
-	DunningPolicyId    string    `json:"dunning_policy_id,omitempty"`
-	Email              string    `json:"email,omitempty"`
-	EmailBounceReason  string    `json:"email_bounce_reason,omitempty"`
+	// CreatedAt When the customer was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// DisplayName The name shown on invoices, emails and the dashboard. Create
+	// refuses one longer than 255 bytes (UTF-8); an update does not
+	// check the length.
+	DisplayName string `json:"display_name"`
+
+	// DunningPolicyId The dunning policy (the plan for retrying failed payments) this
+	// customer uses. Absent when the customer uses the account's
+	// default policy.
+	DunningPolicyId string `json:"dunning_policy_id,omitempty"`
+
+	// Email Where billing emails go: invoices, receipts, payment reminders
+	// and payment-method links. Absent when the customer has none.
+	Email string `json:"email,omitempty"`
+
+	// EmailBounceReason The reason the email provider gave with the last bounce or spam
+	// report. Absent until one is recorded, when the report gave no
+	// reason, and again after `email` changes.
+	EmailBounceReason string `json:"email_bounce_reason,omitempty"`
+
+	// EmailLastBouncedAt When the last bounce or spam report was recorded. Absent until
+	// one is, and again after `email` changes.
 	EmailLastBouncedAt time.Time `json:"email_last_bounced_at,omitempty"`
 
-	// EmailStatus Deliverability of `email`, learned from bounce and complaint reports.
+	// EmailStatus Whether `email` receives mail, learned from bounce and spam
+	// reports. `unknown` until a report arrives. `bounced` or
+	// `complained` after one, and Hardcount then stops emailing the
+	// address. Changing `email` sets it back to `unknown`. Hardcount
+	// does not set `ok` today.
 	EmailStatus CustomerEmailStatus `json:"email_status,omitempty"`
-	ExternalId  string              `json:"external_id"`
-	Id          string              `json:"id"`
-	Livemode    bool                `json:"livemode,omitempty"`
-	Status      CustomerStatus      `json:"status"`
 
-	// StripeCustomerId The Stripe customer. Absent until the first payment-method action.
+	// ExternalId Your own ID for the customer, such as the account ID in your
+	// app. Unique in the account and mode, and fixed after create.
+	// Create refuses one longer than 255 bytes (UTF-8).
+	ExternalId string `json:"external_id"`
+
+	// Id The customer's ID, `hc_cus_` and 20 characters.
+	Id string `json:"id"`
+
+	// Livemode Whether the customer is in live mode. The customer routes and
+	// webhook events leave it out: use the mode of your API key.
+	Livemode bool `json:"livemode,omitempty"`
+
+	// Status `archived` blocks new subscriptions for the customer. Its
+	// unpaid invoices stay collectible.
+	Status CustomerStatus `json:"status"`
+
+	// StripeCustomerId The Stripe customer linked to this customer. Absent until
+	// Hardcount first creates it: when you create a payment-method
+	// link (setup session or setup email), or when the customer opens
+	// Stripe Checkout from a payment-update link or the hosted invoice
+	// page. Set once, never replaced.
 	StripeCustomerId string `json:"stripe_customer_id,omitempty"`
-	TenantId         string `json:"tenant_id,omitempty"`
 
-	// TestClockId Test clock this customer is pinned to (test mode only). When set,
-	// the customer — and any invoices/subscriptions created for it —
-	// run on the clock's simulated time. Empty for live customers. The
-	// dashboard reads it to show the "test clock" badge + simulated-time
-	// banner on the customer and its invoices.
-	TestClockId string    `json:"test_clock_id,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// TenantId The account the customer belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TestClockId The test clock the customer was created on (test mode only).
+	// Its subscriptions and invoices then run on the clock's
+	// simulated time. Set at create and fixed after. Absent for a
+	// customer with no test clock.
+	TestClockId string `json:"test_clock_id,omitempty"`
+
+	// UpdatedAt When the customer was last changed.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// CustomerEmailStatus Deliverability of `email`, learned from bounce and complaint reports.
+// CustomerEmailStatus Whether `email` receives mail, learned from bounce and spam
+// reports. `unknown` until a report arrives. `bounced` or
+// `complained` after one, and Hardcount then stops emailing the
+// address. Changing `email` sets it back to `unknown`. Hardcount
+// does not set `ok` today.
 type CustomerEmailStatus string
 
-// CustomerStatus defines model for Customer.Status.
+// CustomerStatus `archived` blocks new subscriptions for the customer. Its
+// unpaid invoices stay collectible.
 type CustomerStatus string
 
 // CustomerBillingProfile defines model for CustomerBillingProfile.
 type CustomerBillingProfile struct {
+	// AddressLine1 First line of the billing address.
 	AddressLine1 string `json:"address_line1,omitempty"`
-	AddressLine2 string `json:"address_line2,omitempty"`
-	City         string `json:"city,omitempty"`
 
-	// Country ISO 3166 alpha-2 code, such as `US` or `IN`.
-	Country   string    `json:"country,omitempty"`
+	// AddressLine2 Second line of the billing address.
+	AddressLine2 string `json:"address_line2,omitempty"`
+
+	// City City of the billing address.
+	City string `json:"city,omitempty"`
+
+	// Country Two letters, an ISO 3166 alpha-2 code such as `US` or `IN`. Only
+	// the format is checked. Stored in upper case.
+	Country string `json:"country,omitempty"`
+
+	// CreatedAt When the profile was first saved.
 	CreatedAt time.Time `json:"created_at"`
 
 	// Currency ISO 4217 code, such as `USD`. When set, invoices for this
-	// customer use it instead of the plan currency.
-	Currency   string `json:"currency,omitempty"`
+	// customer use it instead of the plan currency. Stored in upper
+	// case. Zero-decimal currencies such as JPY are refused.
+	Currency string `json:"currency,omitempty"`
+
+	// CustomerId The customer this profile belongs to.
 	CustomerId string `json:"customer_id"`
-	LegalName  string `json:"legal_name,omitempty"`
 
-	// Phone 7 to 20 characters of digits, spaces, `+`, `-`, `(`, `)`.
-	Phone      string `json:"phone,omitempty"`
-	PostalCode string `json:"postal_code,omitempty"`
-
-	// ProfileStatus Set by the server. `ready` when legal name, address line
-	// 1, city and country are all set.
-	ProfileStatus CustomerBillingProfileProfileStatus `json:"profile_status"`
-	State         string                              `json:"state,omitempty"`
-
-	// TaxExemptReason Required when `tax_status` is `exempt`.
-	TaxExemptReason string `json:"tax_exempt_reason,omitempty"`
-
-	// TaxId Buyer tax ID. Required when `tax_status` is `reverse_charge`.
-	TaxId string `json:"tax_id"`
-
-	// TaxIdType Tax ID kind, stored as its Stripe code (for example `eu_vat`, `in_gst`).
-	TaxIdType string `json:"tax_id_type"`
-
-	// TaxStatus Defaults to `standard`.
-	TaxStatus CustomerBillingProfileTaxStatus `json:"tax_status"`
-	TenantId  string                          `json:"tenant_id,omitempty"`
-	UpdatedAt time.Time                       `json:"updated_at"`
-}
-
-// CustomerBillingProfileProfileStatus Set by the server. `ready` when legal name, address line
-// 1, city and country are all set.
-type CustomerBillingProfileProfileStatus string
-
-// CustomerBillingProfileTaxStatus Defaults to `standard`.
-type CustomerBillingProfileTaxStatus string
-
-// CustomerBillingProfileInput The billing details printed on invoices and used for tax. The
-// whole profile is replaced on every write.
-type CustomerBillingProfileInput struct {
-	AddressLine1 string `json:"address_line1,omitempty"`
-	AddressLine2 string `json:"address_line2,omitempty"`
-	City         string `json:"city,omitempty"`
-
-	// Country ISO 3166 alpha-2 code, such as `US` or `IN`.
-	Country string `json:"country,omitempty"`
-
-	// Currency ISO 4217 code, such as `USD`. When set, invoices for this
-	// customer use it instead of the plan currency.
-	Currency  string `json:"currency,omitempty"`
+	// LegalName The customer's legal name, printed in the invoice's Bill to block.
 	LegalName string `json:"legal_name,omitempty"`
 
 	// Phone 7 to 20 characters of digits, spaces, `+`, `-`, `(`, `)`.
-	Phone      string `json:"phone,omitempty"`
-	PostalCode string `json:"postal_code,omitempty"`
-	State      string `json:"state,omitempty"`
+	Phone string `json:"phone,omitempty"`
 
-	// TaxExemptReason Required when `tax_status` is `exempt`.
+	// PostalCode Postal code of the billing address, where the country has one.
+	PostalCode string `json:"postal_code,omitempty"`
+
+	// ProfileStatus Set by the server. `ready` when legal name, address line
+	// 1, city and country are all set, so the invoice can print
+	// a full Bill to block. Otherwise `incomplete`.
+	ProfileStatus CustomerBillingProfileProfileStatus `json:"profile_status"`
+
+	// State State, province or region of the billing address, where the country has one.
+	State string `json:"state,omitempty"`
+
+	// TaxExemptReason Why the customer pays no tax, such as a reseller certificate.
+	// Required when `tax_status` is `exempt`.
 	TaxExemptReason string `json:"tax_exempt_reason,omitempty"`
 
-	// TaxId Buyer tax ID. Required when `tax_status` is `reverse_charge`.
+	// TaxId The buyer's tax ID, stored in upper case. Required when
+	// `tax_status` is `reverse_charge`. For `eu_vat`, `in_gst` and
+	// `au_abn` its format is checked.
+	TaxId string `json:"tax_id"`
+
+	// TaxIdType The kind of tax ID, as its Stripe code (for example `eu_vat`,
+	// `in_gst`, `au_abn`), stored in lower case. `vat`, `gstin`,
+	// `in_gstin` and `abn` are stored as those codes.
+	TaxIdType string `json:"tax_id_type"`
+
+	// TaxStatus `standard`: tax is worked out as usual. `exempt`: no tax, and
+	// the invoice shows `tax_exempt_reason`. `reverse_charge`: no tax,
+	// and the invoice tells the buyer to account for it. Defaults to
+	// `standard`.
+	TaxStatus CustomerBillingProfileTaxStatus `json:"tax_status"`
+
+	// TenantId The account the customer belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the profile was last saved.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CustomerBillingProfileProfileStatus Set by the server. `ready` when legal name, address line
+// 1, city and country are all set, so the invoice can print
+// a full Bill to block. Otherwise `incomplete`.
+type CustomerBillingProfileProfileStatus string
+
+// CustomerBillingProfileTaxStatus `standard`: tax is worked out as usual. `exempt`: no tax, and
+// the invoice shows `tax_exempt_reason`. `reverse_charge`: no tax,
+// and the invoice tells the buyer to account for it. Defaults to
+// `standard`.
+type CustomerBillingProfileTaxStatus string
+
+// CustomerBillingProfileInput The billing details printed on invoices and used for tax: the body
+// of `PUT /v1/customers/{id}/billing-profile`. The whole profile is
+// replaced on every write, so a field you leave out is stored empty.
+type CustomerBillingProfileInput struct {
+	// AddressLine1 First line of the billing address.
+	AddressLine1 string `json:"address_line1,omitempty"`
+
+	// AddressLine2 Second line of the billing address.
+	AddressLine2 string `json:"address_line2,omitempty"`
+
+	// City City of the billing address.
+	City string `json:"city,omitempty"`
+
+	// Country Two letters, an ISO 3166 alpha-2 code such as `US` or `IN`. Only
+	// the format is checked. Stored in upper case.
+	Country string `json:"country,omitempty"`
+
+	// Currency ISO 4217 code, such as `USD`. When set, invoices for this
+	// customer use it instead of the plan currency. Stored in upper
+	// case. Zero-decimal currencies such as JPY are refused.
+	Currency string `json:"currency,omitempty"`
+
+	// LegalName The customer's legal name, printed in the invoice's Bill to block.
+	LegalName string `json:"legal_name,omitempty"`
+
+	// Phone 7 to 20 characters of digits, spaces, `+`, `-`, `(`, `)`.
+	Phone string `json:"phone,omitempty"`
+
+	// PostalCode Postal code of the billing address, where the country has one.
+	PostalCode string `json:"postal_code,omitempty"`
+
+	// State State, province or region of the billing address, where the country has one.
+	State string `json:"state,omitempty"`
+
+	// TaxExemptReason Why the customer pays no tax, such as a reseller certificate.
+	// Required when `tax_status` is `exempt`.
+	TaxExemptReason string `json:"tax_exempt_reason,omitempty"`
+
+	// TaxId The buyer's tax ID, stored in upper case. Required when
+	// `tax_status` is `reverse_charge`. For `eu_vat`, `in_gst` and
+	// `au_abn` its format is checked.
 	TaxId string `json:"tax_id,omitempty"`
 
-	// TaxIdType Tax ID kind, stored as its Stripe code (for example `eu_vat`, `in_gst`).
+	// TaxIdType The kind of tax ID, as its Stripe code (for example `eu_vat`,
+	// `in_gst`, `au_abn`), stored in lower case. `vat`, `gstin`,
+	// `in_gstin` and `abn` are stored as those codes.
 	TaxIdType string `json:"tax_id_type,omitempty"`
 
-	// TaxStatus Defaults to `standard`.
+	// TaxStatus `standard`: tax is worked out as usual. `exempt`: no tax, and
+	// the invoice shows `tax_exempt_reason`. `reverse_charge`: no tax,
+	// and the invoice tells the buyer to account for it. Defaults to
+	// `standard`.
 	TaxStatus CustomerBillingProfileInputTaxStatus `json:"tax_status,omitempty"`
 }
 
-// CustomerBillingProfileInputTaxStatus Defaults to `standard`.
+// CustomerBillingProfileInputTaxStatus `standard`: tax is worked out as usual. `exempt`: no tax, and
+// the invoice shows `tax_exempt_reason`. `reverse_charge`: no tax,
+// and the invoice tells the buyer to account for it. Defaults to
+// `standard`.
 type CustomerBillingProfileInputTaxStatus string
 
-// CustomerOverview defines model for CustomerOverview.
+// CustomerOverview A one-call summary of a customer for a customer page: its active
+// subscriptions, its 5 newest invoices and what it still owes.
+// `GET /v1/customers/{customer_id}/overview` returns it.
 type CustomerOverview struct {
+	// ActiveSubscriptions The customer's subscriptions with status `active`, up to 50,
+	// with their items. Trialing subscriptions are not listed.
 	ActiveSubscriptions []Subscription `json:"active_subscriptions"`
-	CustomerId          string         `json:"customer_id"`
+
+	// CustomerId The customer the overview is about.
+	CustomerId string `json:"customer_id"`
 
 	// OutstandingBalance Invoices that are not draft, voided or uncollectible and
 	// whose payment is pending, failed or unknown.
 	OutstandingBalance struct {
-		// ByCurrency Amount due on the same invoices, one entry per currency, largest first. Empty when nothing is owed.
+		// ByCurrency Amount due on the same invoices, one entry per currency,
+		// largest first. Empty when nothing is owed.
 		ByCurrency []struct {
-			AmountCents int64  `json:"amount_cents"`
-			Currency    string `json:"currency"`
+			// AmountCents Amount due in this currency, in its minor unit (cents for USD).
+			AmountCents int64 `json:"amount_cents"`
+
+			// Currency The currency, such as `USD`.
+			Currency string `json:"currency"`
 		} `json:"by_currency"`
 
-		// TotalCents Sum of `amount_due_cents`. Amounts in different currencies are added together, so use `by_currency` to show an amount.
-		TotalCents  int64 `json:"total_cents"`
-		UnpaidCount int   `json:"unpaid_count"`
+		// TotalCents Sum of `amount_due_cents`, in minor units (cents for USD).
+		// Amounts in different currencies are added together, so use
+		// `by_currency` to show an amount.
+		TotalCents int64 `json:"total_cents"`
+
+		// UnpaidCount How many invoices are counted.
+		UnpaidCount int `json:"unpaid_count"`
 	} `json:"outstanding_balance"`
 
 	// RecentInvoices The 5 newest invoices.
@@ -4155,55 +4936,87 @@ type CustomerOverview struct {
 
 // CustomerPriceOverride A customer's negotiated rate for one plan price. It keeps applying
 // when the price's rate changes, and ends when the price is removed.
-// It takes the plan's currency.
+// It takes the plan's currency. The `/v1/price-overrides` routes
+// create, list and end overrides. Every shape field is always sent:
+// the ones the mode does not use are `"0"`, `0` or `[]`.
 type CustomerPriceOverride struct {
+	// Active True until the override is ended: by `DELETE
+	// /v1/price-overrides/{id}`, by a new override for the same
+	// customer and price, or by the removal of the price.
 	Active bool `json:"active"`
 
 	// CreatedAt When the override starts, in the customer's time: wall time, or
 	// its test clock's time. A subscription already on the plan gets
 	// it from its next period; one that first joins the plan in a
 	// period after this instant gets it from the join.
-	CreatedAt  time.Time `json:"created_at"`
-	CustomerId string    `json:"customer_id"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// CustomerId The customer who pays this rate.
+	CustomerId string `json:"customer_id"`
 
 	// DeactivatedAt When the override ended, in the customer's time. Absent while it is active.
 	DeactivatedAt time.Time `json:"deactivated_at,omitempty"`
-	Id            string    `json:"id"`
 
-	// Mode As on PriceShape.
+	// Id The override's ID, `hc_cpo_` and 20 characters.
+	Id string `json:"id"`
+
+	// Mode How the override bills a quantity; see PriceShape.
 	Mode CustomerPriceOverrideMode `json:"mode"`
 
-	// PackageAmountCents Price of one package in cents, as a decimal string.
+	// PackageAmountCents Price of one package, as a decimal string of cents. `"0"` unless
+	// `mode` is `package`.
 	PackageAmountCents string `json:"package_amount_cents"`
-	PackageSize        int64  `json:"package_size"`
+
+	// PackageSize The units in one package. 0 unless `mode` is `package`.
+	PackageSize int64 `json:"package_size"`
 
 	// PriceId The plan price this override replaces the rate of, for this customer.
-	PriceId  string `json:"price_id"`
-	Reason   string `json:"reason,omitempty"`
+	PriceId string `json:"price_id"`
+
+	// Reason Your note on why the customer has this rate. Absent when none was given.
+	Reason string `json:"reason,omitempty"`
+
+	// TenantId The account the override belongs to.
 	TenantId string `json:"tenant_id,omitempty"`
 
 	// Tiers Empty (`[]`) unless `mode` is `graduated`.
 	Tiers []PriceTier `json:"tiers"`
 
-	// UnitAmountCents Price per unit in cents, as a decimal string.
-	UnitAmountCents string    `json:"unit_amount_cents"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	// UnitAmountCents Price per unit, as a decimal string of cents. `"0"` unless `mode`
+	// is `per_unit`.
+	UnitAmountCents string `json:"unit_amount_cents"`
+
+	// UpdatedAt When the override was last written.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// CustomerPriceOverrideMode As on PriceShape.
+// CustomerPriceOverrideMode How the override bills a quantity; see PriceShape.
 type CustomerPriceOverrideMode string
 
-// CustomerUsage defines model for CustomerUsage.
+// CustomerUsage A customer's usage and its cost over a window, priced the way the
+// invoice prices it: `GET /v1/customers/{id}/usage`. Only active and
+// trialing subscriptions are counted. Quantities are decimal strings.
 type CustomerUsage struct {
-	// Buckets One entry per UTC day in the period, including days with no usage.
+	// Buckets One entry per UTC day in the period, including days with no
+	// usage. Empty when the customer's plans price no meter, or when
+	// the daily series failed to load (`warnings` then says so).
 	Buckets []struct {
+		// BucketStart The start of the UTC day.
 		BucketStart time.Time `json:"bucket_start"`
 
-		// PerMeter Quantity per meter ID for that day, as a decimal string.
+		// PerMeter Quantity per meter ID for that day, as a decimal string:
+		// the sum of the day's event quantities, including usage
+		// no price takes. So the days need not add up to a meter's
+		// `total_quantity`, which uses the meter's aggregation.
+		// Empty on a day with no usage.
 		PerMeter map[string]string `json:"per_meter"`
 	} `json:"buckets"`
-	CustomerId string               `json:"customer_id"`
-	Meters     []CustomerUsageMeter `json:"meters"`
+
+	// CustomerId The customer the usage belongs to.
+	CustomerId string `json:"customer_id"`
+
+	// Meters One entry per meter the customer's plans price, with or without usage.
+	Meters []CustomerUsageMeter `json:"meters"`
 
 	// Period The window the response covers. With no `from` and `to`
 	// (`current_billing_cycle`), each subscription is rated over its
@@ -4212,6 +5025,7 @@ type CustomerUsage struct {
 	// totals and daily `buckets` cover its own subscription's whole
 	// period, including usage a threshold invoice already billed.
 	Period struct {
+		// From Start of the window, inclusive.
 		From time.Time `json:"from"`
 
 		// Source `current_billing_cycle`: no `from` and `to` were sent, and
@@ -4223,25 +5037,42 @@ type CustomerUsage struct {
 		// subscription's usage in the window is priced at the
 		// prices of its current billing period.
 		Source CustomerUsagePeriodSource `json:"source"`
-		To     time.Time                 `json:"to"`
+
+		// To End of the window, exclusive.
+		To time.Time `json:"to"`
 	} `json:"period"`
 
 	// Subscriptions One entry per item of each active or trialing subscription. A
 	// subscription with several plans appears once per plan, with the
 	// same `id`.
 	Subscriptions []struct {
-		Currency           string    `json:"currency"`
-		CurrentPeriodEnd   time.Time `json:"current_period_end"`
+		// Currency The plan's currency, such as `USD`.
+		Currency string `json:"currency"`
+
+		// CurrentPeriodEnd End of the subscription's current billing period, exclusive.
+		CurrentPeriodEnd time.Time `json:"current_period_end"`
+
+		// CurrentPeriodStart Start of the subscription's current billing period.
 		CurrentPeriodStart time.Time `json:"current_period_start"`
-		Id                 string    `json:"id"`
-		PlanId             string    `json:"plan_id"`
-		PlanName           string    `json:"plan_name"`
+
+		// Id The subscription's ID.
+		Id string `json:"id"`
+
+		// PlanId The plan of this item.
+		PlanId string `json:"plan_id"`
+
+		// PlanName The plan's name.
+		PlanName string `json:"plan_name"`
 	} `json:"subscriptions"`
 
 	// Totals One entry per currency.
 	Totals []struct {
-		AmountCents int64  `json:"amount_cents"`
-		Currency    string `json:"currency"`
+		// AmountCents The usage cost of every meter in this currency, in the
+		// currency's minor unit (cents for USD).
+		AmountCents int64 `json:"amount_cents"`
+
+		// Currency The currency, such as `USD`.
+		Currency string `json:"currency"`
 	} `json:"totals"`
 
 	// Warnings Problems found working out this usage, in words, such as usage
@@ -4259,17 +5090,28 @@ type CustomerUsage struct {
 // prices of its current billing period.
 type CustomerUsagePeriodSource string
 
-// CustomerUsageMeter defines model for CustomerUsageMeter.
+// CustomerUsageMeter One meter in a customer's usage report: its usage over the window
+// and what that usage costs, split by the price that took it.
 type CustomerUsageMeter struct {
-	Currency  string `json:"currency"`
+	// Currency The currency of the plan whose rows `prices` shows. Empty (`""`)
+	// when `prices` is empty.
+	Currency string `json:"currency"`
+
+	// EventName The `event_name` usage events send for this meter.
 	EventName string `json:"event_name"`
-	MeterId   string `json:"meter_id"`
+
+	// MeterId The meter's ID.
+	MeterId string `json:"meter_id"`
+
+	// MeterName The meter's display name.
 	MeterName string `json:"meter_name"`
 
 	// Prices One row per (plan, price) that took usage, and a `no_price` row
 	// per plan for the usage no price of that plan took. Two plans can
 	// price one meter differently.
 	Prices []struct {
+		// AmountCents What this price bills for the usage, in the currency's minor
+		// unit (cents for USD).
 		AmountCents int64 `json:"amount_cents"`
 
 		// DimensionMatch The labels the price takes. Absent for a price that takes every event.
@@ -4277,35 +5119,49 @@ type CustomerUsageMeter struct {
 
 		// NoPrice True for usage no price of the plan took. Hardcount bills
 		// nothing for it, and it is left out of the meter's totals.
-		NoPrice bool   `json:"no_price,omitempty"`
-		PlanId  string `json:"plan_id"`
+		// Absent on other rows.
+		NoPrice bool `json:"no_price,omitempty"`
 
-		// PriceId Absent on a `no_price` row.
+		// PlanId The plan the price belongs to.
+		PlanId string `json:"plan_id"`
+
+		// PriceId The plan price that took the usage. Absent on a `no_price` row.
 		PriceId string `json:"price_id,omitempty"`
 
-		// Quantity Decimal string.
+		// Quantity The usage this price took, as a decimal string.
 		Quantity string `json:"quantity"`
 
-		// UnitAmountDecimal Price per unit in cents, as a decimal string; the same figure the invoice line shows.
+		// UnitAmountDecimal Price per unit, as a decimal string of cents; the same
+		// figure the invoice line shows. Absent on a `no_price`
+		// row.
 		UnitAmountDecimal string `json:"unit_amount_decimal,omitempty"`
 	} `json:"prices"`
+
+	// TotalAmountCents What the usage costs, in the currency's minor unit (cents for
+	// USD). Usage no price took is left out.
 	TotalAmountCents int64 `json:"total_amount_cents"`
 
-	// TotalQuantity Decimal string.
+	// TotalQuantity The usage the meter's prices took, as a decimal string, under
+	// the meter's aggregation. Usage no price took is left out.
 	TotalQuantity string `json:"total_quantity"`
-	Unit          string `json:"unit"`
+
+	// Unit The meter's unit, such as `tokens`.
+	Unit string `json:"unit"`
 }
 
 // DisputeWebhookEventData The `data` of the outbound webhook events `payment.dispute_opened`
-// and `payment.dispute_closed` (docs/webhooks.md): the invoice the
-// disputed payment paid and the dispute, each as the API returns it.
-// Both are saved in the same transaction that records the dispute, so
-// a crash cannot drop them. `payment.dispute_opened` is sent once per
-// dispute, when Hardcount first records it; if the first event Hardcount
-// receives is already the close, both are sent, and both carry the
-// closed status and `closed_at`. Their delivery order is not
-// guaranteed. `payment.dispute_closed` is sent when the dispute
-// reaches a closed status it did not have: `won`, `lost`,
+// and `payment.dispute_closed`
+// ([Webhook events](https://gethardcount.com/docs/api/webhook-events/)): the
+// invoice the disputed payment paid and the dispute, each as the API
+// returns it. The invoice leaves out `attention`, `recovery_warning`,
+// `billing_period_display` and `test_clock_id`, which are worked out
+// per read. Both events are saved in the same transaction that records
+// the dispute, so a crash cannot drop them. `payment.dispute_opened`
+// is sent once per dispute, when Hardcount first records it; if the
+// first event Hardcount receives is already the close, both are sent,
+// and both carry the closed status and `closed_at`. Their delivery
+// order is not guaranteed. `payment.dispute_closed` is sent when the
+// dispute reaches a closed status it did not have: `won`, `lost`,
 // `warning_closed` or `prevented`. A lost dispute that Stripe later
 // marks won sends it again.
 type DisputeWebhookEventData struct {
@@ -4317,57 +5173,123 @@ type DisputeWebhookEventData struct {
 	// stays paid and no money moves.
 	Dispute InvoiceDispute `json:"dispute"`
 
-	// Invoice A Hardcount invoice. Returned from create, finalize, void, list, get,
-	// rotate-public-token, and collect-payment endpoints.
+	// Invoice A bill for one customer, in one currency. The billing engine creates
+	// one at the end of each subscription period (and for a subscription's
+	// start when a fee is billed in advance, a change, a cancel or a spend
+	// threshold); you can also create one-off invoices with
+	// `POST /v1/invoices`. The engine creates its invoices already
+	// `finalized`, or as a `draft` while their tax is pending or collection
+	// is paused on the subscription. An invoice you create starts as a
+	// `draft` until you finalize it. A finalized invoice ends `paid`,
+	// `voided` or `uncollectible`. Every amount is a whole number in the
+	// currency's minor unit (cents for USD). The invoice routes and the
+	// `invoice.*` and `payment.*` webhook events return it.
 	Invoice Invoice `json:"invoice"`
 }
 
-// DocumentBillTo What an issued invoice or credit note prints about its buyer, copied
-// when the document was issued (ADR-109). The printed name is
-// `legal_name` when set, otherwise `display_name`.
+// DocumentBillTo What an issued invoice or credit note prints about its buyer. It is
+// copied from the customer and the billing profile when the document
+// is issued, so a later edit to either does not change it. The printed
+// name is `legal_name` when set, otherwise `display_name`.
 type DocumentBillTo struct {
+	// AddressLine1 First address line of the billing profile. Absent when none was set.
 	AddressLine1 string `json:"address_line1,omitempty"`
+
+	// AddressLine2 Second address line of the billing profile. Absent when none was set.
 	AddressLine2 string `json:"address_line2,omitempty"`
-	City         string `json:"city,omitempty"`
-	Country      string `json:"country,omitempty"`
-	DisplayName  string `json:"display_name"`
-	Email        string `json:"email,omitempty"`
-	LegalName    string `json:"legal_name,omitempty"`
-	PostalCode   string `json:"postal_code,omitempty"`
-	State        string `json:"state,omitempty"`
+
+	// City City of the billing profile. Absent when none was set.
+	City string `json:"city,omitempty"`
+
+	// Country Country of the billing profile, as a two-letter ISO 3166 code. Absent when none was set.
+	Country string `json:"country,omitempty"`
+
+	// DisplayName The customer's display name when the document was issued.
+	DisplayName string `json:"display_name"`
+
+	// Email The customer's email address. Absent when none was set.
+	Email string `json:"email,omitempty"`
+
+	// LegalName The billing profile's legal name. Absent when none was set.
+	LegalName string `json:"legal_name,omitempty"`
+
+	// PostalCode Postal code of the billing profile. Absent when none was set.
+	PostalCode string `json:"postal_code,omitempty"`
+
+	// State State or region of the billing profile. Absent when none was set.
+	State string `json:"state,omitempty"`
 
 	// TaxId On an invoice, the tax ID its tax was calculated with when set,
-	// otherwise the billing profile's tax ID at issue.
-	TaxId     string `json:"tax_id,omitempty"`
+	// otherwise the billing profile's tax ID at issue. Absent when
+	// there is none.
+	TaxId string `json:"tax_id,omitempty"`
+
+	// TaxIdType The kind of tax ID, as the billing profile stores it. Absent when none was set.
 	TaxIdType string `json:"tax_id_type,omitempty"`
 }
 
-// DocumentSupplier What an issued invoice or credit note prints about its seller (the
-// tenant's company), copied when the document was issued (ADR-109).
+// DocumentSupplier What an issued invoice or credit note prints about its seller: your
+// company details from the account settings, copied when the document
+// was issued. A later change to the settings does not change it.
+// Every field is absent when the setting was empty.
 type DocumentSupplier struct {
+	// AddressLine1 First line of your company address.
 	AddressLine1 string `json:"address_line1,omitempty"`
+
+	// AddressLine2 Second line of your company address.
 	AddressLine2 string `json:"address_line2,omitempty"`
-	City         string `json:"city,omitempty"`
-	Country      string `json:"country,omitempty"`
-	Email        string `json:"email,omitempty"`
-	Name         string `json:"name,omitempty"`
-	Phone        string `json:"phone,omitempty"`
-	PostalCode   string `json:"postal_code,omitempty"`
-	State        string `json:"state,omitempty"`
-	TaxId        string `json:"tax_id,omitempty"`
+
+	// City City of your company address.
+	City string `json:"city,omitempty"`
+
+	// Country Country of your company address.
+	Country string `json:"country,omitempty"`
+
+	// Email Your company's contact email.
+	Email string `json:"email,omitempty"`
+
+	// Name Your company name.
+	Name string `json:"name,omitempty"`
+
+	// Phone Your company's phone number.
+	Phone string `json:"phone,omitempty"`
+
+	// PostalCode Postal code of your company address.
+	PostalCode string `json:"postal_code,omitempty"`
+
+	// State State or region of your company address.
+	State string `json:"state,omitempty"`
+
+	// TaxId Your company's tax ID.
+	TaxId string `json:"tax_id,omitempty"`
 }
 
-// DunningPolicy defines model for DunningPolicy.
+// DunningPolicy A dunning policy: how failed or missing payments are retried, and
+// what happens when the retries run out. Every account starts with one
+// policy per mode, "Default retries" (retries on day 3, 7 and 14, then
+// no final action), as the default. Customers without an assigned
+// policy use the default.
 type DunningPolicy struct {
-	CreatedAt               time.Time                            `json:"created_at"`
-	Enabled                 bool                                 `json:"enabled"`
-	FinalInvoiceAction      DunningPolicyFinalInvoiceAction      `json:"final_invoice_action"`
+	// CreatedAt When the policy was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Enabled Whether the policy starts dunning. A disabled policy starts no runs.
+	Enabled bool `json:"enabled"`
+
+	// FinalInvoiceAction What happens to the invoice when retries run out.
+	FinalInvoiceAction DunningPolicyFinalInvoiceAction `json:"final_invoice_action"`
+
+	// FinalSubscriptionAction What happens to the subscription when retries run out.
 	FinalSubscriptionAction DunningPolicyFinalSubscriptionAction `json:"final_subscription_action"`
-	Id                      string                               `json:"id"`
+
+	// Id Unique identifier of the policy, starting `hc_dpol_`.
+	Id string `json:"id"`
 
 	// IsDefault Customers without an assigned policy use the default.
-	IsDefault bool   `json:"is_default"`
-	Name      string `json:"name"`
+	IsDefault bool `json:"is_default"`
+
+	// Name The policy's name. Can be empty.
+	Name string `json:"name"`
 
 	// RetryDays Days to wait before each retry; the number of retries is its length.
 	RetryDays []int `json:"retry_days"`
@@ -4377,23 +5299,33 @@ type DunningPolicy struct {
 	// true, the next enabled policy you create becomes the default
 	// instead. Set by the server: a request body that sends it is
 	// refused with 422.
-	Seeded    bool      `json:"seeded"`
-	TenantId  string    `json:"tenant_id,omitempty"`
+	Seeded bool `json:"seeded"`
+
+	// TenantId The account the policy belongs to. Absent when empty.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the policy last changed.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// DunningPolicyFinalInvoiceAction defines model for DunningPolicy.FinalInvoiceAction.
+// DunningPolicyFinalInvoiceAction What happens to the invoice when retries run out.
 type DunningPolicyFinalInvoiceAction string
 
-// DunningPolicyFinalSubscriptionAction defines model for DunningPolicy.FinalSubscriptionAction.
+// DunningPolicyFinalSubscriptionAction What happens to the subscription when retries run out.
 type DunningPolicyFinalSubscriptionAction string
 
-// DunningPolicyInput defines model for DunningPolicyInput.
+// DunningPolicyInput The body of `POST /v1/dunning/policies` and
+// `PATCH /v1/dunning/policies/{id}`. A PATCH replaces every setting,
+// so send the full policy. `id`, `tenant_id`, `is_default`, `seeded`,
+// `created_at` and `updated_at` are set by the server; sending one is
+// refused with 422.
 type DunningPolicyInput struct {
 	// Enabled A disabled policy starts no dunning.
 	Enabled bool `json:"enabled,omitempty"`
 
 	// FinalInvoiceAction What happens to the invoice when retries run out.
+	// `mark_uncollectible` writes it off as bad debt; `none` leaves it
+	// open and due.
 	FinalInvoiceAction DunningPolicyInputFinalInvoiceAction `json:"final_invoice_action,omitempty"`
 
 	// FinalSubscriptionAction What happens to the subscription when retries run out. `pause`
@@ -4404,20 +5336,26 @@ type DunningPolicyInput struct {
 	// `subscription.canceled` with `canceled_by: dunning`. It does
 	// nothing if the subscription is already canceled. If a scheduled
 	// cancel was already due, that cancel happens instead, and its
-	// event says `canceled_by: schedule`.
+	// event says `canceled_by: schedule`. `none` leaves it alone. An
+	// invoice with no subscription is not affected.
 	FinalSubscriptionAction DunningPolicyInputFinalSubscriptionAction `json:"final_subscription_action,omitempty"`
-	Name                    string                                    `json:"name,omitempty"`
+
+	// Name A name for the policy, up to 255 bytes (a character outside ASCII counts as more than one). Defaults to empty.
+	Name string `json:"name,omitempty"`
 
 	// RetryDays Days to wait before each retry. The first counts from the failed
-	// payment, or, with no card on file, from the collection that found
-	// none. Each later one counts from the retry before it: `[3, 4, 7]`
-	// retries on day 3, 7 and 14. The number of retries is the length
-	// of the list. A day is 24 hours. `retry_schedule`,
-	// `max_retry_attempts` and `grace_period_days` are refused.
+	// payment or the collection that found no card. Each later one
+	// counts from the retry before it: `[3, 4, 7]` retries on day 3, 7
+	// and 14. The number of retries is the length of the list, 1 to
+	// 15, and each wait is a whole number of days from 1 to 30. A day
+	// is 24 hours. `retry_schedule`, `max_retry_attempts`,
+	// `grace_period_days` and `final_action` are refused.
 	RetryDays []int `json:"retry_days"`
 }
 
 // DunningPolicyInputFinalInvoiceAction What happens to the invoice when retries run out.
+// `mark_uncollectible` writes it off as bad debt; `none` leaves it
+// open and due.
 type DunningPolicyInputFinalInvoiceAction string
 
 // DunningPolicyInputFinalSubscriptionAction What happens to the subscription when retries run out. `pause`
@@ -4428,22 +5366,35 @@ type DunningPolicyInputFinalInvoiceAction string
 // `subscription.canceled` with `canceled_by: dunning`. It does
 // nothing if the subscription is already canceled. If a scheduled
 // cancel was already due, that cancel happens instead, and its
-// event says `canceled_by: schedule`.
+// event says `canceled_by: schedule`. `none` leaves it alone. An
+// invoice with no subscription is not affected.
 type DunningPolicyInputFinalSubscriptionAction string
 
 // DunningPolicyListItem defines model for DunningPolicyListItem.
 type DunningPolicyListItem struct {
 	// AssignedCustomers Customers explicitly assigned to this policy. Customers using it only as the default are not counted.
-	AssignedCustomers       int                                          `json:"assigned_customers"`
-	CreatedAt               time.Time                                    `json:"created_at"`
-	Enabled                 bool                                         `json:"enabled"`
-	FinalInvoiceAction      DunningPolicyListItemFinalInvoiceAction      `json:"final_invoice_action"`
+	AssignedCustomers int `json:"assigned_customers"`
+
+	// CreatedAt When the policy was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Enabled Whether the policy starts dunning. A disabled policy starts no runs.
+	Enabled bool `json:"enabled"`
+
+	// FinalInvoiceAction What happens to the invoice when retries run out.
+	FinalInvoiceAction DunningPolicyListItemFinalInvoiceAction `json:"final_invoice_action"`
+
+	// FinalSubscriptionAction What happens to the subscription when retries run out.
 	FinalSubscriptionAction DunningPolicyListItemFinalSubscriptionAction `json:"final_subscription_action"`
-	Id                      string                                       `json:"id"`
+
+	// Id Unique identifier of the policy, starting `hc_dpol_`.
+	Id string `json:"id"`
 
 	// IsDefault Customers without an assigned policy use the default.
-	IsDefault bool   `json:"is_default"`
-	Name      string `json:"name"`
+	IsDefault bool `json:"is_default"`
+
+	// Name The policy's name. Can be empty.
+	Name string `json:"name"`
 
 	// RetryDays Days to wait before each retry; the number of retries is its length.
 	RetryDays []int `json:"retry_days"`
@@ -4453,36 +5404,55 @@ type DunningPolicyListItem struct {
 	// true, the next enabled policy you create becomes the default
 	// instead. Set by the server: a request body that sends it is
 	// refused with 422.
-	Seeded    bool      `json:"seeded"`
-	TenantId  string    `json:"tenant_id,omitempty"`
+	Seeded bool `json:"seeded"`
+
+	// TenantId The account the policy belongs to. Absent when empty.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the policy last changed.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// DunningPolicyListItemFinalInvoiceAction defines model for DunningPolicyListItem.FinalInvoiceAction.
+// DunningPolicyListItemFinalInvoiceAction What happens to the invoice when retries run out.
 type DunningPolicyListItemFinalInvoiceAction string
 
-// DunningPolicyListItemFinalSubscriptionAction defines model for DunningPolicyListItem.FinalSubscriptionAction.
+// DunningPolicyListItemFinalSubscriptionAction What happens to the subscription when retries run out.
 type DunningPolicyListItemFinalSubscriptionAction string
 
-// DunningRun defines model for DunningRun.
+// DunningRun A dunning run: the payment retries for one unpaid invoice. Dunning
+// is retrying a failed or missing payment on a schedule (the
+// invoice's dunning policy), and running the policy's final action
+// when the retries run out. Each invoice has at most one run.
 type DunningRun struct {
-	AttemptCount int       `json:"attempt_count"`
-	CreatedAt    time.Time `json:"created_at"`
-	CustomerId   string    `json:"customer_id,omitempty"`
+	// AttemptCount How many retries have run so far.
+	AttemptCount int `json:"attempt_count"`
+
+	// CreatedAt When the run started: when the payment failed or the collection
+	// found no card. For an invoice on a test clock, the clock's time.
+	CreatedAt time.Time `json:"created_at"`
+
+	// CustomerId The invoice's customer. Absent when not recorded.
+	CustomerId string `json:"customer_id,omitempty"`
 
 	// EffectiveNow The test clock's current time, when the customer is on a test clock. Filled in on list responses.
 	EffectiveNow time.Time `json:"effective_now,omitempty"`
-	Id           string    `json:"id"`
 
-	// InvoiceAmountDueCents Filled in on list responses.
+	// Id Unique identifier of the run, starting `hc_drun_`.
+	Id string `json:"id"`
+
+	// InvoiceAmountDueCents What the invoice still owes, in the currency's minor unit (cents for USD). Filled in on list responses; absent when 0.
 	InvoiceAmountDueCents int64 `json:"invoice_amount_due_cents,omitempty"`
 
-	// InvoiceCurrency Filled in on list responses.
+	// InvoiceCurrency The invoice's currency. Filled in on list responses.
 	InvoiceCurrency string `json:"invoice_currency,omitempty"`
-	InvoiceId       string `json:"invoice_id"`
 
-	// InvoiceNumber Filled in on list responses.
-	InvoiceNumber string    `json:"invoice_number,omitempty"`
+	// InvoiceId The invoice the run collects.
+	InvoiceId string `json:"invoice_id"`
+
+	// InvoiceNumber The invoice's number. Filled in on list responses.
+	InvoiceNumber string `json:"invoice_number,omitempty"`
+
+	// LastAttemptAt When the last retry ran. Absent before the first retry.
 	LastAttemptAt time.Time `json:"last_attempt_at,omitempty"`
 
 	// MaxRetryAttempts How many retries the run's policy makes: the length of its
@@ -4490,11 +5460,22 @@ type DunningRun struct {
 	// When `attempt_count` has reached it, no charge is retried:
 	// `next_action_at` is when the final action (pause, cancel or
 	// mark uncollectible) runs.
-	MaxRetryAttempts int       `json:"max_retry_attempts,omitempty"`
-	NextActionAt     time.Time `json:"next_action_at,omitempty"`
-	Paused           bool      `json:"paused"`
-	PolicyId         string    `json:"policy_id"`
-	Reason           string    `json:"reason,omitempty"`
+	MaxRetryAttempts int `json:"max_retry_attempts,omitempty"`
+
+	// NextActionAt When the run acts next: the next retry, or the final action once
+	// the retries are used. Absent when the run has ended.
+	NextActionAt time.Time `json:"next_action_at,omitempty"`
+
+	// Paused True while the run is paused, so its retries are skipped. No API route pauses a run.
+	Paused bool `json:"paused"`
+
+	// PolicyId The dunning policy whose schedule and final action the run follows.
+	PolicyId string `json:"policy_id"`
+
+	// Reason Why the run started: `payment_failed` (a charge was declined or
+	// refused) or `no_payment_method` (the customer had no card, so
+	// nothing was charged). Absent when not recorded.
+	Reason string `json:"reason,omitempty"`
 
 	// Resolution How the run ended, set when it is resolved. Exception:
 	// `action_failed` is set on a run that is still `active`. The
@@ -4502,19 +5483,25 @@ type DunningRun struct {
 	// will be retried at `next_action_at`. `amount_below_minimum`: a
 	// charge on the invoice was refused by Stripe because the amount is
 	// below its minimum charge, so the run ended without its final
-	// action.
+	// action. Absent while the run is active.
 	Resolution DunningRunResolution `json:"resolution,omitempty"`
-	ResolvedAt time.Time            `json:"resolved_at,omitempty"`
+
+	// ResolvedAt When the run ended, resolved or escalated. Absent while it is active.
+	ResolvedAt time.Time `json:"resolved_at,omitempty"`
 
 	// State `active`: retries are running. `escalated`: retries ran out
 	// (`resolution` is `retries_exhausted`). `resolved`: the run ended
 	// another way; see `resolution`.
-	State    DunningRunState `json:"state"`
-	TenantId string          `json:"tenant_id,omitempty"`
+	State DunningRunState `json:"state"`
 
-	// TestClockId Filled in on list responses.
-	TestClockId string    `json:"test_clock_id,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// TenantId The account the run belongs to. Absent when empty.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TestClockId The customer's test clock, when they are on one. Filled in on list responses.
+	TestClockId string `json:"test_clock_id,omitempty"`
+
+	// UpdatedAt When the run last changed.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // DunningRunResolution How the run ended, set when it is resolved. Exception:
@@ -4523,7 +5510,7 @@ type DunningRun struct {
 // will be retried at `next_action_at`. `amount_below_minimum`: a
 // charge on the invoice was refused by Stripe because the amount is
 // below its minimum charge, so the run ended without its final
-// action.
+// action. Absent while the run is active.
 type DunningRunResolution string
 
 // DunningRunState `active`: retries are running. `escalated`: retries ran out
@@ -4531,7 +5518,7 @@ type DunningRunResolution string
 // another way; see `resolution`.
 type DunningRunState string
 
-// DunningRunDetail defines model for DunningRunDetail.
+// DunningRunDetail What `GET /v1/dunning/runs/{id}` returns, the run and its event history.
 type DunningRunDetail struct {
 	// Degraded Sources that could not be read. `events`: the event history, so
 	// `events` is empty. `invoice`: the run's invoice, so no event has
@@ -4540,58 +5527,108 @@ type DunningRunDetail struct {
 	// `charge_attempts` the decline reason and amount, `audit` who
 	// resolved the run.
 	Degraded []DunningRunDetailDegraded `json:"degraded"`
-	Events   []DunningRunEvent          `json:"events"`
-	Run      DunningRun                 `json:"run"`
+
+	// Events The run's events, oldest first. Empty when the history could not be read (`degraded` names `events`).
+	Events []DunningRunEvent `json:"events"`
+
+	// Run A dunning run: the payment retries for one unpaid invoice. Dunning
+	// is retrying a failed or missing payment on a schedule (the
+	// invoice's dunning policy), and running the policy's final action
+	// when the retries run out. Each invoice has at most one run.
+	Run DunningRun `json:"run"`
 }
 
 // DunningRunDetailDegraded defines model for DunningRunDetail.Degraded.
 type DunningRunDetailDegraded string
 
-// DunningRunEvent defines model for DunningRunEvent.
+// DunningRunEvent One step in a dunning run's history, as `GET /v1/dunning/runs/{id}` returns it, oldest first.
 type DunningRunEvent struct {
-	AttemptCount int                      `json:"attempt_count"`
-	CreatedAt    time.Time                `json:"created_at"`
-	EventType    DunningRunEventEventType `json:"event_type"`
-	Id           string                   `json:"id"`
-	InvoiceId    string                   `json:"invoice_id"`
+	// AttemptCount The run's retry count at this event.
+	AttemptCount int `json:"attempt_count"`
 
-	// Line The event in the words of the activity line standard (ADR-128):
-	// the line the invoice's payment timeline shows for the same
-	// event, without that timeline's folds. Absent when the run's
-	// invoice could not be read (`degraded` names `invoice`).
-	Line       ActivityLine           `json:"line,omitempty"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
-	Reason     string                 `json:"reason,omitempty"`
-	RecordedAt time.Time              `json:"recorded_at,omitempty"`
-	RunId      string                 `json:"run_id"`
-	State      DunningRunEventState   `json:"state"`
-	TenantId   string                 `json:"tenant_id,omitempty"`
+	// CreatedAt When the event happened. For an invoice on a test clock, the clock's time.
+	CreatedAt time.Time `json:"created_at"`
+
+	// EventType `dunning_started`: the run began. `retry_attempted`: a retry ran
+	// (or was skipped; see `reason`). `escalated`: the retries ran out
+	// and the final action ran. `resolved`: the run ended.
+	EventType DunningRunEventEventType `json:"event_type"`
+
+	// Id Unique identifier of the event, starting `hc_devt_`.
+	Id string `json:"id"`
+
+	// InvoiceId The run's invoice.
+	InvoiceId string `json:"invoice_id"`
+
+	// Line The event in the words of the activity line: the line the
+	// invoice's payment timeline shows for the same event, without
+	// that timeline's folds. Absent when the run's invoice could not
+	// be read (`degraded` names `invoice`).
+	Line ActivityLine `json:"line,omitempty"`
+
+	// Metadata Extra facts about the event, such as `payment_intent_id` on a retry that charged. Absent when empty.
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// Reason Detail that depends on the event. On `dunning_started`, why the
+	// run started (`payment_failed` or `no_payment_method`). On
+	// `retry_attempted`, the outcome: `succeeded`, the decline text
+	// (for example `payment failed: Your card has insufficient
+	// funds.`), or a reason nothing was charged (`no_payment_method`,
+	// `card_refused`, `needs_confirmation`, `amount_below_minimum`,
+	// `payment_processing`). On `escalated`, what the final action did,
+	// joined with `+` (`subscription_paused`, `subscription_canceled`,
+	// `invoice_marked_uncollectible`), empty when it changed nothing. On
+	// `resolved`, what ended the run, such as `payment_recovered` or
+	// `invoice_voided`. Absent when empty.
+	Reason string `json:"reason,omitempty"`
+
+	// RecordedAt The real-world time the event was written. Absent on events written before releases recorded it.
+	RecordedAt time.Time `json:"recorded_at,omitempty"`
+
+	// RunId The run the event belongs to.
+	RunId string `json:"run_id"`
+
+	// State The run's state after this event.
+	State DunningRunEventState `json:"state"`
+
+	// TenantId The account the event belongs to. Absent when empty.
+	TenantId string `json:"tenant_id,omitempty"`
 }
 
-// DunningRunEventEventType defines model for DunningRunEvent.EventType.
+// DunningRunEventEventType `dunning_started`: the run began. `retry_attempted`: a retry ran
+// (or was skipped; see `reason`). `escalated`: the retries ran out
+// and the final action ran. `resolved`: the run ended.
 type DunningRunEventEventType string
 
-// DunningRunEventState defines model for DunningRunEvent.State.
+// DunningRunEventState The run's state after this event.
 type DunningRunEventState string
 
-// DunningStats defines model for DunningStats.
+// DunningStats What `GET /v1/dunning/stats` returns: dunning runs counted by state,
+// and the amount still due on the open ones. It covers every run in
+// this mode. Amounts are in the currency's minor unit (cents for USD).
 type DunningStats struct {
+	// ActiveCount Runs in `active`, still retrying.
 	ActiveCount int `json:"active_count"`
 
 	// AtRiskByCurrency Amount due on active and escalated runs whose invoice is still
 	// open, one entry per currency. `currency` comes first, then the
 	// largest amount. Empty when no run is at risk.
 	AtRiskByCurrency []struct {
-		AmountCents int64  `json:"amount_cents"`
-		Currency    string `json:"currency"`
+		// AmountCents The amount at risk in this currency, in its minor unit (cents for USD).
+		AmountCents int64 `json:"amount_cents"`
+
+		// Currency The currency of this entry, uppercase.
+		Currency string `json:"currency"`
 	} `json:"at_risk_by_currency"`
 
-	// AtRiskCents Amount due on active and escalated runs whose invoice is still open, in `currency` only. A voided or written-off invoice is not at risk.
+	// AtRiskCents Amount due on active and escalated runs whose invoice is still open, in `currency` only, in its minor unit (cents for USD). A voided or written-off invoice is not at risk.
 	AtRiskCents int64 `json:"at_risk_cents"`
 
-	// Currency The tenant's default currency.
-	Currency       string `json:"currency"`
-	EscalatedCount int    `json:"escalated_count"`
+	// Currency The account's default currency, the one `at_risk_cents` counts.
+	Currency string `json:"currency"`
+
+	// EscalatedCount Runs in `escalated`, whose retries ran out.
+	EscalatedCount int `json:"escalated_count"`
 
 	// RecoveredCount Resolved runs that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0). A run closed by a credit note or customer credit that left nothing due is resolved, not recovered.
 	RecoveredCount int `json:"recovered_count"`
@@ -4600,29 +5637,50 @@ type DunningStats struct {
 	ResolvedCount int `json:"resolved_count"`
 }
 
-// Error defines model for Error.
+// Error The body of an error answer. `error.type` is the broad class,
+// `error.code` is the exact reason for your code to branch on, and
+// `error.message` is a sentence for a person. Quote
+// `error.request_id` when you ask for help.
 type Error struct {
+	// Error What went wrong.
 	Error struct {
-		Code    string `json:"code,omitempty"`
-		Message string `json:"message,omitempty"`
+		// Code The exact reason, such as `validation_error`, `not_found`,
+		// `already_exists`, `invalid_state` or a more specific code
+		// the operation lists. Branch on this, not on `message`.
+		Code string `json:"code"`
 
-		// Param The request field the error is about. Sent only when the error
-		// names one. A request body may hold only the fields its
-		// operation lists, spelled and cased as listed: any other
-		// field, or one the server sets (such as `id`), is refused
-		// with 422 and `param` naming it. An operation with no request body lists no fields: send
-		// no body, `{}` or `null`. The Stripe and Postmark webhooks and
-		// the LiteLLM callback take their sender's body as it comes.
-		Param     string `json:"param,omitempty"`
-		RequestId string `json:"request_id,omitempty"`
+		// Message What went wrong, written for a person to read.
+		Message string `json:"message"`
+
+		// Param The request field or query parameter the error is about.
+		// Sent only when the error names one.
+		//
+		// A request body may hold only the fields its operation
+		// lists, spelled and cased as listed. Any other field, or one
+		// the server sets (such as `id`), is refused with 422 and
+		// `param` naming it. An operation with no request body lists
+		// no fields: send no body, `{}` or `null`. The Stripe and
+		// Postmark webhooks and the LiteLLM callback take their
+		// sender's body as it comes.
+		Param string `json:"param,omitempty"`
+
+		// RequestId The id of the request that produced this answer
+		// (`req_…`). It is normally the same value as the
+		// `Hardcount-Request-Id` response header. On an answer
+		// replayed for a repeated `Idempotency-Key`, the body is the
+		// first request's, so this is the first request's id, while
+		// the `Hardcount-Request-Id` header holds the new request's
+		// id.
+		RequestId string `json:"request_id"`
 
 		// Type One of `invalid_request_error`, `authentication_error`,
 		// `rate_limit_error` or `api_error`. Every error the API
 		// answers has this shape, including an unknown path (404,
 		// code `route_not_found`) and a method the path does not take
 		// (405, code `method_not_allowed`, with an `Allow` header).
-		// The few exceptions are listed in docs/api-surface.md.
-		Type string `json:"type,omitempty"`
+		// The few exceptions are listed in
+		// [Errors](https://gethardcount.com/docs/api/errors/).
+		Type string `json:"type"`
 	} `json:"error,omitempty"`
 }
 
@@ -4635,9 +5693,13 @@ type HeldUsageGroup struct {
 	EventName string `json:"event_name"`
 
 	// ExternalCustomerId The LiteLLM `user` value the rows carried.
-	ExternalCustomerId string    `json:"external_customer_id"`
-	FirstEventAt       time.Time `json:"first_event_at"`
-	LastEventAt        time.Time `json:"last_event_at"`
+	ExternalCustomerId string `json:"external_customer_id"`
+
+	// FirstEventAt The earliest usage time among the rows.
+	FirstEventAt time.Time `json:"first_event_at"`
+
+	// LastEventAt The latest usage time among the rows.
+	LastEventAt time.Time `json:"last_event_at"`
 
 	// LastReceivedAt When Hardcount last received a row for this group.
 	LastReceivedAt time.Time `json:"last_received_at"`
@@ -4647,7 +5709,9 @@ type HeldUsageGroup struct {
 
 	// Reason What was missing when the rows arrived.
 	Reason HeldUsageGroupReason `json:"reason"`
-	Rows   int                  `json:"rows"`
+
+	// Rows Number of rows held in the group.
+	Rows int `json:"rows"`
 
 	// TotalQuantity Sum of the held quantities, as a decimal string.
 	TotalQuantity string `json:"total_quantity"`
@@ -4656,8 +5720,9 @@ type HeldUsageGroup struct {
 // HeldUsageGroupReason What was missing when the rows arrived.
 type HeldUsageGroupReason string
 
-// HeldUsageReleaseResult The counts are what Hardcount found when the release wrote the rows, as
-// for `billing_status` (see `UsageBillingStatus`). The invoice is the
+// HeldUsageReleaseResult What `POST /v1/usage-events/held/release` did. The counts are what
+// Hardcount found when the release wrote the rows, as for
+// `billing_status` (see `UsageBillingStatus`). The invoice is the
 // final answer.
 type HeldUsageReleaseResult struct {
 	// CustomerId The customer the rows were ingested for.
@@ -4716,33 +5781,77 @@ type HeldUsageReleaseResult struct {
 	StillHeld int `json:"still_held"`
 }
 
-// HostedInvoice What the hosted invoice page shows. It leaves out internal ids and
+// HostedInvoice What the hosted invoice page shows, from
+// `GET /v1/public/invoices/{token}`. It leaves out internal ids and
 // Stripe details. `bill_to` and the company details in `branding`
-// come from the same place as the invoice PDF's.
+// come from the same place as the invoice PDF's: an issued invoice
+// shows the details it was issued with. Amounts are whole numbers in
+// the currency's minor unit (cents for USD).
 type HostedInvoice struct {
+	// BillTo The buyer as the PDF prints it. Each field is absent when empty.
 	BillTo struct {
+		// AddressLine1 First address line.
 		AddressLine1 string `json:"address_line1,omitempty"`
+
+		// AddressLine2 Second address line.
 		AddressLine2 string `json:"address_line2,omitempty"`
-		City         string `json:"city,omitempty"`
-		Country      string `json:"country,omitempty"`
-		Email        string `json:"email,omitempty"`
-		Name         string `json:"name,omitempty"`
-		PostalCode   string `json:"postal_code,omitempty"`
-		State        string `json:"state,omitempty"`
+
+		// City City.
+		City string `json:"city,omitempty"`
+
+		// Country Country, as a two-letter code.
+		Country string `json:"country,omitempty"`
+
+		// Email The customer's email address.
+		Email string `json:"email,omitempty"`
+
+		// Name The billing profile's legal name, or the customer's display name when it has none.
+		Name string `json:"name,omitempty"`
+
+		// PostalCode Postal code.
+		PostalCode string `json:"postal_code,omitempty"`
+
+		// State State or region.
+		State string `json:"state,omitempty"`
 	} `json:"bill_to"`
+
+	// Branding The seller's company details and branding. Each field is absent when empty.
 	Branding struct {
-		BrandColor          string `json:"brand_color,omitempty"`
+		// BrandColor The seller's brand color, as the account settings store it (for example `#4F46E5`).
+		BrandColor string `json:"brand_color,omitempty"`
+
+		// CompanyAddressLine1 First line of the seller's address.
 		CompanyAddressLine1 string `json:"company_address_line1,omitempty"`
+
+		// CompanyAddressLine2 Second line of the seller's address.
 		CompanyAddressLine2 string `json:"company_address_line2,omitempty"`
-		CompanyCity         string `json:"company_city,omitempty"`
-		CompanyCountry      string `json:"company_country,omitempty"`
-		CompanyEmail        string `json:"company_email,omitempty"`
-		CompanyName         string `json:"company_name,omitempty"`
-		CompanyPhone        string `json:"company_phone,omitempty"`
-		CompanyPostalCode   string `json:"company_postal_code,omitempty"`
-		CompanyState        string `json:"company_state,omitempty"`
-		LogoUrl             string `json:"logo_url,omitempty"`
-		SupportUrl          string `json:"support_url,omitempty"`
+
+		// CompanyCity City of the seller's address.
+		CompanyCity string `json:"company_city,omitempty"`
+
+		// CompanyCountry Country of the seller's address.
+		CompanyCountry string `json:"company_country,omitempty"`
+
+		// CompanyEmail The seller's contact email.
+		CompanyEmail string `json:"company_email,omitempty"`
+
+		// CompanyName The seller's company name.
+		CompanyName string `json:"company_name,omitempty"`
+
+		// CompanyPhone The seller's phone number.
+		CompanyPhone string `json:"company_phone,omitempty"`
+
+		// CompanyPostalCode Postal code of the seller's address.
+		CompanyPostalCode string `json:"company_postal_code,omitempty"`
+
+		// CompanyState State or region of the seller's address.
+		CompanyState string `json:"company_state,omitempty"`
+
+		// LogoUrl The seller's logo, from the current account settings.
+		LogoUrl string `json:"logo_url,omitempty"`
+
+		// SupportUrl Where the customer can get help, from the current account settings.
+		SupportUrl string `json:"support_url,omitempty"`
 	} `json:"branding"`
 
 	// CreditNotes The invoice's issued credit notes, as its PDF prints them, so
@@ -4753,70 +5862,144 @@ type HostedInvoice struct {
 	// Stripe confirmed it, credit added to the customer's balance, or
 	// an amount settled another way. Empty when there are none.
 	CreditNotes []struct {
-		AmountCents         int64  `json:"amount_cents"`
-		BeforePayment       bool   `json:"before_payment"`
-		CreditedCents       int64  `json:"credited_cents,omitempty"`
-		Number              string `json:"number"`
-		RefundedCents       int64  `json:"refunded_cents,omitempty"`
-		SettledOutsideCents int64  `json:"settled_outside_cents,omitempty"`
+		// AmountCents The credit note's total, in the currency's minor unit (cents for USD).
+		AmountCents int64 `json:"amount_cents"`
+
+		// BeforePayment True when the note was issued before payment and lowered what is owed.
+		BeforePayment bool `json:"before_payment"`
+
+		// CreditedCents For a note after payment, the credit added to the customer's balance. Absent when 0.
+		CreditedCents int64 `json:"credited_cents,omitempty"`
+
+		// Number The credit note's number, for example `CN-000003`.
+		Number string `json:"number"`
+
+		// RefundedCents For a note after payment, the card refund once Stripe confirmed it. Absent when 0.
+		RefundedCents int64 `json:"refunded_cents,omitempty"`
+
+		// SettledOutsideCents For a note after payment, the amount paid back another way. Absent when 0.
+		SettledOutsideCents int64 `json:"settled_outside_cents,omitempty"`
 	} `json:"credit_notes"`
+
+	// Invoice The invoice's number, status, totals and dates.
 	Invoice struct {
-		AmountDueCents  int64 `json:"amount_due_cents"`
+		// AmountDueCents What is still owed, in the currency's minor unit (cents for USD). 0 once paid.
+		AmountDueCents int64 `json:"amount_due_cents"`
+
+		// AmountPaidCents What was paid, in the currency's minor unit (cents for USD).
 		AmountPaidCents int64 `json:"amount_paid_cents"`
 
 		// BillingTimezone The time zone to show the dates in, so they match the PDF.
-		BillingTimezone     string    `json:"billing_timezone,omitempty"`
-		CreditsAppliedCents int64     `json:"credits_applied_cents"`
-		Currency            string    `json:"currency"`
-		DiscountCents       int64     `json:"discount_cents"`
-		DueAt               time.Time `json:"due_at,omitempty"`
+		BillingTimezone string `json:"billing_timezone,omitempty"`
 
-		// Footer The footer this invoice was issued with.
-		Footer        string    `json:"footer,omitempty"`
-		InvoiceNumber string    `json:"invoice_number"`
-		IssuedAt      time.Time `json:"issued_at,omitempty"`
-		Memo          string    `json:"memo,omitempty"`
-		PaidAt        time.Time `json:"paid_at,omitempty"`
+		// CreditsAppliedCents Customer credit used to pay the invoice, in the currency's minor unit (cents for USD).
+		CreditsAppliedCents int64 `json:"credits_applied_cents"`
 
-		// PaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
-		// returned an ambiguous error (5xx, timeout, connection reset) where
-		// we cannot tell whether Stripe processed the charge. With a payment
-		// intent recorded, Hardcount asks Stripe for it after a short wait. With
-		// none (a parked invoice), Hardcount lists the customer's payments at
-		// Stripe every billing tick: it records a payment for the invoice that
-		// appears, and if none has appeared 24 hours after the attempt the
-		// invoice goes back to `pending` (`failed` after a dunning retry) and
-		// is charged again as usual.
+		// Currency The invoice's currency, as an uppercase ISO 4217 code.
+		Currency string `json:"currency"`
+
+		// DiscountCents Discount taken off the subtotal, in the currency's minor unit (cents for USD).
+		DiscountCents int64 `json:"discount_cents"`
+
+		// DueAt When payment is due.
+		DueAt time.Time `json:"due_at,omitempty"`
+
+		// Footer The footer this invoice was issued with. Absent when there is none.
+		Footer string `json:"footer,omitempty"`
+
+		// InvoiceNumber The number printed on the invoice, for example `HC-000042`.
+		InvoiceNumber string `json:"invoice_number"`
+
+		// IssuedAt When the invoice was issued.
+		IssuedAt time.Time `json:"issued_at,omitempty"`
+
+		// Memo The invoice's note. Absent when empty.
+		Memo string `json:"memo,omitempty"`
+
+		// PaidAt When the invoice was paid. Absent until it is paid.
+		PaidAt time.Time `json:"paid_at,omitempty"`
+
+		// PaymentStatus The state of the invoice's payment.
+		// - `pending`: nothing has been charged yet, or a charge is about to
+		//   be sent. Also the status after Stripe refused the amount as below
+		//   its minimum charge (see `amount_below_minimum`).
+		// - `processing`: Stripe is still working on a charge.
+		// - `succeeded`: the invoice is paid.
+		// - `failed`: the last charge was declined or refused. Dunning, when
+		//   a policy is on, retries it.
+		// - `unknown`: a Stripe charge got an unclear answer (a 5xx, a timeout
+		//   or a dropped connection), so Hardcount cannot tell whether Stripe
+		//   took the money. With a payment intent recorded, Hardcount asks
+		//   Stripe for it after a short wait. With none (a parked invoice),
+		//   Hardcount lists the customer's payments at Stripe on every billing
+		//   tick: it records a payment for the invoice that appears, and if
+		//   none has appeared 24 hours after the attempt the invoice goes back
+		//   to `pending` (`failed` after a dunning retry) and is charged again
+		//   as usual.
 		PaymentStatus InvoicePaymentStatus `json:"payment_status"`
 
-		// Status Lifecycle state of the invoice. `uncollectible` marks an invoice
-		// a dunning policy has given up collecting (no further retries) while
-		// keeping it on the books — distinct from `voided` (cancelled, owes
-		// nothing).
-		Status          InvoiceStatus `json:"status"`
-		SubtotalCents   int64         `json:"subtotal_cents"`
-		TaxAmountCents  int64         `json:"tax_amount_cents"`
-		TaxExemptReason string        `json:"tax_exempt_reason,omitempty"`
-		TaxName         string        `json:"tax_name,omitempty"`
+		// Status Where the invoice is in its life.
+		// - `draft`: not issued yet. Lines can still be added, and nothing is
+		//   charged.
+		// - `finalized`: issued and owed. Hardcount collects it.
+		// - `paid`: settled, by card, credit, an offline payment or a credit
+		//   note that left nothing due.
+		// - `voided`: cancelled. Nothing is owed. Voiding is final.
+		// - `uncollectible`: written off as bad debt, by you
+		//   (`POST /v1/invoices/{id}/mark-uncollectible`) or by a dunning
+		//   policy's final action. Hardcount stops collecting it, but it stays
+		//   on the books and can still be paid.
+		Status InvoiceStatus `json:"status"`
+
+		// SubtotalCents The sum of the line amounts before discount and tax, in the currency's minor unit (cents for USD).
+		SubtotalCents int64 `json:"subtotal_cents"`
+
+		// TaxAmountCents Tax on the invoice, in the currency's minor unit (cents for USD).
+		TaxAmountCents int64 `json:"tax_amount_cents"`
+
+		// TaxExemptReason Why the customer is exempt from tax. Absent when they are not.
+		TaxExemptReason string `json:"tax_exempt_reason,omitempty"`
+
+		// TaxName The tax's label, such as `VAT`. Absent when there is none.
+		TaxName string `json:"tax_name,omitempty"`
 
 		// TaxRate Tax rate in percent, for example `18` for 18%.
-		TaxRate          float32   `json:"tax_rate"`
-		TaxReverseCharge bool      `json:"tax_reverse_charge,omitempty"`
-		TotalAmountCents int64     `json:"total_amount_cents"`
-		VoidedAt         time.Time `json:"voided_at,omitempty"`
+		TaxRate float32 `json:"tax_rate"`
+
+		// TaxReverseCharge True when reverse charge applies and the customer accounts for the tax. Absent when false.
+		TaxReverseCharge bool `json:"tax_reverse_charge,omitempty"`
+
+		// TotalAmountCents The invoice total with tax, in the currency's minor unit (cents for USD).
+		TotalAmountCents int64 `json:"total_amount_cents"`
+
+		// VoidedAt When the invoice was voided. Absent unless it is voided.
+		VoidedAt time.Time `json:"voided_at,omitempty"`
 	} `json:"invoice"`
+
+	// LineItems The invoice's lines.
 	LineItems []struct {
-		AmountCents int64  `json:"amount_cents"`
-		Currency    string `json:"currency"`
+		// AmountCents The line's amount before tax, in the currency's minor unit (cents for USD).
+		AmountCents int64 `json:"amount_cents"`
+
+		// Currency The line's currency.
+		Currency string `json:"currency"`
+
+		// Description The line's text.
 		Description string `json:"description"`
-		MeterUnit   string `json:"meter_unit,omitempty"`
+
+		// MeterUnit On a usage line, the meter's unit, such as `tokens`. Absent on other lines.
+		MeterUnit string `json:"meter_unit,omitempty"`
 
 		// Quantity The exact quantity as a decimal string, for example `3` or `1.5`.
-		Quantity         string `json:"quantity"`
-		TaxAmountCents   int64  `json:"tax_amount_cents,omitempty"`
-		TotalAmountCents int64  `json:"total_amount_cents"`
+		Quantity string `json:"quantity"`
 
-		// UnitAmountDecimal The unit price in cents at full precision, for example `0.3` for $0.003.
+		// TaxAmountCents Tax on the line, in the currency's minor unit (cents for USD). Absent when 0.
+		TaxAmountCents int64 `json:"tax_amount_cents,omitempty"`
+
+		// TotalAmountCents The line's amount plus its tax, in the currency's minor unit (cents for USD).
+		TotalAmountCents int64 `json:"total_amount_cents"`
+
+		// UnitAmountDecimal The unit price, a decimal string of cents at full precision, for example `0.3` for $0.003.
 		UnitAmountDecimal string `json:"unit_amount_decimal"`
 	} `json:"line_items"`
 
@@ -4845,155 +6028,275 @@ type HostedInvoice struct {
 // charge.
 type HostedInvoicePayUnavailableReason string
 
-// Invoice A Hardcount invoice. Returned from create, finalize, void, list, get,
-// rotate-public-token, and collect-payment endpoints.
+// Invoice A bill for one customer, in one currency. The billing engine creates
+// one at the end of each subscription period (and for a subscription's
+// start when a fee is billed in advance, a change, a cancel or a spend
+// threshold); you can also create one-off invoices with
+// `POST /v1/invoices`. The engine creates its invoices already
+// `finalized`, or as a `draft` while their tax is pending or collection
+// is paused on the subscription. An invoice you create starts as a
+// `draft` until you finalize it. A finalized invoice ends `paid`,
+// `voided` or `uncollectible`. Every amount is a whole number in the
+// currency's minor unit (cents for USD). The invoice routes and the
+// `invoice.*` and `payment.*` webhook events return it.
 type Invoice struct {
-	AmountDueCents  int64 `json:"amount_due_cents"`
+	// AmountDueCents What the customer still owes, in the currency's minor unit (cents
+	// for USD): the total, less customer credit applied
+	// (`credits_applied_cents`), credit notes issued before payment,
+	// and payments. It becomes 0 when the invoice is paid. A voided or
+	// written-off invoice keeps the amount that was due.
+	AmountDueCents int64 `json:"amount_due_cents"`
+
+	// AmountPaidCents What was paid by card or recorded as an offline payment, in the
+	// currency's minor unit (cents for USD). Set when the invoice is
+	// paid, to the amount that was due then; 0 before. Credit applied
+	// is counted in `credits_applied_cents`, not here.
 	AmountPaidCents int64 `json:"amount_paid_cents"`
 
-	// Attention Unified "this invoice needs operator attention" surface.
-	// Computed server-side from durable invoice fields
-	// (`tax_status`, `tax_error_code`, `payment_status`,
-	// `last_payment_error`). Never persisted —
-	// always derived. Omitted entirely when the invoice is healthy
-	// (matches Stripe's `last_finalization_error: null` ergonomic).
-	// See ADR-009.
-	Attention         Attention `json:"attention,omitempty"`
-	AutoChargePending bool      `json:"auto_charge_pending,omitempty"`
+	// Attention Why an invoice needs your attention now, and what to do about it.
+	// Hardcount works it out each time the invoice is read, from the
+	// invoice's tax and payment state and related facts (the customer's
+	// card, the dunning run, disputes, refunds made in Stripe); it is never
+	// stored. The invoice
+	// leaves it out when nothing needs attention. `GET /v1/invoices`,
+	// `GET /v1/invoices/{id}` and the finalize, retry-tax and
+	// rotate-public-token responses carry it; the other invoice responses
+	// and the webhook events do not.
+	Attention Attention `json:"attention,omitempty"`
 
-	// BillToSnapshot The buyer details this invoice was issued with (ADR-109), copied
-	// when it left draft. The PDF, the hosted page and the dashboard
-	// render an issued invoice from this copy, so a later edit to the
-	// customer or billing profile does not change it. Absent on drafts
-	// and on invoices issued before this field existed; those render
-	// from the current customer details.
+	// AutoChargePending True while the invoice is queued for the automatic charge, which
+	// applies credit and charges the saved card. Absent when false.
+	AutoChargePending bool `json:"auto_charge_pending,omitempty"`
+
+	// BillToSnapshot The buyer details this invoice was issued with, copied when it
+	// was finalized (or created already finalized). The PDF, the
+	// hosted page and the dashboard show an issued invoice from this
+	// copy, so a later edit to the customer or billing profile does not
+	// change it. Absent on drafts and on invoices issued before this
+	// field existed; those show the current customer details.
 	BillToSnapshot DocumentBillTo `json:"bill_to_snapshot,omitempty"`
 
-	// BillingPeriodDisplay Human period string with the inclusive last covered day ("Jun 1, 2028 – Jun 30, 2028"), date-only in the invoice's billing timezone (ADR-058 / ADR-077). Computed on read; the raw billing_period_start/end stay half-open. Empty/omitted for one-off invoices with no period.
-	BillingPeriodDisplay string    `json:"billing_period_display,omitempty"`
-	BillingPeriodEnd     time.Time `json:"billing_period_end"`
-	BillingPeriodStart   time.Time `json:"billing_period_start"`
+	// BillingPeriodDisplay The period as people read it, with its last day included, in `billing_timezone`: for example "Oct 1, 2026 – Oct 31, 2026". `billing_period_start` and `billing_period_end` stay the exact boundaries. Worked out when the invoice is read, so it comes with the same responses as `attention`. Absent when the period starts and ends at the same instant.
+	BillingPeriodDisplay string `json:"billing_period_display,omitempty"`
 
-	// BillingReason Mirrors Stripe's `invoice.billing_reason`. Classifies the trigger
-	// that produced the invoice. Stamped at create time and never mutated.
+	// BillingPeriodEnd End of the period the invoice bills (not included): the next
+	// period's start. On a one-off invoice created without a period,
+	// the time it was created.
+	BillingPeriodEnd time.Time `json:"billing_period_end"`
+
+	// BillingPeriodStart Start of the period the invoice bills (included). On a one-off
+	// invoice created without a period, the time it was created.
+	BillingPeriodStart time.Time `json:"billing_period_start"`
+
+	// BillingReason Why the invoice was made, like Stripe's `invoice.billing_reason`.
+	// Set when the invoice is created and never changed.
+	// - `subscription_cycle`: the invoice for a subscription period that
+	//   ended (a renewal).
+	// - `subscription_create`: the first invoice when a subscription
+	//   starts or its trial ends, for the fees its plans bill in advance.
+	//   A subscription billed only in arrears has none.
+	// - `subscription_cancel`: the final invoice when a subscription is
+	//   canceled at once in the middle of a period.
+	// - `subscription_update`: the invoice for a change in the middle of a
+	//   period, such as a plan upgrade, a quantity increase or an added
+	//   item.
+	// - `manual`: an invoice you created with `POST /v1/invoices`.
+	// - `threshold`: an early invoice because a spend threshold was
+	//   crossed.
 	BillingReason InvoiceBillingReason `json:"billing_reason,omitempty"`
 
-	// BillingTimezone IANA timezone the period boundaries are anchored in — the org billing timezone resolved and denormalized onto the invoice at issue (ADR-077). billing_period_display is rendered in this zone, so an issued invoice's dates stay fixed even if the org later changes its timezone. Empty only on legacy invoices created before the zone was stamped (cycle invoices before migration 0134, manual invoices before 2026-10-16).
-	BillingTimezone     string    `json:"billing_timezone,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	CreditsAppliedCents int64     `json:"credits_applied_cents"`
-	Currency            string    `json:"currency"`
-	CustomerId          string    `json:"customer_id"`
-	DiscountCents       int64     `json:"discount_cents"`
-	DueAt               time.Time `json:"due_at,omitempty"`
+	// BillingTimezone The IANA time zone the period boundaries are in: the account's billing time zone, copied onto the invoice when it was created. `billing_period_display`, the PDF and the hosted page show dates in it, so an issued invoice's dates stay the same if the account later changes its time zone. Absent only on invoices created before releases recorded it.
+	BillingTimezone string `json:"billing_timezone,omitempty"`
 
-	// Footer The tenant's `invoice_footer` as it was when this invoice was
-	// issued. Printed on the PDF and the hosted invoice page. Empty on
-	// a draft.
+	// CreatedAt When the invoice was created. For a customer on a test clock, the clock's time.
+	CreatedAt time.Time `json:"created_at"`
+
+	// CreditsAppliedCents How much of the customer's credit balance paid this invoice, in
+	// the currency's minor unit (cents for USD). Credit is applied when
+	// the invoice is collected (after finalize, or by
+	// `POST /v1/invoices/{id}/collect`). A void gives it back to the
+	// customer's balance, and a credit note issued before payment can
+	// give part of it back, lowering this figure.
+	CreditsAppliedCents int64 `json:"credits_applied_cents"`
+
+	// Currency The invoice's currency, as an uppercase ISO 4217 code. Every
+	// amount on the invoice and its lines is in this currency's minor
+	// unit.
+	Currency string `json:"currency"`
+
+	// CustomerId The customer the invoice bills.
+	CustomerId string `json:"customer_id"`
+
+	// DiscountCents Discount taken off the subtotal, in the currency's minor unit (cents for USD). 0 when there is none.
+	DiscountCents int64 `json:"discount_cents"`
+
+	// DueAt When payment is due: `issued_at` plus `net_payment_term_days`
+	// calendar days, counted in `billing_timezone`. Set with
+	// `issued_at`. Hardcount does not charge on this date: it collects
+	// right after finalize and retries on the dunning schedule. The
+	// `overdue` filter of `GET /v1/invoices` uses it.
+	DueAt time.Time `json:"due_at,omitempty"`
+
+	// Footer The account's invoice footer as it was when this invoice was
+	// issued. Printed on the PDF and the hosted invoice page. Absent on
+	// a draft and when no footer was set.
 	Footer string `json:"footer,omitempty"`
-	Id     string `json:"id"`
+
+	// Id Unique identifier of the invoice, starting `hc_inv_`.
+	Id string `json:"id"`
 
 	// InvoiceEmailedAt When Hardcount itself emailed the customer this invoice, because
-	// Stripe is not connected for the invoice's mode and the customer
-	// has no card. The email is sent once. An invoice you email with
-	// `POST /v1/invoices/{id}/send` does not set it.
+	// Stripe is not connected for the invoice's mode. The email is sent
+	// once. An invoice you email with `POST /v1/invoices/{id}/send`
+	// does not set it. Absent until then.
 	InvoiceEmailedAt time.Time `json:"invoice_emailed_at,omitempty"`
 
-	// InvoiceNumber Set when the invoice is created, including drafts.
+	// InvoiceNumber The number printed on the invoice: the account's invoice prefix
+	// (default `HC`), a hyphen and a sequence padded to six digits, for
+	// example `HC-000042`. Test mode and live mode count separately.
+	// Set when the invoice is created, drafts included.
 	InvoiceNumber string `json:"invoice_number"`
 
-	// IsSimulated Whether this invoice's domain timestamps (created/issued/due/paid)
-	// were stamped on a test clock's simulated time rather than
-	// wall-clock. Captured at write time (engine: the subscription is
-	// clock-pinned; manual composer: the customer is clock-pinned). The
-	// dashboard renders a "simulated" badge from this authoritative flag
-	// instead of inferring it. Always false in live mode.
+	// IsSimulated True when the invoice's dates (created, issued, due, paid) are
+	// on a test clock's time instead of the real time. Recorded when
+	// the invoice is written: for a cycle invoice, its subscription is
+	// on a test clock; for one you create, its customer is. Always
+	// false in live mode.
 	IsSimulated bool `json:"is_simulated"`
 
-	// IssuedAt Set when the invoice transitions out of draft.
-	IssuedAt           time.Time              `json:"issued_at,omitempty"`
-	LastPaymentError   string                 `json:"last_payment_error,omitempty"`
-	Memo               string                 `json:"memo,omitempty"`
-	Metadata           map[string]interface{} `json:"metadata,omitempty"`
-	NetPaymentTermDays int                    `json:"net_payment_term_days"`
+	// IssuedAt When the invoice was issued. Every invoice gets one when it is
+	// created, drafts included. An invoice you create with
+	// `POST /v1/invoices` gets a new one when it is finalized.
+	IssuedAt time.Time `json:"issued_at,omitempty"`
 
-	// NoPmNotifiedAt When the customer was emailed a link to add a payment method for
-	// this invoice. The email is sent once.
+	// LastPaymentError The error text recorded with the invoice's last charge attempt
+	// that did not succeed. Usually Stripe's message, which is written
+	// for the cardholder, with card numbers and email addresses masked.
+	// It can also be Hardcount's own text, such as `customer has no
+	// payment method on file`. Absent when there is none.
+	LastPaymentError string `json:"last_payment_error,omitempty"`
+
+	// Memo A note you set when creating the invoice, printed on the PDF and the hosted page. Absent when empty.
+	Memo string `json:"memo,omitempty"`
+
+	// Metadata Extra key-value data stored with the invoice. No API request sets it; it is absent when empty.
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// NetPaymentTermDays Days from `issued_at` to `due_at`. 0 means due on receipt.
+	NetPaymentTermDays int `json:"net_payment_term_days"`
+
+	// NoPmNotifiedAt When Hardcount automatically queued an email to the customer with
+	// a link to add a payment method for this invoice. It is queued
+	// once, when Stripe is connected, the customer has an email address
+	// and the server's `PAYMENT_UPDATE_URL` is set; it reaches the
+	// customer only when the server can send email.
+	// `POST /v1/invoices/{id}/resend-setup-link` sends it again and does
+	// not change this time. Absent until the automatic email is queued.
 	NoPmNotifiedAt time.Time `json:"no_pm_notified_at,omitempty"`
-	PaidAt         time.Time `json:"paid_at,omitempty"`
+
+	// PaidAt When the invoice was paid. Absent until it is paid.
+	PaidAt time.Time `json:"paid_at,omitempty"`
 
 	// PaidOutOfBand True when the payment was recorded as made outside Hardcount, such as
 	// a bank transfer or cheque (`POST /v1/invoices/{id}/record-payment`,
-	// or a payment recovery run resolved as `payment_recovered`). Such
+	// or a dunning run resolved as `payment_recovered`). Such
 	// an invoice has no `stripe_payment_intent_id`, so there is no card
 	// to refund.
 	PaidOutOfBand bool `json:"paid_out_of_band"`
 
-	// PaymentAnomalyCapturedCents The amount Stripe took in that unexpected payment.
+	// PaymentAnomalyCapturedCents The amount Stripe took in that unexpected payment, in the currency's minor unit (cents for USD). Absent when there is none.
 	PaymentAnomalyCapturedCents int64 `json:"payment_anomaly_captured_cents,omitempty"`
 
 	// PaymentAnomalyKind Set when a payment arrived that the invoice did not expect. The
 	// webhook event name of the cause: `payment.duplicate_charge`,
 	// `payment.amount_mismatch`, `payment.currency_mismatch` or
 	// `payment.received_on_voided_invoice`.
-	// Only the latest one is kept.
+	// Only the latest one is kept. Absent when there is none.
 	PaymentAnomalyKind string `json:"payment_anomaly_kind,omitempty"`
 
-	// PaymentAnomalyPaymentIntentId The Stripe PaymentIntent of that unexpected payment.
+	// PaymentAnomalyPaymentIntentId The Stripe PaymentIntent of that unexpected payment. Absent when there is none.
 	PaymentAnomalyPaymentIntentId string `json:"payment_anomaly_payment_intent_id,omitempty"`
 
-	// PaymentCardBrand Brand of the saved card that paid the invoice. Absent when the card is unknown.
+	// PaymentCardBrand Brand of the saved card that paid the invoice, as Stripe names it (for example `visa`). Absent when the card is unknown.
 	PaymentCardBrand string `json:"payment_card_brand,omitempty"`
 
-	// PaymentCardLast4 Last four digits of the saved card that paid the invoice.
+	// PaymentCardLast4 Last four digits of the saved card that paid the invoice. Absent when the card is unknown.
 	PaymentCardLast4 string `json:"payment_card_last4,omitempty"`
 
-	// PaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
-	// returned an ambiguous error (5xx, timeout, connection reset) where
-	// we cannot tell whether Stripe processed the charge. With a payment
-	// intent recorded, Hardcount asks Stripe for it after a short wait. With
-	// none (a parked invoice), Hardcount lists the customer's payments at
-	// Stripe every billing tick: it records a payment for the invoice that
-	// appears, and if none has appeared 24 hours after the attempt the
-	// invoice goes back to `pending` (`failed` after a dunning retry) and
-	// is charged again as usual.
+	// PaymentStatus The state of the invoice's payment.
+	// - `pending`: nothing has been charged yet, or a charge is about to
+	//   be sent. Also the status after Stripe refused the amount as below
+	//   its minimum charge (see `amount_below_minimum`).
+	// - `processing`: Stripe is still working on a charge.
+	// - `succeeded`: the invoice is paid.
+	// - `failed`: the last charge was declined or refused. Dunning, when
+	//   a policy is on, retries it.
+	// - `unknown`: a Stripe charge got an unclear answer (a 5xx, a timeout
+	//   or a dropped connection), so Hardcount cannot tell whether Stripe
+	//   took the money. With a payment intent recorded, Hardcount asks
+	//   Stripe for it after a short wait. With none (a parked invoice),
+	//   Hardcount lists the customer's payments at Stripe on every billing
+	//   tick: it records a payment for the invoice that appears, and if
+	//   none has appeared 24 hours after the attempt the invoice goes back
+	//   to `pending` (`failed` after a dunning retry) and is charged again
+	//   as usual.
 	PaymentStatus InvoicePaymentStatus `json:"payment_status"`
 
 	// ProviderPaymentStatus Stripe's PaymentIntent status the last time Hardcount checked it,
 	// word for word. For information only: `payment_status` is the
 	// invoice's payment state. Absent until Hardcount has checked. An
-	// invoice checked by the Stripe Search sweep of releases before
-	// this one may still show `search_not_found`,
-	// `search_terminal_only` or `search_error`.
+	// invoice checked by the Stripe Search sweep of earlier releases
+	// may still show `search_not_found`, `search_terminal_only` or
+	// `search_error`.
 	ProviderPaymentStatus string `json:"provider_payment_status,omitempty"`
 
 	// ProviderSyncedAt When Hardcount last asked Stripe about this invoice's payment, whether
 	// or not Stripe answered: a read of `provider_payment_status`, or a
-	// check of a charge whose result was lost.
+	// check of a charge whose result was lost. Absent until then.
 	ProviderSyncedAt time.Time `json:"provider_synced_at,omitempty"`
 
-	// PublicToken Hosted-invoice-URL credential (Stripe-parity
-	// `hosted_invoice_url`). Generated at finalize; drafts have an
-	// empty token. Rotatable via `POST
-	// /v1/invoices/{id}/rotate-public-token`.
+	// PublicToken The token in the hosted invoice page's link, like Stripe's
+	// `hosted_invoice_url`; `GET /v1/public/invoices/{token}` serves
+	// the page's data. Anyone with it can view and pay the invoice, so
+	// share it only with the customer. Created when the invoice is
+	// finalized, or created already finalized; absent on drafts.
+	// Replace it with
+	// `POST /v1/invoices/{id}/rotate-public-token`.
 	PublicToken string `json:"public_token,omitempty"`
 
-	// RecoveryWarning What an operator must know BEFORE recording an OFFLINE payment on a
-	// written-off invoice — a consequence that will go unreconciled, NOT
-	// a refusal. Absent when there is nothing to say.
+	// RecoveryWarning What you should know before you record an offline payment on a
+	// written-off invoice: a consequence that will not reconcile on
+	// its own, never a refusal. Sent only on `uncollectible` invoices,
+	// by the same responses that carry `attention`. Absent when there
+	// is nothing to say.
 	RecoveryWarning RecoveryWarning `json:"recovery_warning,omitempty"`
 
-	// SourceChangeType Classifies per-item proration artifacts so the dedup index can
-	// distinguish a plan-change and a quantity-change that happen to
-	// share the same `(subscription, item, timestamp)`.
-	SourceChangeType         ItemChangeType `json:"source_change_type,omitempty"`
-	SourcePlanChangedAt      time.Time      `json:"source_plan_changed_at,omitempty"`
-	SourceSubscriptionItemId string         `json:"source_subscription_item_id,omitempty"`
+	// SourceChangeType The kind of subscription item change that produced a proration:
+	// `plan` (the item moved to another plan), `quantity` (its quantity
+	// changed), `add` (the item was added) or `remove` (the item was
+	// removed). On a credit ledger entry (`source_change_type`) it is
+	// never sent in this version.
+	SourceChangeType ItemChangeType `json:"source_change_type,omitempty"`
 
-	// Status Lifecycle state of the invoice. `uncollectible` marks an invoice
-	// a dunning policy has given up collecting (no further retries) while
-	// keeping it on the books — distinct from `voided` (cancelled, owes
-	// nothing).
+	// SourcePlanChangedAt On an invoice for a change in the middle of a period
+	// (`billing_reason` `subscription_update`), when the change took
+	// effect. Absent on other invoices.
+	SourcePlanChangedAt time.Time `json:"source_plan_changed_at,omitempty"`
+
+	// SourceSubscriptionItemId On an invoice for a change in the middle of a period, the subscription item that changed. Absent on other invoices.
+	SourceSubscriptionItemId string `json:"source_subscription_item_id,omitempty"`
+
+	// Status Where the invoice is in its life.
+	// - `draft`: not issued yet. Lines can still be added, and nothing is
+	//   charged.
+	// - `finalized`: issued and owed. Hardcount collects it.
+	// - `paid`: settled, by card, credit, an offline payment or a credit
+	//   note that left nothing due.
+	// - `voided`: cancelled. Nothing is owed. Voiding is final.
+	// - `uncollectible`: written off as bad debt, by you
+	//   (`POST /v1/invoices/{id}/mark-uncollectible`) or by a dunning
+	//   policy's final action. Hardcount stops collecting it, but it stays
+	//   on the books and can still be paid.
 	Status InvoiceStatus `json:"status"`
 
 	// StripePaymentIntentId The Stripe PaymentIntent of the card charge that paid the
@@ -5004,66 +6307,109 @@ type Invoice struct {
 	// refused the last charge as below its minimum.
 	StripePaymentIntentId string `json:"stripe_payment_intent_id,omitempty"`
 
-	// SubscriptionId Empty for one-off invoices not tied to a subscription.
+	// SubscriptionId The subscription the invoice bills. An empty string when the
+	// invoice bills no subscription. An invoice you create with
+	// `POST /v1/invoices` carries the `subscription_id` you sent.
 	SubscriptionId string `json:"subscription_id"`
-	SubtotalCents  int64  `json:"subtotal_cents"`
 
-	// SupplierSnapshot The seller (company) details this invoice was issued with
-	// (ADR-109), copied when it left draft. Absent on drafts and on
-	// invoices issued before this field existed. Branding (logo, brand
-	// color) is not part of it.
+	// SubtotalCents The sum of the line amounts, before discount and tax, in the
+	// currency's minor unit (cents for USD). With tax-inclusive
+	// prices, it is the net amount after the tax is taken out.
+	SubtotalCents int64 `json:"subtotal_cents"`
+
+	// SupplierSnapshot Your company details this invoice was issued with, copied when it
+	// was finalized (or created already finalized). Absent on drafts
+	// and on invoices issued before this field existed. Branding (logo,
+	// brand color) is not part of it.
 	SupplierSnapshot DocumentSupplier `json:"supplier_snapshot,omitempty"`
-	TaxAmountCents   int64            `json:"tax_amount_cents"`
 
-	// TaxCalculationId Provider-side calculation reference captured at build time.
-	// For Stripe Tax this expires after 24 h; persisted so finalized
-	// invoices remain reconstructable past expiry.
-	TaxCalculationId string    `json:"tax_calculation_id,omitempty"`
-	TaxCountry       string    `json:"tax_country,omitempty"`
-	TaxDeferredAt    time.Time `json:"tax_deferred_at,omitempty"`
+	// TaxAmountCents Tax on the invoice, in the currency's minor unit (cents for USD).
+	// On an invoice you create with `POST /v1/invoices`, it is 0 until
+	// finalize calculates the tax.
+	TaxAmountCents int64 `json:"tax_amount_cents"`
+
+	// TaxCalculationId The tax provider's calculation reference (Stripe Tax only). A
+	// Stripe Tax calculation expires after 24 hours; Hardcount keeps
+	// the reference so a finalized invoice can still be traced.
+	// Absent for the manual and none providers.
+	TaxCalculationId string `json:"tax_calculation_id,omitempty"`
+
+	// TaxCountry The country the tax was calculated for. Absent when none was recorded.
+	TaxCountry string `json:"tax_country,omitempty"`
+
+	// TaxDeferredAt When the tax calculation failed and the invoice was held as a
+	// draft. A later successful calculation clears it. Absent unless
+	// tax is deferred.
+	TaxDeferredAt time.Time `json:"tax_deferred_at,omitempty"`
 
 	// TaxErrorCode Why tax could not be calculated, as a code. Set while
 	// `tax_status` is `pending`; `tax_pending_reason` has the
 	// detail.
-	TaxErrorCode    InvoiceTaxErrorCode `json:"tax_error_code,omitempty"`
-	TaxExemptReason string              `json:"tax_exempt_reason,omitempty"`
-	TaxId           string              `json:"tax_id,omitempty"`
-	TaxName         string              `json:"tax_name,omitempty"`
+	TaxErrorCode InvoiceTaxErrorCode `json:"tax_error_code,omitempty"`
+
+	// TaxExemptReason Why the customer is exempt from tax, as recorded on the customer. Absent when they are not exempt.
+	TaxExemptReason string `json:"tax_exempt_reason,omitempty"`
+
+	// TaxId The customer's tax ID the tax was calculated with. Absent when there was none.
+	TaxId string `json:"tax_id,omitempty"`
+
+	// TaxName The tax's label, such as `VAT` or `Sales Tax`. Absent when there is none.
+	TaxName string `json:"tax_name,omitempty"`
 
 	// TaxNextRetryAt The earliest time the background retry may calculate tax again,
-	// after a failed attempt. Absent when a retry may run now.
-	TaxNextRetryAt   time.Time `json:"tax_next_retry_at,omitempty"`
-	TaxPendingReason string    `json:"tax_pending_reason,omitempty"`
+	// after a failed attempt. Absent when a retry may run now, and when
+	// none is scheduled: an error code Hardcount does not retry, or the
+	// automatic retries are used up.
+	TaxNextRetryAt time.Time `json:"tax_next_retry_at,omitempty"`
 
-	// TaxProvider Durable audit snapshot of the upstream tax engine that ran the
-	// calculation (e.g. `stripe`, `none`, `manual`).
+	// TaxPendingReason Why tax could not be calculated, while `tax_status` is `pending`:
+	// the provider's error, or Hardcount's own text when the provider
+	// was never called (`tax_error_code` `provider_not_configured`).
+	// Cut to 500 bytes. Absent otherwise.
+	TaxPendingReason string `json:"tax_pending_reason,omitempty"`
+
+	// TaxProvider The tax engine that calculated the tax: `stripe_tax`, `manual` (a
+	// flat rate from the account settings) or `none`. A draft's tax can
+	// be calculated again (retry-tax, or finalize of a one-off draft);
+	// once the invoice is finalized it no longer changes. Absent until
+	// tax is calculated.
 	TaxProvider string `json:"tax_provider,omitempty"`
 
-	// TaxRate Tax rate as a percent (18.50 = 18.50%), up to 4-decimal precision. ADR-042/043.
-	TaxRate          float64 `json:"tax_rate"`
-	TaxRetryCount    int     `json:"tax_retry_count,omitempty"`
-	TaxReverseCharge bool    `json:"tax_reverse_charge,omitempty"`
+	// TaxRate Tax rate as a percent, up to four decimal places (18.5 means 18.5%).
+	TaxRate float64 `json:"tax_rate"`
 
-	// TaxReversedAt When the provider's tax transaction was reversed after a void or
-	// write-off, or found to need no reversal. Absent while the
-	// reversal is not confirmed.
+	// TaxRetryCount How many times tax was calculated again while it was pending:
+	// each `POST /v1/invoices/{id}/retry-tax` on pending tax, each
+	// automatic retry, and each finalize of a one-off draft whose
+	// earlier calculation failed. Absent when 0.
+	TaxRetryCount int `json:"tax_retry_count,omitempty"`
+
+	// TaxReverseCharge True when reverse charge applies: no tax is charged and the
+	// customer accounts for it. Absent when false.
+	TaxReverseCharge bool `json:"tax_reverse_charge,omitempty"`
+
+	// TaxReversedAt When the provider's tax transaction was reversed after a void,
+	// or found to need no reversal. Absent while the reversal is not
+	// confirmed.
 	TaxReversedAt time.Time `json:"tax_reversed_at,omitempty"`
 
-	// TaxStatus Whether tax has been calculated. `ok`: it has. `pending`: the
-	// calculation failed, and `tax_error_code` says why and whether
-	// Hardcount retries it. A pending invoice cannot be finalized, so a wrong
-	// tax amount is never sent.
+	// TaxStatus Whether tax has been calculated. `ok`: it has (a zero tax counts).
+	// `pending`: the calculation failed, and `tax_error_code` says why and
+	// whether Hardcount retries it. A pending invoice stays a draft and
+	// cannot be finalized, so a wrong tax amount is never sent.
 	TaxStatus InvoiceTaxStatus `json:"tax_status,omitempty"`
 
-	// TaxTransactionId Provider-side committed transaction reference, captured at
-	// finalize. For Stripe Tax this is `tx_xxx` and is the handle
-	// the provider needs for a later reversal when a credit note is
-	// issued.
+	// TaxTransactionId The tax provider's committed transaction (Stripe Tax only). On an
+	// invoice the billing engine creates, it is recorded when the
+	// invoice is built; on one you create, at finalize. When that first
+	// commit fails, a background retry records it later. Hardcount
+	// reverses it when the invoice is voided or a credit note is
+	// issued. Absent until committed, and for providers that keep no
+	// record.
 	TaxTransactionId string `json:"tax_transaction_id,omitempty"`
 
-	// TenantId Owning tenant. Returned for diagnostic clarity but redundant
-	// with the API key (which already determines the tenant).
-	// Omitted when empty.
+	// TenantId The account the invoice belongs to. Your API key already decides
+	// the account, so you rarely need it.
 	TenantId string `json:"tenant_id,omitempty"`
 
 	// TestClockId The test clock this invoice's dates follow: the clock its customer
@@ -5071,13 +6417,22 @@ type Invoice struct {
 	// customer on `GET /v1/invoices` and `GET /v1/invoices/{id}`; other
 	// responses may leave it out. Left out for a customer on wall-clock
 	// time, and always in live mode.
-	TestClockId      string `json:"test_clock_id,omitempty"`
-	TotalAmountCents int64  `json:"total_amount_cents"`
+	TestClockId string `json:"test_clock_id,omitempty"`
 
-	// UncollectibleAt When the invoice was marked uncollectible.
+	// TotalAmountCents The invoice total: `subtotal_cents` minus `discount_cents` plus
+	// `tax_amount_cents`, in the currency's minor unit (cents for USD).
+	// It is what the invoice charges before credit and payments, and it
+	// does not change when the invoice is paid.
+	TotalAmountCents int64 `json:"total_amount_cents"`
+
+	// UncollectibleAt When the invoice was written off as uncollectible. Absent unless it was.
 	UncollectibleAt time.Time `json:"uncollectible_at,omitempty"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	VoidedAt        time.Time `json:"voided_at,omitempty"`
+
+	// UpdatedAt When the invoice last changed.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// VoidedAt When the invoice was voided. Absent unless it is voided.
+	VoidedAt time.Time `json:"voided_at,omitempty"`
 }
 
 // InvoiceTaxErrorCode Why tax could not be calculated, as a code. Set while
@@ -5085,24 +6440,49 @@ type Invoice struct {
 // detail.
 type InvoiceTaxErrorCode string
 
-// InvoiceBillingReason Mirrors Stripe's `invoice.billing_reason`. Classifies the trigger
-// that produced the invoice. Stamped at create time and never mutated.
+// InvoiceBillingReason Why the invoice was made, like Stripe's `invoice.billing_reason`.
+// Set when the invoice is created and never changed.
+//   - `subscription_cycle`: the invoice for a subscription period that
+//     ended (a renewal).
+//   - `subscription_create`: the first invoice when a subscription
+//     starts or its trial ends, for the fees its plans bill in advance.
+//     A subscription billed only in arrears has none.
+//   - `subscription_cancel`: the final invoice when a subscription is
+//     canceled at once in the middle of a period.
+//   - `subscription_update`: the invoice for a change in the middle of a
+//     period, such as a plan upgrade, a quantity increase or an added
+//     item.
+//   - `manual`: an invoice you created with `POST /v1/invoices`.
+//   - `threshold`: an early invoice because a spend threshold was
+//     crossed.
 type InvoiceBillingReason string
 
-// InvoiceCreateRequest defines model for InvoiceCreateRequest.
+// InvoiceCreateRequest The body of `POST /v1/invoices`, which creates a one-off draft invoice.
 type InvoiceCreateRequest struct {
-	BillingPeriodEnd   time.Time `json:"billing_period_end,omitempty"`
+	// BillingPeriodEnd End of the period the invoice covers. Defaults to now.
+	BillingPeriodEnd time.Time `json:"billing_period_end,omitempty"`
+
+	// BillingPeriodStart Start of the period the invoice covers. Defaults to now.
 	BillingPeriodStart time.Time `json:"billing_period_start,omitempty"`
 
-	// Currency ISO 4217 code. Must be the customer's currency (see 409). Defaults to the billing-profile currency, then the live subscriptions' plan currency, then the tenant default.
-	Currency   string `json:"currency,omitempty"`
+	// Currency Uppercase or lowercase ISO 4217 code; it is stored uppercase. It
+	// must be the customer's currency (see the 409). Defaults to the
+	// billing profile's currency, then the plan currency of the
+	// customer's live subscriptions, then the account's default
+	// currency. Currencies with no minor unit (such as JPY) are
+	// refused.
+	Currency string `json:"currency,omitempty"`
+
+	// CustomerId The customer to bill. Must exist in this account and mode.
 	CustomerId string `json:"customer_id"`
 
-	// LineItems Lines created in the same transaction as the invoice.
+	// LineItems Lines created in the same transaction as the invoice. Leave out to create an invoice with no lines and add them later.
 	LineItems []InvoiceLineItemInput `json:"line_items,omitempty"`
-	Memo      string                 `json:"memo,omitempty"`
 
-	// NetPaymentTermDays Days until the invoice is due. 0 means due on receipt. Defaults to the tenant's net payment terms.
+	// Memo A note printed on the invoice. Leading and trailing spaces are removed.
+	Memo string `json:"memo,omitempty"`
+
+	// NetPaymentTermDays Days until the invoice is due. 0 means due on receipt. Defaults to the account's net payment terms. A negative value is stored as 0.
 	NetPaymentTermDays int `json:"net_payment_term_days,omitempty"`
 
 	// SubscriptionId Optional. Must belong to `customer_id`. Leave out for a one-off invoice. The subscription's own cycle invoices are still billed, also for the same period.
@@ -5116,37 +6496,53 @@ type InvoiceCreateRequest struct {
 // Hardcount records and reports a dispute, and nothing else: the invoice
 // stays paid and no money moves.
 type InvoiceDispute struct {
-	// AmountCents The disputed amount. It can differ from the payment.
+	// AmountCents The disputed amount, in the currency's minor unit (cents for USD). It can differ from the payment.
 	AmountCents int64 `json:"amount_cents"`
 
 	// ClosedAt When Stripe closed it. Absent while it is open.
-	ClosedAt  time.Time `json:"closed_at,omitempty"`
+	ClosedAt time.Time `json:"closed_at,omitempty"`
+
+	// CreatedAt When Hardcount first recorded the dispute.
 	CreatedAt time.Time `json:"created_at"`
-	Currency  string    `json:"currency"`
+
+	// Currency The dispute's currency, uppercase.
+	Currency string `json:"currency"`
 
 	// EvidenceDueBy The deadline to respond in Stripe. Absent when Stripe gave none.
 	EvidenceDueBy time.Time `json:"evidence_due_by,omitempty"`
-	Id            string    `json:"id"`
-	InvoiceId     string    `json:"invoice_id"`
-	Livemode      bool      `json:"livemode"`
+
+	// Id Unique identifier of the dispute record, `hc_dsp_` and 24 hex characters.
+	Id string `json:"id"`
+
+	// InvoiceId The invoice whose payment is disputed.
+	InvoiceId string `json:"invoice_id"`
+
+	// Livemode True for a live-mode payment, false for test mode.
+	Livemode bool `json:"livemode"`
 
 	// OpenedAt When Stripe opened the dispute.
 	OpenedAt time.Time `json:"opened_at"`
 
-	// Reason The reason the cardholder gave, for example `fraudulent`.
+	// Reason The reason the cardholder gave, for example `fraudulent`. Absent when Stripe gave none.
 	Reason string `json:"reason,omitempty"`
 
 	// Status Stripe's dispute status, as Stripe sends it. The `warning_`
 	// statuses are an inquiry, which comes before a chargeback or
 	// instead of one. `won`, `lost`, `warning_closed` and `prevented`
 	// are closed.
-	Status          InvoiceDisputeStatus `json:"status"`
-	StripeChargeId  string               `json:"stripe_charge_id,omitempty"`
-	StripeDisputeId string               `json:"stripe_dispute_id"`
+	Status InvoiceDisputeStatus `json:"status"`
+
+	// StripeChargeId The disputed Stripe charge (`ch_…`). Absent when Stripe did not send it.
+	StripeChargeId string `json:"stripe_charge_id,omitempty"`
+
+	// StripeDisputeId Stripe's dispute id (`du_…`).
+	StripeDisputeId string `json:"stripe_dispute_id"`
 
 	// StripePaymentIntentId The disputed payment.
-	StripePaymentIntentId string    `json:"stripe_payment_intent_id"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	StripePaymentIntentId string `json:"stripe_payment_intent_id"`
+
+	// UpdatedAt When Hardcount last updated the record from a Stripe event.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // InvoiceDisputeStatus Stripe's dispute status, as Stripe sends it. The `warning_`
@@ -5155,8 +6551,9 @@ type InvoiceDispute struct {
 // are closed.
 type InvoiceDisputeStatus string
 
-// InvoiceDisputeList defines model for InvoiceDisputeList.
+// InvoiceDisputeList What `GET /v1/invoices/{id}/disputes` returns, one page of the invoice's disputes, oldest first.
 type InvoiceDisputeList struct {
+	// Data The disputes on this page. An empty list when the invoice has none.
 	Data []InvoiceDispute `json:"data"`
 
 	// Total How many rows match the request's filters, on every page, not only
@@ -5165,38 +6562,70 @@ type InvoiceDisputeList struct {
 	Total ListTotal `json:"total"`
 }
 
-// InvoiceLineItem A single line on an invoice.
+// InvoiceLineItem One line on an invoice: a base fee, a usage charge or another
+// charge. Amounts are whole numbers in the currency's minor unit
+// (cents for USD). `GET /v1/invoices/{id}` returns the lines, and
+// `POST /v1/invoices/{id}/line-items` returns the line it added.
 type InvoiceLineItem struct {
-	AmountCents        int64     `json:"amount_cents"`
-	BillingPeriodEnd   time.Time `json:"billing_period_end,omitempty"`
+	// AmountCents The line's amount before tax, in the currency's minor unit (cents
+	// for USD). With tax-inclusive prices, it is the net amount after
+	// the tax is taken out.
+	AmountCents int64 `json:"amount_cents"`
+
+	// BillingPeriodEnd End of the time the line bills for (not included). Absent on lines with no period of their own.
+	BillingPeriodEnd time.Time `json:"billing_period_end,omitempty"`
+
+	// BillingPeriodStart Start of the time the line bills for (included). Absent on lines with no period of their own, such as lines you add to a draft.
 	BillingPeriodStart time.Time `json:"billing_period_start,omitempty"`
 
-	// CommitExpiresAt Expiry of the granted commit block. The credit can be drawn up
-	// to and including this instant; a period invoice draws it when
-	// its period ends at or before it. The dashboard sends the local
-	// midnight after the picked day. Absent/null = the credits never
-	// expire (the default).
+	// CommitExpiresAt When the granted credit expires. The credit can be drawn up to
+	// and including this instant; a period invoice draws it when its
+	// period ends at or before it. The dashboard sends the local
+	// midnight after the picked day. Absent when the credit never
+	// expires (the default).
 	CommitExpiresAt time.Time `json:"commit_expires_at,omitempty"`
 
-	// CommitGrantedCents Marks the line as a prepaid-commit purchase (ADR-078): when the
-	// invoice finalizes, a credit block of this many cents is granted
-	// to the customer. May differ from the line price — discounted
-	// commits sell $10k of credits for $9k. add_on lines on manual
-	// invoices only, at most one per invoice. Absent on normal lines.
-	CommitGrantedCents int64     `json:"commit_granted_cents,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	Currency           string    `json:"currency"`
-	Description        string    `json:"description"`
+	// CommitGrantedCents Marks the line as a prepaid commit purchase: when the invoice is
+	// finalized, the customer is granted a block of credit of this
+	// many cents (in the invoice's currency). It may differ from the
+	// line's price: a discounted commit sells $10,000 of credit for
+	// $9,000. Only on `add_on` lines of invoices you create, at most
+	// one per invoice. Absent on other lines.
+	CommitGrantedCents int64 `json:"commit_granted_cents,omitempty"`
+
+	// CreatedAt When the line was written.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Currency The line's currency, the same as the invoice's.
+	Currency string `json:"currency"`
+
+	// Description The line's text as printed on the invoice. A base fee reads like
+	// "Pro - base fee (qty 1)"; a usage line names the meter and its
+	// unit, or the labels its price takes, like "Tokens (tokens)".
+	Description string `json:"description"`
 
 	// DimensionMatch On a usage line, the labels its price takes. Absent for a price that takes every event, and on other lines.
-	DimensionMatch map[string]string      `json:"dimension_match,omitempty"`
-	Id             string                 `json:"id"`
-	InvoiceId      string                 `json:"invoice_id"`
-	LineType       InvoiceLineType        `json:"line_type"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	MeterId        string                 `json:"meter_id,omitempty"`
+	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
 
-	// MeterUnit The meter's unit ("tokens", "seconds", …), stamped on usage lines at write time so invoice surfaces can apply the display-scale convention (token rates read "$3.00 / 1M tokens"). Empty on non-usage lines and on lines written before the 0173 backfill.
+	// Id Unique identifier of the line, starting `hc_ili_`.
+	Id string `json:"id"`
+
+	// InvoiceId The invoice the line is on.
+	InvoiceId string `json:"invoice_id"`
+
+	// LineType What an invoice line charges for. `base_fee`: a plan's flat fee for
+	// the period. `usage`: metered usage, priced by a plan price.
+	// `add_on`: any other charge, such as a line you add to a draft (the
+	// default for those).
+	LineType InvoiceLineType `json:"line_type"`
+
+	// Metadata Extra key-value data stored with the line. No API request sets it; it is absent when empty.
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// MeterId On a usage line, the meter that measured the usage. Absent on other lines.
+	MeterId string `json:"meter_id,omitempty"`
+
+	// MeterUnit On a usage line, the meter's unit ("tokens", "seconds", …), as it was when the line was written, so prices can be shown per unit the way the pricing pages show them (token rates read "$3.00 / 1M tokens"). Absent on other lines, and on usage lines written before releases recorded it.
 	MeterUnit string `json:"meter_unit,omitempty"`
 
 	// PriceId On a usage line, the plan price that billed it. Absent on other lines.
@@ -5206,32 +6635,43 @@ type InvoiceLineItem struct {
 	PricingMode string `json:"pricing_mode,omitempty"`
 
 	// Quantity The line's exact quantity as a decimal string, for example "3" or "1.5". Line amounts stay whole cents.
-	Quantity        string `json:"quantity"`
-	TaxAmountCents  int64  `json:"tax_amount_cents"`
-	TaxCode         string `json:"tax_code,omitempty"`
+	Quantity string `json:"quantity"`
+
+	// TaxAmountCents Tax on the line, in the currency's minor unit (cents for USD).
+	TaxAmountCents int64 `json:"tax_amount_cents"`
+
+	// TaxCode The product tax code the line was taxed under (for Stripe Tax, a `txcd_…` code). Absent when none was used.
+	TaxCode string `json:"tax_code,omitempty"`
+
+	// TaxJurisdiction The tax jurisdiction the provider named for the line. Absent when none was given.
 	TaxJurisdiction string `json:"tax_jurisdiction,omitempty"`
 
-	// TaxRate Tax rate as a percent (18.50 = 18.50%), up to 4-decimal precision. ADR-042/043.
+	// TaxRate Tax rate on the line as a percent, up to four decimal places (18.5 means 18.5%).
 	TaxRate float64 `json:"tax_rate"`
 
-	// TaxReason Stripe-canonical structured `taxability_reason`
+	// TaxReason Why the line was taxed as it was, in Stripe Tax's words
 	// (`standard_rated`, `reverse_charge`, `not_collecting`,
-	// `customer_exempt`, `product_exempt`, `zero_rated`, etc.).
+	// `customer_exempt`, `product_exempt`, `zero_rated` and others).
 	// `prepaid_credit_purchase` is Hardcount's own value, on a prepaid
 	// commit purchase line under the manual or Stripe Tax provider:
 	// the line is not taxed, and the usage the credit pays for is
-	// taxed when invoiced. Otherwise empty for non-Stripe providers.
+	// taxed when invoiced. Otherwise absent for providers other than
+	// Stripe Tax.
 	TaxReason string `json:"tax_reason,omitempty"`
 
-	// TenantId Owning tenant. Omitted when empty.
-	TenantId         string `json:"tenant_id,omitempty"`
-	TotalAmountCents int64  `json:"total_amount_cents"`
+	// TenantId The account the line belongs to. Absent when empty.
+	TenantId string `json:"tenant_id,omitempty"`
 
-	// UnitAmountDecimal The unit price in cents at full precision, for example "0.3" for $0.003. On a usage line priced `per_unit` it is that rate; on any other line it is amount_cents ÷ quantity. Line amounts and totals stay whole cents.
+	// TotalAmountCents The line's amount plus its tax, in the currency's minor unit (cents for USD).
+	TotalAmountCents int64 `json:"total_amount_cents"`
+
+	// UnitAmountDecimal The unit price, a decimal string of cents at full precision, for example "0.3" for $0.003. On a usage line priced `per_unit` it is that rate; on any other line it is `amount_cents` ÷ `quantity`. Line amounts and totals stay whole cents.
 	UnitAmountDecimal string `json:"unit_amount_decimal"`
 }
 
-// InvoiceLineItemInput A line to add to a draft invoice.
+// InvoiceLineItemInput A line to add to a draft invoice, with `POST /v1/invoices` or
+// `POST /v1/invoices/{id}/line-items`. Its amount is `quantity` ×
+// `unit_amount_cents`.
 type InvoiceLineItemInput struct {
 	// CommitExpiresAt When the granted credit expires. The credit can be drawn up to
 	// and including this instant; a period invoice draws it when its
@@ -5242,38 +6682,62 @@ type InvoiceLineItemInput struct {
 
 	// CommitGrantedCents Makes this line a prepaid commit purchase: when the invoice is
 	// finalized, the customer gets this many cents of credit. Only on
-	// `add_on` lines of manual invoices, at most one per invoice.
-	CommitGrantedCents int64  `json:"commit_granted_cents,omitempty"`
-	Description        string `json:"description"`
+	// `add_on` lines of invoices you create, at most one per invoice.
+	// At most 100,000,000 ($1,000,000).
+	CommitGrantedCents int64 `json:"commit_granted_cents,omitempty"`
 
-	// LineType Defaults to `add_on`.
-	LineType        InvoiceLineItemInputLineType `json:"line_type,omitempty"`
-	Quantity        int64                        `json:"quantity"`
-	UnitAmountCents int64                        `json:"unit_amount_cents"`
+	// Description The text printed on the line. Must not be blank.
+	Description string `json:"description"`
+
+	// LineType What the line charges for. Defaults to `add_on`.
+	LineType InvoiceLineItemInputLineType `json:"line_type,omitempty"`
+
+	// Quantity How many units, a whole number of 1 or more.
+	Quantity int64 `json:"quantity"`
+
+	// UnitAmountCents Price of one unit in the currency's minor unit (cents for USD),
+	// a whole number of 1 or more. The line's amount is `quantity` ×
+	// `unit_amount_cents`; a product too large for 64-bit cents is
+	// refused.
+	UnitAmountCents int64 `json:"unit_amount_cents"`
 }
 
-// InvoiceLineItemInputLineType Defaults to `add_on`.
+// InvoiceLineItemInputLineType What the line charges for. Defaults to `add_on`.
 type InvoiceLineItemInputLineType string
 
-// InvoiceLineType defines model for InvoiceLineType.
+// InvoiceLineType What an invoice line charges for. `base_fee`: a plan's flat fee for
+// the period. `usage`: metered usage, priced by a plan price.
+// `add_on`: any other charge, such as a line you add to a draft (the
+// default for those).
 type InvoiceLineType string
 
-// InvoicePaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
-// returned an ambiguous error (5xx, timeout, connection reset) where
-// we cannot tell whether Stripe processed the charge. With a payment
-// intent recorded, Hardcount asks Stripe for it after a short wait. With
-// none (a parked invoice), Hardcount lists the customer's payments at
-// Stripe every billing tick: it records a payment for the invoice that
-// appears, and if none has appeared 24 hours after the attempt the
-// invoice goes back to `pending` (`failed` after a dunning retry) and
-// is charged again as usual.
+// InvoicePaymentStatus The state of the invoice's payment.
+//   - `pending`: nothing has been charged yet, or a charge is about to
+//     be sent. Also the status after Stripe refused the amount as below
+//     its minimum charge (see `amount_below_minimum`).
+//   - `processing`: Stripe is still working on a charge.
+//   - `succeeded`: the invoice is paid.
+//   - `failed`: the last charge was declined or refused. Dunning, when
+//     a policy is on, retries it.
+//   - `unknown`: a Stripe charge got an unclear answer (a 5xx, a timeout
+//     or a dropped connection), so Hardcount cannot tell whether Stripe
+//     took the money. With a payment intent recorded, Hardcount asks
+//     Stripe for it after a short wait. With none (a parked invoice),
+//     Hardcount lists the customer's payments at Stripe on every billing
+//     tick: it records a payment for the invoice that appears, and if
+//     none has appeared 24 hours after the attempt the invoice goes back
+//     to `pending` (`failed` after a dunning retry) and is charged again
+//     as usual.
 type InvoicePaymentStatus string
 
-// InvoicePaymentTimeline defines model for InvoicePaymentTimeline.
+// InvoicePaymentTimeline What `GET /v1/invoices/{id}/payment-timeline` returns: the invoice's
+// activity, oldest first, and which sources could not be read.
 type InvoicePaymentTimeline struct {
 	// Degraded Sources that could not be read, so their rows are missing.
 	Degraded []InvoicePaymentTimelineDegraded `json:"degraded"`
-	Events   []InvoiceTimelineEvent           `json:"events"`
+
+	// Events The rows, oldest first. An empty list for a draft.
+	Events []InvoiceTimelineEvent `json:"events"`
 
 	// Truncated True when the credit-note source hit its limit of 100 rows.
 	Truncated bool `json:"truncated"`
@@ -5282,63 +6746,107 @@ type InvoicePaymentTimeline struct {
 // InvoicePaymentTimelineDegraded defines model for InvoicePaymentTimeline.Degraded.
 type InvoicePaymentTimelineDegraded string
 
-// InvoicePreview A dry-run invoice built from the usage recorded so far. Nothing is
-// saved.
+// InvoicePreview A dry-run invoice built from the usage recorded so far, from
+// `POST /v1/invoices/create_preview`. Nothing is saved. Amounts are
+// whole numbers in the currency's minor unit (cents for USD), and
+// tax is not included.
 type InvoicePreview struct {
-	BillingPeriodEnd   time.Time            `json:"billing_period_end"`
-	BillingPeriodStart time.Time            `json:"billing_period_start"`
-	CustomerId         string               `json:"customer_id"`
-	GeneratedAt        time.Time            `json:"generated_at"`
-	Lines              []InvoicePreviewLine `json:"lines"`
+	// BillingPeriodEnd End of the period the invoice would bill (not included). Shifts
+	// with `billing_period_start` when a fee is billed in advance.
+	BillingPeriodEnd time.Time `json:"billing_period_end"`
+
+	// BillingPeriodStart Start of the period the invoice would bill (included): the
+	// previewed window, or, when a plan on the subscription bills its
+	// fee in advance, the period after it, as on the real invoice.
+	BillingPeriodStart time.Time `json:"billing_period_start"`
+
+	// CustomerId The customer the preview is for.
+	CustomerId string `json:"customer_id"`
+
+	// GeneratedAt When the preview was built.
+	GeneratedAt time.Time `json:"generated_at"`
+
+	// Lines The lines the invoice would have. An empty list when nothing would be billed.
+	Lines []InvoicePreviewLine `json:"lines"`
 
 	// PlanName The names of the subscription's plans, comma-separated.
-	PlanName       string `json:"plan_name"`
+	PlanName string `json:"plan_name"`
+
+	// SubscriptionId The subscription the preview bills.
 	SubscriptionId string `json:"subscription_id"`
 
 	// Totals One total per currency on the lines.
 	Totals []InvoicePreviewTotal `json:"totals"`
 
-	// Warnings Ways the real invoice can differ from this preview.
+	// Warnings Ways the real invoice can differ from this preview, in plain words. An empty list when there are none.
 	Warnings []string `json:"warnings"`
 }
 
-// InvoicePreviewLine defines model for InvoicePreviewLine.
+// InvoicePreviewLine One line of an invoice preview.
 type InvoicePreviewLine struct {
-	AmountCents int64  `json:"amount_cents"`
-	Currency    string `json:"currency"`
+	// AmountCents The line's amount, in the currency's minor unit (cents for USD).
+	AmountCents int64 `json:"amount_cents"`
+
+	// Currency The line's currency, the plan's.
+	Currency string `json:"currency"`
+
+	// Description The text the invoice line would carry.
 	Description string `json:"description"`
 
 	// DimensionMatch On a usage line, the labels its price takes. Absent for a price that takes every event.
-	DimensionMatch map[string]string          `json:"dimension_match,omitempty"`
-	LineType       InvoicePreviewLineLineType `json:"line_type"`
-	MeterId        string                     `json:"meter_id,omitempty"`
-	MeterUnit      string                     `json:"meter_unit,omitempty"`
+	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
+
+	// LineType `base_fee`: a plan's flat fee. `usage`: metered usage priced by a plan price.
+	LineType InvoicePreviewLineLineType `json:"line_type"`
+
+	// MeterId On a usage line, the meter that measured the usage. Absent on base fee lines.
+	MeterId string `json:"meter_id,omitempty"`
+
+	// MeterUnit On a usage line, the meter's unit, such as `tokens`. Absent on base fee lines.
+	MeterUnit string `json:"meter_unit,omitempty"`
 
 	// PriceId On a usage line, the plan price that priced it.
-	PriceId     string                        `json:"price_id,omitempty"`
+	PriceId string `json:"price_id,omitempty"`
+
+	// PricingMode On a usage line, the shape of its price. Absent on base fee lines.
 	PricingMode InvoicePreviewLinePricingMode `json:"pricing_mode,omitempty"`
 
 	// Quantity Exact quantity as a decimal string.
-	Quantity        string `json:"quantity"`
-	UnitAmountCents int64  `json:"unit_amount_cents"`
+	Quantity string `json:"quantity"`
+
+	// UnitAmountCents Unit price in whole cents of the currency's minor unit. On a base
+	// fee line it is the plan's base fee per unit; on a usage line it is
+	// `amount_cents` ÷ `quantity` rounded to a whole cent, so a sub-cent
+	// rate shows 0.
+	UnitAmountCents int64 `json:"unit_amount_cents"`
 }
 
-// InvoicePreviewLineLineType defines model for InvoicePreviewLine.LineType.
+// InvoicePreviewLineLineType `base_fee`: a plan's flat fee. `usage`: metered usage priced by a plan price.
 type InvoicePreviewLineLineType string
 
-// InvoicePreviewLinePricingMode defines model for InvoicePreviewLine.PricingMode.
+// InvoicePreviewLinePricingMode On a usage line, the shape of its price. Absent on base fee lines.
 type InvoicePreviewLinePricingMode string
 
-// InvoicePreviewTotal defines model for InvoicePreviewTotal.
+// InvoicePreviewTotal The total of an invoice preview's lines in one currency.
 type InvoicePreviewTotal struct {
-	AmountCents int64  `json:"amount_cents"`
-	Currency    string `json:"currency"`
+	// AmountCents The sum of the lines in this currency, in its minor unit (cents for USD), before tax.
+	AmountCents int64 `json:"amount_cents"`
+
+	// Currency The currency, uppercase.
+	Currency string `json:"currency"`
 }
 
-// InvoiceStatus Lifecycle state of the invoice. `uncollectible` marks an invoice
-// a dunning policy has given up collecting (no further retries) while
-// keeping it on the books — distinct from `voided` (cancelled, owes
-// nothing).
+// InvoiceStatus Where the invoice is in its life.
+//   - `draft`: not issued yet. Lines can still be added, and nothing is
+//     charged.
+//   - `finalized`: issued and owed. Hardcount collects it.
+//   - `paid`: settled, by card, credit, an offline payment or a credit
+//     note that left nothing due.
+//   - `voided`: cancelled. Nothing is owed. Voiding is final.
+//   - `uncollectible`: written off as bad debt, by you
+//     (`POST /v1/invoices/{id}/mark-uncollectible`) or by a dunning
+//     policy's final action. Hardcount stops collecting it, but it stays
+//     on the books and can still be paid.
 type InvoiceStatus string
 
 // InvoiceStripeRefund A refund made in Stripe outside Hardcount (the Stripe dashboard, or
@@ -5346,24 +6854,41 @@ type InvoiceStatus string
 // recorded from Stripe's `refund.created`, `refund.updated`,
 // `refund.failed` and `charge.refund.updated` webhook events. It holds
 // the refund as the newest of those events showed it. Hardcount's own
-// refunds are never listed here. `outcome` is what Hardcount did when
-// it first saw the refund, and only the operator changes it after
-// that.
+// refunds are never listed here. `outcome` is what Hardcount did with
+// the refund: decided when Hardcount first sees it, or, for a refund
+// first seen in flight (`awaiting`), when a later event shows how it
+// ended. After that only you change it, by recording a flagged refund
+// with a credit note or dismissing it.
 type InvoiceStripeRefund struct {
-	AmountCents int64     `json:"amount_cents"`
-	CreatedAt   time.Time `json:"created_at"`
+	// AmountCents The refunded amount, in the currency's minor unit (cents for USD).
+	AmountCents int64 `json:"amount_cents"`
+
+	// CreatedAt When Hardcount first recorded the refund.
+	CreatedAt time.Time `json:"created_at"`
 
 	// CreditNoteId The credit note that records the refund, when `outcome` is `credit_note`.
-	CreditNoteId  string    `json:"credit_note_id,omitempty"`
-	Currency      string    `json:"currency"`
-	DismissedAt   time.Time `json:"dismissed_at,omitempty"`
-	DismissedNote string    `json:"dismissed_note,omitempty"`
+	CreditNoteId string `json:"credit_note_id,omitempty"`
+
+	// Currency The refund's currency, uppercase.
+	Currency string `json:"currency"`
+
+	// DismissedAt When the refund was dismissed. Absent unless `outcome` is `dismissed`.
+	DismissedAt time.Time `json:"dismissed_at,omitempty"`
+
+	// DismissedNote The note given when the refund was dismissed. Absent unless `outcome` is `dismissed`.
+	DismissedNote string `json:"dismissed_note,omitempty"`
 
 	// FailureReason Why Stripe could not make the refund, once it failed.
 	FailureReason string `json:"failure_reason,omitempty"`
-	Id            string `json:"id"`
-	InvoiceId     string `json:"invoice_id"`
-	Livemode      bool   `json:"livemode"`
+
+	// Id Unique identifier of the refund record, `hc_srf_` and 24 hex characters.
+	Id string `json:"id"`
+
+	// InvoiceId The invoice whose payment was refunded.
+	InvoiceId string `json:"invoice_id"`
+
+	// Livemode True for a live-mode payment, false for test mode.
+	Livemode bool `json:"livemode"`
 
 	// Outcome `awaiting`: first seen pending or requiring action. Nothing is
 	// recorded or sent until a later event shows how it ended: once it
@@ -5382,7 +6907,7 @@ type InvoiceStripeRefund struct {
 	// handled it outside Hardcount.
 	Outcome InvoiceStripeRefundOutcome `json:"outcome"`
 
-	// Reason Stripe's refund reason, for example `requested_by_customer`. Absent when none was given.
+	// Reason Stripe's refund reason (`duplicate`, `fraudulent` or `requested_by_customer`). Absent when none was given.
 	Reason string `json:"reason,omitempty"`
 
 	// RefundCreatedAt When Stripe made the refund.
@@ -5394,13 +6919,19 @@ type InvoiceStripeRefund struct {
 	ReviewReason InvoiceStripeRefundReviewReason `json:"review_reason,omitempty"`
 
 	// Status Stripe's refund status, as Stripe sends it.
-	Status         InvoiceStripeRefundStatus `json:"status"`
-	StripeChargeId string                    `json:"stripe_charge_id,omitempty"`
+	Status InvoiceStripeRefundStatus `json:"status"`
+
+	// StripeChargeId The refunded Stripe charge (`ch_…`). Absent when Stripe did not send it.
+	StripeChargeId string `json:"stripe_charge_id,omitempty"`
 
 	// StripePaymentIntentId The refunded payment.
-	StripePaymentIntentId string    `json:"stripe_payment_intent_id"`
-	StripeRefundId        string    `json:"stripe_refund_id"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	StripePaymentIntentId string `json:"stripe_payment_intent_id"`
+
+	// StripeRefundId Stripe's refund id (`re_…`).
+	StripeRefundId string `json:"stripe_refund_id"`
+
+	// UpdatedAt When Hardcount last updated the record.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // InvoiceStripeRefundOutcome `awaiting`: first seen pending or requiring action. Nothing is
@@ -5428,8 +6959,9 @@ type InvoiceStripeRefundReviewReason string
 // InvoiceStripeRefundStatus Stripe's refund status, as Stripe sends it.
 type InvoiceStripeRefundStatus string
 
-// InvoiceStripeRefundList defines model for InvoiceStripeRefundList.
+// InvoiceStripeRefundList What `GET /v1/invoices/{id}/stripe-refunds` returns, one page of the refunds made in Stripe on the invoice's payments, oldest first.
 type InvoiceStripeRefundList struct {
+	// Data The refunds on this page. An empty list when the invoice has none.
 	Data []InvoiceStripeRefund `json:"data"`
 
 	// Total How many rows match the request's filters, on every page, not only
@@ -5438,72 +6970,113 @@ type InvoiceStripeRefundList struct {
 	Total ListTotal `json:"total"`
 }
 
-// InvoiceTaxStatus Whether tax has been calculated. `ok`: it has. `pending`: the
-// calculation failed, and `tax_error_code` says why and whether
-// Hardcount retries it. A pending invoice cannot be finalized, so a wrong
-// tax amount is never sent.
+// InvoiceTaxStatus Whether tax has been calculated. `ok`: it has (a zero tax counts).
+// `pending`: the calculation failed, and `tax_error_code` says why and
+// whether Hardcount retries it. A pending invoice stays a draft and
+// cannot be finalized, so a wrong tax amount is never sent.
 type InvoiceTaxStatus string
 
-// InvoiceTimelineEvent defines model for InvoiceTimelineEvent.
+// InvoiceTimelineEvent One row of an invoice's activity timeline
+// (`GET /v1/invoices/{id}/payment-timeline`). `line` is the row in the
+// activity line's words; `description`, `detail`, `error`, `status`,
+// `amount_cents` and `currency` repeat it for clients that read the
+// older fields.
 type InvoiceTimelineEvent struct {
-	AmountCents  int64  `json:"amount_cents,omitempty"`
-	AttemptCount int    `json:"attempt_count,omitempty"`
-	Currency     string `json:"currency,omitempty"`
+	// AmountCents The line's amount, in the currency's minor unit (cents for USD). Absent when the row has no amount.
+	AmountCents int64 `json:"amount_cents,omitempty"`
+
+	// AttemptCount On dunning rows, the run's retry count at the event; on the paid row, the retries that ran before payment. Absent when 0.
+	AttemptCount int `json:"attempt_count,omitempty"`
+
+	// Currency The currency of `amount_cents`. Absent when the row has no amount.
+	Currency string `json:"currency,omitempty"`
 
 	// Description The line's title.
 	Description string `json:"description"`
 
-	// Detail The line's meta line as text, its actor last, for example "Visa •••• 4242 · After 2 retries".
+	// Detail The line's meta line as text, its actor last, for example "Visa •••• 4242 · After 2 retries". Absent when empty.
 	Detail string `json:"detail,omitempty"`
 
-	// Error The line's problem.
-	Error     string `json:"error,omitempty"`
+	// Error The line's problem. Absent when there is none.
+	Error string `json:"error,omitempty"`
+
+	// EventType Machine name of the event, for example `invoice.finalized`,
+	// `charge_attempt.failed`, `retry_attempted`, `credit_note.issued`
+	// or `payment.dispute_opened`.
 	EventType string `json:"event_type"`
 
 	// Id Stable key for the row.
 	Id string `json:"id"`
 
-	// IsSimulated True when `timestamp` is test-clock time.
+	// IsSimulated True when `timestamp` is test-clock time. Absent when false.
 	IsSimulated bool `json:"is_simulated,omitempty"`
 
-	// Line One activity row in the words of the activity line standard
-	// (ADR-128): a title with no values, the amount when the event moves
-	// money, asks for it or cancels money owed, a problem line on failure
-	// and warning rows, the meta line's parts and the actor, a tone, and
-	// the event's time on the entity's calendar. `recorded_at` is the
-	// real-world time, set only for an entity on a test clock.
-	Line            ActivityLine `json:"line"`
-	PaymentIntentId string       `json:"payment_intent_id,omitempty"`
+	// Line One activity row, with every word written by the server: a title
+	// with no values, the amount when the event moves money, asks for it
+	// or cancels money owed, a problem line on failure and warning rows,
+	// the meta line's parts and the actor, a tone, and the event's time on
+	// the entity's calendar. `recorded_at` is the real-world time, set
+	// only for an entity on a test clock. The invoice payment timeline and
+	// dunning run events carry it.
+	Line ActivityLine `json:"line"`
 
-	// RecordedAt Real-world time of a row whose `timestamp` is test-clock time.
-	RecordedAt time.Time                  `json:"recorded_at,omitempty"`
-	Source     InvoiceTimelineEventSource `json:"source"`
+	// PaymentIntentId The Stripe PaymentIntent the row is about, on payment, dunning, dispute and refund rows that name one. Absent otherwise.
+	PaymentIntentId string `json:"payment_intent_id,omitempty"`
+
+	// RecordedAt Real-world time of a row whose `timestamp` is test-clock time. Absent otherwise.
+	RecordedAt time.Time `json:"recorded_at,omitempty"`
+
+	// Source Where the row comes from: `lifecycle` (created, finalized, paid,
+	// voided, written off), `payment` (a charge attempt), `dunning` (a
+	// payment retry run), `email` (an email to the customer),
+	// `credit_note`, `dispute` or `stripe_refund` (a refund made in
+	// Stripe outside Hardcount).
+	Source InvoiceTimelineEventSource `json:"source"`
 
 	// Status The line's tone in older words, read by the dashboard's dot.
-	Status    InvoiceTimelineEventStatus `json:"status"`
-	Timestamp time.Time                  `json:"timestamp"`
+	Status InvoiceTimelineEventStatus `json:"status"`
+
+	// Timestamp When the event happened, to the second: on the invoice's
+	// calendar (the test clock's time for an invoice on a test clock),
+	// and at Stripe's own time for disputes and refunds made in Stripe.
+	Timestamp time.Time `json:"timestamp"`
 }
 
-// InvoiceTimelineEventSource defines model for InvoiceTimelineEvent.Source.
+// InvoiceTimelineEventSource Where the row comes from: `lifecycle` (created, finalized, paid,
+// voided, written off), `payment` (a charge attempt), `dunning` (a
+// payment retry run), `email` (an email to the customer),
+// `credit_note`, `dispute` or `stripe_refund` (a refund made in
+// Stripe outside Hardcount).
 type InvoiceTimelineEventSource string
 
 // InvoiceTimelineEventStatus The line's tone in older words, read by the dashboard's dot.
 type InvoiceTimelineEventStatus string
 
-// InvoiceWithLineItems Response shape for `GET /v1/invoices/{id}`. The handler returns the
-// invoice and its line items as separate top-level keys (rather than
-// nesting `line_items` inside the invoice) so the client can render
-// the two arrays independently.
+// InvoiceWithLineItems What `GET /v1/invoices/{id}` returns: the invoice and its lines, as
+// two keys side by side.
 type InvoiceWithLineItems struct {
-	// Invoice A Hardcount invoice. Returned from create, finalize, void, list, get,
-	// rotate-public-token, and collect-payment endpoints.
-	Invoice   Invoice           `json:"invoice"`
+	// Invoice A bill for one customer, in one currency. The billing engine creates
+	// one at the end of each subscription period (and for a subscription's
+	// start when a fee is billed in advance, a change, a cancel or a spend
+	// threshold); you can also create one-off invoices with
+	// `POST /v1/invoices`. The engine creates its invoices already
+	// `finalized`, or as a `draft` while their tax is pending or collection
+	// is paused on the subscription. An invoice you create starts as a
+	// `draft` until you finalize it. A finalized invoice ends `paid`,
+	// `voided` or `uncollectible`. Every amount is a whole number in the
+	// currency's minor unit (cents for USD). The invoice routes and the
+	// `invoice.*` and `payment.*` webhook events return it.
+	Invoice Invoice `json:"invoice"`
+
+	// LineItems The invoice's lines. An empty list when it has none.
 	LineItems []InvoiceLineItem `json:"line_items"`
 }
 
-// ItemChangeType Classifies per-item proration artifacts so the dedup index can
-// distinguish a plan-change and a quantity-change that happen to
-// share the same `(subscription, item, timestamp)`.
+// ItemChangeType The kind of subscription item change that produced a proration:
+// `plan` (the item moved to another plan), `quantity` (its quantity
+// changed), `add` (the item was added) or `remove` (the item was
+// removed). On a credit ledger entry (`source_change_type`) it is
+// never sent in this version.
 type ItemChangeType string
 
 // ListTotal How many rows match the request's filters, on every page, not only
@@ -5523,28 +7096,46 @@ type LitellmSpendLog struct {
 	// Hardcount does not bill (images, audio, realtime, moderation,
 	// batches, files, A2A, response retrieval, ...); those are
 	// skipped, and a skipped record that carries tokens is logged.
-	CallType         string `json:"call_type,omitempty"`
-	CompletionTokens int64  `json:"completion_tokens,omitempty"`
+	CallType string `json:"call_type,omitempty"`
+
+	// CompletionTokens Output tokens. Used when there is no `usage` object.
+	CompletionTokens int64 `json:"completion_tokens,omitempty"`
 
 	// CostBreakdown The provider's own cost, in dollars. When present, each event's
 	// provider cost comes from its part (input, output, cache read or
-	// cache write) instead of the provider-costs table. A part that is
-	// missing or negative falls back to the table. `input_cost`
-	// includes cache reads and cache writes, so the input event gets
-	// `input_cost` minus `cache_read_cost` and `cache_creation_cost`.
-	// If there were cache reads but no `cache_read_cost`, or split-off
-	// cache writes but no `cache_creation_cost`, the input-side events
-	// use the provider-costs table. With 1-hour cache writes they
-	// always do: LiteLLM prices `cache_creation_cost` at the 5-minute
-	// rate.
+	// cache write) instead of the provider-costs table. A negative
+	// part falls back to the table. A missing `input_cost` or
+	// `output_cost` reads as 0 and is recorded as a cost of 0; a
+	// missing `cache_read_cost` or `cache_creation_cost` means
+	// unknown. `input_cost` includes cache reads and cache writes, so
+	// the input event gets `input_cost` minus `cache_read_cost` and
+	// `cache_creation_cost`. If there were cache reads but no
+	// `cache_read_cost`, the input and cache-read events use the
+	// provider-costs table; if there were split-off cache writes but
+	// no `cache_creation_cost`, the input and cache-write events do.
+	// With 1-hour cache writes the input and cache-write events always
+	// do: LiteLLM prices `cache_creation_cost` at the 5-minute rate.
 	CostBreakdown struct {
+		// CacheCreationCost LiteLLM's cost of the cache writes, in dollars, priced at the 5-minute rate.
 		CacheCreationCost float32 `json:"cache_creation_cost,omitempty"`
-		CacheReadCost     float32 `json:"cache_read_cost,omitempty"`
-		InputCost         float32 `json:"input_cost,omitempty"`
-		OutputCost        float32 `json:"output_cost,omitempty"`
-		ToolUsageCost     float32 `json:"tool_usage_cost,omitempty"`
-		TotalCost         float32 `json:"total_cost,omitempty"`
+
+		// CacheReadCost The part of `input_cost` spent on cache reads, in dollars.
+		CacheReadCost float32 `json:"cache_read_cost,omitempty"`
+
+		// InputCost The cost of the whole prompt, in dollars, cache reads and writes included.
+		InputCost float32 `json:"input_cost,omitempty"`
+
+		// OutputCost The cost of the output tokens, in dollars.
+		OutputCost float32 `json:"output_cost,omitempty"`
+
+		// ToolUsageCost Accepted but not used.
+		ToolUsageCost float32 `json:"tool_usage_cost,omitempty"`
+
+		// TotalCost Accepted but not used.
+		TotalCost float32 `json:"total_cost,omitempty"`
 	} `json:"cost_breakdown,omitempty"`
+
+	// CustomLlmProvider The provider LiteLLM sent the call to, such as `openai`. Each event carries it as the `provider` dimension.
 	CustomLlmProvider string `json:"custom_llm_provider,omitempty"`
 
 	// EndTime Unix seconds. The event time. With neither, the customer's current time is used.
@@ -5556,10 +7147,20 @@ type LitellmSpendLog struct {
 	// Id LiteLLM's call id. Used to build the events' idempotency keys.
 	Id string `json:"id,omitempty"`
 
-	// Metadata `team_id` and `request_tags` become event dimensions;
-	// `usage_object` is read for token counts; other keys are ignored.
+	// Metadata `team_id` and `request_tags` become event dimensions (a list of
+	// tags becomes one sorted, comma-separated string);
+	// `usage_object` is read for token counts; `user_api_key_end_user_id`
+	// names the customer when `user` and `end_user` are empty; a
+	// `user_api_key_request_route` of `/vertex_ai/live` on a
+	// `pass_through_endpoint` record marks Vertex AI Live audio, which
+	// is skipped. Other keys do not change billing.
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
-	Model    string                 `json:"model,omitempty"`
+
+	// Model The model the call used, as LiteLLM names it. Each event
+	// carries it as the `model_raw` dimension, and as `model` the
+	// model family name when Hardcount recognises it (the name as
+	// sent otherwise).
+	Model string `json:"model,omitempty"`
 
 	// PromptTokens Used when there is no `usage` object.
 	PromptTokens int64 `json:"prompt_tokens,omitempty"`
@@ -5571,28 +7172,57 @@ type LitellmSpendLog struct {
 	StartTime float32 `json:"startTime,omitempty"`
 
 	// Status A `failure` record (a call the provider refused or that timed out) is skipped, whatever token counts it carries.
-	Status      string `json:"status,omitempty"`
-	TotalTokens int64  `json:"total_tokens,omitempty"`
-	Usage       struct {
+	Status string `json:"status,omitempty"`
+
+	// TotalTokens Accepted but not used.
+	TotalTokens int64 `json:"total_tokens,omitempty"`
+
+	// Usage The call's token counts. When it is absent, Hardcount reads
+	// `metadata.usage_object`, then the top-level `prompt_tokens` and
+	// `completion_tokens`.
+	Usage struct {
 		// CacheCreationInputTokens Cache-write tokens, included in prompt_tokens. Split into `cache_write_5m` and `cache_write_1h` by `prompt_tokens_details.cache_creation_token_details`.
 		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
-		CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
-		CompletionTokens         int64 `json:"completion_tokens,omitempty"`
+
+		// CacheReadInputTokens Anthropic's cache-read tokens, included in prompt_tokens.
+		// Hardcount takes the larger of this and
+		// `prompt_tokens_details.cached_tokens` as the `cache_read`
+		// event.
+		CacheReadInputTokens int64 `json:"cache_read_input_tokens,omitempty"`
+
+		// CompletionTokens Output tokens. They become the `output` event.
+		CompletionTokens int64 `json:"completion_tokens,omitempty"`
 
 		// PromptTokens Includes cache-read tokens.
-		PromptTokens        int64 `json:"prompt_tokens,omitempty"`
+		PromptTokens int64 `json:"prompt_tokens,omitempty"`
+
+		// PromptTokensDetails The breakdown of `prompt_tokens`, as LiteLLM reports it.
 		PromptTokensDetails struct {
 			// CacheCreationTokenDetails Anthropic's cache writes by cache lifetime. They become
 			// `cache_write_5m` and `cache_write_1h` events, taken out
-			// of `input`. Without this split, or when it does not add
-			// up to the cache-write count, the writes stay in `input`.
+			// of `input`. Without this split, when it does not add up
+			// to the cache-write count, or when the writes do not fit
+			// in `prompt_tokens` less the cache reads, the writes stay
+			// in `input`.
 			CacheCreationTokenDetails struct {
+				// Ephemeral1hInputTokens Cache writes with a 1-hour lifetime. They become the `cache_write_1h` event.
 				Ephemeral1hInputTokens int64 `json:"ephemeral_1h_input_tokens,omitempty"`
+
+				// Ephemeral5mInputTokens Cache writes with a 5-minute lifetime. They become the `cache_write_5m` event.
 				Ephemeral5mInputTokens int64 `json:"ephemeral_5m_input_tokens,omitempty"`
 			} `json:"cache_creation_token_details,omitempty"`
+
+			// CacheCreationTokens Prompt tokens written to the provider's cache. Hardcount
+			// takes the larger of this and
+			// `cache_creation_input_tokens`.
 			CacheCreationTokens int64 `json:"cache_creation_tokens,omitempty"`
-			CachedTokens        int64 `json:"cached_tokens,omitempty"`
+
+			// CachedTokens Prompt tokens read from the provider's cache. They become
+			// the `cache_read` event, taken out of `input`.
+			CachedTokens int64 `json:"cached_tokens,omitempty"`
 		} `json:"prompt_tokens_details,omitempty"`
+
+		// TotalTokens Accepted but not used.
 		TotalTokens int64 `json:"total_tokens,omitempty"`
 	} `json:"usage,omitempty"`
 
@@ -5600,7 +7230,10 @@ type LitellmSpendLog struct {
 	User string `json:"user,omitempty"`
 }
 
-// LitellmSpendResult defines model for LitellmSpendResult.
+// LitellmSpendResult What `POST /v1/integrations/litellm/spend` did with the records it
+// received. Each record becomes up to five usage events, one per
+// token type; the counts below count events, except `skipped` and
+// `cache_hits`, which count records.
 type LitellmSpendResult struct {
 	// Accepted Usage events newly recorded.
 	Accepted int `json:"accepted"`
@@ -5616,8 +7249,11 @@ type LitellmSpendResult struct {
 	// Deduplicated Usage events already recorded, or already held, by an earlier delivery.
 	Deduplicated int `json:"deduplicated"`
 
-	// Errors One entry per record that was not recorded. A record's events are recorded together or not at all.
+	// Errors One entry per record that was not recorded. A record's events are
+	// recorded together or not at all. Absent when every record was
+	// recorded, held or skipped.
 	Errors []struct {
+		// Error Why the record was not recorded, such as a missing `user`.
 		Error string `json:"error"`
 
 		// Id The LiteLLM record id.
@@ -5644,84 +7280,158 @@ type LitellmSpendResult struct {
 	// never counts here.
 	OutsideSubscription int `json:"outside_subscription"`
 
-	// Skipped Records that bill nothing - a call type with no tokens, zero tokens, a failed call (`status` `failure`) or a LiteLLM response-cache hit.
+	// Skipped Records that bill nothing - a call type Hardcount does not bill (even when it carries tokens), no token counts, a failed call (`status` `failure`) or a LiteLLM response-cache hit.
 	Skipped int `json:"skipped"`
 }
 
-// MarginReport defines model for MarginReport.
+// MarginReport One customer's usage revenue against what that usage cost you at
+// your AI providers, for a window: `GET /v1/customers/{id}/margin`.
+// It looks only at usage: base fees, credits and tax are not in it.
+// Revenue is shown per model only where the price that billed the
+// usage names the model in its `dimension_match`; other revenue is
+// reported as unattributed, never split by a guess.
 type MarginReport struct {
+	// ByModel One row per model that has stamped cost or attributed revenue in
+	// the window, largest revenue first, then largest cost.
 	ByModel []struct {
-		// Attributed True only when the price that billed the usage names this model — margin is never heuristically allocated.
+		// Attributed True only when the price that billed the usage names this
+		// model, so revenue is never split by a guess.
 		Attributed bool `json:"attributed"`
 
 		// CostCents This model's stamped provider cost in US cents, as a decimal string.
 		CostCents string `json:"cost_cents"`
 
-		// MarginBps This model's (revenue − cost) / revenue in basis points, by the same formula as the report's margin_bps. Omitted whenever the report's margin_bps is omitted for currency or unresolved_events, and when the row is not attributed or has no provider cost of its own.
-		MarginBps    int64  `json:"margin_bps,omitempty"`
-		Model        string `json:"model"`
-		RevenueCents int64  `json:"revenue_cents,omitempty"`
+		// MarginBps This model's (revenue − cost) / revenue in basis points, by
+		// the same formula as the report's `margin_bps`. Absent
+		// whenever the report's `margin_bps` is absent for currency or
+		// `unresolved_events`, and when the row is not attributed or
+		// has no provider cost of its own.
+		MarginBps int64 `json:"margin_bps,omitempty"`
+
+		// Model The model, from the events' `model` label (else their
+		// `model_raw` label, else `(unknown)`), or from the price's
+		// `dimension_match` for revenue with no stamped cost.
+		Model string `json:"model"`
+
+		// RevenueCents The revenue of the prices that name this model, in the
+		// minor unit of `revenue_currency`. Absent when the row is
+		// not attributed or the revenue is 0.
+		RevenueCents int64 `json:"revenue_cents,omitempty"`
 	} `json:"by_model"`
 
 	// CostCents Total stamped provider cost in US cents, as a decimal string (e.g. "275.75").
 	CostCents string `json:"cost_cents"`
 
-	// CostCurrency Currency of cost_cents. Always USD.
+	// CostCurrency Currency of `cost_cents`. Always USD.
 	CostCurrency string `json:"cost_currency"`
 
-	// CostRatesConfigured Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up.
+	// CostRatesConfigured Whether the account has any provider cost rate in this mode. False
+	// with `costed_events` 0 means no rates are set up.
 	CostRatesConfigured bool `json:"cost_rates_configured"`
 
-	// CostedEvents Events in the window that carry a stamped provider cost (zero cost included). 0 means the cost side is unknown.
-	CostedEvents int64     `json:"costed_events"`
-	CustomerId   string    `json:"customer_id"`
-	From         time.Time `json:"from"`
+	// CostedEvents Events in the window that carry a stamped provider cost (zero cost
+	// included). 0 means the cost side is unknown.
+	CostedEvents int64 `json:"costed_events"`
 
-	// MarginBps (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, when costed_events is 0 (no provider cost known), or when unresolved_events is above 0 (part of the cost unknown, so the margin would read too high).
+	// CustomerId The customer the report is about.
+	CustomerId string `json:"customer_id"`
+
+	// From Start of the window, inclusive.
+	From time.Time `json:"from"`
+
+	// MarginBps (revenue − cost) / revenue in basis points (100 = 1%). Absent
+	// when revenue is 0, when `revenue_currency` is not
+	// `cost_currency`, when `costed_events` is 0 (no provider cost
+	// known), or when `unresolved_events` is above 0 (part of the
+	// cost unknown, so the margin would read too high).
 	MarginBps int64 `json:"margin_bps,omitempty"`
 
-	// RevenueCents Total rated usage revenue in the window, an estimate at each subscription's current prices. Only active and trialing subscriptions are counted.
+	// RevenueCents Total rated usage revenue in the window, in the minor unit of
+	// `revenue_currency` (cents for USD). It is an estimate at each
+	// subscription's current prices. Only active and trialing
+	// subscriptions are counted.
 	RevenueCents int64 `json:"revenue_cents"`
 
-	// RevenueCurrency Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter.
-	RevenueCurrency          string    `json:"revenue_currency,omitempty"`
-	To                       time.Time `json:"to"`
-	UnattributedRevenueCents int64     `json:"unattributed_revenue_cents"`
+	// RevenueCurrency Currency of `revenue_cents` (the currency of the customer's
+	// prices). Absent when the window's revenue spans more than one
+	// currency, or the customer has no priced meter.
+	RevenueCurrency string `json:"revenue_currency,omitempty"`
 
-	// UnresolvedEvents Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `unit_cost_cents`, was too large to record (about $9.2 trillion or more, either sign).
+	// To End of the window, exclusive.
+	To time.Time `json:"to"`
+
+	// UnattributedRevenueCents The revenue of prices that name no model, in the minor unit of
+	// `revenue_currency` (cents for USD).
+	UnattributedRevenueCents int64 `json:"unattributed_revenue_cents"`
+
+	// UnresolvedEvents Usage events in the window that carry `provider` and
+	// `token_type` labels and a `model` or `model_raw` label, but have
+	// no cost: no rate matched (add a rate to cost new events), or the
+	// cost, quantity × `unit_cost_cents`, was too large to record
+	// (about $9.2 trillion or more, either sign).
 	UnresolvedEvents int64 `json:"unresolved_events"`
 }
 
-// MemberInvitation defines model for MemberInvitation.
+// MemberInvitation An invitation for a teammate to join this account's dashboard.
+// `POST /v1/members/invite` returns it, and `GET /v1/members` lists
+// every invitation the account has sent, newest first.
 type MemberInvitation struct {
-	AcceptedAt     time.Time `json:"accepted_at,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	Email          string    `json:"email"`
-	ExpiresAt      time.Time `json:"expires_at"`
-	Id             string    `json:"id"`
-	InvitedByEmail string    `json:"invited_by_email,omitempty"`
-	RevokedAt      time.Time `json:"revoked_at,omitempty"`
+	// AcceptedAt When the invitee accepted. Absent until then.
+	AcceptedAt time.Time `json:"accepted_at,omitempty"`
 
-	// Role Recorded for the future role split; not enforced (every member holds the full permission set).
+	// CreatedAt When the invitation was created and its email queued.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Email The invited address, in lower case. It becomes the new member's sign-in email.
+	Email string `json:"email"`
+
+	// ExpiresAt When the accept link stops working, 7 days after `created_at`.
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Id The invitation's id (`hc_minv_…`).
+	Id string `json:"id"`
+
+	// InvitedByEmail The sign-in email of the member who sent the invitation. Absent when that user no longer exists.
+	InvitedByEmail string `json:"invited_by_email,omitempty"`
+
+	// RevokedAt When the invitation was revoked, by a member or because its
+	// email could not be queued. Absent unless it was revoked.
+	RevokedAt time.Time `json:"revoked_at,omitempty"`
+
+	// Role Always `member` for an invitation. Roles are recorded but not
+	// enforced yet: every member can do everything in the dashboard.
 	Role string `json:"role"`
 
-	// Status Server-derived; treat as authoritative.
+	// Status `pending` until the invitation is accepted or revoked, or until
+	// `expires_at` passes (`expired`). The server works it out each
+	// time it answers.
 	Status MemberInvitationStatus `json:"status"`
 }
 
-// MemberInvitationStatus Server-derived; treat as authoritative.
+// MemberInvitationStatus `pending` until the invitation is accepted or revoked, or until
+// `expires_at` passes (`expired`). The server works it out each
+// time it answers.
 type MemberInvitationStatus string
 
-// Meter defines model for Meter.
+// Meter A meter counts one kind of usage: every usage event that sends its
+// `event_name`. A meter has no price of its own. Plans price it
+// (`/v1/plans/{id}/prices`). Create, list, get and update meters
+// under `/v1/meters`.
 type Meter struct {
 	// Aggregation How the meter rolls its events into one quantity per billing
-	// period. Every price of the meter bills under it. `last`
-	// is the latest event by timestamp, then by id. Fixed once the
-	// meter has a usage event (see `has_usage`).
+	// period: `sum` adds the quantities, `count` counts the events,
+	// `max` takes the highest quantity, and `last` takes the latest
+	// event's quantity, by timestamp, then by id. Every price of the
+	// meter bills under it. Fixed once the meter has a usage event
+	// (see `has_usage`).
 	Aggregation MeterAggregation `json:"aggregation"`
-	CreatedAt   time.Time        `json:"created_at"`
 
-	// EventName The `event_name` usage events send for this meter.
+	// CreatedAt When the meter was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// EventName The `event_name` usage events send for this meter. Letters,
+	// digits, `-` and `_`, at most 100 characters. Unique in the
+	// account and mode, and fixed after create.
 	EventName string `json:"event_name"`
 
 	// HasUsage Whether the meter has usage events. Once it has, its
@@ -5729,109 +7439,213 @@ type Meter struct {
 	// does not count until it is released. Returned when you create,
 	// get or update one meter; the meter list leaves it out. A create
 	// or update that succeeded leaves it out if it could not be read.
-	HasUsage  bool      `json:"has_usage,omitempty"`
-	Id        string    `json:"id"`
-	Name      string    `json:"name"`
-	TenantId  string    `json:"tenant_id,omitempty"`
-	Unit      string    `json:"unit"`
+	HasUsage bool `json:"has_usage,omitempty"`
+
+	// Id The meter's ID, `hc_mtr_` and 20 characters.
+	Id string `json:"id"`
+
+	// Name The meter's display name, at most 255 bytes (UTF-8).
+	Name string `json:"name"`
+
+	// TenantId The account the meter belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// Unit The unit of the quantity, such as `tokens` or `seconds`.
+	// `unit` when none was given.
+	Unit string `json:"unit"`
+
+	// UpdatedAt When the meter was last changed.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // MeterAggregation How the meter rolls its events into one quantity per billing
-// period. Every price of the meter bills under it. `last`
-// is the latest event by timestamp, then by id. Fixed once the
-// meter has a usage event (see `has_usage`).
+// period: `sum` adds the quantities, `count` counts the events,
+// `max` takes the highest quantity, and `last` takes the latest
+// event's quantity, by timestamp, then by id. Every price of the
+// meter bills under it. Fixed once the meter has a usage event
+// (see `has_usage`).
 type MeterAggregation string
 
-// PaymentMethod defines model for PaymentMethod.
+// PaymentMethod A card saved for a customer in Stripe, which Hardcount can charge.
+// The payment-method routes under
+// `/v1/customers/{customer_id}/payment-methods` return it, and the
+// `payment_method.*` webhook events carry it.
 type PaymentMethod struct {
-	CardBrand    string    `json:"card_brand,omitempty"`
-	CardExpMonth int       `json:"card_exp_month,omitempty"`
-	CardExpYear  int       `json:"card_exp_year,omitempty"`
-	CardLast4    string    `json:"card_last4,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	CustomerId   string    `json:"customer_id"`
-	Id           string    `json:"id"`
-	IsDefault    bool      `json:"is_default"`
-	Type         string    `json:"type"`
+	// CardBrand The card network as Stripe names it, such as `visa` or
+	// `mastercard`. Absent when Stripe sent none.
+	CardBrand string `json:"card_brand,omitempty"`
+
+	// CardExpMonth The card's expiry month, 1 to 12. Absent when Stripe sent none.
+	CardExpMonth int `json:"card_exp_month,omitempty"`
+
+	// CardExpYear The card's expiry year, such as `2029`. Absent when Stripe sent none.
+	CardExpYear int `json:"card_exp_year,omitempty"`
+
+	// CardLast4 The last 4 digits of the card number. Absent when Stripe sent none.
+	CardLast4 string `json:"card_last4,omitempty"`
+
+	// CreatedAt When the card was saved.
+	CreatedAt time.Time `json:"created_at"`
+
+	// CustomerId The customer the card belongs to.
+	CustomerId string `json:"customer_id"`
+
+	// Id The payment method's ID in Hardcount, `hc_pm_` and 24 hex characters.
+	Id string `json:"id"`
+
+	// IsDefault Whether this is the card Hardcount charges. A customer with saved
+	// cards has one default.
+	IsDefault bool `json:"is_default"`
+
+	// Type The kind of payment method. Always `card` today.
+	Type string `json:"type"`
 }
 
-// Plan defines model for Plan.
+// Plan A plan is what a subscription buys: a recurring base fee and the
+// usage prices of its meters, in one currency and billing interval.
+// `GET /v1/plans` lists plans in this shape. Get, create and update
+// answer a `PlanDetail`, which adds two fields.
 type Plan struct {
+	// BaseAmountCents The recurring base fee per billing period, in the currency's minor
+	// unit (cents for USD). 0 for a usage-only plan.
 	BaseAmountCents int64 `json:"base_amount_cents"`
 
-	// BaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
-	// in_arrears: base + usage billed at period end.
-	// in_advance: base billed at period start (day 1 on create; cycle-close invoice
-	// carries upcoming period's base + elapsed period's usage). Usage lines are
-	// always arrears regardless of this field. A plan with no base fee is
-	// in_arrears. See ADR-031.
-	BaseBillTiming  PlanBaseBillTiming  `json:"base_bill_timing"`
+	// BaseBillTiming When the base fee is invoiced, relative to the period it
+	// covers. `in_arrears`: the base fee and the usage are billed at
+	// the period end. `in_advance`: the base fee is billed at the
+	// period start; the first invoice comes when the subscription
+	// starts, and each cycle invoice carries the next period's base
+	// fee with the past period's usage. Usage is always billed at
+	// the period end. A plan with no base fee is `in_arrears`.
+	BaseBillTiming PlanBaseBillTiming `json:"base_bill_timing"`
+
+	// BillingInterval How often a subscription to the plan is billed. Fixed after create.
 	BillingInterval PlanBillingInterval `json:"billing_interval"`
-	Code            string              `json:"code"`
-	CreatedAt       time.Time           `json:"created_at"`
-	Currency        string              `json:"currency"`
-	Description     string              `json:"description,omitempty"`
-	Id              string              `json:"id"`
-	Name            string              `json:"name"`
 
-	// Prices The plan's usage prices from now on. A plan's meters are the
-	// meters it has a price for.
+	// Code Your short name for the plan. Letters, digits, `-` and `_`, at
+	// most 100 characters, unique in the account and mode. Fixed
+	// after create.
+	Code string `json:"code"`
+
+	// CreatedAt When the plan was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Currency ISO 4217 code in upper case, such as `USD`. Fixed after create.
+	// The plan's prices take it.
+	Currency string `json:"currency"`
+
+	// Description Your description of the plan. Absent when empty.
+	Description string `json:"description,omitempty"`
+
+	// Id The plan's ID, `hc_pln_` and 20 characters.
+	Id string `json:"id"`
+
+	// Name The plan's display name. Create refuses one longer than 255
+	// bytes (UTF-8); an update does not check the length.
+	Name string `json:"name"`
+
+	// Prices The plan's usage prices from now on, in the order they were
+	// added. A plan's meters are the meters it has a price for.
 	Prices []PlanPrice `json:"prices"`
-	Status PlanStatus  `json:"status"`
 
-	// TaxCode Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`.
-	TaxCode   string    `json:"tax_code,omitempty"`
-	TenantId  string    `json:"tenant_id,omitempty"`
+	// Status An archived plan takes no new subscriptions and no plan change
+	// onto it. Subscriptions already on it keep billing.
+	Status PlanStatus `json:"status"`
+
+	// TaxCode A Stripe product tax code, such as `txcd_10103001`, read only
+	// by the Stripe Tax provider. Today only the base fee line of the
+	// invoice billed when an in-advance subscription starts carries
+	// it; cycle invoices and usage lines use the account's
+	// `default_product_tax_code`. Absent when not set.
+	TaxCode string `json:"tax_code,omitempty"`
+
+	// TenantId The account the plan belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the plan was last changed.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// PlanBaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
-// in_arrears: base + usage billed at period end.
-// in_advance: base billed at period start (day 1 on create; cycle-close invoice
-// carries upcoming period's base + elapsed period's usage). Usage lines are
-// always arrears regardless of this field. A plan with no base fee is
-// in_arrears. See ADR-031.
+// PlanBaseBillTiming When the base fee is invoiced, relative to the period it
+// covers. `in_arrears`: the base fee and the usage are billed at
+// the period end. `in_advance`: the base fee is billed at the
+// period start; the first invoice comes when the subscription
+// starts, and each cycle invoice carries the next period's base
+// fee with the past period's usage. Usage is always billed at
+// the period end. A plan with no base fee is `in_arrears`.
 type PlanBaseBillTiming string
 
-// PlanBillingInterval defines model for Plan.BillingInterval.
+// PlanBillingInterval How often a subscription to the plan is billed. Fixed after create.
 type PlanBillingInterval string
 
-// PlanStatus defines model for Plan.Status.
+// PlanStatus An archived plan takes no new subscriptions and no plan change
+// onto it. Subscriptions already on it keep billing.
 type PlanStatus string
 
 // PlanDetail defines model for PlanDetail.
 type PlanDetail struct {
+	// BaseAmountCents The recurring base fee per billing period, in the currency's minor
+	// unit (cents for USD). 0 for a usage-only plan.
 	BaseAmountCents int64 `json:"base_amount_cents"`
 
-	// BaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
-	// in_arrears: base + usage billed at period end.
-	// in_advance: base billed at period start (day 1 on create; cycle-close invoice
-	// carries upcoming period's base + elapsed period's usage). Usage lines are
-	// always arrears regardless of this field. A plan with no base fee is
-	// in_arrears. See ADR-031.
-	BaseBillTiming  PlanDetailBaseBillTiming  `json:"base_bill_timing"`
+	// BaseBillTiming When the base fee is invoiced, relative to the period it
+	// covers. `in_arrears`: the base fee and the usage are billed at
+	// the period end. `in_advance`: the base fee is billed at the
+	// period start; the first invoice comes when the subscription
+	// starts, and each cycle invoice carries the next period's base
+	// fee with the past period's usage. Usage is always billed at
+	// the period end. A plan with no base fee is `in_arrears`.
+	BaseBillTiming PlanDetailBaseBillTiming `json:"base_bill_timing"`
+
+	// BillingInterval How often a subscription to the plan is billed. Fixed after create.
 	BillingInterval PlanDetailBillingInterval `json:"billing_interval"`
-	Code            string                    `json:"code"`
-	CreatedAt       time.Time                 `json:"created_at"`
-	Currency        string                    `json:"currency"`
-	Description     string                    `json:"description,omitempty"`
-	Id              string                    `json:"id"`
+
+	// Code Your short name for the plan. Letters, digits, `-` and `_`, at
+	// most 100 characters, unique in the account and mode. Fixed
+	// after create.
+	Code string `json:"code"`
+
+	// CreatedAt When the plan was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Currency ISO 4217 code in upper case, such as `USD`. Fixed after create.
+	// The plan's prices take it.
+	Currency string `json:"currency"`
+
+	// Description Your description of the plan. Absent when empty.
+	Description string `json:"description,omitempty"`
+
+	// Id The plan's ID, `hc_pln_` and 20 characters.
+	Id string `json:"id"`
 
 	// LiveSubscriptionCount Subscriptions on this plan that are not canceled. While it
 	// is above 0, `base_amount_cents` cannot change (see Update
-	// plan).
-	LiveSubscriptionCount int    `json:"live_subscription_count"`
-	Name                  string `json:"name"`
+	// plan). Always 0 on the answer to a create.
+	LiveSubscriptionCount int `json:"live_subscription_count"`
 
-	// Prices The plan's usage prices from now on. A plan's meters are the
-	// meters it has a price for.
-	Prices []PlanPrice      `json:"prices"`
+	// Name The plan's display name. Create refuses one longer than 255
+	// bytes (UTF-8); an update does not check the length.
+	Name string `json:"name"`
+
+	// Prices The plan's usage prices from now on, in the order they were
+	// added. A plan's meters are the meters it has a price for.
+	Prices []PlanPrice `json:"prices"`
+
+	// Status An archived plan takes no new subscriptions and no plan change
+	// onto it. Subscriptions already on it keep billing.
 	Status PlanDetailStatus `json:"status"`
 
-	// TaxCode Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`.
-	TaxCode   string    `json:"tax_code,omitempty"`
-	TenantId  string    `json:"tenant_id,omitempty"`
+	// TaxCode A Stripe product tax code, such as `txcd_10103001`, read only
+	// by the Stripe Tax provider. Today only the base fee line of the
+	// invoice billed when an in-advance subscription starts carries
+	// it; cycle invoices and usage lines use the account's
+	// `default_product_tax_code`. Absent when not set.
+	TaxCode string `json:"tax_code,omitempty"`
+
+	// TenantId The account the plan belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the plan was last changed.
 	UpdatedAt time.Time `json:"updated_at"`
 
 	// Used Whether a subscription has ever used the plan (canceled ones
@@ -5842,25 +7656,30 @@ type PlanDetail struct {
 	Used bool `json:"used"`
 }
 
-// PlanDetailBaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
-// in_arrears: base + usage billed at period end.
-// in_advance: base billed at period start (day 1 on create; cycle-close invoice
-// carries upcoming period's base + elapsed period's usage). Usage lines are
-// always arrears regardless of this field. A plan with no base fee is
-// in_arrears. See ADR-031.
+// PlanDetailBaseBillTiming When the base fee is invoiced, relative to the period it
+// covers. `in_arrears`: the base fee and the usage are billed at
+// the period end. `in_advance`: the base fee is billed at the
+// period start; the first invoice comes when the subscription
+// starts, and each cycle invoice carries the next period's base
+// fee with the past period's usage. Usage is always billed at
+// the period end. A plan with no base fee is `in_arrears`.
 type PlanDetailBaseBillTiming string
 
-// PlanDetailBillingInterval defines model for PlanDetail.BillingInterval.
+// PlanDetailBillingInterval How often a subscription to the plan is billed. Fixed after create.
 type PlanDetailBillingInterval string
 
-// PlanDetailStatus defines model for PlanDetail.Status.
+// PlanDetailStatus An archived plan takes no new subscriptions and no plan change
+// onto it. Subscriptions already on it keep billing.
 type PlanDetailStatus string
 
 // PlanPrice One usage price of a plan: a meter, the events it takes
 // (`dimension_match`) and its rate. The price takes the plan's
 // currency. Its id stays the same when its rate changes; its meter
-// and `dimension_match` are its identity and never change.
+// and `dimension_match` are its identity and never change. Every
+// shape field is always sent: the ones the mode does not use are
+// `"0"`, `0` or `[]`.
 type PlanPrice struct {
+	// CreatedAt When the price was first added to the plan.
 	CreatedAt time.Time `json:"created_at"`
 
 	// DimensionMatch The labels an event must carry for this price to take it, for
@@ -5868,41 +7687,56 @@ type PlanPrice struct {
 	// `{}` takes every event of the meter. Of the prices whose labels
 	// an event carries, the one with the most labels takes it.
 	DimensionMatch map[string]string `json:"dimension_match"`
-	Id             string            `json:"id"`
-	MeterId        string            `json:"meter_id"`
 
-	// Mode As on PriceShape.
+	// Id The price's ID, `hc_prc_` and 20 characters.
+	Id string `json:"id"`
+
+	// MeterId The meter whose usage the price bills.
+	MeterId string `json:"meter_id"`
+
+	// Mode How the price bills a quantity; see PriceShape.
 	Mode PlanPriceMode `json:"mode"`
 
-	// PackageAmountCents Price of one package in cents, as a decimal string.
+	// PackageAmountCents Price of one package, as a decimal string of cents. `"0"` unless
+	// `mode` is `package`.
 	PackageAmountCents string `json:"package_amount_cents"`
-	PackageSize        int64  `json:"package_size"`
-	PlanId             string `json:"plan_id"`
-	TenantId           string `json:"tenant_id,omitempty"`
+
+	// PackageSize The units in one package. 0 unless `mode` is `package`.
+	PackageSize int64 `json:"package_size"`
+
+	// PlanId The plan the price belongs to.
+	PlanId string `json:"plan_id"`
+
+	// TenantId The account the price belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
 
 	// Tiers Empty (`[]`) unless `mode` is `graduated`.
 	Tiers []PriceTier `json:"tiers"`
 
-	// UnitAmountCents Price per unit in cents, as a decimal string.
+	// UnitAmountCents Price per unit, as a decimal string of cents. `"0"` unless `mode`
+	// is `per_unit`.
 	UnitAmountCents string `json:"unit_amount_cents"`
 
 	// UpdatedAt When the content shown was saved.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// PlanPriceMode As on PriceShape.
+// PlanPriceMode How the price bills a quantity; see PriceShape.
 type PlanPriceMode string
 
 // PriceInput defines model for PriceInput.
 type PriceInput struct {
 	// DimensionMatch The labels an event must carry for the price to take it.
-	// Values are strings of 1 to 100 characters, keys too; at
-	// most 16 labels. Omitted or `{}` takes every event of the
-	// meter. Two prices of one plan and meter that could both take
-	// one event with the same number of labels are refused (409
-	// `price_conflict`).
+	// At most 16 labels. Each key and each value is a string of 1
+	// to 100 bytes (UTF-8), and a key may not be only spaces.
+	// Omitted or `{}` takes every event of the meter. Two prices of
+	// one plan and meter that could both take one event with the
+	// same number of labels are refused (409 `price_conflict`).
 	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
-	MeterId        string            `json:"meter_id"`
+
+	// MeterId The meter whose usage the price bills. It must be a meter in
+	// this account and mode.
+	MeterId string `json:"meter_id"`
 
 	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
 	Mode PriceInputMode `json:"mode"`
@@ -5910,7 +7744,7 @@ type PriceInput struct {
 	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`.
 	PackageAmountCents string `json:"package_amount_cents,omitempty"`
 
-	// PackageSize Used when `mode` is `package`. Must be above 0.
+	// PackageSize Used when `mode` is `package`. The units in one package, above 0.
 	PackageSize int64 `json:"package_size,omitempty"`
 
 	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0).
@@ -5923,9 +7757,11 @@ type PriceInput struct {
 // PriceInputMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
 type PriceInputMode string
 
-// PriceShape How a price bills a quantity. Send only the mode's fields: a field the
-// mode does not use must be 0 or left out (`tiers`: `[]` or left out),
-// or the request is refused with 422 and `param` naming it.
+// PriceShape How a price bills a quantity: its mode and the mode's fields. It is
+// the body of `PATCH /v1/plans/{id}/prices/{price_id}` and part of
+// every price you add. Send only the mode's fields: a field the mode
+// does not use must be 0 or left out (`tiers`: `[]` or left out), or
+// the request is refused with 422 and `param` naming it.
 type PriceShape struct {
 	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
 	Mode PriceShapeMode `json:"mode"`
@@ -5933,7 +7769,7 @@ type PriceShape struct {
 	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`.
 	PackageAmountCents string `json:"package_amount_cents,omitempty"`
 
-	// PackageSize Used when `mode` is `package`. Must be above 0.
+	// PackageSize Used when `mode` is `package`. The units in one package, above 0.
 	PackageSize int64 `json:"package_size,omitempty"`
 
 	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0).
@@ -5946,9 +7782,10 @@ type PriceShape struct {
 // PriceShapeMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
 type PriceShapeMode string
 
-// PriceTier defines model for PriceTier.
+// PriceTier One tier of a graduated price.
 type PriceTier struct {
-	// UnitAmountCents Price per unit in cents in this tier, as a decimal string.
+	// UnitAmountCents Price per unit in cents in this tier, as a decimal string. `"0"`
+	// makes the tier free.
 	UnitAmountCents string `json:"unit_amount_cents"`
 
 	// UpTo The tier's upper bound in whole units: the tier prices the quantity above the previous tier's bound, up to this one. `null` on the last tier, which has no upper bound. Only the last tier is `null`, and it must be.
@@ -5957,130 +7794,236 @@ type PriceTier struct {
 
 // PriceWrite defines model for PriceWrite.
 type PriceWrite struct {
+	// CreatedAt When the price was first added to the plan.
 	CreatedAt time.Time `json:"created_at"`
 
 	// DimensionMatch The labels an event must carry for this price to take it, for
 	// example `{"model": "claude-opus-4.5", "token_type": "input"}`.
 	// `{}` takes every event of the meter. Of the prices whose labels
 	// an event carries, the one with the most labels takes it.
-	DimensionMatch map[string]string   `json:"dimension_match"`
-	Effective      PriceWriteEffective `json:"effective"`
+	DimensionMatch map[string]string `json:"dimension_match"`
 
-	// EndedOverrides On a removal, the customer overrides of the price it ended.
-	// Each ends when the removal takes effect for its customer.
+	// Effective When the write applies, as explained above.
+	Effective PriceWriteEffective `json:"effective"`
+
+	// EndedOverrides On a removal, the customer overrides of the price it ended
+	// (`[]` when there were none). Each ends when the removal
+	// takes effect for its customer. Absent on an add or a
+	// change.
 	EndedOverrides []struct {
+		// CustomerId The customer the override was for.
 		CustomerId string `json:"customer_id"`
-		Id         string `json:"id"`
+
+		// Id The ended override's ID.
+		Id string `json:"id"`
 	} `json:"ended_overrides,omitempty"`
-	Id      string `json:"id"`
+
+	// Id The price's ID, `hc_prc_` and 20 characters.
+	Id string `json:"id"`
+
+	// MeterId The meter whose usage the price bills.
 	MeterId string `json:"meter_id"`
 
-	// Mode As on PriceShape.
+	// Mode How the price bills a quantity; see PriceShape.
 	Mode PriceWriteMode `json:"mode"`
 
-	// PackageAmountCents Price of one package in cents, as a decimal string.
+	// PackageAmountCents Price of one package, as a decimal string of cents. `"0"` unless
+	// `mode` is `package`.
 	PackageAmountCents string `json:"package_amount_cents"`
-	PackageSize        int64  `json:"package_size"`
-	PlanId             string `json:"plan_id"`
 
-	// Removed True on the answer to a removal.
-	Removed  bool   `json:"removed,omitempty"`
+	// PackageSize The units in one package. 0 unless `mode` is `package`.
+	PackageSize int64 `json:"package_size"`
+
+	// PlanId The plan the price belongs to.
+	PlanId string `json:"plan_id"`
+
+	// Removed True on the answer to a removal. Absent otherwise.
+	Removed bool `json:"removed,omitempty"`
+
+	// TenantId The account the price belongs to.
 	TenantId string `json:"tenant_id,omitempty"`
 
 	// Tiers Empty (`[]`) unless `mode` is `graduated`.
 	Tiers []PriceTier `json:"tiers"`
 
-	// UnitAmountCents Price per unit in cents, as a decimal string.
+	// UnitAmountCents Price per unit, as a decimal string of cents. `"0"` unless `mode`
+	// is `per_unit`.
 	UnitAmountCents string `json:"unit_amount_cents"`
 
 	// UpdatedAt When the content shown was saved.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// PriceWriteEffective defines model for PriceWrite.Effective.
+// PriceWriteEffective When the write applies, as explained above.
 type PriceWriteEffective string
 
-// PriceWriteMode As on PriceShape.
+// PriceWriteMode How the price bills a quantity; see PriceShape.
 type PriceWriteMode string
 
-// ProviderCostRate defines model for ProviderCostRate.
+// ProviderCostRate What you pay an upstream AI provider per token, for one provider,
+// model and token type. When a usage event with matching `provider`,
+// `model` and `token_type` labels arrives, Hardcount stamps this cost
+// on it, unless the event already brings a cost the provider
+// reported. The margin report adds the stamps up. Editing or deleting
+// a rate changes only events that arrive later. The
+// `/v1/provider-costs` routes manage rates.
 type ProviderCostRate struct {
+	// CreatedAt When the rate was first set.
 	CreatedAt time.Time `json:"created_at"`
 
 	// Currency Always USD. Cost and margin count every rate in US cents.
-	Currency  ProviderCostRateCurrency `json:"currency"`
-	Id        string                   `json:"id"`
-	Model     string                   `json:"model"`
-	Provider  string                   `json:"provider"`
-	TenantId  string                   `json:"tenant_id,omitempty"`
-	TokenType string                   `json:"token_type"`
+	Currency ProviderCostRateCurrency `json:"currency"`
 
-	// UnitCostCents US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens).
-	UnitCostCents string    `json:"unit_cost_cents"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	// Id The rate's ID, `hc_pcr_` and 24 hex characters.
+	Id string `json:"id"`
+
+	// Model The model, such as `claude-sonnet-4.5`. An event matches on its
+	// `model_raw` label first, then on its `model` label.
+	Model string `json:"model"`
+
+	// Provider The provider, in lower case, such as `anthropic`. It must equal
+	// the `provider` label of the usage events it costs.
+	Provider string `json:"provider"`
+
+	// TenantId The account the rate belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TokenType The kind of token, in lower case, such as `input`, `output` or
+	// `cache_read`. It must equal the `token_type` label of the usage
+	// events it costs.
+	TokenType string `json:"token_type"`
+
+	// UnitCostCents US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per
+	// 1,000,000 tokens).
+	UnitCostCents string `json:"unit_cost_cents"`
+
+	// UpdatedAt When the rate was last set.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // ProviderCostRateCurrency Always USD. Cost and margin count every rate in US cents.
 type ProviderCostRateCurrency string
 
-// PublicPaymentUpdate What the payment-update page shows before the customer adds a card.
+// PublicPaymentUpdate What the payment-update page shows before the customer adds a
+// card: `GET /v1/public/payment-updates/{token}`. The page opens from
+// the link in a payment setup email. Hardcount queues one when an
+// invoice has no payment method to charge, the customer has an email
+// address and the server's `PAYMENT_UPDATE_URL` is set, and again on
+// each `POST /v1/invoices/{id}/resend-setup-link`.
 type PublicPaymentUpdate struct {
-	// AmountDueCents Not cleared when the invoice is voided. Check `invoice_status` before asking for payment.
+	// AmountDueCents What is due on the invoice, in the currency's minor unit (cents
+	// for USD). Not cleared when the invoice is voided: check
+	// `invoice_status` before asking for payment.
 	AmountDueCents int64 `json:"amount_due_cents"`
-	Branding       struct {
-		BrandColor   string `json:"brand_color,omitempty"`
+
+	// Branding The seller's branding from its account settings. A field the
+	// seller has not set is absent.
+	Branding struct {
+		// BrandColor The seller's brand color, such as `#4F46E5`.
+		BrandColor string `json:"brand_color,omitempty"`
+
+		// CompanyEmail The seller's contact email.
 		CompanyEmail string `json:"company_email,omitempty"`
-		CompanyName  string `json:"company_name,omitempty"`
-		LogoUrl      string `json:"logo_url,omitempty"`
-		SupportUrl   string `json:"support_url,omitempty"`
+
+		// CompanyName The seller's company name.
+		CompanyName string `json:"company_name,omitempty"`
+
+		// LogoUrl The address of the seller's logo.
+		LogoUrl string `json:"logo_url,omitempty"`
+
+		// SupportUrl Where the customer can get help.
+		SupportUrl string `json:"support_url,omitempty"`
 	} `json:"branding"`
-	Currency      string `json:"currency"`
-	CustomerName  string `json:"customer_name"`
+
+	// Currency The invoice's currency, such as `USD`.
+	Currency string `json:"currency"`
+
+	// CustomerName The customer's display name.
+	CustomerName string `json:"customer_name"`
+
+	// InvoiceNumber The number of the invoice the link was sent for.
 	InvoiceNumber string `json:"invoice_number"`
 
-	// InvoiceStatus Lifecycle state of the invoice. `uncollectible` marks an invoice
-	// a dunning policy has given up collecting (no further retries) while
-	// keeping it on the books — distinct from `voided` (cancelled, owes
-	// nothing).
+	// InvoiceStatus Where the invoice is in its life.
+	// - `draft`: not issued yet. Lines can still be added, and nothing is
+	//   charged.
+	// - `finalized`: issued and owed. Hardcount collects it.
+	// - `paid`: settled, by card, credit, an offline payment or a credit
+	//   note that left nothing due.
+	// - `voided`: cancelled. Nothing is owed. Voiding is final.
+	// - `uncollectible`: written off as bad debt, by you
+	//   (`POST /v1/invoices/{id}/mark-uncollectible`) or by a dunning
+	//   policy's final action. Hardcount stops collecting it, but it stays
+	//   on the books and can still be paid.
 	InvoiceStatus InvoiceStatus `json:"invoice_status"`
 }
 
-// ReadinessReport defines model for ReadinessReport.
+// ReadinessReport The body of `GET /health/ready`, on both 200 and 503.
 type ReadinessReport struct {
 	// Checks One entry per check. `api` is `ok` or `draining`. `database` is
 	// `ok` or `error`. `scheduler` starts with `ok` or `degraded`,
 	// followed by detail such as `ok: last run 12s ago`. While
 	// draining, only `api` is sent.
-	Checks map[string]string     `json:"checks"`
+	Checks map[string]string `json:"checks"`
+
+	// Status `ok` when every check passed. `degraded` when the database
+	// cannot be reached (503) or the billing scheduler is late (still
+	// 200). `draining` while the server shuts down (503).
 	Status ReadinessReportStatus `json:"status"`
 }
 
-// ReadinessReportStatus defines model for ReadinessReport.Status.
+// ReadinessReportStatus `ok` when every check passed. `degraded` when the database
+// cannot be reached (503) or the billing scheduler is late (still
+// 200). `draining` while the server shuts down (503).
 type ReadinessReportStatus string
 
-// Recipe A recipe template as served by list/detail: the full parsed YAML, its meters and its plans with their prices, not just display metadata. A recipe creates nothing else.
+// Recipe A ready-made pricing setup built into Hardcount: its meters, and its plans with their prices, with every overridable value at its default. Installing it creates those objects. A recipe creates nothing else.
 type Recipe struct {
-	Description string           `json:"description,omitempty"`
-	Key         string           `json:"key"`
-	Meters      []RecipeMeter    `json:"meters"`
-	Name        string           `json:"name"`
+	// Description A longer description. Absent when the recipe has none.
+	Description string `json:"description,omitempty"`
+
+	// Key The recipe's key, used in the recipe routes, such as `replicate_style`.
+	Key string `json:"key"`
+
+	// Meters The meters the recipe creates or reuses.
+	Meters []RecipeMeter `json:"meters"`
+
+	// Name The recipe's display name.
+	Name string `json:"name"`
+
+	// Overridable The values you can set before installing.
 	Overridable []RecipeOverride `json:"overridable"`
-	Plans       []RecipePlan     `json:"plans"`
-	Summary     string           `json:"summary"`
-	Version     string           `json:"version"`
+
+	// Plans The plans the recipe creates, with their prices.
+	Plans []RecipePlan `json:"plans"`
+
+	// Summary A short description of what the recipe sets up.
+	Summary string `json:"summary"`
+
+	// Version The recipe's version.
+	Version string `json:"version"`
 }
 
-// RecipeCreatedObjects Per-role map of entity IDs a recipe apply produced (including ADOPTED meters — apply reconnects to an existing meter rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
+// RecipeCreatedObjects The IDs of the objects an install made, by kind. `meter_ids` also holds a meter the install reused rather than made. Each list is absent when empty.
 type RecipeCreatedObjects struct {
+	// MeterIds The meters the install made or reused.
 	MeterIds []string `json:"meter_ids,omitempty"`
-	PlanIds  []string `json:"plan_ids,omitempty"`
+
+	// PlanIds The plans the install made.
+	PlanIds []string `json:"plan_ids,omitempty"`
+
+	// PriceIds The prices the install put on its plans.
 	PriceIds []string `json:"price_ids,omitempty"`
 }
 
-// RecipeCreates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
+// RecipeCreates How many objects a recipe makes when installed, by kind. A recipe makes only meters, plans and prices.
 type RecipeCreates struct {
+	// Meters The meters the recipe declares. An install reuses a matching meter
+	// instead of making a new one.
 	Meters int `json:"meters"`
-	Plans  int `json:"plans"`
+
+	// Plans The plans an install creates.
+	Plans int `json:"plans"`
 
 	// Prices The prices the install puts on its plans.
 	Prices int `json:"prices"`
@@ -6088,114 +8031,204 @@ type RecipeCreates struct {
 
 // RecipeDetail defines model for RecipeDetail.
 type RecipeDetail struct {
-	// Creates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
-	Creates     RecipeCreates    `json:"creates"`
-	Description string           `json:"description,omitempty"`
-	Key         string           `json:"key"`
-	Meters      []RecipeMeter    `json:"meters"`
-	Name        string           `json:"name"`
+	// Creates How many objects a recipe makes when installed, by kind. A recipe makes only meters, plans and prices.
+	Creates RecipeCreates `json:"creates"`
+
+	// Description A longer description. Absent when the recipe has none.
+	Description string `json:"description,omitempty"`
+
+	// Key The recipe's key, used in the recipe routes, such as `replicate_style`.
+	Key string `json:"key"`
+
+	// Meters The meters the recipe creates or reuses.
+	Meters []RecipeMeter `json:"meters"`
+
+	// Name The recipe's display name.
+	Name string `json:"name"`
+
+	// Overridable The values you can set before installing.
 	Overridable []RecipeOverride `json:"overridable"`
-	Plans       []RecipePlan     `json:"plans"`
-	Summary     string           `json:"summary"`
-	Version     string           `json:"version"`
+
+	// Plans The plans the recipe creates, with their prices.
+	Plans []RecipePlan `json:"plans"`
+
+	// Summary A short description of what the recipe sets up.
+	Summary string `json:"summary"`
+
+	// Version The recipe's version.
+	Version string `json:"version"`
 }
 
-// RecipeInstance The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses.
+// RecipeInstance The record that a recipe was installed in this account and mode, and what the install made. A recipe is installed once per mode; installing it again returns this record. Its fields are `recipe_key` and `recipe_version`, not the recipe's own `key` and `version`.
 type RecipeInstance struct {
+	// CreatedAt When the recipe was installed.
 	CreatedAt time.Time `json:"created_at"`
 
-	// CreatedBy Operator email or API key ID. Omitted when empty.
+	// CreatedBy The ID of the API key that installed the recipe. Absent for an
+	// install from a dashboard session.
 	CreatedBy string `json:"created_by,omitempty"`
 
-	// CreatedObjects Per-role map of entity IDs a recipe apply produced (including ADOPTED meters — apply reconnects to an existing meter rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
-	CreatedObjects RecipeCreatedObjects   `json:"created_objects"`
-	Id             string                 `json:"id"`
-	Overrides      map[string]interface{} `json:"overrides"`
-	RecipeKey      string                 `json:"recipe_key"`
-	RecipeVersion  string                 `json:"recipe_version"`
+	// CreatedObjects The IDs of the objects an install made, by kind. `meter_ids` also holds a meter the install reused rather than made. Each list is absent when empty.
+	CreatedObjects RecipeCreatedObjects `json:"created_objects"`
 
-	// TenantId Omitted when empty.
+	// Id The install's ID, `hc_rec_` and 24 hex characters.
+	Id string `json:"id"`
+
+	// Overrides The overrides the install was sent, as sent (`{}` when none).
+	// Defaults are not filled in.
+	Overrides map[string]interface{} `json:"overrides"`
+
+	// RecipeKey The `key` of the recipe installed.
+	RecipeKey string `json:"recipe_key"`
+
+	// RecipeVersion The recipe's `version` at the install.
+	RecipeVersion string `json:"recipe_version"`
+
+	// TenantId The account the recipe was installed in.
 	TenantId string `json:"tenant_id,omitempty"`
 }
 
 // RecipeListItem defines model for RecipeListItem.
 type RecipeListItem struct {
-	// Creates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
-	Creates     RecipeCreates `json:"creates"`
-	Description string        `json:"description,omitempty"`
+	// Creates How many objects a recipe makes when installed, by kind. A recipe makes only meters, plans and prices.
+	Creates RecipeCreates `json:"creates"`
 
-	// Instantiated The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses.
-	Instantiated RecipeInstance   `json:"instantiated,omitempty"`
-	Key          string           `json:"key"`
-	Meters       []RecipeMeter    `json:"meters"`
-	Name         string           `json:"name"`
-	Overridable  []RecipeOverride `json:"overridable"`
-	Plans        []RecipePlan     `json:"plans"`
-	Summary      string           `json:"summary"`
-	Version      string           `json:"version"`
+	// Description A longer description. Absent when the recipe has none.
+	Description string `json:"description,omitempty"`
+
+	// Instantiated The record that a recipe was installed in this account and mode, and what the install made. A recipe is installed once per mode; installing it again returns this record. Its fields are `recipe_key` and `recipe_version`, not the recipe's own `key` and `version`.
+	Instantiated RecipeInstance `json:"instantiated,omitempty"`
+
+	// Key The recipe's key, used in the recipe routes, such as `replicate_style`.
+	Key string `json:"key"`
+
+	// Meters The meters the recipe creates or reuses.
+	Meters []RecipeMeter `json:"meters"`
+
+	// Name The recipe's display name.
+	Name string `json:"name"`
+
+	// Overridable The values you can set before installing.
+	Overridable []RecipeOverride `json:"overridable"`
+
+	// Plans The plans the recipe creates, with their prices.
+	Plans []RecipePlan `json:"plans"`
+
+	// Summary A short description of what the recipe sets up.
+	Summary string `json:"summary"`
+
+	// Version The recipe's version.
+	Version string `json:"version"`
 }
 
-// RecipeMeter defines model for RecipeMeter.
+// RecipeMeter A meter a recipe creates, or reuses when one with the same
+// `event_name` and aggregation exists.
 type RecipeMeter struct {
+	// Aggregation How the meter rolls its events into one quantity per period, one
+	// of `sum`, `count`, `max` or `last`.
 	Aggregation string `json:"aggregation"`
-	EventName   string `json:"event_name"`
-	Name        string `json:"name"`
-	Unit        string `json:"unit"`
+
+	// EventName The `event_name` usage events send for the meter.
+	EventName string `json:"event_name"`
+
+	// Name The meter's display name.
+	Name string `json:"name"`
+
+	// Unit The unit of the quantity, such as `seconds`.
+	Unit string `json:"unit"`
 }
 
-// RecipeOverride One override key declared in a recipe's `overridable` list. Drives validation at instantiate time and the override form in the dashboard's preview dialog.
+// RecipeOverride One value of a recipe you can set before you install it, such as the currency or the plan's name. The recipe's `overridable` list holds them; preview and install check `overrides` against them.
 type RecipeOverride struct {
 	// Default Default value applied when the override is not supplied.
-	Default   interface{}        `json:"default"`
-	Enum      []string           `json:"enum,omitempty"`
-	Key       string             `json:"key"`
-	MaxLength int                `json:"max_length,omitempty"`
-	Pattern   string             `json:"pattern,omitempty"`
-	Type      RecipeOverrideType `json:"type"`
+	Default interface{} `json:"default"`
+
+	// Enum The only values allowed. Absent when any value of the type is allowed.
+	Enum []string `json:"enum,omitempty"`
+
+	// Key The name to use in `overrides`, such as `currency`.
+	Key string `json:"key"`
+
+	// MaxLength The most bytes a string value may have. Absent when there is no limit.
+	MaxLength int `json:"max_length,omitempty"`
+
+	// Pattern A regular expression a string value must match. Absent when there is none.
+	Pattern string `json:"pattern,omitempty"`
+
+	// Type The JSON type the value must have. `int` takes any JSON number.
+	Type RecipeOverrideType `json:"type"`
 }
 
-// RecipeOverrideType defines model for RecipeOverride.Type.
+// RecipeOverrideType The JSON type the value must have. `int` takes any JSON number.
 type RecipeOverrideType string
 
-// RecipePlan defines model for RecipePlan.
+// RecipePlan A plan a recipe creates, with its usage prices. An install always
+// creates a new plan.
 type RecipePlan struct {
+	// BaseAmountCents The plan's recurring base fee, in the currency's minor unit (cents for USD).
 	BaseAmountCents int64 `json:"base_amount_cents"`
 
-	// BaseBillTiming Optional when the base fee is 0; the plan is then in_arrears (ADR-031).
-	BaseBillTiming  RecipePlanBaseBillTiming  `json:"base_bill_timing,omitempty"`
+	// BaseBillTiming When the base fee is billed; see Plan. Absent when the recipe
+	// leaves it out, which it may only with a base fee of 0. The plan is
+	// then `in_arrears`.
+	BaseBillTiming RecipePlanBaseBillTiming `json:"base_bill_timing,omitempty"`
+
+	// BillingInterval How often a subscription to the plan is billed.
 	BillingInterval RecipePlanBillingInterval `json:"billing_interval"`
-	Code            string                    `json:"code"`
-	Currency        string                    `json:"currency"`
-	Name            string                    `json:"name"`
+
+	// Code The plan's code. When a plan with this code exists, the install
+	// gives the new plan the first free code with `_2`, `_3` and so
+	// on added.
+	Code string `json:"code"`
+
+	// Currency The plan's currency, such as `USD`.
+	Currency string `json:"currency"`
+
+	// Name The plan's name.
+	Name string `json:"name"`
 
 	// Prices The plan's usage prices. Each takes the plan's currency.
 	Prices []RecipePrice `json:"prices"`
 }
 
-// RecipePlanBaseBillTiming Optional when the base fee is 0; the plan is then in_arrears (ADR-031).
+// RecipePlanBaseBillTiming When the base fee is billed; see Plan. Absent when the recipe
+// leaves it out, which it may only with a base fee of 0. The plan is
+// then `in_arrears`.
 type RecipePlanBaseBillTiming string
 
-// RecipePlanBillingInterval defines model for RecipePlan.BillingInterval.
+// RecipePlanBillingInterval How often a subscription to the plan is billed.
 type RecipePlanBillingInterval string
 
 // RecipePreviewObjects What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation.
 type RecipePreviewObjects struct {
+	// Meters The meters the install creates or reuses.
 	Meters []RecipeMeter `json:"meters"`
-	Plans  []RecipePlan  `json:"plans"`
+
+	// Plans The plans the install creates, with the overrides applied. An
+	// install that finds a plan's code taken gives the new plan the
+	// first free code with `_2`, `_3` and so on added.
+	Plans []RecipePlan `json:"plans"`
 }
 
-// RecipePreviewResult defines model for RecipePreviewResult.
+// RecipePreviewResult The answer to `POST /v1/recipes/{key}/preview`: what installing the recipe with your overrides would create. Nothing is written.
 type RecipePreviewResult struct {
+	// Key The recipe's key.
 	Key string `json:"key"`
 
 	// Objects What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation.
-	Objects  RecipePreviewObjects `json:"objects"`
-	Version  string               `json:"version"`
-	Warnings []string             `json:"warnings"`
+	Objects RecipePreviewObjects `json:"objects"`
+
+	// Version The recipe's version.
+	Version string `json:"version"`
+
+	// Warnings Problems that would not stop the install. Always empty today.
+	Warnings []string `json:"warnings"`
 }
 
 // RecipePrice defines model for RecipePrice.
 type RecipePrice struct {
+	// DimensionMatch The labels an event must carry for the price to take it. `{}`
+	// takes every event of the meter.
 	DimensionMatch map[string]string `json:"dimension_match"`
 
 	// Meter The `event_name` of the recipe meter the price is on.
@@ -6207,7 +8240,7 @@ type RecipePrice struct {
 	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`.
 	PackageAmountCents string `json:"package_amount_cents,omitempty"`
 
-	// PackageSize Used when `mode` is `package`. Must be above 0.
+	// PackageSize Used when `mode` is `package`. The units in one package, above 0.
 	PackageSize int64 `json:"package_size,omitempty"`
 
 	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0).
@@ -6220,81 +8253,142 @@ type RecipePrice struct {
 // RecipePriceMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
 type RecipePriceMode string
 
-// RecoveryWarning What an operator must know BEFORE recording an OFFLINE payment on a
-// written-off invoice (`status = uncollectible`) — a consequence that
-// will go unreconciled, never a refusal. The money already arrived, and
-// refusing to record it would only make the books wrong too.
-//
-// A written-off invoice is settled by RECORDING writers only — an
-// offline payment, or Hardcount recording a card charge that Stripe shows
-// succeeded (its webhook, or the check of an unresolved charge).
-// Nothing initiates a card
-// charge against one (ADR-113): recovery of a returned customer runs on
-// normal rails via a fresh recovery invoice.
-//
-// `tax_reversed_unrecoverable` — the invoice's tax was reversed with the
-// tax provider and cannot be re-reported automatically; the recorded
-// payment collects tax already reported as not collected.
-// `relief_not_reissued` — a credit the invoice was owed was never
-// applied, so `amount_due_cents` is higher than what is owed and the
-// customer may have overpaid.
+// RecoveryWarning What you should know before you record an offline payment on a
+// written-off invoice (`status` `uncollectible`): a consequence that
+// will not reconcile on its own. It never refuses the payment, because
+// the money already arrived. A written-off invoice is never charged by
+// card. It is settled only by recording a payment: an offline payment,
+// or a card payment Stripe shows succeeded.
 type RecoveryWarning struct {
-	// Blocked Always false — this shape only ever warns.
-	Blocked bool                `json:"blocked"`
-	Code    RecoveryWarningCode `json:"code,omitempty"`
+	// Blocked Always false. This object only warns; it never refuses.
+	Blocked bool `json:"blocked"`
 
-	// Message Operator-facing sentence naming the consequence that will go unreconciled if the payment is recorded.
+	// Code What will not reconcile.
+	// `tax_reversed_unrecoverable`: the invoice's Stripe Tax
+	// transaction was reversed, and recording the payment does not
+	// report it again, so the tax collected will not appear in your
+	// tax provider's records.
+	// `relief_not_reissued`: a credit the invoice was owed was never
+	// applied, so `amount_due_cents` is higher than what is owed and the
+	// customer may have overpaid.
+	Code RecoveryWarningCode `json:"code,omitempty"`
+
+	// Message One sentence for the operator naming the consequence and what to
+	// do about it.
 	Message string `json:"message,omitempty"`
 }
 
-// RecoveryWarningCode defines model for RecoveryWarning.Code.
+// RecoveryWarningCode What will not reconcile.
+// `tax_reversed_unrecoverable`: the invoice's Stripe Tax
+// transaction was reversed, and recording the payment does not
+// report it again, so the tax collected will not appear in your
+// tax provider's records.
+// `relief_not_reissued`: a credit the invoice was owed was never
+// applied, so `amount_due_cents` is higher than what is owed and the
+// customer may have overpaid.
 type RecoveryWarningCode string
 
-// SentEmail defines model for SentEmail.
+// SentEmail One billing email Hardcount sent, or tried to send, to a customer
+// about one of its invoices. `GET /v1/customers/{id}/sent-emails`
+// lists them.
 type SentEmail struct {
+	// CreatedAt When the email was queued.
 	CreatedAt time.Time `json:"created_at"`
 
-	// DeliveryState What the email provider reported back, if anything.
+	// DeliveryState What the email provider reported back about delivery.
+	// `unknown` until it reports.
 	DeliveryState SentEmailDeliveryState `json:"delivery_state"`
-	DispatchedAt  time.Time              `json:"dispatched_at,omitempty"`
-	EmailType     SentEmailEmailType     `json:"email_type"`
-	Id            string                 `json:"id"`
-	InvoiceNumber string                 `json:"invoice_number,omitempty"`
-	LastError     string                 `json:"last_error,omitempty"`
 
-	// Line The email in the words of the activity line standard (ADR-128),
-	// the same as on the invoice's payment timeline: its name and
-	// what happened to it ("Receipt email delivered"), why it was not
-	// sent, the invoice it was about, and who it went to. Dated at the
-	// time on the customer's test clock that caused it, with the real
-	// send time as `recorded_at`. Present for every email type this
-	// list returns.
-	Line      ActivityLine `json:"line,omitempty"`
-	Recipient string       `json:"recipient"`
+	// DispatchedAt When the mail server accepted the email. Absent until then.
+	DispatchedAt time.Time `json:"dispatched_at,omitempty"`
 
-	// Status Hardcount's send state. `dispatched` means the mail server accepted it.
+	// EmailType Which email it is: the invoice, a payment receipt, a failed
+	// payment notice, a request to add a payment method, a payment
+	// reminder (`dunning_warning`), a final notice
+	// (`dunning_escalation`), or a credit note.
+	EmailType SentEmailEmailType `json:"email_type"`
+
+	// Id The email's ID, `hc_emob_` and 20 characters.
+	Id string `json:"id"`
+
+	// InvoiceNumber The number of the invoice the email is about.
+	InvoiceNumber string `json:"invoice_number,omitempty"`
+
+	// LastError Why the last send attempt failed, or, on a `skipped` email, why
+	// it was not sent. Cleared when the email is dispatched. Absent
+	// when there is none.
+	LastError string `json:"last_error,omitempty"`
+
+	// Line The email in the words of the activity line standard, the same
+	// as on the invoice's payment timeline: its name and what
+	// happened to it ("Receipt email delivered"), why it was not
+	// sent, the invoice it was about, and who it went to. Dated when
+	// the mail server took it, or when it was queued if it was not
+	// sent. For an email caused on a test clock, it is dated at the
+	// clock time instead, with the real send time as `recorded_at`.
+	// Present for every email type this list returns.
+	Line ActivityLine `json:"line,omitempty"`
+
+	// Recipient The address the email was sent to: its To address. CC copies
+	// are not listed.
+	Recipient string `json:"recipient"`
+
+	// Status Hardcount's send state. `pending`: queued, or waiting to retry
+	// after a failed attempt. `dispatched`: the mail server accepted
+	// it. `failed`: it could not be sent, and Hardcount stopped
+	// trying.
+	// `skipped`: Hardcount did not send it because its invoice was
+	// paid, voided or marked uncollectible while it waited. Only the
+	// payment requests are skipped (failed payment notice, payment
+	// reminder, final notice, payment setup request); a final notice
+	// or payment setup request still goes out for an uncollectible
+	// invoice.
 	Status SentEmailStatus `json:"status"`
 }
 
-// SentEmailDeliveryState What the email provider reported back, if anything.
+// SentEmailDeliveryState What the email provider reported back about delivery.
+// `unknown` until it reports.
 type SentEmailDeliveryState string
 
-// SentEmailEmailType defines model for SentEmail.EmailType.
+// SentEmailEmailType Which email it is: the invoice, a payment receipt, a failed
+// payment notice, a request to add a payment method, a payment
+// reminder (`dunning_warning`), a final notice
+// (`dunning_escalation`), or a credit note.
 type SentEmailEmailType string
 
-// SentEmailStatus Hardcount's send state. `dispatched` means the mail server accepted it.
+// SentEmailStatus Hardcount's send state. `pending`: queued, or waiting to retry
+// after a failed attempt. `dispatched`: the mail server accepted
+// it. `failed`: it could not be sent, and Hardcount stopped
+// trying.
+// `skipped`: Hardcount did not send it because its invoice was
+// paid, voided or marked uncollectible while it waited. Only the
+// payment requests are skipped (failed payment notice, payment
+// reminder, final notice, payment setup request); a final notice
+// or payment setup request still goes out for an uncollectible
+// invoice.
 type SentEmailStatus string
 
-// StripeConnection defines model for StripeConnection.
+// StripeConnection The account's own Stripe keys for one mode, without the secrets.
+// Hardcount uses them to charge customers and to read Stripe's
+// answers. `GET /v1/settings/stripe` lists one per connected mode.
 type StripeConnection struct {
-	CreatedAt        time.Time `json:"created_at"`
-	HasWebhookSecret bool      `json:"has_webhook_secret"`
+	// CreatedAt When keys were first saved for this mode.
+	CreatedAt time.Time `json:"created_at"`
 
-	// Id Also the `{id}` in the Stripe webhook URL `/v1/webhooks/stripe/{id}`.
+	// HasWebhookSecret Whether a webhook signing secret is saved. Until one is, Stripe
+	// webhooks sent to this connection are refused with 404.
+	HasWebhookSecret bool `json:"has_webhook_secret"`
+
+	// Id The connection's id (`hc_spc_…`). It is also the
+	// `{endpoint_id}` in the Stripe webhook URL
+	// `/v1/webhooks/stripe/{endpoint_id}`.
 	Id string `json:"id"`
 
 	// LastVerifiedError Why the last Stripe check failed, in Stripe's own words (or the
-	// network error when Stripe was not reached). Empty when it passed.
+	// network error when Stripe was not reached). Also set when Stripe
+	// refuses the key on a charge (401, or 403 for a restricted key);
+	// the next charge that goes through clears that. Absent when the
+	// check passed.
 	LastVerifiedError string `json:"last_verified_error,omitempty"`
 
 	// LastVerifiedErrorKind What kind of failure `last_verified_error` is. `rejected`: Stripe
@@ -6303,25 +8397,43 @@ type StripeConnection struct {
 	// key was not checked; connecting again may work. Absent when the
 	// check passed, and on keys that failed before this field existed.
 	LastVerifiedErrorKind StripeConnectionLastVerifiedErrorKind `json:"last_verified_error_kind,omitempty"`
-	Livemode              bool                                  `json:"livemode"`
-	PublishableKey        string                                `json:"publishable_key"`
 
-	// RetriesQueued Connect response only. Number of stuck invoices being retried in the background.
-	RetriesQueued  int    `json:"retries_queued,omitempty"`
+	// Livemode True for live-mode keys (`sk_live_…`), false for test-mode keys.
+	Livemode bool `json:"livemode"`
+
+	// PublishableKey The publishable key, in full. It is not a secret.
+	PublishableKey string `json:"publishable_key"`
+
+	// RetriesQueued Only in the answer to `POST /v1/settings/stripe`, and only when
+	// above 0: how many invoices that were stuck waiting for Stripe
+	// keys are now being retried in the background.
+	RetriesQueued int `json:"retries_queued,omitempty"`
+
+	// SecretKeyLast4 Last 4 characters of the secret key.
 	SecretKeyLast4 string `json:"secret_key_last4"`
 
 	// SecretKeyPrefix First 12 characters of the secret key.
 	SecretKeyPrefix string `json:"secret_key_prefix,omitempty"`
 
-	// StripeAccountId Set after Stripe accepted the key.
-	StripeAccountId   string    `json:"stripe_account_id,omitempty"`
-	StripeAccountName string    `json:"stripe_account_name,omitempty"`
-	TenantId          string    `json:"tenant_id"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	// StripeAccountId The Stripe account the key belongs to (`acct_…`). Absent until Stripe first accepts a key for this mode.
+	StripeAccountId string `json:"stripe_account_id,omitempty"`
 
-	// VerifiedAt Last time Stripe accepted the key.
-	VerifiedAt         time.Time `json:"verified_at,omitempty"`
-	WebhookSecretLast4 string    `json:"webhook_secret_last4,omitempty"`
+	// StripeAccountName The Stripe account's business name, or its dashboard name or
+	// email when it has none. Absent until Stripe accepts a key.
+	StripeAccountName string `json:"stripe_account_name,omitempty"`
+
+	// TenantId The account the keys belong to.
+	TenantId string `json:"tenant_id"`
+
+	// UpdatedAt When the connection last changed.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// VerifiedAt When Stripe last accepted the key. Absent until it does. Saving
+	// new keys clears it until the next check passes.
+	VerifiedAt time.Time `json:"verified_at,omitempty"`
+
+	// WebhookSecretLast4 Last 4 characters of the webhook signing secret. Absent until one is saved.
+	WebhookSecretLast4 string `json:"webhook_secret_last4,omitempty"`
 }
 
 // StripeConnectionLastVerifiedErrorKind What kind of failure `last_verified_error` is. `rejected`: Stripe
@@ -6332,15 +8444,27 @@ type StripeConnection struct {
 type StripeConnectionLastVerifiedErrorKind string
 
 // StripeRefundWebhookEventData The `data` of the outbound webhook event `payment.refunded_in_stripe`
-// (docs/webhooks.md): the invoice the refunded payment belongs to, as
-// it stood (a refund never changes it), and the refund as the API
-// returns it. Sent once per refund, when its outcome is decided: when
-// Hardcount first sees it, or, for a refund first seen in flight, when
-// it succeeds, fails or is canceled. Saved in the same transaction that
-// records it. A later change to the refund sends nothing more.
+// ([Webhook events](https://gethardcount.com/docs/api/webhook-events/)): the invoice the refunded payment
+// belongs to, as it stood (a refund never changes it), and the refund
+// as the API returns it. The invoice leaves out `attention`,
+// `recovery_warning`, `billing_period_display` and `test_clock_id`,
+// which are worked out per read. Sent once per refund, when its
+// outcome is decided: when Hardcount first sees it, or, for a refund
+// first seen in flight, when it succeeds, fails or is canceled. Saved
+// in the same transaction that records it. A later change to the
+// refund sends nothing more.
 type StripeRefundWebhookEventData struct {
-	// Invoice A Hardcount invoice. Returned from create, finalize, void, list, get,
-	// rotate-public-token, and collect-payment endpoints.
+	// Invoice A bill for one customer, in one currency. The billing engine creates
+	// one at the end of each subscription period (and for a subscription's
+	// start when a fee is billed in advance, a change, a cancel or a spend
+	// threshold); you can also create one-off invoices with
+	// `POST /v1/invoices`. The engine creates its invoices already
+	// `finalized`, or as a `draft` while their tax is pending or collection
+	// is paused on the subscription. An invoice you create starts as a
+	// `draft` until you finalize it. A finalized invoice ends `paid`,
+	// `voided` or `uncollectible`. Every amount is a whole number in the
+	// currency's minor unit (cents for USD). The invoice routes and the
+	// `invoice.*` and `payment.*` webhook events return it.
 	Invoice Invoice `json:"invoice"`
 
 	// Refund A refund made in Stripe outside Hardcount (the Stripe dashboard, or
@@ -6348,17 +8472,36 @@ type StripeRefundWebhookEventData struct {
 	// recorded from Stripe's `refund.created`, `refund.updated`,
 	// `refund.failed` and `charge.refund.updated` webhook events. It holds
 	// the refund as the newest of those events showed it. Hardcount's own
-	// refunds are never listed here. `outcome` is what Hardcount did when
-	// it first saw the refund, and only the operator changes it after
-	// that.
+	// refunds are never listed here. `outcome` is what Hardcount did with
+	// the refund: decided when Hardcount first sees it, or, for a refund
+	// first seen in flight (`awaiting`), when a later event shows how it
+	// ended. After that only you change it, by recording a flagged refund
+	// with a credit note or dismissing it.
 	Refund InvoiceStripeRefund `json:"refund"`
 }
 
-// Subscription defines model for Subscription.
+// Subscription A customer's subscription: the plans it bills (its `items`), its
+// status and its current billing period. Every route under
+// `/v1/subscriptions` that returns a subscription returns this
+// object, with its items.
+//
+// A subscription bills in one currency, the currency of its plans.
+// All its items share one billing interval and one base-fee timing.
+// Usage, and a base fee billed in arrears, are invoiced when a period
+// ends. A base fee billed in advance is invoiced when its period
+// starts: the first one in the same transaction that creates or
+// activates the subscription or ends its trial, each later one on the
+// invoice that closes the period before.
 type Subscription struct {
+	// ActivatedAt When the subscription became `active`: at creation without a
+	// trial, at activation of a draft, or when its trial ended.
+	// Absent on a draft and while it trials.
 	ActivatedAt time.Time `json:"activated_at,omitempty"`
 
-	// BillingAnchorDay Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions.
+	// BillingAnchorDay Day of the month the subscription bills on (1-31): the day its
+	// first period started, or the day of its last immediate change to
+	// a plan with another billing interval. Absent on a draft and for
+	// calendar-monthly subscriptions.
 	BillingAnchorDay int `json:"billing_anchor_day,omitempty"`
 
 	// BillingFailure Present on a subscription while the billing run is failing on the
@@ -6379,92 +8522,241 @@ type Subscription struct {
 	// invoice bills the period's usage so far, and no base fee. The period
 	// keeps its dates, the base fee is billed as it would be with no
 	// threshold, and the period's next invoice bills the rest of the usage.
+	// Absent on a subscription with no thresholds. Set them with
+	// `PUT /v1/subscriptions/{id}/billing-thresholds`.
 	BillingThresholds SubscriptionBillingThresholds `json:"billing_thresholds,omitempty"`
-	BillingTime       SubscriptionBillingTime       `json:"billing_time"`
 
-	// CancelAt A scheduled cancel time, if one is set.
+	// BillingTime How monthly periods line up. The first period starts on the day
+	// the subscription starts to bill: the day it is created or
+	// activated, or, with a trial, the day the trial ends.
+	// `calendar`: every period ends on the 1st of a month, in your
+	// account's billing time zone, so the first period runs from that
+	// day to the next 1st. `anniversary`: each period starts on the
+	// same day of the month as the first one (the last day of a
+	// shorter month). A plan billed yearly always bills a year from
+	// that first day, whatever this says. An immediate change to a
+	// plan with another billing interval starts a new first period at
+	// the change.
+	BillingTime SubscriptionBillingTime `json:"billing_time"`
+
+	// CancelAt The instant a cancel is scheduled for, when it was scheduled
+	// with `cancel_at`. Absent when none is set, and after the
+	// subscription is canceled.
 	CancelAt time.Time `json:"cancel_at,omitempty"`
 
-	// CancelAtPeriodEnd True when the subscription cancels at the end of the current period.
+	// CancelAtPeriodEnd True when the subscription cancels at the end of the current
+	// period, or, while it trials, at the end of the trial. False
+	// after the subscription is canceled.
 	CancelAtPeriodEnd bool `json:"cancel_at_period_end"`
 
-	// CancelEffectiveAt When a scheduled cancel takes effect. Absent when no cancel is scheduled.
+	// CancelEffectiveAt When a scheduled cancel takes effect: `cancel_at` when set;
+	// otherwise, with `cancel_at_period_end`, `trial_end_at` while
+	// the subscription trials and `current_billing_period_end`
+	// after. Absent when no cancel is scheduled.
 	CancelEffectiveAt time.Time `json:"cancel_effective_at,omitempty"`
 
 	// CanceledAt When the subscription was canceled. Absent until then.
 	CanceledAt time.Time `json:"canceled_at,omitempty"`
-	Code       string    `json:"code"`
-	CreatedAt  time.Time `json:"created_at"`
 
-	// CurrentBillingPeriodDisplay The current period as text, with the last day included, in the tenant's billing time zone.
+	// Code Your code for the subscription: letters, digits, hyphens and
+	// underscores. Unique in your account and mode (live or test).
+	Code string `json:"code"`
+
+	// CreatedAt When the subscription was created. For a customer on a test clock, the clock's time.
+	CreatedAt time.Time `json:"created_at"`
+
+	// CurrentBillingPeriodDisplay The current period as text, with the last day included, in your
+	// account's billing time zone, for example "Oct 1, 2026 – Oct 31,
+	// 2026". Absent when the subscription has no current period, when
+	// the time zone could not be read, and on the rows of
+	// `GET /v1/test-clocks/{id}/subscriptions`.
 	CurrentBillingPeriodDisplay string `json:"current_billing_period_display,omitempty"`
 
-	// CurrentBillingPeriodEnd End of the current period (exclusive).
-	CurrentBillingPeriodEnd   time.Time `json:"current_billing_period_end,omitempty"`
+	// CurrentBillingPeriodEnd End of the current period (exclusive): the start of the next
+	// one. While the subscription trials, the end of the first paid
+	// period. Absent on a draft. On a canceled subscription it keeps
+	// its last value.
+	CurrentBillingPeriodEnd time.Time `json:"current_billing_period_end,omitempty"`
+
+	// CurrentBillingPeriodStart Start of the current billing period, normally the beginning of
+	// a day in your account's billing time zone. While the
+	// subscription trials, it is the start of the first paid period:
+	// the beginning of the day the trial ends, not `trial_end_at`
+	// itself. After an immediate change to a plan with another billing
+	// interval, a period can start or end at the instant of the
+	// change. Absent on a draft. On a canceled subscription it keeps
+	// its last value.
 	CurrentBillingPeriodStart time.Time `json:"current_billing_period_start,omitempty"`
-	CustomerId                string    `json:"customer_id"`
-	DisplayName               string    `json:"display_name"`
-	Id                        string    `json:"id"`
+
+	// CustomerId The customer the subscription bills (`hc_cus_…`).
+	CustomerId string `json:"customer_id"`
+
+	// DisplayName The subscription's name, as shown in the dashboard.
+	DisplayName string `json:"display_name"`
+
+	// Id The subscription's ID (`hc_sub_…`).
+	Id string `json:"id"`
 
 	// Items The subscription's priced lines. Each item names its plan.
-	Items         []SubscriptionItem `json:"items,omitempty"`
-	NextBillingAt time.Time          `json:"next_billing_at,omitempty"`
+	Items []SubscriptionItem `json:"items,omitempty"`
+
+	// NextBillingAt When the current period's invoice is due to be built: the end
+	// of the current period. The billing run builds it once the
+	// invoice grace after that time has passed. Absent on a draft. A
+	// canceled subscription keeps its last value, and nothing is
+	// billed at that time.
+	NextBillingAt time.Time `json:"next_billing_at,omitempty"`
 
 	// PauseCollection Present on a subscription while collection is paused. New invoices
-	// are still created, but stay drafts and are not charged.
+	// are still created, but stay drafts and are not charged. Absent when
+	// collection runs normally. A cancel leaves it in place: it still
+	// holds the subscription's unpaid invoices, and
+	// `DELETE /v1/subscriptions/{id}/pause-collection` releases them.
 	PauseCollection SubscriptionPauseCollection `json:"pause_collection,omitempty"`
-	StartedAt       time.Time                   `json:"started_at,omitempty"`
-	Status          SubscriptionStatus          `json:"status"`
-	TenantId        string                      `json:"tenant_id,omitempty"`
-	TestClockId     string                      `json:"test_clock_id,omitempty"`
-	TrialEndAt      time.Time                   `json:"trial_end_at,omitempty"`
-	TrialStartAt    time.Time                   `json:"trial_start_at,omitempty"`
-	UpdatedAt       time.Time                   `json:"updated_at"`
+
+	// StartedAt When the subscription started: when it was created, or, for a
+	// draft, when it was activated. Absent on a draft.
+	StartedAt time.Time `json:"started_at,omitempty"`
+
+	// Status Where the subscription is in its life.
+	//
+	// - `draft`: created with `status: draft`. It has no billing
+	//   period and bills nothing until you activate it with
+	//   `POST /v1/subscriptions/{id}/activate`.
+	// - `trialing`: in a free trial until `trial_end_at`. Usage in
+	//   the trial is not billed. When the trial ends, Hardcount makes
+	//   the subscription `active` and its first paid period starts.
+	//   If a cancel is scheduled for the trial end, it becomes
+	//   `canceled` instead, with no charge.
+	// - `active`: billing. Usage and base fees billed in arrears are
+	//   invoiced when each period ends; a base fee billed in advance
+	//   when its period starts.
+	// - `canceled`: ended at `canceled_at`. It bills nothing more,
+	//   and no route makes it `active` again.
+	//
+	// A paused collection is not a status: see `pause_collection`.
+	Status SubscriptionStatus `json:"status"`
+
+	// TenantId The account the subscription belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TestClockId The test clock the subscription runs on (test mode only),
+	// taken from its customer when it was created. Absent when the
+	// customer is not on a test clock.
+	TestClockId string `json:"test_clock_id,omitempty"`
+
+	// TrialEndAt When the trial ends, or ended. The first paid period starts at
+	// the beginning of that day in your account's billing time zone.
+	// Ending the trial early (`POST /v1/subscriptions/{id}/end-trial`)
+	// sets it to that moment. Absent when the subscription had no
+	// trial.
+	TrialEndAt time.Time `json:"trial_end_at,omitempty"`
+
+	// TrialStartAt When the trial started. Absent when the subscription had no trial.
+	TrialStartAt time.Time `json:"trial_start_at,omitempty"`
+
+	// UpdatedAt When the subscription last changed.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// SubscriptionBillingTime defines model for Subscription.BillingTime.
+// SubscriptionBillingTime How monthly periods line up. The first period starts on the day
+// the subscription starts to bill: the day it is created or
+// activated, or, with a trial, the day the trial ends.
+// `calendar`: every period ends on the 1st of a month, in your
+// account's billing time zone, so the first period runs from that
+// day to the next 1st. `anniversary`: each period starts on the
+// same day of the month as the first one (the last day of a
+// shorter month). A plan billed yearly always bills a year from
+// that first day, whatever this says. An immediate change to a
+// plan with another billing interval starts a new first period at
+// the change.
 type SubscriptionBillingTime string
 
-// SubscriptionStatus defines model for Subscription.Status.
+// SubscriptionStatus Where the subscription is in its life.
+//
+//   - `draft`: created with `status: draft`. It has no billing
+//     period and bills nothing until you activate it with
+//     `POST /v1/subscriptions/{id}/activate`.
+//   - `trialing`: in a free trial until `trial_end_at`. Usage in
+//     the trial is not billed. When the trial ends, Hardcount makes
+//     the subscription `active` and its first paid period starts.
+//     If a cancel is scheduled for the trial end, it becomes
+//     `canceled` instead, with no charge.
+//   - `active`: billing. Usage and base fees billed in arrears are
+//     invoiced when each period ends; a base fee billed in advance
+//     when its period starts.
+//   - `canceled`: ended at `canceled_at`. It bills nothing more,
+//     and no route makes it `active` again.
+//
+// A paused collection is not a status: see `pause_collection`.
 type SubscriptionStatus string
 
 // SubscriptionBillingThresholds Limits that make Hardcount invoice before the period ends. A threshold
 // invoice bills the period's usage so far, and no base fee. The period
 // keeps its dates, the base fee is billed as it would be with no
 // threshold, and the period's next invoice bills the rest of the usage.
+// Absent on a subscription with no thresholds. Set them with
+// `PUT /v1/subscriptions/{id}/billing-thresholds`.
 type SubscriptionBillingThresholds struct {
-	// AmountGte Usage threshold in cents, compared with the period's usage so far (the base fee is not counted). Absent when not set.
-	AmountGte      int64                       `json:"amount_gte,omitempty"`
+	// AmountGte Usage threshold in the subscription currency's minor unit
+	// (cents for USD), compared with the period's usage so far (the
+	// base fee is not counted). Absent when not set.
+	AmountGte int64 `json:"amount_gte,omitempty"`
+
+	// ItemThresholds Per-item usage quantity thresholds. Empty when only `amount_gte` is set.
 	ItemThresholds []SubscriptionItemThreshold `json:"item_thresholds"`
 }
 
 // SubscriptionItem One priced line of a subscription. It pairs a plan with a quantity.
+// Returned inside a subscription's `items`, and by the item routes.
 type SubscriptionItem struct {
+	// CreatedAt When the item was added.
 	CreatedAt time.Time `json:"created_at"`
-	Id        string    `json:"id"`
+
+	// Id The item's ID (`hc_si_…`).
+	Id string `json:"id"`
 
 	// Metadata The item's stored metadata. Absent when empty.
-	Metadata               map[string]interface{} `json:"metadata,omitempty"`
-	PendingPlanEffectiveAt time.Time              `json:"pending_plan_effective_at,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// PendingPlanEffectiveAt When the scheduled plan change takes effect: the end of the
+	// period in which it was scheduled. Absent when no change is
+	// scheduled.
+	PendingPlanEffectiveAt time.Time `json:"pending_plan_effective_at,omitempty"`
 
 	// PendingPlanId Plan the item moves to at `pending_plan_effective_at`. Absent when no change is scheduled.
 	PendingPlanId string `json:"pending_plan_id,omitempty"`
 
 	// PlanChangedAt When the plan was last changed immediately. Absent until the first such change.
-	PlanChangedAt  time.Time `json:"plan_changed_at,omitempty"`
-	PlanId         string    `json:"plan_id"`
-	Quantity       int64     `json:"quantity"`
-	SubscriptionId string    `json:"subscription_id"`
-	TenantId       string    `json:"tenant_id,omitempty"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	PlanChangedAt time.Time `json:"plan_changed_at,omitempty"`
+
+	// PlanId The plan the item bills now. A scheduled plan change shows in
+	// `pending_plan_id` until it takes effect.
+	PlanId string `json:"plan_id"`
+
+	// Quantity How many of the plan the item bills: the plan's base fee is
+	// charged this many times. At least 1.
+	Quantity int64 `json:"quantity"`
+
+	// SubscriptionId The subscription the item is on.
+	SubscriptionId string `json:"subscription_id"`
+
+	// TenantId The account the item belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the item last changed.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// SubscriptionItemChangeResult defines model for SubscriptionItemChangeResult.
+// SubscriptionItemChangeResult What `PATCH /v1/subscriptions/{id}/items/{itemID}` did: the item
+// after the change, when the change takes effect, and how the rest
+// of the period was settled.
 type SubscriptionItemChangeResult struct {
 	// EffectiveAt When the change takes effect. For a scheduled plan change, the end of the current period.
 	EffectiveAt time.Time `json:"effective_at"`
 
 	// Item One priced line of a subscription. It pairs a plan with a quantity.
+	// Returned inside a subscription's `items`, and by the item routes.
 	Item SubscriptionItem `json:"item"`
 
 	// NewPeriodInvoice The invoice an immediate change to a plan with another billing
@@ -6477,37 +8769,44 @@ type SubscriptionItemChangeResult struct {
 
 // SubscriptionItemProration What Hardcount did to settle the rest of the period for an item change.
 type SubscriptionItemProration struct {
-	// AmountCents Gross amount, tax included: the invoice total (`invoice`), or
-	// the whole credit for unused time (`credit` and `adjustment`).
+	// AmountCents Gross amount, tax included, in the currency's minor unit (cents
+	// for USD): the invoice total (`invoice`), or the whole credit for
+	// unused time (`credit` and `adjustment`).
 	// `credited_to_balance_cents`, `reduced_open_invoices_cents` and
 	// `held_on_draft_invoices_cents` say where the credit went.
 	AmountCents int64 `json:"amount_cents"`
 
 	// CreditedToBalanceCents The part of the credit added to the customer's balance, tax
-	// included. On a paid invoice, all of its part. On an open invoice
-	// paid partly with credits, the part above what it still asks for:
-	// those credits go back to the balance. A part on an invoice whose
-	// payment is still processing counts here; if that payment fails,
-	// it reduces the invoice instead. 0 when `type` is `invoice`.
+	// included, in the currency's minor unit. On a paid invoice, all
+	// of its part. On an open invoice paid partly with credits, the
+	// part above what it still asks for: those credits go back to the
+	// balance. A part on an invoice whose payment is still processing
+	// counts here; if that payment fails, it reduces the invoice
+	// instead. 0 when `type` is `invoice`.
 	CreditedToBalanceCents int64 `json:"credited_to_balance_cents"`
 
-	// HeldOnDraftInvoicesCents The part of the credit on draft invoices, tax included. It is
-	// held until the draft is finalized, then applied by how the
-	// invoice stands: if paid, to the customer's balance; if still
-	// open, off what it asks for first, as above. 0 when `type` is
-	// `invoice`.
+	// HeldOnDraftInvoicesCents The part of the credit on draft invoices, tax included, in the
+	// currency's minor unit. It is held until the draft is finalized,
+	// then applied by how the invoice stands: if paid, to the
+	// customer's balance; if still open, off what it asks for first,
+	// as above. 0 when `type` is `invoice`.
 	HeldOnDraftInvoicesCents int64 `json:"held_on_draft_invoices_cents"`
 
 	// InvoiceId The proration invoice. Present when `type` is `invoice`.
 	InvoiceId string `json:"invoice_id,omitempty"`
+
+	// NewPlanId The plan the item is on after the change.
 	NewPlanId string `json:"new_plan_id"`
+
+	// OldPlanId The plan the item was on before the change. The same as `new_plan_id` for a quantity change.
 	OldPlanId string `json:"old_plan_id"`
 
 	// ProrationFactor Share of the full billing cycle that was left, from 0 to 1.
 	ProrationFactor float64 `json:"proration_factor"`
 
 	// ReducedOpenInvoicesCents The part of the credit taken off the amount due on open
-	// invoices, tax included. 0 when `type` is `invoice`.
+	// invoices, tax included, in the currency's minor unit. 0 when
+	// `type` is `invoice`.
 	ReducedOpenInvoicesCents int64 `json:"reduced_open_invoices_cents"`
 
 	// Type `invoice`: a proration invoice was created. `credit`: some of
@@ -6523,8 +8822,10 @@ type SubscriptionItemProration struct {
 // none of it went to the balance.
 type SubscriptionItemProrationType string
 
-// SubscriptionItemThreshold defines model for SubscriptionItemThreshold.
+// SubscriptionItemThreshold A usage threshold on one item: when the item's usage in the period
+// reaches `usage_gte`, Hardcount invoices the usage so far.
 type SubscriptionItemThreshold struct {
+	// SubscriptionItemId The item of this subscription the threshold watches.
 	SubscriptionItemId string `json:"subscription_item_id"`
 
 	// UsageGte Usage quantity threshold, as a decimal string.
@@ -6534,8 +8835,13 @@ type SubscriptionItemThreshold struct {
 // SubscriptionNewPeriodInvoice The invoice an immediate change to a plan with another billing
 // interval created for the new period it starts.
 type SubscriptionNewPeriodInvoice struct {
-	Currency      string `json:"currency"`
-	Id            string `json:"id"`
+	// Currency The invoice's currency, uppercase (for example `USD`).
+	Currency string `json:"currency"`
+
+	// Id The invoice's ID (`hc_inv_…`).
+	Id string `json:"id"`
+
+	// InvoiceNumber The invoice's number, as printed on it.
 	InvoiceNumber string `json:"invoice_number"`
 
 	// Status `draft` when the invoice was not issued yet: collection is
@@ -6543,8 +8849,9 @@ type SubscriptionNewPeriodInvoice struct {
 	// then change before it is finalized.
 	Status SubscriptionNewPeriodInvoiceStatus `json:"status"`
 
-	// TotalAmountCents The invoice total when the change created it. On a `draft`
-	// whose tax could not be calculated yet, it has no tax in it.
+	// TotalAmountCents The invoice total when the change created it, in the
+	// currency's minor unit (cents for USD). On a `draft` whose tax
+	// could not be calculated yet, it has no tax in it.
 	TotalAmountCents int64 `json:"total_amount_cents"`
 }
 
@@ -6554,8 +8861,14 @@ type SubscriptionNewPeriodInvoice struct {
 type SubscriptionNewPeriodInvoiceStatus string
 
 // SubscriptionPauseCollection Present on a subscription while collection is paused. New invoices
-// are still created, but stay drafts and are not charged.
+// are still created, but stay drafts and are not charged. Absent when
+// collection runs normally. A cancel leaves it in place: it still
+// holds the subscription's unpaid invoices, and
+// `DELETE /v1/subscriptions/{id}/pause-collection` releases them.
 type SubscriptionPauseCollection struct {
+	// Behavior What happens to the invoices built during the pause. Only
+	// `keep_as_draft`: they stay drafts, so they are not finalized,
+	// charged or dunned.
 	Behavior SubscriptionPauseCollectionBehavior `json:"behavior"`
 
 	// ResumesAt When collection resumes. Absent when the pause lasts until it is
@@ -6572,7 +8885,9 @@ type SubscriptionPauseCollection struct {
 	SetBy SubscriptionPauseCollectionSetBy `json:"set_by,omitempty"`
 }
 
-// SubscriptionPauseCollectionBehavior defines model for SubscriptionPauseCollection.Behavior.
+// SubscriptionPauseCollectionBehavior What happens to the invoices built during the pause. Only
+// `keep_as_draft`: they stay drafts, so they are not finalized,
+// charged or dunned.
 type SubscriptionPauseCollectionBehavior string
 
 // SubscriptionPauseCollectionSetBy Who paused collection. `operator`: you, through the API or the
@@ -6583,10 +8898,21 @@ type SubscriptionPauseCollectionBehavior string
 // that ended during the pause keep their draft invoices.
 type SubscriptionPauseCollectionSetBy string
 
-// SubscriptionTimelineEvent defines model for SubscriptionTimelineEvent.
+// SubscriptionTimelineEvent One row of a subscription's activity timeline
+// (`GET /v1/subscriptions/{id}/timeline`), built from one audit log
+// entry. `line` carries the row in its structured form; `description`,
+// `detail`, `detail_timestamp`, `error` and `status` repeat its words
+// for older clients.
 type SubscriptionTimelineEvent struct {
-	ActorId   string `json:"actor_id,omitempty"`
+	// ActorId The actor's ID (a user's, an API key's `hc_key_…` or a customer's), or `system`.
+	ActorId string `json:"actor_id,omitempty"`
+
+	// ActorName The actor's name: a user's email, an API key's name or a
+	// customer's display name. Absent when it is not known.
 	ActorName string `json:"actor_name,omitempty"`
+
+	// ActorType Who acted, as the audit log records it: `user` (a dashboard
+	// user), `api_key`, `customer`, or `system` (Hardcount itself).
 	ActorType string `json:"actor_type,omitempty"`
 
 	// Description The line's title, for example "Subscription canceled".
@@ -6609,87 +8935,121 @@ type SubscriptionTimelineEvent struct {
 	// IsSimulated True when the action affected a subscription on a test clock.
 	IsSimulated bool `json:"is_simulated,omitempty"`
 
-	// Line One activity row in the words of the activity line standard
-	// (ADR-128): a title with no values, the amount when the event moves
-	// money, asks for it or cancels money owed, a problem line on failure
-	// and warning rows, the meta line's parts and the actor, a tone, and
-	// the event's time on the entity's calendar. `recorded_at` is the
-	// real-world time, set only for an entity on a test clock.
+	// Line One activity row, with every word written by the server: a title
+	// with no values, the amount when the event moves money, asks for it
+	// or cancels money owed, a problem line on failure and warning rows,
+	// the meta line's parts and the actor, a tone, and the event's time on
+	// the entity's calendar. `recorded_at` is the real-world time, set
+	// only for an entity on a test clock. The invoice payment timeline and
+	// dunning run events carry it.
 	Line ActivityLine `json:"line"`
 
 	// SimEffectiveAt The test clock's simulated time when the action took effect.
-	SimEffectiveAt time.Time                       `json:"sim_effective_at,omitempty"`
-	Source         SubscriptionTimelineEventSource `json:"source"`
+	SimEffectiveAt time.Time `json:"sim_effective_at,omitempty"`
+
+	// Source Where the row comes from. Always `audit`, the audit log.
+	Source SubscriptionTimelineEventSource `json:"source"`
 
 	// Status The line's tone in older words, read by the dashboard's dot.
-	Status      SubscriptionTimelineEventStatus `json:"status"`
-	TestClockId string                          `json:"test_clock_id,omitempty"`
+	Status SubscriptionTimelineEventStatus `json:"status"`
+
+	// TestClockId The test clock `sim_effective_at` belongs to. Absent when the action was not on a test clock.
+	TestClockId string `json:"test_clock_id,omitempty"`
 
 	// Timestamp When the action was recorded (wall-clock time).
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// SubscriptionTimelineEventSource defines model for SubscriptionTimelineEvent.Source.
+// SubscriptionTimelineEventSource Where the row comes from. Always `audit`, the audit log.
 type SubscriptionTimelineEventSource string
 
 // SubscriptionTimelineEventStatus The line's tone in older words, read by the dashboard's dot.
 type SubscriptionTimelineEventStatus string
 
-// Tenant defines model for Tenant.
+// Tenant An account: one business that bills its customers with Hardcount.
+// It has separate test and live data. `POST /v1/bootstrap` creates
+// the first one.
 type Tenant struct {
-	CreatedAt time.Time    `json:"created_at"`
-	Id        string       `json:"id"`
-	Name      string       `json:"name"`
-	Status    TenantStatus `json:"status"`
-	UpdatedAt time.Time    `json:"updated_at"`
+	// CreatedAt When the account was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Id The account's id (`hc_ten_…`). Other objects carry it as `tenant_id`.
+	Id string `json:"id"`
+
+	// Name The account's name, given at setup.
+	Name string `json:"name"`
+
+	// Status The account's state. Setup creates it `active`. Nothing in this
+	// version sets `suspended` or `deleted`.
+	Status TenantStatus `json:"status"`
+
+	// UpdatedAt When the account record last changed.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// TenantStatus defines model for Tenant.Status.
+// TenantStatus The account's state. Setup creates it `active`. Nothing in this
+// version sets `suspended` or `deleted`.
 type TenantStatus string
 
 // TenantSettings defines model for TenantSettings.
 type TenantSettings struct {
-	// BrandColor Accent color on invoice PDFs, as `#rrggbb`.
-	BrandColor          string `json:"brand_color,omitempty"`
+	// BrandColor Accent color on invoice PDFs, as `#rrggbb`. Stored in lower case.
+	BrandColor string `json:"brand_color,omitempty"`
+
+	// CompanyAddressLine1 First line of your business address, printed as the seller on invoices and credit notes.
 	CompanyAddressLine1 string `json:"company_address_line1,omitempty"`
+
+	// CompanyAddressLine2 Second line of your business address, such as a suite number.
 	CompanyAddressLine2 string `json:"company_address_line2,omitempty"`
-	CompanyCity         string `json:"company_city,omitempty"`
+
+	// CompanyCity City of your business address.
+	CompanyCity string `json:"company_city,omitempty"`
 
 	// CompanyCountry ISO 3166 alpha-2 code, such as `US`. Empty is allowed.
 	// Whitespace is trimmed and the code is upper-cased before it is
 	// checked and stored.
 	CompanyCountry string `json:"company_country,omitempty"`
-	CompanyEmail   string `json:"company_email,omitempty"`
+
+	// CompanyEmail Your billing contact address, printed as the seller on invoices
+	// and credit notes and shown on the hosted pages. One plain
+	// address, such as `billing@example.com`, with no display name.
+	CompanyEmail string `json:"company_email,omitempty"`
 
 	// CompanyName Shown on invoices and as the sender name on emails. No line breaks.
 	CompanyName string `json:"company_name,omitempty"`
 
 	// CompanyPhone 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`.
-	CompanyPhone      string `json:"company_phone,omitempty"`
-	CompanyPostalCode string `json:"company_postal_code,omitempty"`
-	CompanyState      string `json:"company_state,omitempty"`
+	CompanyPhone string `json:"company_phone,omitempty"`
 
-	// CreatedAt Zero time when the tenant has never saved settings.
+	// CompanyPostalCode Postal code of your business address.
+	CompanyPostalCode string `json:"company_postal_code,omitempty"`
+
+	// CompanyState State, province or region of your business address.
+	CompanyState string `json:"company_state,omitempty"`
+
+	// CreatedAt When the account's settings were first stored. Zero time (`0001-01-01T00:00:00Z`) when none are stored yet, and the answer shows the defaults.
 	CreatedAt time.Time `json:"created_at"`
 
 	// CreditBalanceLowThresholdCents When a customer's credit in one currency drops below this
 	// amount, in that currency's minor units, the `credit.balance_low`
 	// webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
-	// credit. null turns it off.
+	// credit. Send null to turn it off. Answers leave it out while it
+	// is off.
 	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
 
-	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
-	// applies to new credit notes only. Issued notes keep their
+	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. Stored in
+	// upper case. A change applies to new credit notes only. Issued notes keep their
 	// numbers. It must differ from `invoice_prefix`, or an invoice and
 	// a credit note would get the same number.
 	CreditNotePrefix string `json:"credit_note_prefix"`
 
-	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
+	// DefaultCurrency ISO 4217 code, stored in upper case. Zero-decimal currencies (such as JPY) are not supported yet.
 	DefaultCurrency string `json:"default_currency"`
 
 	// DefaultProductTaxCode Stripe product tax code used when a plan has none, such as
 	// `txcd_10103001`. Empty is allowed. Surrounding whitespace is
-	// trimmed before the check.
+	// trimmed before the check. A save with `tax_provider: stripe_tax`
+	// and no code stores `txcd_10103001` (SaaS, business use).
 	DefaultProductTaxCode string `json:"default_product_tax_code,omitempty"`
 
 	// InvoiceFooter Printed under the totals on invoice PDFs and on the hosted
@@ -6698,7 +9058,7 @@ type TenantSettings struct {
 	// the current text.
 	InvoiceFooter string `json:"invoice_footer,omitempty"`
 
-	// InvoicePrefix Starts every invoice number, such as `HC-000001`.
+	// InvoicePrefix Starts every invoice number, such as `HC-000001`. Stored in upper case.
 	InvoicePrefix string `json:"invoice_prefix"`
 
 	// LogoUrl Shown in emails and on the hosted invoice page. PDFs do not print it.
@@ -6711,7 +9071,7 @@ type TenantSettings struct {
 	// before the prefix: 43 means the next invoice is
 	// `<invoice_prefix>-000043`. Test and live count separately, and
 	// changing `invoice_prefix` keeps the count. Not a setting:
-	// sending it on `PUT` does nothing.
+	// `PUT` refuses it as an unknown field (422).
 	NextInvoiceSequence int `json:"next_invoice_sequence"`
 
 	// SupportUrl Must start with `http://` or `https://`. Linked in emails and on
@@ -6734,12 +9094,17 @@ type TenantSettings struct {
 	// TaxProvider `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.
 	TaxProvider TenantSettingsTaxProvider `json:"tax_provider"`
 
-	// TaxRate Percent, up to 4 decimal places (18.5 = 18.5%). Used by the `manual` provider.
-	TaxRate  float32 `json:"tax_rate"`
-	TenantId string  `json:"tenant_id"`
+	// TaxRate Percent, from 0 to 100 (18.5 = 18.5%), stored to 4 decimal
+	// places. Used by the `manual` provider.
+	TaxRate float32 `json:"tax_rate"`
+
+	// TenantId The account these settings belong to. `PUT` refuses it (422).
+	TenantId string `json:"tenant_id"`
 
 	// Timezone IANA zone name, such as `America/New_York`. `Local` is rejected. All billing date math uses this zone.
-	Timezone  string    `json:"timezone"`
+	Timezone string `json:"timezone"`
+
+	// UpdatedAt When the settings were last saved. Zero time (`0001-01-01T00:00:00Z`) when none are stored yet.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
@@ -6749,46 +9114,65 @@ type TenantSettingsTaxOnFailure string
 // TenantSettingsTaxProvider `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.
 type TenantSettingsTaxProvider string
 
-// TenantSettingsInput Every field is optional. Fields you leave out keep their stored value.
+// TenantSettingsInput The account's billing settings, as `PUT /v1/settings` takes them.
+// Every field is optional. Fields you leave out keep their stored
+// value. Settings are shared by test and live mode. The length limits
+// count bytes, not characters: an accented letter counts as two.
 type TenantSettingsInput struct {
-	// BrandColor Accent color on invoice PDFs, as `#rrggbb`.
-	BrandColor          string `json:"brand_color,omitempty"`
+	// BrandColor Accent color on invoice PDFs, as `#rrggbb`. Stored in lower case.
+	BrandColor string `json:"brand_color,omitempty"`
+
+	// CompanyAddressLine1 First line of your business address, printed as the seller on invoices and credit notes.
 	CompanyAddressLine1 string `json:"company_address_line1,omitempty"`
+
+	// CompanyAddressLine2 Second line of your business address, such as a suite number.
 	CompanyAddressLine2 string `json:"company_address_line2,omitempty"`
-	CompanyCity         string `json:"company_city,omitempty"`
+
+	// CompanyCity City of your business address.
+	CompanyCity string `json:"company_city,omitempty"`
 
 	// CompanyCountry ISO 3166 alpha-2 code, such as `US`. Empty is allowed.
 	// Whitespace is trimmed and the code is upper-cased before it is
 	// checked and stored.
 	CompanyCountry string `json:"company_country,omitempty"`
-	CompanyEmail   string `json:"company_email,omitempty"`
+
+	// CompanyEmail Your billing contact address, printed as the seller on invoices
+	// and credit notes and shown on the hosted pages. One plain
+	// address, such as `billing@example.com`, with no display name.
+	CompanyEmail string `json:"company_email,omitempty"`
 
 	// CompanyName Shown on invoices and as the sender name on emails. No line breaks.
 	CompanyName string `json:"company_name,omitempty"`
 
 	// CompanyPhone 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`.
-	CompanyPhone      string `json:"company_phone,omitempty"`
+	CompanyPhone string `json:"company_phone,omitempty"`
+
+	// CompanyPostalCode Postal code of your business address.
 	CompanyPostalCode string `json:"company_postal_code,omitempty"`
-	CompanyState      string `json:"company_state,omitempty"`
+
+	// CompanyState State, province or region of your business address.
+	CompanyState string `json:"company_state,omitempty"`
 
 	// CreditBalanceLowThresholdCents When a customer's credit in one currency drops below this
 	// amount, in that currency's minor units, the `credit.balance_low`
 	// webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
-	// credit. null turns it off.
+	// credit. Send null to turn it off. Answers leave it out while it
+	// is off.
 	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
 
-	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
-	// applies to new credit notes only. Issued notes keep their
+	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. Stored in
+	// upper case. A change applies to new credit notes only. Issued notes keep their
 	// numbers. It must differ from `invoice_prefix`, or an invoice and
 	// a credit note would get the same number.
 	CreditNotePrefix string `json:"credit_note_prefix,omitempty"`
 
-	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
+	// DefaultCurrency ISO 4217 code, stored in upper case. Zero-decimal currencies (such as JPY) are not supported yet.
 	DefaultCurrency string `json:"default_currency,omitempty"`
 
 	// DefaultProductTaxCode Stripe product tax code used when a plan has none, such as
 	// `txcd_10103001`. Empty is allowed. Surrounding whitespace is
-	// trimmed before the check.
+	// trimmed before the check. A save with `tax_provider: stripe_tax`
+	// and no code stores `txcd_10103001` (SaaS, business use).
 	DefaultProductTaxCode string `json:"default_product_tax_code,omitempty"`
 
 	// InvoiceFooter Printed under the totals on invoice PDFs and on the hosted
@@ -6797,7 +9181,7 @@ type TenantSettingsInput struct {
 	// the current text.
 	InvoiceFooter string `json:"invoice_footer,omitempty"`
 
-	// InvoicePrefix Starts every invoice number, such as `HC-000001`.
+	// InvoicePrefix Starts every invoice number, such as `HC-000001`. Stored in upper case.
 	InvoicePrefix string `json:"invoice_prefix,omitempty"`
 
 	// LogoUrl Shown in emails and on the hosted invoice page. PDFs do not print it.
@@ -6826,7 +9210,8 @@ type TenantSettingsInput struct {
 	// TaxProvider `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.
 	TaxProvider TenantSettingsInputTaxProvider `json:"tax_provider,omitempty"`
 
-	// TaxRate Percent, up to 4 decimal places (18.5 = 18.5%). Used by the `manual` provider.
+	// TaxRate Percent, from 0 to 100 (18.5 = 18.5%), stored to 4 decimal
+	// places. Used by the `manual` provider.
 	TaxRate float32 `json:"tax_rate,omitempty"`
 
 	// Timezone IANA zone name, such as `America/New_York`. `Local` is rejected. All billing date math uses this zone.
@@ -6840,33 +9225,45 @@ type TenantSettingsInputTaxOnFailure string
 type TenantSettingsInputTaxProvider string
 
 // TestClock A clock for test mode. Customers and subscriptions attached to it
-// are billed on its time, not the real time.
+// are billed on its time, not the real time. Returned by the
+// `/v1/test-clocks` routes.
 type TestClock struct {
+	// CreatedAt When the clock was created, in real time.
 	CreatedAt time.Time `json:"created_at"`
 
 	// FrozenTime The clock's current time.
 	FrozenTime time.Time `json:"frozen_time"`
-	Id         string    `json:"id"`
+
+	// Id The clock's ID (`hc_tclk_…`).
+	Id string `json:"id"`
 
 	// LastAdvanceSummary What the latest advance did: the time span it covered and how many
 	// of each billing step it ran. Absent until the clock is first
 	// advanced.
 	LastAdvanceSummary TestClockAdvanceSummary `json:"last_advance_summary,omitempty"`
 
-	// LastFailureReason Why the last advance failed. Cleared by the next successful advance.
+	// LastFailureReason Why the last advance failed, for a clock in `internal_failure`.
+	// Cleared when you retry the advance, and by the next advance
+	// that succeeds. Absent when there is none.
 	LastFailureReason string `json:"last_failure_reason,omitempty"`
-	Name              string `json:"name"`
 
-	// Status `ready`: it can be advanced or deleted. `advancing`: billing is
-	// catching up to the new time. `internal_failure`: the last advance
+	// Name Your name for the clock. Empty when you gave none.
+	Name string `json:"name"`
+
+	// Status `ready`: it can be advanced. `advancing`: billing is catching up
+	// to the new time. `internal_failure`: the last advance
 	// failed partway; resume it with `POST /v1/test-clocks/{id}/retry-advance`.
-	Status    TestClockStatus `json:"status"`
-	TenantId  string          `json:"tenant_id,omitempty"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	Status TestClockStatus `json:"status"`
+
+	// TenantId The account the clock belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the clock last changed, in real time.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// TestClockStatus `ready`: it can be advanced or deleted. `advancing`: billing is
-// catching up to the new time. `internal_failure`: the last advance
+// TestClockStatus `ready`: it can be advanced. `advancing`: billing is catching up
+// to the new time. `internal_failure`: the last advance
 // failed partway; resume it with `POST /v1/test-clocks/{id}/retry-advance`.
 type TestClockStatus string
 
@@ -6874,23 +9271,52 @@ type TestClockStatus string
 // of each billing step it ran. Absent until the clock is first
 // advanced.
 type TestClockAdvanceSummary struct {
-	AdvancedFrom    time.Time `json:"advanced_from"`
-	AdvancedTo      time.Time `json:"advanced_to"`
-	ChargesRetried  int       `json:"charges_retried"`
-	ClawbacksIssued int       `json:"clawbacks_issued"`
-	CreditsExpired  int       `json:"credits_expired"`
-	DunningAdvanced int       `json:"dunning_advanced"`
+	// AdvancedFrom The clock's time before the advance. After a retried advance it
+	// equals `advanced_to`. When the server restarted during the
+	// advance and resumed it, it is `0001-01-01T00:00:00Z`.
+	AdvancedFrom time.Time `json:"advanced_from"`
 
-	// HadErrors True when a step failed. The counts then cover only the work done before the failure.
-	HadErrors         bool `json:"had_errors"`
-	InvoicesGenerated int  `json:"invoices_generated"`
-	PausesResumed     int  `json:"pauses_resumed"`
-	TaxRetried        int  `json:"tax_retried"`
-	ThresholdsFired   int  `json:"thresholds_fired"`
-	TrialsActivated   int  `json:"trials_activated"`
+	// AdvancedTo The clock's time after the advance.
+	AdvancedTo time.Time `json:"advanced_to"`
+
+	// ChargesRetried Invoices waiting to be charged that the advance tried to collect.
+	ChargesRetried int `json:"charges_retried"`
+
+	// ClawbacksIssued Credit notes for unused time that were waiting for their invoice
+	// to settle, issued now.
+	ClawbacksIssued int `json:"clawbacks_issued"`
+
+	// CreditsExpired Credit grants that expired in the span.
+	CreditsExpired int `json:"credits_expired"`
+
+	// DunningAdvanced Dunning runs that took a step.
+	DunningAdvanced int `json:"dunning_advanced"`
+
+	// HadErrors True when a step failed, which leaves the clock in
+	// `internal_failure`. The steps after a failed one still ran, so
+	// each count is what its step did.
+	HadErrors bool `json:"had_errors"`
+
+	// InvoicesGenerated Period invoices the advance created.
+	InvoicesGenerated int `json:"invoices_generated"`
+
+	// PausesResumed Collection pauses whose `resumes_at` passed in the span and that were lifted.
+	PausesResumed int `json:"pauses_resumed"`
+
+	// TaxRetried Invoices waiting for tax whose tax calculation was tried again.
+	TaxRetried int `json:"tax_retried"`
+
+	// ThresholdsFired Billing-threshold invoices issued.
+	ThresholdsFired int `json:"thresholds_fired"`
+
+	// TrialsActivated Subscriptions whose trial ended by the clock's new time: those
+	// that became `active`, and those a cancel scheduled for the trial
+	// end canceled with no charge.
+	TrialsActivated int `json:"trials_activated"`
 }
 
-// UsageAggregate defines model for UsageAggregate.
+// UsageAggregate Totals over every usage event that matches the filters of
+// `GET /v1/usage-events/aggregate`, with one row per meter.
 type UsageAggregate struct {
 	// ActiveCustomers Distinct customers among the matching events.
 	ActiveCustomers int `json:"active_customers"`
@@ -6910,12 +9336,17 @@ type UsageAggregate struct {
 
 		// Daily One entry per calendar day (in `tz`) with events, oldest first.
 		Daily []struct {
+			// Date The calendar day, `YYYY-MM-DD`, in `tz`.
 			Date openapi_types.Date `json:"date"`
 
 			// Value The day's usage under the meter's aggregation.
 			Value string `json:"value"`
 		} `json:"daily"`
-		Events  int    `json:"events"`
+
+		// Events Number of matching events on this meter.
+		Events int `json:"events"`
+
+		// MeterId The meter (`hc_mtr_…`).
 		MeterId string `json:"meter_id"`
 
 		// Peak Highest single reported quantity, as a decimal string.
@@ -6930,6 +9361,8 @@ type UsageAggregate struct {
 		// Billing applies them per billing period.
 		Value string `json:"value"`
 	} `json:"by_meter"`
+
+	// TotalEvents Number of matching events.
 	TotalEvents int `json:"total_events"`
 
 	// TotalUnits Sum of all matching quantities across meters, as a decimal
@@ -6975,7 +9408,11 @@ type UsageAggregate struct {
 // request is in flight. Absent on a replay and on a read.
 type UsageBillingStatus string
 
-// UsageEvent defines model for UsageEvent.
+// UsageEvent One usage event: a quantity of one meter's usage, for one customer,
+// at one time. Returned by `POST /v1/usage-events` and
+// `POST /v1/usage-events/backfill`, and listed by
+// `GET /v1/usage-events`. An event counts toward the billing period
+// its `timestamp` falls in.
 type UsageEvent struct {
 	// BillingStatus What Hardcount found when the event arrived. It checked the event
 	// against the customer's subscriptions, the plans and prices in force,
@@ -7013,46 +9450,83 @@ type UsageEvent struct {
 	// request read the prices, and a subscription change saved while the
 	// request is in flight. Absent on a replay and on a read.
 	BillingStatus UsageBillingStatus `json:"billing_status,omitempty"`
-	CustomerId    string             `json:"customer_id"`
+
+	// CustomerId The customer the event was recorded for (`hc_cus_…`): the
+	// customer whose `external_id` you sent as
+	// `external_customer_id`.
+	CustomerId string `json:"customer_id"`
 
 	// Dimensions The dimension values sent with the event. Absent when none were sent.
-	Dimensions     map[string]interface{} `json:"dimensions,omitempty"`
-	Id             string                 `json:"id"`
-	IdempotencyKey string                 `json:"idempotency_key,omitempty"`
-	MeterId        string                 `json:"meter_id"`
+	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
 
-	// Origin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
+	// Id The event's ID (`hc_evt_…`).
+	Id string `json:"id"`
+
+	// IdempotencyKey The key the event was sent with. Hardcount keeps one event per
+	// key in each account and mode (live or test), with no expiry: an
+	// event sent later with the same key is not stored again, however
+	// long after. Absent on an event stored without a key.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+
+	// MeterId The meter the event counts toward (`hc_mtr_…`): the meter whose
+	// `event_name` you sent.
+	MeterId string `json:"meter_id"`
+
+	// Origin How the event arrived. `api`: `POST /v1/usage-events`, the batch
+	// route or the LiteLLM integration. `backfill`:
+	// `POST /v1/usage-events/backfill`, or released held usage.
+	// Absent on the rows of `GET /v1/usage-events`, which does not
+	// return it.
 	Origin UsageEventOrigin `json:"origin,omitempty"`
 
 	// ProviderCostCents What serving this event cost you at your provider, in US cents as
 	// a decimal string (e.g. "0.45"), set when the event arrived: from
-	// your provider cost rates, or the cost the sender reported (see
-	// `provider_cost_source`). Absent when the cost is unknown or the
-	// event has no costed dimensions.
+	// your provider cost rates, or the cost LiteLLM reported for the
+	// call (see `provider_cost_source`). Absent when no rate matched
+	// or the cost was too large to store, and when the source is
+	// `not_applicable`.
 	ProviderCostCents string `json:"provider_cost_cents,omitempty"`
 
 	// ProviderCostSource Where `provider_cost_cents` came from: `table` (your provider
-	// cost rates), `observed` (the cost the sender reported), or
-	// `not_applicable` (the meter has no costed dimensions). Absent when
-	// the cost is unknown.
+	// cost rates), `observed` (the cost LiteLLM reported for the
+	// call), or `not_applicable`: the event lacks a `provider` or
+	// `token_type` dimension, or has neither `model` nor `model_raw`,
+	// so no rate can apply. Absent when the event has those
+	// dimensions but no rate matched.
 	ProviderCostSource UsageEventProviderCostSource `json:"provider_cost_source,omitempty"`
 
 	// Quantity Exact quantity as a decimal string (e.g. "1.5").
-	Quantity  string    `json:"quantity"`
-	TenantId  string    `json:"tenant_id,omitempty"`
+	Quantity string `json:"quantity"`
+
+	// TenantId The account the event belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// Timestamp When the usage happened. It decides which billing period the
+	// event counts toward. An event sent without `timestamp` is
+	// stamped with the time Hardcount received it, or, for a customer
+	// on a test clock, with the clock's time. A live event may be at
+	// most 5 minutes ahead of that time. There is no limit on how far
+	// back it goes, but an event in a period whose invoice is already
+	// built is stored and not billed (see `billing_status`).
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// UsageEventOrigin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
+// UsageEventOrigin How the event arrived. `api`: `POST /v1/usage-events`, the batch
+// route or the LiteLLM integration. `backfill`:
+// `POST /v1/usage-events/backfill`, or released held usage.
+// Absent on the rows of `GET /v1/usage-events`, which does not
+// return it.
 type UsageEventOrigin string
 
 // UsageEventProviderCostSource Where `provider_cost_cents` came from: `table` (your provider
-// cost rates), `observed` (the cost the sender reported), or
-// `not_applicable` (the meter has no costed dimensions). Absent when
-// the cost is unknown.
+// cost rates), `observed` (the cost LiteLLM reported for the
+// call), or `not_applicable`: the event lacks a `provider` or
+// `token_type` dimension, or has neither `model` nor `model_raw`,
+// so no rate can apply. Absent when the event has those
+// dimensions but no rate matched.
 type UsageEventProviderCostSource string
 
-// UsageEventBatchEventResult defines model for UsageEventBatchEventResult.
+// UsageEventBatchEventResult What the batch did with one of its events.
 type UsageEventBatchEventResult struct {
 	// BillingStatus What Hardcount found when the event arrived. It checked the event
 	// against the customer's subscriptions, the plans and prices in force,
@@ -7102,7 +9576,9 @@ type UsageEventBatchEventResult struct {
 // this batch, so it was not stored again.
 type UsageEventBatchEventResultStatus string
 
-// UsageEventBatchResult defines model for UsageEventBatchResult.
+// UsageEventBatchResult What `POST /v1/usage-events/batch` wrote: how many events were new,
+// how many were already stored, and one result per event in the order
+// sent.
 type UsageEventBatchResult struct {
 	// AfterClose Of `ingested`, the events answered `billing_status` `after_close`.
 	AfterClose int `json:"after_close"`
@@ -7130,7 +9606,7 @@ type UsageEventBatchResult struct {
 	Total int `json:"total"`
 }
 
-// WebhookDeliveryReplayResult defines model for WebhookDeliveryReplayResult.
+// WebhookDeliveryReplayResult What `POST /v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay` returns.
 type WebhookDeliveryReplayResult struct {
 	// DeliveryId The new delivery to this endpoint.
 	DeliveryId string `json:"delivery_id"`
@@ -7139,73 +9615,147 @@ type WebhookDeliveryReplayResult struct {
 	EventId string `json:"event_id"`
 
 	// ReplayOf The original event.
-	ReplayOf string                            `json:"replay_of"`
-	Status   WebhookDeliveryReplayResultStatus `json:"status"`
+	ReplayOf string `json:"replay_of"`
+
+	// Status Always `queued`. The send happens in the background.
+	Status WebhookDeliveryReplayResultStatus `json:"status"`
 }
 
-// WebhookDeliveryReplayResultStatus defines model for WebhookDeliveryReplayResult.Status.
+// WebhookDeliveryReplayResultStatus Always `queued`. The send happens in the background.
 type WebhookDeliveryReplayResultStatus string
 
-// WebhookEndpoint defines model for WebhookEndpoint.
+// WebhookEndpoint A URL that Hardcount sends webhook events to, for one mode. Its
+// signing secret is never returned here: only creating the endpoint
+// and rotating its secret show it, once.
 type WebhookEndpoint struct {
-	// Active false = paused.
-	Active      bool      `json:"active"`
-	CreatedAt   time.Time `json:"created_at"`
-	Description string    `json:"description,omitempty"`
+	// Active False while the endpoint is paused. A paused endpoint gets no
+	// new events, its pending retries end as `failed`, and its
+	// deliveries cannot be resent.
+	Active bool `json:"active"`
 
-	// Events Subscribed event types. `*` means all.
-	Events                   []string  `json:"events"`
-	Id                       string    `json:"id"`
-	Livemode                 bool      `json:"livemode"`
+	// CreatedAt When the endpoint was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Description Your note about the endpoint. Absent when empty.
+	Description string `json:"description,omitempty"`
+
+	// Events The event types the endpoint gets. `*` means every event, and a
+	// prefix such as `invoice.*` means every event whose type starts
+	// with `invoice.`.
+	Events []string `json:"events"`
+
+	// Id The endpoint's id (`hc_whe_…`).
+	Id string `json:"id"`
+
+	// Livemode The mode the endpoint gets events from, true for live. It is the caller's mode when the endpoint is created.
+	Livemode bool `json:"livemode"`
+
+	// SecondarySecretExpiresAt When the previous secret stops signing deliveries, 72 hours
+	// after the rotation. It stays in the answer after that time.
+	// Absent if the secret was never rotated.
 	SecondarySecretExpiresAt time.Time `json:"secondary_secret_expires_at,omitempty"`
 
-	// SecondarySecretLast4 The previous signing secret, during a rotation grace period.
-	SecondarySecretLast4 string    `json:"secondary_secret_last4,omitempty"`
-	SecretLast4          string    `json:"secret_last4"`
-	TenantId             string    `json:"tenant_id,omitempty"`
-	UpdatedAt            time.Time `json:"updated_at"`
-	Url                  string    `json:"url"`
+	// SecondarySecretLast4 Last 4 characters of the previous signing secret, after a
+	// rotation. Absent if the secret was never rotated.
+	SecondarySecretLast4 string `json:"secondary_secret_last4,omitempty"`
+
+	// SecretLast4 Last 4 characters of the current signing secret.
+	SecretLast4 string `json:"secret_last4"`
+
+	// TenantId The account the endpoint belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the endpoint last changed.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// Url Where Hardcount POSTs each event. It must be `https://` on a
+	// public address. Outside production (`APP_ENV` is not
+	// `production`), a `localhost` or loopback URL works too, over
+	// `http://` or `https://`. Each delivery checks the address again,
+	// so a host that later points to a private address is not called.
+	Url string `json:"url"`
 }
 
 // WebhookEndpointCreated A new webhook endpoint and its signing secret. The secret is shown only here.
 type WebhookEndpointCreated struct {
+	// Endpoint A URL that Hardcount sends webhook events to, for one mode. Its
+	// signing secret is never returned here: only creating the endpoint
+	// and rotating its secret show it, once.
 	Endpoint WebhookEndpoint `json:"endpoint"`
 
 	// Secret The signing secret (`whsec_…`). Store it now; Hardcount does not show it again.
 	Secret string `json:"secret"`
 }
 
-// WebhookEndpointDelivery defines model for WebhookEndpointDelivery.
+// WebhookEndpointDelivery One delivery of one event to one endpoint, with the result of its
+// latest attempt. A failed attempt is tried again after about 1
+// minute, 5 minutes, 30 minutes, 2 hours and 24 hours. After the
+// sixth failed attempt the delivery is `failed`. A redirect counts as
+// a failure.
 type WebhookEndpointDelivery struct {
-	AttemptCount int       `json:"attempt_count"`
-	CompletedAt  time.Time `json:"completed_at"`
-	CreatedAt    time.Time `json:"created_at"`
-	Error        string    `json:"error"`
-	EventId      string    `json:"event_id"`
-	EventType    string    `json:"event_type"`
-	Id           string    `json:"id"`
+	// AttemptCount Attempts made so far, at most 6.
+	AttemptCount int `json:"attempt_count"`
+
+	// CompletedAt When the delivery succeeded or failed for good. null while pending.
+	CompletedAt time.Time `json:"completed_at"`
+
+	// CreatedAt When the delivery was queued.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Error Why an attempt failed, such as `HTTP 500`, a connection error,
+	// `endpoint disabled` or `endpoint deleted`. Empty when no attempt
+	// failed. A delivery that succeeded on a retry keeps the earlier
+	// failure's text.
+	Error string `json:"error"`
+
+	// EventId The event this delivery sent. For a replay, the replay's own id; the message itself carried the original event's `id`.
+	EventId string `json:"event_id"`
+
+	// EventType The event's type, such as `invoice.finalized`.
+	EventType string `json:"event_type"`
+
+	// Id The delivery's id (`hc_whd_…`).
+	Id string `json:"id"`
 
 	// IsReplay The delivery came from a replay.
-	IsReplay        bool      `json:"is_replay"`
-	NextRetryAt     time.Time `json:"next_retry_at"`
-	ReplayOfEventId string    `json:"replay_of_event_id,omitempty"`
+	IsReplay bool `json:"is_replay"`
 
-	// ResponseBody First 4 KB of the receiver's response.
-	ResponseBody string                        `json:"response_body"`
-	Status       WebhookEndpointDeliveryStatus `json:"status"`
+	// NextRetryAt While pending, when the next attempt is due. While an attempt is
+	// running, it is when a retry takes over if that attempt never
+	// finishes. null once the delivery is finished.
+	NextRetryAt time.Time `json:"next_retry_at"`
 
-	// StatusCode HTTP status from the receiver. 0 when there was no response.
+	// ReplayOfEventId The original event, when `is_replay` is true. Absent otherwise.
+	ReplayOfEventId string `json:"replay_of_event_id,omitempty"`
+
+	// ResponseBody Up to the first 1 KB of the receiver's latest answer.
+	ResponseBody string `json:"response_body"`
+
+	// Status `pending` while an attempt is running or due, `succeeded` after
+	// a 2xx answer, `failed` once no attempt is left or the endpoint
+	// was paused or deleted.
+	Status WebhookEndpointDeliveryStatus `json:"status"`
+
+	// StatusCode HTTP status from the receiver's latest answer. 0 when no attempt got an answer.
 	StatusCode int `json:"status_code"`
 }
 
-// WebhookEndpointDeliveryStatus defines model for WebhookEndpointDelivery.Status.
+// WebhookEndpointDeliveryStatus `pending` while an attempt is running or due, `succeeded` after
+// a 2xx answer, `failed` once no attempt is left or the endpoint
+// was paused or deleted.
 type WebhookEndpointDeliveryStatus string
 
-// WebhookEndpointStats defines model for WebhookEndpointStats.
+// WebhookEndpointStats All-time delivery counts for one endpoint in the caller's mode, from
+// `GET /v1/webhook-endpoints/endpoints/stats`.
 type WebhookEndpointStats struct {
+	// EndpointId The endpoint's id. It can name a deleted endpoint.
 	EndpointId string `json:"endpoint_id"`
-	Failed     int    `json:"failed"`
-	Succeeded  int    `json:"succeeded"`
+
+	// Failed Deliveries that failed for good.
+	Failed int `json:"failed"`
+
+	// Succeeded Deliveries that got a 2xx answer.
+	Succeeded int `json:"succeeded"`
 
 	// SuccessRate Percent (0-100) of finished deliveries that succeeded. Pending deliveries are not counted. 0 when none finished.
 	SuccessRate float32 `json:"success_rate"`
@@ -7215,97 +9765,165 @@ type WebhookEndpointStats struct {
 }
 
 // WebhookEvent One outbound webhook event, as Hardcount created it.
+// `GET /v1/webhook-endpoints/events` lists them. Each delivery POSTs
+// `{"id", "event_type", "created_at", "data"}` to the endpoint, where
+// `data` is this event's `payload`.
 type WebhookEvent struct {
+	// CreatedAt When the event was created.
 	CreatedAt time.Time `json:"created_at"`
-	EventType string    `json:"event_type"`
-	Id        string    `json:"id"`
-	Livemode  bool      `json:"livemode"`
+
+	// EventType What happened, such as `invoice.finalized`. [Webhook events](https://gethardcount.com/docs/api/webhook-events/) lists every type.
+	EventType string `json:"event_type"`
+
+	// Id The event's id (`hc_whevt_…`). A replay has its own id but is sent with the original event's `id` and `created_at`.
+	Id string `json:"id"`
+
+	// Livemode The mode the event happened in. Only endpoints of the same mode get it.
+	Livemode bool `json:"livemode"`
 
 	// Payload The event's data: the resource the event is about, under the
 	// resource's name (`invoice`, `subscription`, `customer`,
 	// `payment_method`, `dunning_run` or `credit_balance`), as the
 	// API returns it, and the few keys the event adds beside it.
-	// docs/webhooks.md lists what each event carries;
+	// [Webhook events](https://gethardcount.com/docs/api/webhook-events/) lists what each
+	// event carries;
 	// `payment.dispute_opened` and `payment.dispute_closed` carry a
 	// `DisputeWebhookEventData`; `payment.refunded_in_stripe` carries a
 	// `StripeRefundWebhookEventData`.
 	Payload map[string]interface{} `json:"payload"`
 
-	// ReplayOfEventId Set on a replay. The event the replay was made from.
+	// ReplayOfEventId Set on a replay. The original event it copies; a replay of a
+	// replay points to that same original. Absent on an original
+	// event.
 	ReplayOfEventId string `json:"replay_of_event_id,omitempty"`
-	TenantId        string `json:"tenant_id,omitempty"`
+
+	// TenantId The account the event belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
 }
 
-// WebhookEventDeliveryAttempt defines model for WebhookEventDeliveryAttempt.
+// WebhookEventDeliveryAttempt One row of an event's delivery timeline, from
+// `GET /v1/webhook_events/{id}/deliveries`. Each row is one
+// endpoint's delivery of the event or of one of its replays, with the
+// result of its latest attempt.
 type WebhookEventDeliveryAttempt struct {
-	// AttemptNo Position in the timeline, starting at 1.
-	AttemptNo           int       `json:"attempt_no"`
-	AttemptedAt         time.Time `json:"attempted_at"`
-	CompletedAt         time.Time `json:"completed_at"`
-	EndpointDescription string    `json:"endpoint_description"`
-	EndpointId          string    `json:"endpoint_id"`
-	EndpointUrl         string    `json:"endpoint_url"`
-	Error               string    `json:"error"`
+	// AttemptNo Position in the timeline, starting at 1. It is not the number of attempts.
+	AttemptNo int `json:"attempt_no"`
+
+	// AttemptedAt When the delivery was queued.
+	AttemptedAt time.Time `json:"attempted_at"`
+
+	// CompletedAt When the delivery succeeded or failed for good. null while pending.
+	CompletedAt time.Time `json:"completed_at"`
+
+	// EndpointDescription The endpoint's description, or empty.
+	EndpointDescription string `json:"endpoint_description"`
+
+	// EndpointId The endpoint the delivery went to.
+	EndpointId string `json:"endpoint_id"`
+
+	// EndpointUrl The endpoint's URL. It is kept after the endpoint is deleted.
+	EndpointUrl string `json:"endpoint_url"`
+
+	// Error Why an attempt failed, such as `HTTP 500` or a connection error. Empty when no attempt failed.
+	Error string `json:"error"`
 
 	// EventId The event this delivery belongs to. When `is_replay` is true, the replay's own id; the message it sent carries the original event's `id` (`root_event_id`).
-	EventId     string    `json:"event_id"`
-	Id          string    `json:"id"`
-	IsReplay    bool      `json:"is_replay"`
+	EventId string `json:"event_id"`
+
+	// Id The delivery's id (`hc_whd_…`).
+	Id string `json:"id"`
+
+	// IsReplay True when the row belongs to a replay of the event.
+	IsReplay bool `json:"is_replay"`
+
+	// NextRetryAt While pending, when the next attempt is due. While an attempt is
+	// running, it is when a retry takes over if that attempt never
+	// finishes. null once the delivery is finished.
 	NextRetryAt time.Time `json:"next_retry_at"`
 
 	// ReplayEventId The replay's event id when `is_replay` is true; otherwise empty.
 	ReplayEventId string `json:"replay_event_id"`
 
-	// RequestPayloadSha256 SHA-256 of the event payload. Equal values mean the same payload was sent.
+	// RequestPayloadSha256 SHA-256, in hex, of the event's data. Two rows with the same
+	// value sent the same data.
 	RequestPayloadSha256 string `json:"request_payload_sha256"`
 
-	// ResponseBody First 4 KB of the receiver's response.
-	ResponseBody string                            `json:"response_body"`
-	Status       WebhookEventDeliveryAttemptStatus `json:"status"`
-	StatusCode   int                               `json:"status_code"`
+	// ResponseBody Up to the first 1 KB of the receiver's latest answer.
+	ResponseBody string `json:"response_body"`
+
+	// Status `pending` while an attempt is running or due, `succeeded` after a 2xx answer, `failed` once the delivery failed for good.
+	Status WebhookEventDeliveryAttemptStatus `json:"status"`
+
+	// StatusCode HTTP status from the receiver's latest answer. 0 when no attempt got an answer.
+	StatusCode int `json:"status_code"`
 }
 
-// WebhookEventDeliveryAttemptStatus defines model for WebhookEventDeliveryAttempt.Status.
+// WebhookEventDeliveryAttemptStatus `pending` while an attempt is running or due, `succeeded` after a 2xx answer, `failed` once the delivery failed for good.
 type WebhookEventDeliveryAttemptStatus string
 
-// WebhookReplayResult defines model for WebhookReplayResult.
+// WebhookReplayResult What `POST /v1/webhook_events/{id}/replay` returns.
 type WebhookReplayResult struct {
 	// EventId The new event created by the replay.
 	EventId string `json:"event_id"`
 
 	// ReplayOf The original event.
-	ReplayOf string                    `json:"replay_of"`
-	Status   WebhookReplayResultStatus `json:"status"`
+	ReplayOf string `json:"replay_of"`
+
+	// Status `queued` when at least one endpoint will get the replay.
+	// `no_matching_endpoints` when no active endpoint in this mode
+	// subscribes to the event's type; the replay event is still
+	// created.
+	Status WebhookReplayResultStatus `json:"status"`
 }
 
-// WebhookReplayResultStatus defines model for WebhookReplayResult.Status.
+// WebhookReplayResultStatus `queued` when at least one endpoint will get the replay.
+// `no_matching_endpoints` when no active endpoint in this mode
+// subscribes to the event's type; the replay event is still
+// created.
 type WebhookReplayResultStatus string
 
 // WebhookSecretRotation The endpoint's new signing secret. It is shown only here.
 type WebhookSecretRotation struct {
-	// SecondaryValidUntil Until this time, deliveries are also signed with the old secret.
+	// SecondaryValidUntil Until this time, 72 hours after the rotation, each delivery is
+	// signed with the old secret too, so your receiver can switch
+	// without rejecting events.
 	SecondaryValidUntil time.Time `json:"secondary_valid_until,omitempty"`
-	Secret              string    `json:"secret"`
+
+	// Secret The new signing secret (`whsec_…`). Store it now; Hardcount does not show it again.
+	Secret string `json:"secret"`
 }
 
 // WebhookStreamFrame The JSON in each `data:` line of `/v1/webhook_events/stream`.
 type WebhookStreamFrame struct {
+	// CreatedAt When the event was created.
 	CreatedAt time.Time `json:"created_at"`
 
 	// CustomerId The customer the event is about: the `customer_id` of the
 	// resource in `data` (its `id` for a `customer.*` event), or empty.
 	// For an event queued before `data` held the resource, its
 	// `data.customer_id`.
-	CustomerId      string    `json:"customer_id"`
-	EventId         string    `json:"event_id"`
-	EventType       string    `json:"event_type"`
-	LastAttemptAt   time.Time `json:"last_attempt_at"`
-	Livemode        bool      `json:"livemode"`
-	ReplayOfEventId string    `json:"replay_of_event_id"`
+	CustomerId string `json:"customer_id"`
 
-	// Status Delivery state. Live frames send `pending`, `succeeded` or
-	// `failed`. Frames in the first batch send `pending`, `failed`,
-	// `delivered` (all deliveries succeeded) or `no_endpoints`.
+	// EventId The event's id. For a replay, the replay's own id.
+	EventId string `json:"event_id"`
+
+	// EventType The event's type, such as `invoice.finalized`.
+	EventType string `json:"event_type"`
+
+	// LastAttemptAt When the delivery result this frame reports happened. null in the first batch and in a new event's first frame.
+	LastAttemptAt time.Time `json:"last_attempt_at"`
+
+	// Livemode The event's mode. Live frames are not filtered by mode, so check it.
+	Livemode bool `json:"livemode"`
+
+	// ReplayOfEventId The original event, when this frame is about a replay. null otherwise.
+	ReplayOfEventId string `json:"replay_of_event_id"`
+
+	// Status Delivery state. Live frames send `pending` (a new event or
+	// replay), `succeeded` (one delivery got a 2xx answer) or `failed`
+	// (one delivery failed for good). Frames in the first batch send
+	// the event's roll-up over all its deliveries: `pending`, `failed`,
+	// `delivered` (every delivery succeeded) or `no_endpoints`.
 	Status string `json:"status"`
 }
 
@@ -7318,8 +9936,41 @@ type Limit = int
 // Offset defines model for Offset.
 type Offset = int
 
-// InvalidPage defines model for InvalidPage.
+// BodyNotAllowed The body of an error answer. `error.type` is the broad class,
+// `error.code` is the exact reason for your code to branch on, and
+// `error.message` is a sentence for a person. Quote
+// `error.request_id` when you ask for help.
+type BodyNotAllowed = Error
+
+// Forbidden The body of an error answer. `error.type` is the broad class,
+// `error.code` is the exact reason for your code to branch on, and
+// `error.message` is a sentence for a person. Quote
+// `error.request_id` when you ask for help.
+type Forbidden = Error
+
+// InvalidBody The body of an error answer. `error.type` is the broad class,
+// `error.code` is the exact reason for your code to branch on, and
+// `error.message` is a sentence for a person. Quote
+// `error.request_id` when you ask for help.
+type InvalidBody = Error
+
+// InvalidPage The body of an error answer. `error.type` is the broad class,
+// `error.code` is the exact reason for your code to branch on, and
+// `error.message` is a sentence for a person. Quote
+// `error.request_id` when you ask for help.
 type InvalidPage = Error
+
+// RateLimited The body of an error answer. `error.type` is the broad class,
+// `error.code` is the exact reason for your code to branch on, and
+// `error.message` is a sentence for a person. Quote
+// `error.request_id` when you ask for help.
+type RateLimited = Error
+
+// Unauthorized The body of an error answer. `error.type` is the broad class,
+// `error.code` is the exact reason for your code to branch on, and
+// `error.message` is a sentence for a person. Quote
+// `error.request_id` when you ask for help.
+type Unauthorized = Error
 
 // bearerAuthContextKey is the context key for BearerAuth security scheme
 type bearerAuthContextKey string
@@ -7362,20 +10013,24 @@ type GetAnalyticsUsageParams struct {
 
 // ListApiKeysParams defines parameters for ListApiKeys.
 type ListApiKeysParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // CreateApiKeyJSONBody defines parameters for CreateApiKey.
 type CreateApiKeyJSONBody struct {
 	// ExpiresAt Optional. Must be in the future. Omit for a key that does not expire.
-	ExpiresAt time.Time                   `json:"expires_at,omitempty"`
-	KeyType   CreateApiKeyJSONBodyKeyType `json:"key_type,omitempty"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
+
+	// KeyType `secret` for full access, or `ingest` for a key that can only send usage events.
+	KeyType CreateApiKeyJSONBodyKeyType `json:"key_type,omitempty"`
 
 	// Name Label shown in the key list. Must not be blank.
 	Name string `json:"name"`
@@ -7384,11 +10039,18 @@ type CreateApiKeyJSONBody struct {
 // CreateApiKeyParams defines parameters for CreateApiKey.
 type CreateApiKeyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7404,11 +10066,18 @@ type RotateApiKeyJSONBody struct {
 // RotateApiKeyParams defines parameters for RotateApiKey.
 type RotateApiKeyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7416,12 +10085,14 @@ type RotateApiKeyParams struct {
 type ListAuditLogParams struct {
 	// ResourceType For example `invoice`, `api_key`, `setting`. See `/v1/audit-log/filters`.
 	ResourceType string `form:"resource_type,omitempty" json:"resource_type,omitempty"`
-	ResourceId   string `form:"resource_id,omitempty" json:"resource_id,omitempty"`
+
+	// ResourceId Only entries about this resource id.
+	ResourceId string `form:"resource_id,omitempty" json:"resource_id,omitempty"`
 
 	// Action For example `create`, `update`, `revoke`. See `/v1/audit-log/filters`.
 	Action string `form:"action,omitempty" json:"action,omitempty"`
 
-	// ActorId A user id or an API key id.
+	// ActorId Only entries by this actor, an `actor_id` value such as a user id or an API key id.
 	ActorId string `form:"actor_id,omitempty" json:"actor_id,omitempty"`
 
 	// DateFrom Lower bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (start of day, UTC).
@@ -7433,42 +10104,56 @@ type ListAuditLogParams struct {
 	// TestClockId Only entries made inside this test clock's simulation. Works for deleted clocks too.
 	TestClockId string `form:"test_clock_id,omitempty" json:"test_clock_id,omitempty"`
 
-	// SimFrom Lower bound on `sim_effective_at` (simulated time), inclusive. Excludes entries with no simulated time.
+	// SimFrom Lower bound on `sim_effective_at` (simulated time), inclusive.
+	// RFC3339 or YYYY-MM-DD, like `date_from`. Excludes entries with
+	// no simulated time.
 	SimFrom string `form:"sim_from,omitempty" json:"sim_from,omitempty"`
 
-	// SimTo Upper bound on `sim_effective_at`, inclusive.
+	// SimTo Upper bound on `sim_effective_at`, inclusive. RFC3339 or
+	// YYYY-MM-DD, like `date_to`. Excludes entries with no simulated
+	// time.
 	SimTo string `form:"sim_to,omitempty" json:"sim_to,omitempty"`
 
 	// Order The only supported order. Any other value is a 400.
 	Order ListAuditLogParamsOrder `form:"order,omitempty" json:"order,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListAuditLogParamsOrder defines parameters for ListAuditLog.
 type ListAuditLogParamsOrder string
 
-// PostV1AuthAcceptInviteJSONBody defines parameters for PostV1AuthAcceptInvite.
-type PostV1AuthAcceptInviteJSONBody struct {
-	// Password Required (and validated) only when no account exists for the invited email; ignored otherwise.
+// AcceptInvitationJSONBody defines parameters for AcceptInvitation.
+type AcceptInvitationJSONBody struct {
+	// Password Required when no account has the invited email: at least
+	// 12 characters, at most 72 bytes, and not one of the most
+	// common passwords. Ignored otherwise.
 	Password string `json:"password,omitempty"`
-	Token    string `json:"token"`
+
+	// Token The token from the invite link.
+	Token string `json:"token"`
 }
 
-// PostV1AuthLoginJSONBody defines parameters for PostV1AuthLogin.
-type PostV1AuthLoginJSONBody struct {
-	Email    openapi_types.Email `json:"email"`
-	Password string              `json:"password"`
+// LoginJSONBody defines parameters for Login.
+type LoginJSONBody struct {
+	// Email The user's sign-in email.
+	Email openapi_types.Email `json:"email"`
+
+	// Password The user's password.
+	Password string `json:"password"`
 }
 
-// PostV1AuthModeJSONBody defines parameters for PostV1AuthMode.
-type PostV1AuthModeJSONBody struct {
+// SwitchSessionModeJSONBody defines parameters for SwitchSessionMode.
+type SwitchSessionModeJSONBody struct {
+	// Livemode True for live mode, false for test mode.
 	Livemode bool `json:"livemode"`
 }
 
@@ -7481,39 +10166,53 @@ type CheckPasswordResetTokenParams struct {
 // CheckPasswordResetToken200JSONResponseBodyValid defines parameters for CheckPasswordResetToken.
 type CheckPasswordResetToken200JSONResponseBodyValid bool
 
-// PostV1AuthPasswordResetConfirmJSONBody defines parameters for PostV1AuthPasswordResetConfirm.
-type PostV1AuthPasswordResetConfirmJSONBody struct {
+// ConfirmPasswordResetJSONBody defines parameters for ConfirmPasswordReset.
+type ConfirmPasswordResetJSONBody struct {
+	// Password The new password: at least 12 characters, at most 72
+	// bytes, and not one of the most common passwords.
 	Password string `json:"password"`
-	Token    string `json:"token"`
+
+	// Token The token from the reset link.
+	Token string `json:"token"`
 }
 
-// PostV1AuthPasswordResetRequestJSONBody defines parameters for PostV1AuthPasswordResetRequest.
-type PostV1AuthPasswordResetRequestJSONBody struct {
+// RequestPasswordResetJSONBody defines parameters for RequestPasswordReset.
+type RequestPasswordResetJSONBody struct {
+	// Email The sign-in email of the account to reset.
 	Email openapi_types.Email `json:"email"`
 }
 
-// PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery defines parameters for PostV1AuthPasswordResetRequest.
-type PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery string
+// RequestPasswordReset200JSONResponseBodyEmailDelivery defines parameters for RequestPasswordReset.
+type RequestPasswordReset200JSONResponseBodyEmailDelivery string
 
-// PostV1BillingRunParams defines parameters for PostV1BillingRun.
-type PostV1BillingRunParams struct {
+// RunBillingParams defines parameters for RunBilling.
+type RunBillingParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // BootstrapJSONBody defines parameters for Bootstrap.
 type BootstrapJSONBody struct {
-	// OwnerEmail Must contain `@`.
+	// OwnerEmail The owner's dashboard sign-in email. One plain address whose domain has a dot.
 	OwnerEmail string `json:"owner_email,omitempty"`
 
 	// OwnerPassword 12 or more characters, at most 72 bytes, and not a common password from a leaked-password list. Omit to have Hardcount generate one.
 	OwnerPassword string `json:"owner_password,omitempty"`
-	TenantName    string `json:"tenant_name,omitempty"`
+
+	// TenantName The account's name.
+	TenantName string `json:"tenant_name,omitempty"`
 
 	// Token The value of `HARDCOUNT_BOOTSTRAP_TOKEN`. Or send it as a Bearer token.
 	Token string `json:"token,omitempty"`
@@ -7521,26 +10220,40 @@ type BootstrapJSONBody struct {
 
 // ListCreditNotesParams defines parameters for ListCreditNotes.
 type ListCreditNotesParams struct {
-	InvoiceId  string                      `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
-	CustomerId string                      `form:"customer_id,omitempty" json:"customer_id,omitempty"`
-	Status     ListCreditNotesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	// InvoiceId Only notes against this invoice.
+	InvoiceId string `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
 
-	// RefundStatus `needs_attention` returns issued, non-test-clock notes whose
+	// CustomerId Only this customer's notes.
+	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
+
+	// Status Only notes in this status.
+	Status ListCreditNotesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// RefundStatus Only notes whose refund is in this state. `needs_attention`
+	// returns issued, non-test-clock notes whose
 	// refund failed or has an unknown result, has been pending more
 	// than 72 hours, or has a refund amount still at `none` after 1
 	// hour.
 	RefundStatus ListCreditNotesParamsRefundStatus `form:"refund_status,omitempty" json:"refund_status,omitempty"`
 
-	// Sort One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default).
-	Sort string                   `form:"sort,omitempty" json:"sort,omitempty"`
-	Dir  ListCreditNotesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+	// Sort The order of the list. `created_at` (the default),
+	// `credit_note_number`, `total_cents` (or `amount`), `status` or
+	// `issued_at`. Any other value is a 422 with `param: sort`. Ties are
+	// broken by `id` in the same direction.
+	Sort ListCreditNotesParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Dir Sort direction: `desc` (the default) or `asc`, in lower case. Any
+	// other value is a 422 with `param: dir`.
+	Dir ListCreditNotesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -7550,63 +10263,89 @@ type ListCreditNotesParamsStatus string
 // ListCreditNotesParamsRefundStatus defines parameters for ListCreditNotes.
 type ListCreditNotesParamsRefundStatus string
 
+// ListCreditNotesParamsSort defines parameters for ListCreditNotes.
+type ListCreditNotesParamsSort string
+
 // ListCreditNotesParamsDir defines parameters for ListCreditNotes.
 type ListCreditNotesParamsDir string
 
-// PostV1CreditNotesJSONBody defines parameters for PostV1CreditNotes.
-type PostV1CreditNotesJSONBody struct {
+// CreateCreditNoteJSONBody defines parameters for CreateCreditNote.
+type CreateCreditNoteJSONBody struct {
+	// AutoIssue True issues the note in the same call. If the issue fails,
+	// the draft is voided and the error is returned. Defaults to
+	// false (the note stays a draft).
 	AutoIssue bool `json:"auto_issue,omitempty"`
 
 	// CommitRelief Mutually exclusive with lines and credit_amount_cents. The
 	// relief's split goes in here, not at the top level: a top-level
 	// `refund_amount_cents`, `out_of_band_amount_cents` or
 	// `refund_type` is a 422. Example after a lost dispute:
-	// `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
+	// `{"invoice_id": "hc_inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
 	CommitRelief struct {
 		// InvoiceId Optional. Defaults to the top-level invoice_id.
-		InvoiceId            string `json:"invoice_id,omitempty"`
-		OutOfBandAmountCents int    `json:"out_of_band_amount_cents,omitempty"`
+		InvoiceId string `json:"invoice_id,omitempty"`
 
-		// Reason Optional. Defaults to the top-level reason.
+		// OutOfBandAmountCents Optional. Part of the cash paid back outside Hardcount.
+		OutOfBandAmountCents int `json:"out_of_band_amount_cents,omitempty"`
+
+		// Reason Optional. Wins over the top-level `reason`. When both
+		// are empty, the note's reason is `commit_relief`.
 		Reason string `json:"reason,omitempty"`
 
-		// RefundAmountCents Optional allocation; must sum with out_of_band to the derived cash.
+		// RefundAmountCents Optional. Part of the cash refunded to the card. With `out_of_band_amount_cents` it must add up to the cash Hardcount works out. When both are left out, the cash goes to the card if the invoice was paid by card, otherwise out of band.
 		RefundAmountCents int `json:"refund_amount_cents,omitempty"`
 
-		// RetireAll Retire the LIVE remaining (absorbs racing drawdowns).
+		// RetireAll Retire all the commit credit left at the moment the relief runs, so credit the customer spends meanwhile is not counted. `retire_cents` is then ignored.
 		RetireAll bool `json:"retire_all,omitempty"`
 
-		// RetireCents Commit credits to retire (1..remaining).
+		// RetireCents Commit credits to retire, from 1 to what is left of the commit.
 		RetireCents int `json:"retire_cents,omitempty"`
 	} `json:"commit_relief,omitempty"`
-	CreditAmountCents int    `json:"credit_amount_cents,omitempty"`
-	InvoiceId         string `json:"invoice_id"`
-	Lines             []struct {
+
+	// CreditAmountCents Part of the total added to the customer's credit balance, in the currency's minor unit (cents for USD). Paid invoices only. Not with commit_relief.
+	CreditAmountCents int `json:"credit_amount_cents,omitempty"`
+
+	// InvoiceId The invoice to credit. It must be `finalized` or `paid`.
+	InvoiceId string `json:"invoice_id"`
+
+	// Lines The credited amounts, tax included. At least one line for a line-based note; none with `commit_relief`.
+	Lines []struct {
+		// Description The text printed on the line.
 		Description string `json:"description,omitempty"`
 
-		// InvoiceLineItemId Optional. The invoice line this credit line reverses.
+		// InvoiceLineItemId Optional. The invoice line this credit line reverses. It must be a line of this invoice.
 		InvoiceLineItemId string `json:"invoice_line_item_id,omitempty"`
-		Quantity          int    `json:"quantity,omitempty"`
-		UnitAmountCents   int    `json:"unit_amount_cents,omitempty"`
+
+		// Quantity How many units, 1 or more.
+		Quantity int `json:"quantity,omitempty"`
+
+		// UnitAmountCents Credit per unit, tax included, in the currency's minor unit (cents for USD). 1 or more.
+		UnitAmountCents int `json:"unit_amount_cents,omitempty"`
 	} `json:"lines,omitempty"`
 
-	// OutOfBandAmountCents Not with commit_relief; put the relief's split inside commit_relief.
-	OutOfBandAmountCents int    `json:"out_of_band_amount_cents,omitempty"`
-	Reason               string `json:"reason,omitempty"`
+	// OutOfBandAmountCents Part of the total paid back outside Hardcount, in the currency's minor unit (cents for USD). Paid invoices only. Not with commit_relief; put the relief's split inside commit_relief.
+	OutOfBandAmountCents int `json:"out_of_band_amount_cents,omitempty"`
 
-	// RefundAmountCents Not with commit_relief; put the relief's split inside commit_relief.
+	// Reason Why you are crediting, printed on the note. Required for a
+	// line-based note. For a relief, `commit_relief.reason` wins;
+	// this one is used when that is empty, and `commit_relief`
+	// is the reason when both are empty.
+	Reason string `json:"reason,omitempty"`
+
+	// RefundAmountCents Part of the total refunded to the card, in the currency's minor unit (cents for USD). Paid invoices only. Not with commit_relief; put the relief's split inside commit_relief.
 	RefundAmountCents int `json:"refund_amount_cents,omitempty"`
 
 	// RefundType Older single-channel form. On a paid invoice whose three
 	// `*_amount_cents` fields are all 0, `refund` or `credit`
 	// puts the whole note in that channel. Not with commit_relief.
-	RefundType PostV1CreditNotesJSONBodyRefundType `json:"refund_type,omitempty"`
+	RefundType CreateCreditNoteJSONBodyRefundType `json:"refund_type,omitempty"`
 
 	// StripeRefundId Links a refund made in Stripe outside Hardcount as this
-	// note's card refund, Stripe's `refunds[]` shape: Hardcount
+	// note's card refund, like Stripe's `refunds[]`: Hardcount
 	// reads the refund from Stripe and calls nothing else
 	// there for it. The refund must be of the payment that paid
-	// this invoice, not made by Hardcount, and succeeded; `refund_amount_cents` must be its amount,
+	// this invoice, not made by Hardcount, and succeeded;
+	// `refund_amount_cents` must be its amount,
 	// `credit_amount_cents` 0, and `auto_issue` true (the
 	// note is issued at once). The caps on the invoice still
 	// apply. A refund Hardcount flagged on the invoice
@@ -7615,132 +10354,202 @@ type PostV1CreditNotesJSONBody struct {
 	StripeRefundId string `json:"stripe_refund_id,omitempty"`
 }
 
-// PostV1CreditNotesParams defines parameters for PostV1CreditNotes.
-type PostV1CreditNotesParams struct {
+// CreateCreditNoteParams defines parameters for CreateCreditNote.
+type CreateCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1CreditNotesJSONBodyRefundType defines parameters for PostV1CreditNotes.
-type PostV1CreditNotesJSONBodyRefundType string
+// CreateCreditNoteJSONBodyRefundType defines parameters for CreateCreditNote.
+type CreateCreditNoteJSONBodyRefundType string
 
 // AttachStripeRefundToCreditNoteJSONBody defines parameters for AttachStripeRefundToCreditNote.
 type AttachStripeRefundToCreditNoteJSONBody struct {
+	// StripeRefundId Stripe's id of the refund you made (`re_…`).
 	StripeRefundId string `json:"stripe_refund_id"`
 }
 
 // AttachStripeRefundToCreditNoteParams defines parameters for AttachStripeRefundToCreditNote.
 type AttachStripeRefundToCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // IssueCreditNoteParams defines parameters for IssueCreditNote.
 type IssueCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // RetryCreditNoteRefundParams defines parameters for RetryCreditNoteRefund.
 type RetryCreditNoteRefundParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1CreditNotesIdSendJSONBody defines parameters for PostV1CreditNotesIdSend.
-type PostV1CreditNotesIdSendJSONBody struct {
-	AdditionalEmails []string            `json:"additional_emails,omitempty"`
-	Email            openapi_types.Email `json:"email"`
+// SendCreditNoteJSONBody defines parameters for SendCreditNote.
+type SendCreditNoteJSONBody struct {
+	// AdditionalEmails Addresses to copy on this send. Absent copies the customer's stored list; `[]` copies nobody.
+	AdditionalEmails []string `json:"additional_emails,omitempty"`
+
+	// Email The recipient, one plain address such as `billing@acme.example`, with no display name.
+	Email openapi_types.Email `json:"email"`
 }
 
-// PostV1CreditNotesIdSendParams defines parameters for PostV1CreditNotesIdSend.
-type PostV1CreditNotesIdSendParams struct {
+// SendCreditNoteParams defines parameters for SendCreditNote.
+type SendCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1CreditNotesIdSend200JSONResponseBodyStatus defines parameters for PostV1CreditNotesIdSend.
-type PostV1CreditNotesIdSend200JSONResponseBodyStatus string
+// SendCreditNote200JSONResponseBodyStatus defines parameters for SendCreditNote.
+type SendCreditNote200JSONResponseBodyStatus string
 
 // VoidCreditNoteParams defines parameters for VoidCreditNote.
 type VoidCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // AdjustCreditsJSONBody defines parameters for AdjustCredits.
 type AdjustCreditsJSONBody struct {
-	// AmountCents Positive adds credit, negative removes it. Not zero.
+	// AmountCents Positive adds credit, negative removes it, in the
+	// currency's minor unit (cents for USD). Not zero.
 	AmountCents int64 `json:"amount_cents"`
 
 	// Currency ISO 4217 code of the balance to change. Case-insensitive; stored uppercase.
-	Currency    string `json:"currency"`
-	CustomerId  string `json:"customer_id"`
+	Currency string `json:"currency"`
+
+	// CustomerId The customer whose credit to change (`hc_cus_…`).
+	CustomerId string `json:"customer_id"`
+
+	// Description Why you change the balance. Shown on the ledger entry. Must not be blank.
 	Description string `json:"description"`
 }
 
 // AdjustCreditsParams defines parameters for AdjustCredits.
 type AdjustCreditsParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // ListCreditBalancesParams defines parameters for ListCreditBalances.
 type ListCreditBalancesParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1CreditsGrantJSONBody defines parameters for PostV1CreditsGrant.
-type PostV1CreditsGrantJSONBody struct {
+// GrantCreditsJSONBody defines parameters for GrantCredits.
+type GrantCreditsJSONBody struct {
+	// AmountCents The credit to add, in the currency's minor unit (cents
+	// for USD). From 1 to 100000000 (1,000,000.00).
 	AmountCents int64 `json:"amount_cents"`
 
 	// Currency ISO 4217 code of the credit. Required. Case-insensitive;
 	// stored uppercase. Zero-decimal currencies (such as JPY)
 	// are not supported yet.
-	Currency    string `json:"currency"`
-	CustomerId  string `json:"customer_id"`
-	Description string `json:"description,omitempty"`
+	Currency string `json:"currency"`
+
+	// CustomerId The customer to grant credit to (`hc_cus_…`).
+	CustomerId string `json:"customer_id"`
+
+	// Description What the credit is for, shown on the ledger entry.
+	// Required: a grant without one, or with a blank one, is
+	// refused with 422. At most 500 bytes after surrounding
+	// spaces are trimmed (fewer characters when it has
+	// non-ASCII letters).
+	Description string `json:"description"`
 
 	// ExpiresAt Optional expiry; must be in the future. Omitted = never
 	// expires. The credit can be drawn up to and including this
@@ -7749,123 +10558,181 @@ type PostV1CreditsGrantJSONBody struct {
 	// after the picked day.
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
 
-	// GrantKind Optional cost-basis class (ADR-078). `promotional` marks
-	// free/marketing credits, drained BEFORE all paid-class
-	// blocks. Omitted = unclassified (drains in the paid
-	// class). `commit` is reserved for the invoice-finalize
-	// funding path and rejected here.
-	GrantKind PostV1CreditsGrantJSONBodyGrantKind `json:"grant_kind,omitempty"`
+	// GrantKind Optional cost-basis class. `promotional` marks free or
+	// marketing credit, which invoices draw before any other
+	// credit. Omitted means unclassified credit. `commit` is
+	// refused here: commit credit comes only from finalizing a
+	// commit invoice.
+	GrantKind GrantCreditsJSONBodyGrantKind `json:"grant_kind,omitempty"`
 }
 
-// PostV1CreditsGrantParams defines parameters for PostV1CreditsGrant.
-type PostV1CreditsGrantParams struct {
+// GrantCreditsParams defines parameters for GrantCredits.
+type GrantCreditsParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1CreditsGrantJSONBodyGrantKind defines parameters for PostV1CreditsGrant.
-type PostV1CreditsGrantJSONBodyGrantKind string
+// GrantCreditsJSONBodyGrantKind defines parameters for GrantCredits.
+type GrantCreditsJSONBodyGrantKind string
 
-// GetV1CreditsGrantsCustomerIdParams defines parameters for GetV1CreditsGrantsCustomerId.
-type GetV1CreditsGrantsCustomerIdParams struct {
+// GetCreditGrantsParams defines parameters for GetCreditGrants.
+type GetCreditGrantsParams struct {
+	// IncludeExhausted `true` also lists the blocks with nothing left (used up,
+	// expired, retired or deducted). Any other value leaves them out.
 	IncludeExhausted bool `form:"include_exhausted,omitempty" json:"include_exhausted,omitempty"`
 }
 
 // ListCreditLedgerEntriesParams defines parameters for ListCreditLedgerEntries.
 type ListCreditLedgerEntriesParams struct {
+	// EntryType Only entries of this type.
 	EntryType ListCreditLedgerEntriesParamsEntryType `form:"entry_type,omitempty" json:"entry_type,omitempty"`
 
-	// Sort One of created_at (default), amount_cents, entry_type, expires_at.
-	Sort string `form:"sort,omitempty" json:"sort,omitempty"`
+	// Sort The order of the list. `created_at` (the default), `amount_cents`
+	// (or `amount`), `entry_type` or `expires_at`. Any other value is a
+	// 422 with `param: sort`. Ties are broken by `id` in the same
+	// direction.
+	Sort ListCreditLedgerEntriesParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
 
-	// Dir Default desc.
+	// Dir Sort direction: `desc` (the default) or `asc`, in lower case. Any
+	// other value is a 422 with `param: dir`.
 	Dir ListCreditLedgerEntriesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListCreditLedgerEntriesParamsEntryType defines parameters for ListCreditLedgerEntries.
 type ListCreditLedgerEntriesParamsEntryType string
 
+// ListCreditLedgerEntriesParamsSort defines parameters for ListCreditLedgerEntries.
+type ListCreditLedgerEntriesParamsSort string
+
 // ListCreditLedgerEntriesParamsDir defines parameters for ListCreditLedgerEntries.
 type ListCreditLedgerEntriesParamsDir string
 
-// GetV1CustomersParams defines parameters for GetV1Customers.
-type GetV1CustomersParams struct {
+// ListCustomersParams defines parameters for ListCustomers.
+type ListCustomersParams struct {
+	// Status Only customers with this status, `active` or `archived`. Any other
+	// value matches no customer.
 	Status string `form:"status,omitempty" json:"status,omitempty"`
 
-	// ExternalId Exact-match filter on the caller-assigned external ID.
+	// ExternalId Only the customer with this `external_id` (exact match).
 	ExternalId string `form:"external_id,omitempty" json:"external_id,omitempty"`
 
-	// Ids Comma-separated customer IDs to fetch exactly.
+	// Ids Comma-separated customer IDs. Only those customers are returned;
+	// IDs not found are skipped.
 	Ids string `form:"ids,omitempty" json:"ids,omitempty"`
 
-	// Search Case-insensitive substring match on display name, email,
-	// external ID, or ID. Matching runs post-decryption (PII
-	// columns are encrypted at rest), bounded to the first 5000
-	// rows of the tenant's filtered set; the rows and `total` stop
-	// there.
+	// Search Case-insensitive substring match on display name, email, external
+	// ID or ID. It looks at the first 5,000 customers, in the list's
+	// sort order, that match the other filters; the rows and `total`
+	// stop there.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
-	// Sort One of display_name, email, external_id, status, created_at
-	// (default). A sort by display_name or email looks at 5,000
-	// customers at most; the rows and `total` stop there.
-	Sort string                  `form:"sort,omitempty" json:"sort,omitempty"`
-	Dir  GetV1CustomersParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+	// Sort The order of the list. `created_at` (the default), `display_name`
+	// (or `name`), `email`, `external_id` or `status`. Any other value is
+	// a 422 with `param: sort`. On a server that encrypts customer data,
+	// a sort by `display_name`, `name` or `email` looks at the 5,000
+	// newest customers at most; the rows and `total` stop there.
+	Sort ListCustomersParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Dir Sort direction: `desc` (the default) or `asc`, in lower case. Any
+	// other value is a 422 with `param: dir`.
+	Dir ListCustomersParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// GetV1CustomersParamsDir defines parameters for GetV1Customers.
-type GetV1CustomersParamsDir string
+// ListCustomersParamsSort defines parameters for ListCustomers.
+type ListCustomersParamsSort string
 
-// PostV1CustomersJSONBody defines parameters for PostV1Customers.
-type PostV1CustomersJSONBody struct {
+// ListCustomersParamsDir defines parameters for ListCustomers.
+type ListCustomersParamsDir string
+
+// CreateCustomerJSONBody defines parameters for CreateCustomer.
+type CreateCustomerJSONBody struct {
+	// AdditionalEmails Addresses to copy on billing emails. Each is checked
+	// like `email`, lowercased and deduplicated. None may equal
+	// `email`. More than 10 after deduplication is refused with
+	// 422.
 	AdditionalEmails []string `json:"additional_emails,omitempty"`
-	DisplayName      string   `json:"display_name"`
-	Email            string   `json:"email,omitempty"`
-	ExternalId       string   `json:"external_id"`
 
-	// TestClockId Test mode only. Attaches the customer to a test clock.
+	// DisplayName The name shown on invoices, emails and the dashboard.
+	// Spaces at the ends are trimmed; then at most 255 bytes
+	// (UTF-8).
+	DisplayName string `json:"display_name"`
+
+	// Email Where billing emails go. One bare address with a dot in
+	// its domain, such as `billing@acme.example`: no display
+	// name, quotes or angle brackets.
+	Email string `json:"email,omitempty"`
+
+	// ExternalId Your own ID for the customer, such as the account ID in
+	// your app. Spaces at the ends are trimmed; then at most
+	// 255 bytes (UTF-8). Unique in the account and mode.
+	ExternalId string `json:"external_id"`
+
+	// TestClockId Test mode only. Runs the customer on this test clock,
+	// which must exist in the account and mode. Fixed after
+	// create.
 	TestClockId string `json:"test_clock_id,omitempty"`
 }
 
-// PostV1CustomersParams defines parameters for PostV1Customers.
-type PostV1CustomersParams struct {
+// CreateCustomerParams defines parameters for CreateCustomer.
+type CreateCustomerParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // ListCustomerPaymentMethodsParams defines parameters for ListCustomerPaymentMethods.
 type ListCustomerPaymentMethodsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -7879,62 +10746,105 @@ type SendCustomerPaymentSetupEmailJSONBody struct {
 // SendCustomerPaymentSetupEmailParams defines parameters for SendCustomerPaymentSetupEmail.
 type SendCustomerPaymentSetupEmailParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // CreateCustomerPaymentSetupSessionJSONBody defines parameters for CreateCustomerPaymentSetupSession.
 type CreateCustomerPaymentSetupSessionJSONBody struct {
 	// ReturnUrl Where Stripe sends the customer afterwards. Defaults to
-	// the dashboard's setup-complete page.
+	// `/payment-method-added` on the server's
+	// `CUSTOMER_PORTAL_URL` (`http://localhost:5173` when that
+	// is unset).
 	ReturnUrl string `json:"return_url,omitempty"`
 }
 
 // CreateCustomerPaymentSetupSessionParams defines parameters for CreateCustomerPaymentSetupSession.
 type CreateCustomerPaymentSetupSessionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // SetCustomerDefaultPaymentMethodParams defines parameters for SetCustomerDefaultPaymentMethod.
 type SetCustomerDefaultPaymentMethodParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // UpdateCustomerJSONBody defines parameters for UpdateCustomer.
 type UpdateCustomerJSONBody struct {
+	// AdditionalEmails The new CC list, which replaces the whole list. `[]`
+	// clears it. Left out keeps the current list. More than 10
+	// after deduplication is refused with 422.
 	AdditionalEmails []string `json:"additional_emails,omitempty"`
-	DisplayName      string   `json:"display_name,omitempty"`
 
-	// DunningPolicyId Policy ID, or `""` to use the tenant default.
-	DunningPolicyId string                       `json:"dunning_policy_id,omitempty"`
-	Email           string                       `json:"email,omitempty"`
-	Status          UpdateCustomerJSONBodyStatus `json:"status,omitempty"`
+	// DisplayName The new name. Spaces at the ends are trimmed. Empty or
+	// left out keeps the current name. Unlike create, the
+	// update does not check its length.
+	DisplayName string `json:"display_name,omitempty"`
+
+	// DunningPolicyId Policy ID, or `""` to use the account's default policy.
+	DunningPolicyId string `json:"dunning_policy_id,omitempty"`
+
+	// Email The new primary email, checked as on create. Empty or left
+	// out keeps the current email.
+	Email string `json:"email,omitempty"`
+
+	// Status `archived` blocks new subscriptions for the customer.
+	// `active` lifts that.
+	Status UpdateCustomerJSONBodyStatus `json:"status,omitempty"`
 }
 
 // UpdateCustomerParams defines parameters for UpdateCustomer.
 type UpdateCustomerParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7944,73 +10854,102 @@ type UpdateCustomerJSONBodyStatus string
 // UpsertCustomerBillingProfileParams defines parameters for UpsertCustomerBillingProfile.
 type UpsertCustomerBillingProfileParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// GetV1CustomersIdMarginParams defines parameters for GetV1CustomersIdMargin.
-type GetV1CustomersIdMarginParams struct {
-	// From Window start, inclusive. RFC 3339. Default is 30 days before the customer's current time.
+// GetCustomerMarginParams defines parameters for GetCustomerMargin.
+type GetCustomerMarginParams struct {
+	// From Window start, inclusive. RFC 3339. Default is 30 days before the
+	// customer's current time.
 	From time.Time `form:"from,omitempty" json:"from,omitempty"`
 
-	// To Window end, exclusive. RFC 3339. Default is the customer's current time (test clock time for a customer on a test clock).
+	// To Window end, exclusive. RFC 3339. Default is the customer's current
+	// time (test clock time for a customer on a test clock).
 	To time.Time `form:"to,omitempty" json:"to,omitempty"`
 }
 
-// PostV1CustomersIdRotateCostDashboardTokenParams defines parameters for PostV1CustomersIdRotateCostDashboardToken.
-type PostV1CustomersIdRotateCostDashboardTokenParams struct {
+// RotateCustomerCostDashboardTokenParams defines parameters for RotateCustomerCostDashboardToken.
+type RotateCustomerCostDashboardTokenParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // ListCustomerSentEmailsParams defines parameters for ListCustomerSentEmails.
 type ListCustomerSentEmailsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // GetCustomerUsageParams defines parameters for GetCustomerUsage.
 type GetCustomerUsageParams struct {
-	// From Start of the window. RFC 3339 instant or `YYYY-MM-DD` (start of that day, UTC).
+	// From Start of the window. An RFC 3339 instant, or `YYYY-MM-DD` for the
+	// start of that day in UTC.
 	From string `form:"from,omitempty" json:"from,omitempty"`
 
-	// To End of the window, exclusive. RFC 3339 instant or `YYYY-MM-DD` (23:59:59.999999 UTC that day, so the day is included).
+	// To End of the window, exclusive. An RFC 3339 instant, or `YYYY-MM-DD`
+	// for 23:59:59.999999 UTC that day, so the day is included.
 	To string `form:"to,omitempty" json:"to,omitempty"`
 }
 
 // ListDunningPoliciesParams defines parameters for ListDunningPolicies.
 type ListDunningPoliciesParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // CreateDunningPolicyParams defines parameters for CreateDunningPolicy.
 type CreateDunningPolicyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8020,22 +10959,36 @@ type DeleteDunningPolicy200JSONResponseBodyStatus string
 // UpdateDunningPolicyParams defines parameters for UpdateDunningPolicy.
 type UpdateDunningPolicyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // SetDefaultDunningPolicyParams defines parameters for SetDefaultDunningPolicy.
 type SetDefaultDunningPolicyParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8044,17 +10997,20 @@ type SetDefaultDunningPolicy200JSONResponseBodyStatus string
 
 // ListDunningRunsParams defines parameters for ListDunningRuns.
 type ListDunningRunsParams struct {
+	// InvoiceId Only the run for this invoice.
 	InvoiceId string `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
 
-	// State Exact run state. Any other value is a 422.
+	// State Only runs in this state. Any other value is a 422 with `param: state`.
 	State ListDunningRunsParamsState `form:"state,omitempty" json:"state,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -8063,17 +11019,25 @@ type ListDunningRunsParamsState string
 
 // ResolveDunningRunJSONBody defines parameters for ResolveDunningRun.
 type ResolveDunningRunJSONBody struct {
+	// Resolution How the run ends, and what happens to its invoice (see above).
 	Resolution ResolveDunningRunJSONBodyResolution `json:"resolution"`
 }
 
 // ResolveDunningRunParams defines parameters for ResolveDunningRun.
 type ResolveDunningRunParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8086,11 +11050,19 @@ type ExportAuditLogCsvParams struct {
 	DateFrom string `form:"date_from,omitempty" json:"date_from,omitempty"`
 
 	// DateTo Upper bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC).
-	DateTo       string `form:"date_to,omitempty" json:"date_to,omitempty"`
+	DateTo string `form:"date_to,omitempty" json:"date_to,omitempty"`
+
+	// ResourceType Only rows about this kind of resource, such as `invoice` or `api_key`.
 	ResourceType string `form:"resource_type,omitempty" json:"resource_type,omitempty"`
-	ResourceId   string `form:"resource_id,omitempty" json:"resource_id,omitempty"`
-	Action       string `form:"action,omitempty" json:"action,omitempty"`
-	ActorId      string `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+
+	// ResourceId Only rows about this resource id.
+	ResourceId string `form:"resource_id,omitempty" json:"resource_id,omitempty"`
+
+	// Action Only rows with this action, such as `create` or `revoke`.
+	Action string `form:"action,omitempty" json:"action,omitempty"`
+
+	// ActorId Only rows by this actor (a user id or an API key id).
+	ActorId string `form:"actor_id,omitempty" json:"actor_id,omitempty"`
 
 	// TestClockId Only rows from this test clock's simulation.
 	TestClockId string `form:"test_clock_id,omitempty" json:"test_clock_id,omitempty"`
@@ -8160,14 +11132,28 @@ type IngestLitellmSpendJSONBody2 struct {
 	Events []LitellmSpendLog `json:"events"`
 }
 
-// GetV1InvoicesParams defines parameters for GetV1Invoices.
-type GetV1InvoicesParams struct {
-	CustomerId     string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
-	SubscriptionId string `form:"subscription_id,omitempty" json:"subscription_id,omitempty"`
-	Status         string `form:"status,omitempty" json:"status,omitempty"`
-	PaymentStatus  string `form:"payment_status,omitempty" json:"payment_status,omitempty"`
+// ListInvoicesParams defines parameters for ListInvoices.
+type ListInvoicesParams struct {
+	// CustomerId Only this customer's invoices.
+	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
 
-	// Search Case-insensitive substring match on the invoice number or the customer's name or email.
+	// SubscriptionId Only invoices that bill this subscription.
+	SubscriptionId string `form:"subscription_id,omitempty" json:"subscription_id,omitempty"`
+
+	// Status Only invoices in this status: `draft`, `finalized`, `paid`,
+	// `voided` or `uncollectible`. Another value matches nothing.
+	Status string `form:"status,omitempty" json:"status,omitempty"`
+
+	// PaymentStatus Only invoices with this payment status: `pending`, `processing`,
+	// `succeeded`, `failed` or `unknown`. Another value matches
+	// nothing.
+	PaymentStatus string `form:"payment_status,omitempty" json:"payment_status,omitempty"`
+
+	// Search Case-insensitive substring match on the invoice number, or on
+	// the customer's name or email only when customer data is not
+	// encrypted. With `HARDCOUNT_ENCRYPTION_KEY` set (required in
+	// production), the name and email are stored encrypted, so only
+	// the invoice number matches.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
 	// From Lower bound on created_at, inclusive. RFC3339 instant or
@@ -8178,124 +11164,187 @@ type GetV1InvoicesParams struct {
 	// bare YYYY-MM-DD (anchored at 23:59:59.999999Z, the end of that day).
 	To string `form:"to,omitempty" json:"to,omitempty"`
 
-	// Overdue When true, restrict to open invoices past their due date
-	// that haven't settled (finalized + due_at < now +
-	// payment_status not succeeded/processing). Backs the
-	// dashboard's "Past due" segment.
+	// Overdue `true` keeps only open invoices past their due date: `finalized`,
+	// `due_at` before the current real time, and `payment_status` not
+	// `succeeded`, `processing` or `unknown`. Any other value applies
+	// no filter. The dashboard's Past due view uses it.
 	Overdue bool `form:"overdue,omitempty" json:"overdue,omitempty"`
 
 	// Ids Comma-separated invoice IDs to fetch exactly.
 	Ids string `form:"ids,omitempty" json:"ids,omitempty"`
 
-	// Sort One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps.
-	Sort string                 `form:"sort,omitempty" json:"sort,omitempty"`
-	Dir  GetV1InvoicesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+	// Sort The order of the list. `created_at` (the default), `invoice_number`,
+	// `amount_due_cents` (or `amount_due`), `billing_period_start` (or
+	// `period`), `due_at`, `issued_at`, `status` or `payment_status`.
+	// `amount_due_cents` sorts a paid invoice by what paid it
+	// (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes
+	// `amount_due_cents`) and every other invoice by `amount_due_cents`,
+	// which a voided or written-off invoice keeps. Any other value is a
+	// 422 with `param: sort`. Ties are broken by `id` in the same
+	// direction.
+	Sort ListInvoicesParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Dir Sort direction: `desc` (the default) or `asc`, in lower case. Any
+	// other value is a 422 with `param: dir`.
+	Dir ListInvoicesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// GetV1InvoicesParamsDir defines parameters for GetV1Invoices.
-type GetV1InvoicesParamsDir string
+// ListInvoicesParamsSort defines parameters for ListInvoices.
+type ListInvoicesParamsSort string
+
+// ListInvoicesParamsDir defines parameters for ListInvoices.
+type ListInvoicesParamsDir string
 
 // CreateInvoiceParams defines parameters for CreateInvoice.
 type CreateInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1InvoicesCreatePreviewJSONBody defines parameters for PostV1InvoicesCreatePreview.
-type PostV1InvoicesCreatePreviewJSONBody struct {
+// CreateInvoicePreviewJSONBody defines parameters for CreateInvoicePreview.
+type CreateInvoicePreviewJSONBody struct {
 	// CustomerId Customer to preview the invoice for.
 	CustomerId string `json:"customer_id"`
 
-	// Period Optional explicit window. Both bounds must be
-	// supplied together; partial windows are rejected.
-	// Defaults to the resolved subscription's current
-	// cycle.
+	// Period Optional explicit window, `from` before `to`. Both bounds
+	// must be supplied together; partial windows are rejected.
+	// Defaults to the subscription's current period.
 	Period struct {
+		// From Start of the window (included), RFC 3339.
 		From time.Time `json:"from"`
-		To   time.Time `json:"to"`
+
+		// To End of the window (not included), RFC 3339.
+		To time.Time `json:"to"`
 	} `json:"period,omitempty"`
 
-	// SubscriptionId Optional. Defaults to the customer's primary active
-	// subscription if not supplied.
+	// SubscriptionId Optional. The subscription to preview; it must belong to
+	// `customer_id`. Defaults to the customer's active or
+	// trialing subscription whose current period started last.
 	SubscriptionId string `json:"subscription_id,omitempty"`
 }
 
-// PostV1InvoicesCreatePreviewParams defines parameters for PostV1InvoicesCreatePreview.
-type PostV1InvoicesCreatePreviewParams struct {
+// CreateInvoicePreviewParams defines parameters for CreateInvoicePreview.
+type CreateInvoicePreviewParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // CollectInvoicePaymentParams defines parameters for CollectInvoicePayment.
 type CollectInvoicePaymentParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // ListInvoiceDisputesParams defines parameters for ListInvoiceDisputes.
 type ListInvoiceDisputesParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1InvoicesIdFinalizeParams defines parameters for PostV1InvoicesIdFinalize.
-type PostV1InvoicesIdFinalizeParams struct {
+// FinalizeInvoiceParams defines parameters for FinalizeInvoice.
+type FinalizeInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // AddInvoiceLineItemParams defines parameters for AddInvoiceLineItem.
 type AddInvoiceLineItemParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // MarkInvoiceUncollectibleParams defines parameters for MarkInvoiceUncollectible.
 type MarkInvoiceUncollectibleParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8308,11 +11357,18 @@ type RecordInvoicePaymentJSONBody struct {
 // RecordInvoicePaymentParams defines parameters for RecordInvoicePayment.
 type RecordInvoicePaymentParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8322,18 +11378,27 @@ type RefundInvoiceJSONBody struct {
 	AmountCents int64 `json:"amount_cents,omitempty"`
 
 	// Description Text for the credit note line. Defaults to "Refund: <reason>".
-	Description string                      `json:"description,omitempty"`
-	Reason      RefundInvoiceJSONBodyReason `json:"reason"`
+	Description string `json:"description,omitempty"`
+
+	// Reason Why you are refunding, stored as the credit note's `reason`.
+	Reason RefundInvoiceJSONBodyReason `json:"reason"`
 }
 
 // RefundInvoiceParams defines parameters for RefundInvoice.
 type RefundInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8343,255 +11408,386 @@ type RefundInvoiceJSONBodyReason string
 // ResendInvoiceSetupLinkParams defines parameters for ResendInvoiceSetupLink.
 type ResendInvoiceSetupLinkParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // ResendInvoiceSetupLink200JSONResponseBodyStatus defines parameters for ResendInvoiceSetupLink.
 type ResendInvoiceSetupLink200JSONResponseBodyStatus string
 
-// PostV1InvoicesIdRetryTaxParams defines parameters for PostV1InvoicesIdRetryTax.
-type PostV1InvoicesIdRetryTaxParams struct {
+// RetryInvoiceTaxParams defines parameters for RetryInvoiceTax.
+type RetryInvoiceTaxParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // RotateInvoicePublicTokenParams defines parameters for RotateInvoicePublicToken.
 type RotateInvoicePublicTokenParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1InvoicesIdSendJSONBody defines parameters for PostV1InvoicesIdSend.
-type PostV1InvoicesIdSendJSONBody struct {
-	AdditionalEmails []string            `json:"additional_emails,omitempty"`
-	Email            openapi_types.Email `json:"email"`
+// SendInvoiceJSONBody defines parameters for SendInvoice.
+type SendInvoiceJSONBody struct {
+	// AdditionalEmails Addresses to copy on this send. See the description for absent, empty and a list.
+	AdditionalEmails []string `json:"additional_emails,omitempty"`
+
+	// Email The recipient, one plain address such as `billing@acme.example`, with no display name.
+	Email openapi_types.Email `json:"email"`
 }
 
-// PostV1InvoicesIdSendParams defines parameters for PostV1InvoicesIdSend.
-type PostV1InvoicesIdSendParams struct {
+// SendInvoiceParams defines parameters for SendInvoice.
+type SendInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1InvoicesIdSend200JSONResponseBodyStatus defines parameters for PostV1InvoicesIdSend.
-type PostV1InvoicesIdSend200JSONResponseBodyStatus string
+// SendInvoice200JSONResponseBodyStatus defines parameters for SendInvoice.
+type SendInvoice200JSONResponseBodyStatus string
 
 // ListInvoiceStripeRefundsParams defines parameters for ListInvoiceStripeRefunds.
 type ListInvoiceStripeRefundsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // DismissInvoiceStripeRefundJSONBody defines parameters for DismissInvoiceStripeRefund.
 type DismissInvoiceStripeRefundJSONBody struct {
-	// Note How the refund was handled. 1 to 1000 characters.
+	// Note How the refund was handled. 1 to 1000 characters; leading and trailing spaces are removed.
 	Note string `json:"note"`
 }
 
 // DismissInvoiceStripeRefundParams defines parameters for DismissInvoiceStripeRefund.
 type DismissInvoiceStripeRefundParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // VoidInvoiceParams defines parameters for VoidInvoice.
 type VoidInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // InviteMemberJSONBody defines parameters for InviteMember.
 type InviteMemberJSONBody struct {
+	// Email The teammate's email, one plain address. It is stored in lower case.
 	Email openapi_types.Email `json:"email"`
 }
 
 // InviteMemberParams defines parameters for InviteMember.
 type InviteMemberParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// GetV1MetersParams defines parameters for GetV1Meters.
-type GetV1MetersParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+// ListMetersParams defines parameters for ListMeters.
+type ListMetersParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1MetersJSONBody defines parameters for PostV1Meters.
-type PostV1MetersJSONBody struct {
-	// Aggregation How the meter rolls its events into one quantity per billing period. Fixed once the meter has a usage event.
-	Aggregation PostV1MetersJSONBodyAggregation `json:"aggregation,omitempty"`
+// CreateMeterJSONBody defines parameters for CreateMeter.
+type CreateMeterJSONBody struct {
+	// Aggregation How the meter rolls its events into one quantity per
+	// billing period. Fixed once the meter has a usage event.
+	Aggregation CreateMeterJSONBodyAggregation `json:"aggregation,omitempty"`
 
-	// EventName The `event_name` usage events will send for this meter. Letters, digits, `-` and `_`; at most 100 characters.
+	// EventName The `event_name` usage events will send for this meter.
+	// Letters, digits, `-` and `_`; at most 100 characters.
+	// Unique in the account and mode.
 	EventName string `json:"event_name"`
-	Name      string `json:"name"`
-	Unit      string `json:"unit,omitempty"`
+
+	// Name The display name. Spaces at the ends are trimmed; then at
+	// most 255 bytes (UTF-8).
+	Name string `json:"name"`
+
+	// Unit The unit of the quantity, such as `tokens` or `seconds`.
+	// Empty or left out is `unit`.
+	Unit string `json:"unit,omitempty"`
 }
 
-// PostV1MetersParams defines parameters for PostV1Meters.
-type PostV1MetersParams struct {
+// CreateMeterParams defines parameters for CreateMeter.
+type CreateMeterParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1MetersJSONBodyAggregation defines parameters for PostV1Meters.
-type PostV1MetersJSONBodyAggregation string
+// CreateMeterJSONBodyAggregation defines parameters for CreateMeter.
+type CreateMeterJSONBodyAggregation string
 
-// PatchV1MetersIdJSONBody defines parameters for PatchV1MetersId.
-type PatchV1MetersIdJSONBody struct {
-	Aggregation PatchV1MetersIdJSONBodyAggregation `json:"aggregation,omitempty"`
-	Name        string                             `json:"name,omitempty"`
-	Unit        string                             `json:"unit,omitempty"`
+// UpdateMeterJSONBody defines parameters for UpdateMeter.
+type UpdateMeterJSONBody struct {
+	// Aggregation The new aggregation. Refused once the meter has a usage event.
+	Aggregation UpdateMeterJSONBodyAggregation `json:"aggregation,omitempty"`
+
+	// Name The new display name, at most 255 bytes (UTF-8) after
+	// spaces at the ends are trimmed. It cannot be empty.
+	Name string `json:"name,omitempty"`
+
+	// Unit The new unit. Empty sets it to `unit`.
+	Unit string `json:"unit,omitempty"`
 }
 
-// PatchV1MetersIdParams defines parameters for PatchV1MetersId.
-type PatchV1MetersIdParams struct {
+// UpdateMeterParams defines parameters for UpdateMeter.
+type UpdateMeterParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PatchV1MetersIdJSONBodyAggregation defines parameters for PatchV1MetersId.
-type PatchV1MetersIdJSONBodyAggregation string
+// UpdateMeterJSONBodyAggregation defines parameters for UpdateMeter.
+type UpdateMeterJSONBodyAggregation string
 
-// GetV1PlansParams defines parameters for GetV1Plans.
-type GetV1PlansParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+// ListPlansParams defines parameters for ListPlans.
+type ListPlansParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1PlansJSONBody defines parameters for PostV1Plans.
-type PostV1PlansJSONBody struct {
+// CreatePlanJSONBody defines parameters for CreatePlan.
+type CreatePlanJSONBody struct {
+	// BaseAmountCents The recurring base fee per billing period, in the
+	// currency's minor unit (cents for USD). 0 or more; 0 when
+	// left out.
 	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
 
 	// BaseBillTiming Required when `base_amount_cents` is above 0. With a base
 	// of 0 it may be left out, and the plan is in_arrears;
 	// `in_advance` with a base of 0 is refused. See
-	// Plan.base_bill_timing (ADR-031).
-	BaseBillTiming  PostV1PlansJSONBodyBaseBillTiming  `json:"base_bill_timing,omitempty"`
-	BillingInterval PostV1PlansJSONBodyBillingInterval `json:"billing_interval"`
-	Code            string                             `json:"code"`
-	Currency        string                             `json:"currency"`
-	Description     string                             `json:"description,omitempty"`
-	Name            string                             `json:"name"`
+	// `base_bill_timing` on Plan.
+	BaseBillTiming CreatePlanJSONBodyBaseBillTiming `json:"base_bill_timing,omitempty"`
+
+	// BillingInterval How often a subscription to the plan is billed. Fixed after create.
+	BillingInterval CreatePlanJSONBodyBillingInterval `json:"billing_interval"`
+
+	// Code Your short name for the plan. Letters, digits, `-` and
+	// `_`; at most 100 characters; unique in the account and
+	// mode. Fixed after create.
+	Code string `json:"code"`
+
+	// Currency ISO 4217 code, such as `USD`, stored in upper case.
+	// Zero-decimal currencies such as JPY are refused. Fixed
+	// after create.
+	Currency string `json:"currency"`
+
+	// Description Your description of the plan.
+	Description string `json:"description,omitempty"`
+
+	// Name The display name. Spaces at the ends are trimmed; then at
+	// most 255 bytes (UTF-8).
+	Name string `json:"name"`
 
 	// Prices The plan's usage prices, created with it in one request.
 	// Each takes the plan's currency.
 	Prices []PriceInput `json:"prices,omitempty"`
 
 	// Status Optional. A plan is created active; archive it with PATCH.
-	Status PostV1PlansJSONBodyStatus `json:"status,omitempty"`
+	Status CreatePlanJSONBodyStatus `json:"status,omitempty"`
 
-	// TaxCode Stripe product tax code for the base fee, such as
-	// `txcd_10103001`. Empty or omitted means the tenant's
-	// `default_product_tax_code`.
+	// TaxCode A Stripe product tax code, `txcd_` and 8 digits, such as
+	// `txcd_10103001`. Empty or omitted leaves it unset. See
+	// `tax_code` on Plan for which invoice lines carry it.
 	TaxCode string `json:"tax_code,omitempty"`
 }
 
-// PostV1PlansParams defines parameters for PostV1Plans.
-type PostV1PlansParams struct {
+// CreatePlanParams defines parameters for CreatePlan.
+type CreatePlanParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1PlansJSONBodyBaseBillTiming defines parameters for PostV1Plans.
-type PostV1PlansJSONBodyBaseBillTiming string
+// CreatePlanJSONBodyBaseBillTiming defines parameters for CreatePlan.
+type CreatePlanJSONBodyBaseBillTiming string
 
-// PostV1PlansJSONBodyBillingInterval defines parameters for PostV1Plans.
-type PostV1PlansJSONBodyBillingInterval string
+// CreatePlanJSONBodyBillingInterval defines parameters for CreatePlan.
+type CreatePlanJSONBodyBillingInterval string
 
-// PostV1PlansJSONBodyStatus defines parameters for PostV1Plans.
-type PostV1PlansJSONBodyStatus string
+// CreatePlanJSONBodyStatus defines parameters for CreatePlan.
+type CreatePlanJSONBodyStatus string
 
 // UpdatePlanJSONBody defines parameters for UpdatePlan.
 type UpdatePlanJSONBody struct {
 	// BaseAmountCents 0 or more. Omit to keep the current base fee.
-	BaseAmountCents int64                            `json:"base_amount_cents,omitempty"`
-	BaseBillTiming  UpdatePlanJSONBodyBaseBillTiming `json:"base_bill_timing,omitempty"`
+	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
 
-	// Description Whitespace is trimmed. Omit to keep the current description; an empty string clears it.
+	// BaseBillTiming When the base fee is billed. Omit to keep the current
+	// timing. Refused once a subscription has used the plan.
+	BaseBillTiming UpdatePlanJSONBodyBaseBillTiming `json:"base_bill_timing,omitempty"`
+
+	// Description Whitespace is trimmed. Omit to keep the current
+	// description; an empty string clears it.
 	Description string `json:"description,omitempty"`
 
-	// Name Whitespace is trimmed. Empty or omitted keeps the current name.
-	Name   string                   `json:"name,omitempty"`
+	// Name Whitespace is trimmed. Empty or omitted keeps the current
+	// name. Unlike create, the update does not check its
+	// length.
+	Name string `json:"name,omitempty"`
+
+	// Status `archived` stops new subscriptions and plan changes onto
+	// the plan. `active` brings it back.
 	Status UpdatePlanJSONBodyStatus `json:"status,omitempty"`
 
-	// TaxCode Stripe product tax code. Omit to keep the current code; an empty string clears it, and the base fee then uses the tenant's `default_product_tax_code`.
+	// TaxCode A Stripe product tax code, `txcd_` and 8 digits. Omit to
+	// keep the current code; an empty string clears it. See
+	// `tax_code` on Plan for which invoice lines carry it.
 	TaxCode string `json:"tax_code,omitempty"`
 }
 
 // UpdatePlanParams defines parameters for UpdatePlan.
 type UpdatePlanParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8603,34 +11799,50 @@ type UpdatePlanJSONBodyStatus string
 
 // ListPlanPricesParams defines parameters for ListPlanPrices.
 type ListPlanPricesParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // AddPlanPriceParams defines parameters for AddPlanPrice.
 type AddPlanPriceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // UpdatePlanPriceParams defines parameters for UpdatePlanPrice.
 type UpdatePlanPriceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8642,17 +11854,21 @@ type ListPriceOverridesParams struct {
 	// PriceId Only this price's overrides.
 	PriceId string `form:"price_id,omitempty" json:"price_id,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // CreatePriceOverrideJSONBody defines parameters for CreatePriceOverride.
 type CreatePriceOverrideJSONBody struct {
+	// CustomerId The customer who gets the rate. It must be a customer in
+	// this account and mode.
 	CustomerId string `json:"customer_id"`
 
 	// Mode As on PriceShape, also for the fields a mode does not use.
@@ -8666,13 +11882,19 @@ type CreatePriceOverrideJSONBody struct {
 
 	// PriceId The plan price to override.
 	PriceId string `json:"price_id"`
-	Reason  string `json:"reason,omitempty"`
+
+	// Reason Your note on why the customer has this rate, such as a
+	// contract reference. Spaces at the ends are trimmed.
+	Reason string `json:"reason,omitempty"`
 
 	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`.
 	Tiers []struct {
 		// UnitAmountCents Price per unit in cents in this tier, as a decimal string, with the limits of `unit_amount_cents`. A refusal names `tiers[i].unit_amount_cents` (i counts from 0).
 		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-		UpTo            int64  `json:"up_to,omitempty"`
+
+		// UpTo The tier's upper bound in whole units. `null` on the
+		// last tier, and only there.
+		UpTo int64 `json:"up_to,omitempty"`
 	} `json:"tiers,omitempty"`
 
 	// UnitAmountCents Price per unit in cents, as a decimal string. Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field.
@@ -8682,124 +11904,181 @@ type CreatePriceOverrideJSONBody struct {
 // CreatePriceOverrideParams defines parameters for CreatePriceOverride.
 type CreatePriceOverrideParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // CreatePriceOverrideJSONBodyMode defines parameters for CreatePriceOverride.
 type CreatePriceOverrideJSONBodyMode string
 
-// GetV1ProviderCostsParams defines parameters for GetV1ProviderCosts.
-type GetV1ProviderCostsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+// ListProviderCostsParams defines parameters for ListProviderCosts.
+type ListProviderCostsParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PutV1ProviderCostsJSONBody defines parameters for PutV1ProviderCosts.
-type PutV1ProviderCostsJSONBody struct {
+// UpsertProviderCostJSONBody defines parameters for UpsertProviderCost.
+type UpsertProviderCostJSONBody struct {
 	// Currency Rates are in USD only, the currency LiteLLM reports cost
 	// in. Any other value is 422.
-	Currency PutV1ProviderCostsJSONBodyCurrency `json:"currency,omitempty"`
+	Currency UpsertProviderCostJSONBodyCurrency `json:"currency,omitempty"`
 
-	// Model Model family token or raw snapshot id — raw ids match first at ingest.
-	Model    string `json:"model"`
+	// Model The model, such as `claude-sonnet-4.5`, or a raw model
+	// snapshot id. An event's `model_raw` label is matched
+	// first, then its `model` label.
+	Model string `json:"model"`
+
+	// Provider The provider, such as `anthropic`. Stored in lower case;
+	// it must equal the `provider` label of the usage events it
+	// costs.
 	Provider string `json:"provider"`
 
-	// TokenType ADR-044 role — input / output / cache_read.
+	// TokenType The kind of token, such as `input`, `output` or
+	// `cache_read`. Stored in lower case; it must equal the
+	// `token_type` label of the usage events it costs.
 	TokenType string `json:"token_type"`
 
 	// UnitCostCents US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens). 0 or more, under 10^10, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read.
 	UnitCostCents string `json:"unit_cost_cents"`
 }
 
-// PutV1ProviderCostsParams defines parameters for PutV1ProviderCosts.
-type PutV1ProviderCostsParams struct {
+// UpsertProviderCostParams defines parameters for UpsertProviderCost.
+type UpsertProviderCostParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PutV1ProviderCostsJSONBodyCurrency defines parameters for PutV1ProviderCosts.
-type PutV1ProviderCostsJSONBodyCurrency string
+// UpsertProviderCostJSONBodyCurrency defines parameters for UpsertProviderCost.
+type UpsertProviderCostJSONBodyCurrency string
 
-// GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource defines parameters for GetV1PublicCostDashboardToken.
-type GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource string
+// GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource defines parameters for GetPublicCostDashboard.
+type GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource string
 
 // ListRecipesParams defines parameters for ListRecipes.
 type ListRecipesParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListRecipeInstancesParams defines parameters for ListRecipeInstances.
 type ListRecipeInstancesParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // InstantiateRecipeJSONBody defines parameters for InstantiateRecipe.
 type InstantiateRecipeJSONBody struct {
+	// Overrides Values for the recipe's `overridable` keys, such as
+	// `{"currency": "EUR"}`. A key the recipe does not list, or
+	// a value that breaks the key's rules, is refused with 422.
+	// Keys you leave out take their defaults.
 	Overrides map[string]interface{} `json:"overrides,omitempty"`
 }
 
 // InstantiateRecipeParams defines parameters for InstantiateRecipe.
 type InstantiateRecipeParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // PreviewRecipeJSONBody defines parameters for PreviewRecipe.
 type PreviewRecipeJSONBody struct {
+	// Overrides Values for the recipe's `overridable` keys, such as
+	// `{"currency": "EUR"}`. A key the recipe does not list, or
+	// a value that breaks the key's rules, is refused with 422.
+	// Keys you leave out take their defaults.
 	Overrides map[string]interface{} `json:"overrides,omitempty"`
 }
 
 // PreviewRecipeParams defines parameters for PreviewRecipe.
 type PreviewRecipeParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // UpdateTenantSettingsParams defines parameters for UpdateTenantSettings.
 type UpdateTenantSettingsParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8812,11 +12091,18 @@ type GetEmailSettings200JSONResponseBodyTlsMode string
 // SendTestEmailParams defines parameters for SendTestEmail.
 type SendTestEmailParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8838,11 +12124,18 @@ type ConnectStripeJSONBody struct {
 // ConnectStripeParams defines parameters for ConnectStripe.
 type ConnectStripeParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8858,79 +12151,112 @@ type SetStripeWebhookSecretJSONBody struct {
 // SetStripeWebhookSecretParams defines parameters for SetStripeWebhookSecret.
 type SetStripeWebhookSecretParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // SetStripeWebhookSecretParamsMode defines parameters for SetStripeWebhookSecret.
 type SetStripeWebhookSecretParamsMode string
 
-// GetV1SubscriptionsParams defines parameters for GetV1Subscriptions.
-type GetV1SubscriptionsParams struct {
+// ListSubscriptionsParams defines parameters for ListSubscriptions.
+type ListSubscriptionsParams struct {
+	// CustomerId Only this customer's subscriptions (`hc_cus_…`).
 	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
 
 	// PlanId Filter to subscriptions with a live item on this plan.
 	PlanId string `form:"plan_id,omitempty" json:"plan_id,omitempty"`
 
-	// Status Exact status. Any other value is a 422. Paused collection is not
+	// Status Exact status. Any other value is a 422 with `param: status`.
+	// Paused collection is not
 	// a status: use `collection=paused`.
-	Status GetV1SubscriptionsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Status ListSubscriptionsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 
 	// Billing `failing` returns only subscriptions that carry a
 	// `billing_failure`: those waiting for their next billing attempt
-	// and those that are parked. Any other value is a 422.
-	Billing GetV1SubscriptionsParamsBilling `form:"billing,omitempty" json:"billing,omitempty"`
+	// and those that are parked. Any other value is a 422 with
+	// `param: billing`.
+	Billing ListSubscriptionsParamsBilling `form:"billing,omitempty" json:"billing,omitempty"`
 
 	// Collection `paused` returns only active and trialing subscriptions whose
 	// `pause_collection` is in force, whether an operator or dunning set
 	// it. A timed pause ends at `resumes_at` (on the subscription's test
 	// clock, if it has one), even while the response still carries it.
-	// Any other value is a 422.
-	Collection GetV1SubscriptionsParamsCollection `form:"collection,omitempty" json:"collection,omitempty"`
+	// Any other value is a 422 with `param: collection`.
+	Collection ListSubscriptionsParamsCollection `form:"collection,omitempty" json:"collection,omitempty"`
 
 	// Search Case-insensitive substring match on display name or code.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
-	// Sort One of display_name, status, next_billing_at, trial_end_at, created_at (default).
-	Sort string                      `form:"sort,omitempty" json:"sort,omitempty"`
-	Dir  GetV1SubscriptionsParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+	// Sort The order of the list. `created_at` (the default),
+	// `next_billing_at`, `status`, `display_name` (or `name`) or
+	// `trial_end_at`. Any other value is a 422 with `param: sort`. Ties
+	// are broken by `id` in the same direction.
+	Sort ListSubscriptionsParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Dir Sort direction: `desc` (the default) or `asc`, in lower case. Any
+	// other value is a 422 with `param: dir`.
+	Dir ListSubscriptionsParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// GetV1SubscriptionsParamsStatus defines parameters for GetV1Subscriptions.
-type GetV1SubscriptionsParamsStatus string
+// ListSubscriptionsParamsStatus defines parameters for ListSubscriptions.
+type ListSubscriptionsParamsStatus string
 
-// GetV1SubscriptionsParamsBilling defines parameters for GetV1Subscriptions.
-type GetV1SubscriptionsParamsBilling string
+// ListSubscriptionsParamsBilling defines parameters for ListSubscriptions.
+type ListSubscriptionsParamsBilling string
 
-// GetV1SubscriptionsParamsCollection defines parameters for GetV1Subscriptions.
-type GetV1SubscriptionsParamsCollection string
+// ListSubscriptionsParamsCollection defines parameters for ListSubscriptions.
+type ListSubscriptionsParamsCollection string
 
-// GetV1SubscriptionsParamsDir defines parameters for GetV1Subscriptions.
-type GetV1SubscriptionsParamsDir string
+// ListSubscriptionsParamsSort defines parameters for ListSubscriptions.
+type ListSubscriptionsParamsSort string
 
-// PostV1SubscriptionsJSONBody defines parameters for PostV1Subscriptions.
-type PostV1SubscriptionsJSONBody struct {
-	BillingTime PostV1SubscriptionsJSONBodyBillingTime `json:"billing_time,omitempty"`
-	Code        string                                 `json:"code"`
-	CustomerId  string                                 `json:"customer_id"`
-	DisplayName string                                 `json:"display_name"`
+// ListSubscriptionsParamsDir defines parameters for ListSubscriptions.
+type ListSubscriptionsParamsDir string
+
+// CreateSubscriptionJSONBody defines parameters for CreateSubscription.
+type CreateSubscriptionJSONBody struct {
+	// BillingTime How monthly periods line up. See the subscription's `billing_time`.
+	BillingTime CreateSubscriptionJSONBodyBillingTime `json:"billing_time,omitempty"`
+
+	// Code Your code for the subscription: letters, digits, hyphens
+	// and underscores. Unique in your account and mode.
+	Code string `json:"code"`
+
+	// CustomerId The customer to bill (`hc_cus_…`), in this account and
+	// mode.
+	CustomerId string `json:"customer_id"`
+
+	// DisplayName The subscription's name. Must not be blank.
+	DisplayName string `json:"display_name"`
 
 	// Items Plan items — a subscription bills one or more plans.
 	Items []struct {
-		PlanId   string `json:"plan_id"`
-		Quantity int    `json:"quantity,omitempty"`
+		// PlanId A plan of this account (`hc_pln_…`). Each plan can appear once.
+		PlanId string `json:"plan_id"`
+
+		// Quantity How many of the plan to bill. At least 1; 0 or absent means 1.
+		Quantity int `json:"quantity,omitempty"`
 	} `json:"items"`
 
 	// Status Leave it out and the subscription starts now. Without
@@ -8943,7 +12269,7 @@ type PostV1SubscriptionsJSONBody struct {
 	// it with `POST /v1/subscriptions/{id}/activate`. A draft
 	// cannot have a trial (`trial_days` above 0). An empty or
 	// null `status` is refused.
-	Status PostV1SubscriptionsJSONBodyStatus `json:"status,omitempty"`
+	Status CreateSubscriptionJSONBodyStatus `json:"status,omitempty"`
 
 	// TrialDays Days of free trial; 0 means no trial. Above 0, the
 	// subscription is `trialing` from now and its first paid
@@ -8951,38 +12277,58 @@ type PostV1SubscriptionsJSONBody struct {
 	TrialDays int `json:"trial_days,omitempty"`
 }
 
-// PostV1SubscriptionsParams defines parameters for PostV1Subscriptions.
-type PostV1SubscriptionsParams struct {
+// CreateSubscriptionParams defines parameters for CreateSubscription.
+type CreateSubscriptionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1SubscriptionsJSONBodyBillingTime defines parameters for PostV1Subscriptions.
-type PostV1SubscriptionsJSONBodyBillingTime string
+// CreateSubscriptionJSONBodyBillingTime defines parameters for CreateSubscription.
+type CreateSubscriptionJSONBodyBillingTime string
 
-// PostV1SubscriptionsJSONBodyStatus defines parameters for PostV1Subscriptions.
-type PostV1SubscriptionsJSONBodyStatus string
+// CreateSubscriptionJSONBodyStatus defines parameters for CreateSubscription.
+type CreateSubscriptionJSONBodyStatus string
 
-// PostV1SubscriptionsIdActivateParams defines parameters for PostV1SubscriptionsIdActivate.
-type PostV1SubscriptionsIdActivateParams struct {
+// ActivateSubscriptionParams defines parameters for ActivateSubscription.
+type ActivateSubscriptionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // SetSubscriptionBillingThresholdsJSONBody defines parameters for SetSubscriptionBillingThresholds.
 type SetSubscriptionBillingThresholdsJSONBody struct {
-	// AmountGte Invoice early when the period's usage so far reaches this amount, in cents of the subscription's currency. The base fee is not counted.
-	AmountGte      int64 `json:"amount_gte,omitempty"`
+	// AmountGte Invoice early when the period's usage so far reaches
+	// this amount, in the subscription currency's minor unit
+	// (cents for USD). The base fee is not counted. 0 or
+	// absent sets no amount threshold.
+	AmountGte int64 `json:"amount_gte,omitempty"`
+
+	// ItemThresholds Per-item usage thresholds. Each item of this
+	// subscription can appear once. Absent or empty sets none.
 	ItemThresholds []struct {
 		// SubscriptionItemId An item of this subscription. Each item can appear once.
 		SubscriptionItemId string `json:"subscription_item_id"`
@@ -8995,33 +12341,54 @@ type SetSubscriptionBillingThresholdsJSONBody struct {
 // SetSubscriptionBillingThresholdsParams defines parameters for SetSubscriptionBillingThresholds.
 type SetSubscriptionBillingThresholdsParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // CancelSubscriptionParams defines parameters for CancelSubscription.
 type CancelSubscriptionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // EndSubscriptionTrialParams defines parameters for EndSubscriptionTrial.
 type EndSubscriptionTrialParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9034,28 +12401,45 @@ type ExtendSubscriptionTrialJSONBody struct {
 // ExtendSubscriptionTrialParams defines parameters for ExtendSubscriptionTrial.
 type ExtendSubscriptionTrialParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // AddSubscriptionItemJSONBody defines parameters for AddSubscriptionItem.
 type AddSubscriptionItemJSONBody struct {
-	PlanId   string `json:"plan_id"`
-	Quantity int64  `json:"quantity,omitempty"`
+	// PlanId The plan to add (`hc_pln_…`). Not archived, and not already on the subscription.
+	PlanId string `json:"plan_id"`
+
+	// Quantity How many of the plan to bill. 0 or absent means 1.
+	Quantity int64 `json:"quantity,omitempty"`
 }
 
 // AddSubscriptionItemParams defines parameters for AddSubscriptionItem.
 type AddSubscriptionItemParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9074,16 +12458,25 @@ type UpdateSubscriptionItemJSONBody struct {
 // UpdateSubscriptionItemParams defines parameters for UpdateSubscriptionItem.
 type UpdateSubscriptionItemParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // PauseSubscriptionCollectionJSONBody defines parameters for PauseSubscriptionCollection.
 type PauseSubscriptionCollectionJSONBody struct {
+	// Behavior What happens to invoices built during the pause. Only
+	// `keep_as_draft`, which keeps them as drafts.
 	Behavior PauseSubscriptionCollectionJSONBodyBehavior `json:"behavior"`
 
 	// ResumesAt When collection resumes. Must be in the future.
@@ -9093,25 +12486,39 @@ type PauseSubscriptionCollectionJSONBody struct {
 // PauseSubscriptionCollectionParams defines parameters for PauseSubscriptionCollection.
 type PauseSubscriptionCollectionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // PauseSubscriptionCollectionJSONBodyBehavior defines parameters for PauseSubscriptionCollection.
 type PauseSubscriptionCollectionJSONBodyBehavior string
 
-// PostV1SubscriptionsIdRetryBillingParams defines parameters for PostV1SubscriptionsIdRetryBilling.
-type PostV1SubscriptionsIdRetryBillingParams struct {
+// RetrySubscriptionBillingParams defines parameters for RetrySubscriptionBilling.
+type RetrySubscriptionBillingParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9127,104 +12534,148 @@ type ScheduleSubscriptionCancelJSONBody struct {
 // ScheduleSubscriptionCancelParams defines parameters for ScheduleSubscriptionCancel.
 type ScheduleSubscriptionCancelParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// GetV1TestClocksParams defines parameters for GetV1TestClocks.
-type GetV1TestClocksParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+// ListTestClocksParams defines parameters for ListTestClocks.
+type ListTestClocksParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1TestClocksJSONBody defines parameters for PostV1TestClocks.
-type PostV1TestClocksJSONBody struct {
+// CreateTestClockJSONBody defines parameters for CreateTestClock.
+type CreateTestClockJSONBody struct {
+	// FrozenTime The clock's starting time, RFC 3339. Any instant, past or future.
 	FrozenTime time.Time `json:"frozen_time"`
-	Name       string    `json:"name,omitempty"`
+
+	// Name Your name for the clock. Optional; at most 200 bytes
+	// after surrounding spaces are trimmed (fewer characters
+	// when it has non-ASCII letters).
+	Name string `json:"name,omitempty"`
 }
 
-// PostV1TestClocksParams defines parameters for PostV1TestClocks.
-type PostV1TestClocksParams struct {
+// CreateTestClockParams defines parameters for CreateTestClock.
+type CreateTestClockParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// DeleteV1TestClocksId200JSONResponseBodyStatus defines parameters for DeleteV1TestClocksId.
-type DeleteV1TestClocksId200JSONResponseBodyStatus string
+// DeleteTestClock200JSONResponseBodyStatus defines parameters for DeleteTestClock.
+type DeleteTestClock200JSONResponseBodyStatus string
 
-// PostV1TestClocksIdAdvanceJSONBody defines parameters for PostV1TestClocksIdAdvance.
-type PostV1TestClocksIdAdvanceJSONBody struct {
+// AdvanceTestClockJSONBody defines parameters for AdvanceTestClock.
+type AdvanceTestClockJSONBody struct {
+	// FrozenTime The clock's new time, RFC 3339. Must be after its
+	// current `frozen_time` and at most one year after it.
 	FrozenTime time.Time `json:"frozen_time"`
 }
 
-// PostV1TestClocksIdAdvanceParams defines parameters for PostV1TestClocksIdAdvance.
-type PostV1TestClocksIdAdvanceParams struct {
+// AdvanceTestClockParams defines parameters for AdvanceTestClock.
+type AdvanceTestClockParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // ListTestClockCustomersParams defines parameters for ListTestClockCustomers.
 type ListTestClockCustomersParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1TestClocksIdRetryAdvanceParams defines parameters for PostV1TestClocksIdRetryAdvance.
-type PostV1TestClocksIdRetryAdvanceParams struct {
+// RetryTestClockAdvanceParams defines parameters for RetryTestClockAdvance.
+type RetryTestClockAdvanceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// GetV1TestClocksIdSubscriptionsParams defines parameters for GetV1TestClocksIdSubscriptions.
-type GetV1TestClocksIdSubscriptionsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+// ListTestClockSubscriptionsParams defines parameters for ListTestClockSubscriptions.
+type ListTestClockSubscriptionsParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// GetV1UsageEventsParams defines parameters for GetV1UsageEvents.
-type GetV1UsageEventsParams struct {
+// ListUsageEventsParams defines parameters for ListUsageEvents.
+type ListUsageEventsParams struct {
+	// CustomerId Only this customer's events (`hc_cus_…`, the Hardcount ID, not your external ID).
 	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
-	MeterId    string `form:"meter_id,omitempty" json:"meter_id,omitempty"`
+
+	// MeterId Only this meter's events (`hc_mtr_…`).
+	MeterId string `form:"meter_id,omitempty" json:"meter_id,omitempty"`
 
 	// Dimensions Comma-separated key=value pairs matched against the event's
-	// dimensions via JSONB containment (multiple pairs AND).
-	// Values that parse as JSON booleans/numbers are matched
-	// typed ("cached=true", "attempt=2"); everything else as a
-	// string. Malformed pairs → 422. Example:
+	// dimensions; every pair must match. Values that read as JSON
+	// booleans or numbers match typed values ("cached=true",
+	// "attempt=2"); everything else matches as a string. A malformed
+	// pair is refused with 422. Example:
 	// `model=gpt-4o,token_type=input`.
 	Dimensions string `form:"dimensions,omitempty" json:"dimensions,omitempty"`
 
@@ -9234,17 +12685,19 @@ type GetV1UsageEventsParams struct {
 	// To Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
 	To string `form:"to,omitempty" json:"to,omitempty"`
 
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1UsageEventsJSONBody defines parameters for PostV1UsageEvents.
-type PostV1UsageEventsJSONBody struct {
+// CreateUsageEventJSONBody defines parameters for CreateUsageEvent.
+type CreateUsageEventJSONBody struct {
 	// Dimensions Scalar labels of the event (e.g. {"model", "token_type"}). A price takes an event whose labels include the price's `dimension_match`.
 	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
 
@@ -9256,7 +12709,7 @@ type PostV1UsageEventsJSONBody struct {
 
 	// IdempotencyKey Your unique ID for this event. Pick it once, before the
 	// first send, and send the same key on every retry of the
-	// event. Keys are unique per tenant and mode (live or
+	// event. Keys are unique per account and mode (live or
 	// test), forever. An event whose key was already used is
 	// not stored again: the first event wins and the new body
 	// is discarded. So never reuse a key for a different
@@ -9273,25 +12726,37 @@ type PostV1UsageEventsJSONBody struct {
 	// is at most 100 characters. A negative value is a
 	// correction. A missing quantity, or any other value, is
 	// refused with 422 and `param: quantity`.
-	Quantity  PostV1UsageEventsJSONBody_Quantity `json:"quantity"`
-	Timestamp time.Time                          `json:"timestamp,omitempty"`
+	Quantity CreateUsageEventJSONBody_Quantity `json:"quantity"`
+
+	// Timestamp When the usage happened, as an RFC 3339 string. Leave it
+	// out to use the time Hardcount receives the event (the
+	// clock's time for a customer on a test clock). It may be
+	// at most 5 minutes ahead of that time. Any past time is
+	// accepted, but an event in a period that is already
+	// invoiced is stored and not billed (`billing_status:
+	// after_close`). A value that is not an RFC 3339 string is
+	// refused with 422 and `param: timestamp`.
+	Timestamp time.Time `json:"timestamp,omitempty"`
 }
 
-// PostV1UsageEventsJSONBodyQuantity0 defines parameters for PostV1UsageEvents.
-type PostV1UsageEventsJSONBodyQuantity0 = float32
+// CreateUsageEventJSONBodyQuantity0 defines parameters for CreateUsageEvent.
+type CreateUsageEventJSONBodyQuantity0 = float32
 
-// PostV1UsageEventsJSONBodyQuantity1 defines parameters for PostV1UsageEvents.
-type PostV1UsageEventsJSONBodyQuantity1 = string
+// CreateUsageEventJSONBodyQuantity1 defines parameters for CreateUsageEvent.
+type CreateUsageEventJSONBodyQuantity1 = string
 
-// PostV1UsageEventsJSONBody_Quantity defines parameters for PostV1UsageEvents.
-type PostV1UsageEventsJSONBody_Quantity struct {
+// CreateUsageEventJSONBody_Quantity defines parameters for CreateUsageEvent.
+type CreateUsageEventJSONBody_Quantity struct {
 	union json.RawMessage
 }
 
 // AggregateUsageEventsParams defines parameters for AggregateUsageEvents.
 type AggregateUsageEventsParams struct {
+	// CustomerId Only this customer's events (`hc_cus_…`, the Hardcount ID, not your external ID).
 	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
-	MeterId    string `form:"meter_id,omitempty" json:"meter_id,omitempty"`
+
+	// MeterId Only this meter's events (`hc_mtr_…`).
+	MeterId string `form:"meter_id,omitempty" json:"meter_id,omitempty"`
 
 	// From Events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
 	From string `form:"from,omitempty" json:"from,omitempty"`
@@ -9322,7 +12787,7 @@ type BackfillUsageEventJSONBody struct {
 
 	// IdempotencyKey Your unique ID for this event. Pick it once, before the
 	// first send, and send the same key on every retry of the
-	// event. Keys are unique per tenant and mode (live or
+	// event. Keys are unique per account and mode (live or
 	// test), forever. An event whose key was already used is
 	// not stored again: the first event wins and the new body
 	// is discarded. So never reuse a key for a different
@@ -9356,8 +12821,9 @@ type BackfillUsageEventJSONBody_Quantity struct {
 	union json.RawMessage
 }
 
-// PostV1UsageEventsBatchJSONBody defines parameters for PostV1UsageEventsBatch.
-type PostV1UsageEventsBatchJSONBody = []struct {
+// CreateUsageEventBatchJSONBody defines parameters for CreateUsageEventBatch.
+type CreateUsageEventBatchJSONBody = []struct {
+	// Dimensions Scalar labels of the event, at most 16. A price takes an event whose labels include the price's `dimension_match`.
 	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
 
 	// EventName The meter's `event_name` (e.g. "tokens").
@@ -9368,13 +12834,13 @@ type PostV1UsageEventsBatchJSONBody = []struct {
 
 	// IdempotencyKey Your unique ID for this event. Pick it once, before the
 	// first send, and send the same key on every retry of the
-	// event. Keys are unique per tenant and mode (live or
+	// event. Keys are unique per account and mode (live or
 	// test), forever. An event whose key was already used is
 	// not stored again: the first event wins and the new body
 	// is discarded. So never reuse a key for a different
 	// event, such as a batch index or a timestamp that can
 	// repeat, or that usage is lost. Empty or whitespace-only
-	// keys are refused with 422, and so are keys longer than
+	// keys fail validation, and so do keys longer than
 	// 255 characters. This is the only dedup key: the usage
 	// routes ignore the `Idempotency-Key` header.
 	IdempotencyKey string `json:"idempotency_key"`
@@ -9385,25 +12851,31 @@ type PostV1UsageEventsBatchJSONBody = []struct {
 	// 10^26, and it is at most 100 characters. A negative
 	// value is a correction. A missing quantity, or any
 	// other value, fails validation.
-	Quantity  PostV1UsageEventsBatchJSONBody_Quantity `json:"quantity"`
-	Timestamp time.Time                               `json:"timestamp,omitempty"`
+	Quantity CreateUsageEventBatchJSONBody_Quantity `json:"quantity"`
+
+	// Timestamp When the usage happened, as an RFC 3339 string. Leave
+	// it out to use the time Hardcount receives the batch.
+	// The same rules as for `POST /v1/usage-events` apply.
+	Timestamp time.Time `json:"timestamp,omitempty"`
 }
 
-// PostV1UsageEventsBatchJSONBodyQuantity0 defines parameters for PostV1UsageEventsBatch.
-type PostV1UsageEventsBatchJSONBodyQuantity0 = float32
+// CreateUsageEventBatchJSONBodyQuantity0 defines parameters for CreateUsageEventBatch.
+type CreateUsageEventBatchJSONBodyQuantity0 = float32
 
-// PostV1UsageEventsBatchJSONBodyQuantity1 defines parameters for PostV1UsageEventsBatch.
-type PostV1UsageEventsBatchJSONBodyQuantity1 = string
+// CreateUsageEventBatchJSONBodyQuantity1 defines parameters for CreateUsageEventBatch.
+type CreateUsageEventBatchJSONBodyQuantity1 = string
 
-// PostV1UsageEventsBatchJSONBody_Quantity defines parameters for PostV1UsageEventsBatch.
-type PostV1UsageEventsBatchJSONBody_Quantity struct {
+// CreateUsageEventBatchJSONBody_Quantity defines parameters for CreateUsageEventBatch.
+type CreateUsageEventBatchJSONBody_Quantity struct {
 	union json.RawMessage
 }
 
 // DiscardHeldUsageJSONBody defines parameters for DiscardHeldUsage.
 type DiscardHeldUsageJSONBody struct {
 	// EventName Discard only the rows with this `event_name`. Omit for all.
-	EventName          string `json:"event_name,omitempty"`
+	EventName string `json:"event_name,omitempty"`
+
+	// ExternalCustomerId The external ID the rows were held under.
 	ExternalCustomerId string `json:"external_customer_id"`
 }
 
@@ -9418,120 +12890,177 @@ type ReleaseHeldUsageJSONBody struct {
 	ExternalCustomerId string `json:"external_customer_id"`
 }
 
-// GetV1WebhookEndpointsEndpointsParams defines parameters for GetV1WebhookEndpointsEndpoints.
-type GetV1WebhookEndpointsEndpointsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+// ListWebhookEndpointsParams defines parameters for ListWebhookEndpoints.
+type ListWebhookEndpointsParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1WebhookEndpointsEndpointsJSONBody defines parameters for PostV1WebhookEndpointsEndpoints.
-type PostV1WebhookEndpointsEndpointsJSONBody struct {
-	Description string   `json:"description,omitempty"`
-	Events      []string `json:"events,omitempty"`
-	Url         string   `json:"url"`
+// CreateWebhookEndpointJSONBody defines parameters for CreateWebhookEndpoint.
+type CreateWebhookEndpointJSONBody struct {
+	// Description Your note about the endpoint, such as what it feeds.
+	Description string `json:"description,omitempty"`
+
+	// Events Event types to send. `*` means every event; `invoice.*` means every invoice event. Leave it out or send `[]` for every event.
+	Events []string `json:"events,omitempty"`
+
+	// Url Where to send events, an `https://` URL on a public
+	// address (a loopback URL outside production may use
+	// `http://`). Surrounding spaces are trimmed.
+	Url string `json:"url"`
 }
 
-// PostV1WebhookEndpointsEndpointsParams defines parameters for PostV1WebhookEndpointsEndpoints.
-type PostV1WebhookEndpointsEndpointsParams struct {
+// CreateWebhookEndpointParams defines parameters for CreateWebhookEndpoint.
+type CreateWebhookEndpointParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // GetWebhookEndpointStatsParams defines parameters for GetWebhookEndpointStats.
 type GetWebhookEndpointStatsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus defines parameters for DeleteV1WebhookEndpointsEndpointsId.
-type DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus string
+// DeleteWebhookEndpoint200JSONResponseBodyStatus defines parameters for DeleteWebhookEndpoint.
+type DeleteWebhookEndpoint200JSONResponseBodyStatus string
 
-// PatchV1WebhookEndpointsEndpointsIdJSONBody defines parameters for PatchV1WebhookEndpointsEndpointsId.
-type PatchV1WebhookEndpointsEndpointsIdJSONBody struct {
-	Active      bool     `json:"active,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Events      []string `json:"events,omitempty"`
-	Url         string   `json:"url,omitempty"`
+// UpdateWebhookEndpointJSONBody defines parameters for UpdateWebhookEndpoint.
+type UpdateWebhookEndpointJSONBody struct {
+	// Active False pauses the endpoint; true resumes it.
+	Active bool `json:"active,omitempty"`
+
+	// Description A new note. An empty string clears it.
+	Description string `json:"description,omitempty"`
+
+	// Events A new list of event types, replacing the old one. `[]` means every event.
+	Events []string `json:"events,omitempty"`
+
+	// Url A new URL, checked as on create. It cannot be empty.
+	Url string `json:"url,omitempty"`
 }
 
-// PatchV1WebhookEndpointsEndpointsIdParams defines parameters for PatchV1WebhookEndpointsEndpointsId.
-type PatchV1WebhookEndpointsEndpointsIdParams struct {
+// UpdateWebhookEndpointParams defines parameters for UpdateWebhookEndpoint.
+type UpdateWebhookEndpointParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // ListWebhookEndpointDeliveriesParams defines parameters for ListWebhookEndpointDeliveries.
 type ListWebhookEndpointDeliveriesParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ReplayWebhookDeliveryParams defines parameters for ReplayWebhookDelivery.
 type ReplayWebhookDeliveryParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1WebhookEndpointsEndpointsIdRotateSecretParams defines parameters for PostV1WebhookEndpointsEndpointsIdRotateSecret.
-type PostV1WebhookEndpointsEndpointsIdRotateSecretParams struct {
+// RotateWebhookEndpointSecretParams defines parameters for RotateWebhookEndpointSecret.
+type RotateWebhookEndpointSecretParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// GetV1WebhookEndpointsEventsParams defines parameters for GetV1WebhookEndpointsEvents.
-type GetV1WebhookEndpointsEventsParams struct {
-	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
-	// that is not a whole number, is a 422 with `param: limit`.
+// ListWebhookEventsParams defines parameters for ListWebhookEvents.
+type ListWebhookEventsParams struct {
+	// Limit Rows per page, from 1 to 100. Default 50. Any other value, one that
+	// is not a whole number, or `limit` sent twice is a 422 with
+	// `param: limit`. It is never clamped.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Rows to skip, 0 or more. Default 0. A negative value, or one that is
-	// not a whole number, is a 422 with `param: offset`.
+	// Offset Rows to skip, 0 or more. Default 0. A negative value, one that is
+	// not a whole number, or `offset` sent twice is a 422 with
+	// `param: offset`.
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ReplayWebhookEventParams defines parameters for ReplayWebhookEvent.
 type ReplayWebhookEventParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md. The usage routes do not take
-	// it: each usage event carries its own `idempotency_key`.
+	// the same value on every retry. Keys are kept per account and mode.
+	// For 24 hours, a repeat with the same key, method, path and body gets
+	// the first response again, byte for byte, with an
+	// `Idempotent-Replayed: true` header, instead of running again. A
+	// first answer of 409 or 422 is not kept, so a retry with the same
+	// key runs again. A repeat sent while the first request is still
+	// running waits up to 5 seconds for its answer; if there is none by
+	// then, it gets 409 with code `conflict_idempotency`. The same key
+	// with a different method, path or body is a 422 with code
+	// `idempotency_error`. The other error cases are in
+	// [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
+	// not take it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9546,14 +13075,15 @@ type ReceiveStripeWebhookJSONBody map[string]interface{}
 
 // ReceiveStripeWebhookParams defines parameters for ReceiveStripeWebhook.
 type ReceiveStripeWebhookParams struct {
+	// StripeSignature Stripe's signature of the body. Hardcount checks it with the connection's webhook signing secret.
 	StripeSignature string `json:"Stripe-Signature"`
 }
 
 // ReceiveStripeWebhook200JSONResponseBodyStatus defines parameters for ReceiveStripeWebhook.
 type ReceiveStripeWebhook200JSONResponseBodyStatus string
 
-// GetV1Whoami200JSONResponseBodyKeyType defines parameters for GetV1Whoami.
-type GetV1Whoami200JSONResponseBodyKeyType string
+// GetWhoami200JSONResponseBodyKeyType defines parameters for GetWhoami.
+type GetWhoami200JSONResponseBodyKeyType string
 
 // CreateApiKeyJSONRequestBody defines body for CreateApiKey for application/json ContentType.
 type CreateApiKeyJSONRequestBody CreateApiKeyJSONBody
@@ -9561,41 +13091,41 @@ type CreateApiKeyJSONRequestBody CreateApiKeyJSONBody
 // RotateApiKeyJSONRequestBody defines body for RotateApiKey for application/json ContentType.
 type RotateApiKeyJSONRequestBody RotateApiKeyJSONBody
 
-// PostV1AuthAcceptInviteJSONRequestBody defines body for PostV1AuthAcceptInvite for application/json ContentType.
-type PostV1AuthAcceptInviteJSONRequestBody PostV1AuthAcceptInviteJSONBody
+// AcceptInvitationJSONRequestBody defines body for AcceptInvitation for application/json ContentType.
+type AcceptInvitationJSONRequestBody AcceptInvitationJSONBody
 
-// PostV1AuthLoginJSONRequestBody defines body for PostV1AuthLogin for application/json ContentType.
-type PostV1AuthLoginJSONRequestBody PostV1AuthLoginJSONBody
+// LoginJSONRequestBody defines body for Login for application/json ContentType.
+type LoginJSONRequestBody LoginJSONBody
 
-// PostV1AuthModeJSONRequestBody defines body for PostV1AuthMode for application/json ContentType.
-type PostV1AuthModeJSONRequestBody PostV1AuthModeJSONBody
+// SwitchSessionModeJSONRequestBody defines body for SwitchSessionMode for application/json ContentType.
+type SwitchSessionModeJSONRequestBody SwitchSessionModeJSONBody
 
-// PostV1AuthPasswordResetConfirmJSONRequestBody defines body for PostV1AuthPasswordResetConfirm for application/json ContentType.
-type PostV1AuthPasswordResetConfirmJSONRequestBody PostV1AuthPasswordResetConfirmJSONBody
+// ConfirmPasswordResetJSONRequestBody defines body for ConfirmPasswordReset for application/json ContentType.
+type ConfirmPasswordResetJSONRequestBody ConfirmPasswordResetJSONBody
 
-// PostV1AuthPasswordResetRequestJSONRequestBody defines body for PostV1AuthPasswordResetRequest for application/json ContentType.
-type PostV1AuthPasswordResetRequestJSONRequestBody PostV1AuthPasswordResetRequestJSONBody
+// RequestPasswordResetJSONRequestBody defines body for RequestPasswordReset for application/json ContentType.
+type RequestPasswordResetJSONRequestBody RequestPasswordResetJSONBody
 
 // BootstrapJSONRequestBody defines body for Bootstrap for application/json ContentType.
 type BootstrapJSONRequestBody BootstrapJSONBody
 
-// PostV1CreditNotesJSONRequestBody defines body for PostV1CreditNotes for application/json ContentType.
-type PostV1CreditNotesJSONRequestBody PostV1CreditNotesJSONBody
+// CreateCreditNoteJSONRequestBody defines body for CreateCreditNote for application/json ContentType.
+type CreateCreditNoteJSONRequestBody CreateCreditNoteJSONBody
 
 // AttachStripeRefundToCreditNoteJSONRequestBody defines body for AttachStripeRefundToCreditNote for application/json ContentType.
 type AttachStripeRefundToCreditNoteJSONRequestBody AttachStripeRefundToCreditNoteJSONBody
 
-// PostV1CreditNotesIdSendJSONRequestBody defines body for PostV1CreditNotesIdSend for application/json ContentType.
-type PostV1CreditNotesIdSendJSONRequestBody PostV1CreditNotesIdSendJSONBody
+// SendCreditNoteJSONRequestBody defines body for SendCreditNote for application/json ContentType.
+type SendCreditNoteJSONRequestBody SendCreditNoteJSONBody
 
 // AdjustCreditsJSONRequestBody defines body for AdjustCredits for application/json ContentType.
 type AdjustCreditsJSONRequestBody AdjustCreditsJSONBody
 
-// PostV1CreditsGrantJSONRequestBody defines body for PostV1CreditsGrant for application/json ContentType.
-type PostV1CreditsGrantJSONRequestBody PostV1CreditsGrantJSONBody
+// GrantCreditsJSONRequestBody defines body for GrantCredits for application/json ContentType.
+type GrantCreditsJSONRequestBody GrantCreditsJSONBody
 
-// PostV1CustomersJSONRequestBody defines body for PostV1Customers for application/json ContentType.
-type PostV1CustomersJSONRequestBody PostV1CustomersJSONBody
+// CreateCustomerJSONRequestBody defines body for CreateCustomer for application/json ContentType.
+type CreateCustomerJSONRequestBody CreateCustomerJSONBody
 
 // SendCustomerPaymentSetupEmailJSONRequestBody defines body for SendCustomerPaymentSetupEmail for application/json ContentType.
 type SendCustomerPaymentSetupEmailJSONRequestBody SendCustomerPaymentSetupEmailJSONBody
@@ -9624,8 +13154,8 @@ type IngestLitellmSpendJSONRequestBody IngestLitellmSpendJSONBody
 // CreateInvoiceJSONRequestBody defines body for CreateInvoice for application/json ContentType.
 type CreateInvoiceJSONRequestBody = InvoiceCreateRequest
 
-// PostV1InvoicesCreatePreviewJSONRequestBody defines body for PostV1InvoicesCreatePreview for application/json ContentType.
-type PostV1InvoicesCreatePreviewJSONRequestBody PostV1InvoicesCreatePreviewJSONBody
+// CreateInvoicePreviewJSONRequestBody defines body for CreateInvoicePreview for application/json ContentType.
+type CreateInvoicePreviewJSONRequestBody CreateInvoicePreviewJSONBody
 
 // AddInvoiceLineItemJSONRequestBody defines body for AddInvoiceLineItem for application/json ContentType.
 type AddInvoiceLineItemJSONRequestBody = InvoiceLineItemInput
@@ -9636,8 +13166,8 @@ type RecordInvoicePaymentJSONRequestBody RecordInvoicePaymentJSONBody
 // RefundInvoiceJSONRequestBody defines body for RefundInvoice for application/json ContentType.
 type RefundInvoiceJSONRequestBody RefundInvoiceJSONBody
 
-// PostV1InvoicesIdSendJSONRequestBody defines body for PostV1InvoicesIdSend for application/json ContentType.
-type PostV1InvoicesIdSendJSONRequestBody PostV1InvoicesIdSendJSONBody
+// SendInvoiceJSONRequestBody defines body for SendInvoice for application/json ContentType.
+type SendInvoiceJSONRequestBody SendInvoiceJSONBody
 
 // DismissInvoiceStripeRefundJSONRequestBody defines body for DismissInvoiceStripeRefund for application/json ContentType.
 type DismissInvoiceStripeRefundJSONRequestBody DismissInvoiceStripeRefundJSONBody
@@ -9645,14 +13175,14 @@ type DismissInvoiceStripeRefundJSONRequestBody DismissInvoiceStripeRefundJSONBod
 // InviteMemberJSONRequestBody defines body for InviteMember for application/json ContentType.
 type InviteMemberJSONRequestBody InviteMemberJSONBody
 
-// PostV1MetersJSONRequestBody defines body for PostV1Meters for application/json ContentType.
-type PostV1MetersJSONRequestBody PostV1MetersJSONBody
+// CreateMeterJSONRequestBody defines body for CreateMeter for application/json ContentType.
+type CreateMeterJSONRequestBody CreateMeterJSONBody
 
-// PatchV1MetersIdJSONRequestBody defines body for PatchV1MetersId for application/json ContentType.
-type PatchV1MetersIdJSONRequestBody PatchV1MetersIdJSONBody
+// UpdateMeterJSONRequestBody defines body for UpdateMeter for application/json ContentType.
+type UpdateMeterJSONRequestBody UpdateMeterJSONBody
 
-// PostV1PlansJSONRequestBody defines body for PostV1Plans for application/json ContentType.
-type PostV1PlansJSONRequestBody PostV1PlansJSONBody
+// CreatePlanJSONRequestBody defines body for CreatePlan for application/json ContentType.
+type CreatePlanJSONRequestBody CreatePlanJSONBody
 
 // UpdatePlanJSONRequestBody defines body for UpdatePlan for application/json ContentType.
 type UpdatePlanJSONRequestBody UpdatePlanJSONBody
@@ -9666,8 +13196,8 @@ type UpdatePlanPriceJSONRequestBody = PriceShape
 // CreatePriceOverrideJSONRequestBody defines body for CreatePriceOverride for application/json ContentType.
 type CreatePriceOverrideJSONRequestBody CreatePriceOverrideJSONBody
 
-// PutV1ProviderCostsJSONRequestBody defines body for PutV1ProviderCosts for application/json ContentType.
-type PutV1ProviderCostsJSONRequestBody PutV1ProviderCostsJSONBody
+// UpsertProviderCostJSONRequestBody defines body for UpsertProviderCost for application/json ContentType.
+type UpsertProviderCostJSONRequestBody UpsertProviderCostJSONBody
 
 // InstantiateRecipeJSONRequestBody defines body for InstantiateRecipe for application/json ContentType.
 type InstantiateRecipeJSONRequestBody InstantiateRecipeJSONBody
@@ -9684,8 +13214,8 @@ type ConnectStripeJSONRequestBody ConnectStripeJSONBody
 // SetStripeWebhookSecretJSONRequestBody defines body for SetStripeWebhookSecret for application/json ContentType.
 type SetStripeWebhookSecretJSONRequestBody SetStripeWebhookSecretJSONBody
 
-// PostV1SubscriptionsJSONRequestBody defines body for PostV1Subscriptions for application/json ContentType.
-type PostV1SubscriptionsJSONRequestBody PostV1SubscriptionsJSONBody
+// CreateSubscriptionJSONRequestBody defines body for CreateSubscription for application/json ContentType.
+type CreateSubscriptionJSONRequestBody CreateSubscriptionJSONBody
 
 // SetSubscriptionBillingThresholdsJSONRequestBody defines body for SetSubscriptionBillingThresholds for application/json ContentType.
 type SetSubscriptionBillingThresholdsJSONRequestBody SetSubscriptionBillingThresholdsJSONBody
@@ -9705,20 +13235,20 @@ type PauseSubscriptionCollectionJSONRequestBody PauseSubscriptionCollectionJSONB
 // ScheduleSubscriptionCancelJSONRequestBody defines body for ScheduleSubscriptionCancel for application/json ContentType.
 type ScheduleSubscriptionCancelJSONRequestBody ScheduleSubscriptionCancelJSONBody
 
-// PostV1TestClocksJSONRequestBody defines body for PostV1TestClocks for application/json ContentType.
-type PostV1TestClocksJSONRequestBody PostV1TestClocksJSONBody
+// CreateTestClockJSONRequestBody defines body for CreateTestClock for application/json ContentType.
+type CreateTestClockJSONRequestBody CreateTestClockJSONBody
 
-// PostV1TestClocksIdAdvanceJSONRequestBody defines body for PostV1TestClocksIdAdvance for application/json ContentType.
-type PostV1TestClocksIdAdvanceJSONRequestBody PostV1TestClocksIdAdvanceJSONBody
+// AdvanceTestClockJSONRequestBody defines body for AdvanceTestClock for application/json ContentType.
+type AdvanceTestClockJSONRequestBody AdvanceTestClockJSONBody
 
-// PostV1UsageEventsJSONRequestBody defines body for PostV1UsageEvents for application/json ContentType.
-type PostV1UsageEventsJSONRequestBody PostV1UsageEventsJSONBody
+// CreateUsageEventJSONRequestBody defines body for CreateUsageEvent for application/json ContentType.
+type CreateUsageEventJSONRequestBody CreateUsageEventJSONBody
 
 // BackfillUsageEventJSONRequestBody defines body for BackfillUsageEvent for application/json ContentType.
 type BackfillUsageEventJSONRequestBody BackfillUsageEventJSONBody
 
-// PostV1UsageEventsBatchJSONRequestBody defines body for PostV1UsageEventsBatch for application/json ContentType.
-type PostV1UsageEventsBatchJSONRequestBody = PostV1UsageEventsBatchJSONBody
+// CreateUsageEventBatchJSONRequestBody defines body for CreateUsageEventBatch for application/json ContentType.
+type CreateUsageEventBatchJSONRequestBody = CreateUsageEventBatchJSONBody
 
 // DiscardHeldUsageJSONRequestBody defines body for DiscardHeldUsage for application/json ContentType.
 type DiscardHeldUsageJSONRequestBody DiscardHeldUsageJSONBody
@@ -9726,11 +13256,11 @@ type DiscardHeldUsageJSONRequestBody DiscardHeldUsageJSONBody
 // ReleaseHeldUsageJSONRequestBody defines body for ReleaseHeldUsage for application/json ContentType.
 type ReleaseHeldUsageJSONRequestBody ReleaseHeldUsageJSONBody
 
-// PostV1WebhookEndpointsEndpointsJSONRequestBody defines body for PostV1WebhookEndpointsEndpoints for application/json ContentType.
-type PostV1WebhookEndpointsEndpointsJSONRequestBody PostV1WebhookEndpointsEndpointsJSONBody
+// CreateWebhookEndpointJSONRequestBody defines body for CreateWebhookEndpoint for application/json ContentType.
+type CreateWebhookEndpointJSONRequestBody CreateWebhookEndpointJSONBody
 
-// PatchV1WebhookEndpointsEndpointsIdJSONRequestBody defines body for PatchV1WebhookEndpointsEndpointsId for application/json ContentType.
-type PatchV1WebhookEndpointsEndpointsIdJSONRequestBody PatchV1WebhookEndpointsEndpointsIdJSONBody
+// UpdateWebhookEndpointJSONRequestBody defines body for UpdateWebhookEndpoint for application/json ContentType.
+type UpdateWebhookEndpointJSONRequestBody UpdateWebhookEndpointJSONBody
 
 // ReceivePostmarkWebhookJSONRequestBody defines body for ReceivePostmarkWebhook for application/json ContentType.
 type ReceivePostmarkWebhookJSONRequestBody ReceivePostmarkWebhookJSONBody
@@ -9826,22 +13356,22 @@ func (t *IngestLitellmSpendJSONBody) UnmarshalJSON(b []byte) error {
 	return err
 }
 
-// AsPostV1UsageEventsJSONBodyQuantity0 returns the union data inside the PostV1UsageEventsJSONBody_Quantity as a PostV1UsageEventsJSONBodyQuantity0
-func (t PostV1UsageEventsJSONBody_Quantity) AsPostV1UsageEventsJSONBodyQuantity0() (PostV1UsageEventsJSONBodyQuantity0, error) {
-	var body PostV1UsageEventsJSONBodyQuantity0
+// AsCreateUsageEventJSONBodyQuantity0 returns the union data inside the CreateUsageEventJSONBody_Quantity as a CreateUsageEventJSONBodyQuantity0
+func (t CreateUsageEventJSONBody_Quantity) AsCreateUsageEventJSONBodyQuantity0() (CreateUsageEventJSONBodyQuantity0, error) {
+	var body CreateUsageEventJSONBodyQuantity0
 	err := json.Unmarshal(t.union, &body)
 	return body, err
 }
 
-// FromPostV1UsageEventsJSONBodyQuantity0 overwrites any union data inside the PostV1UsageEventsJSONBody_Quantity as the provided PostV1UsageEventsJSONBodyQuantity0
-func (t *PostV1UsageEventsJSONBody_Quantity) FromPostV1UsageEventsJSONBodyQuantity0(v PostV1UsageEventsJSONBodyQuantity0) error {
+// FromCreateUsageEventJSONBodyQuantity0 overwrites any union data inside the CreateUsageEventJSONBody_Quantity as the provided CreateUsageEventJSONBodyQuantity0
+func (t *CreateUsageEventJSONBody_Quantity) FromCreateUsageEventJSONBodyQuantity0(v CreateUsageEventJSONBodyQuantity0) error {
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
 }
 
-// MergePostV1UsageEventsJSONBodyQuantity0 performs a merge with any union data inside the PostV1UsageEventsJSONBody_Quantity, using the provided PostV1UsageEventsJSONBodyQuantity0
-func (t *PostV1UsageEventsJSONBody_Quantity) MergePostV1UsageEventsJSONBodyQuantity0(v PostV1UsageEventsJSONBodyQuantity0) error {
+// MergeCreateUsageEventJSONBodyQuantity0 performs a merge with any union data inside the CreateUsageEventJSONBody_Quantity, using the provided CreateUsageEventJSONBodyQuantity0
+func (t *CreateUsageEventJSONBody_Quantity) MergeCreateUsageEventJSONBodyQuantity0(v CreateUsageEventJSONBodyQuantity0) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -9852,22 +13382,22 @@ func (t *PostV1UsageEventsJSONBody_Quantity) MergePostV1UsageEventsJSONBodyQuant
 	return err
 }
 
-// AsPostV1UsageEventsJSONBodyQuantity1 returns the union data inside the PostV1UsageEventsJSONBody_Quantity as a PostV1UsageEventsJSONBodyQuantity1
-func (t PostV1UsageEventsJSONBody_Quantity) AsPostV1UsageEventsJSONBodyQuantity1() (PostV1UsageEventsJSONBodyQuantity1, error) {
-	var body PostV1UsageEventsJSONBodyQuantity1
+// AsCreateUsageEventJSONBodyQuantity1 returns the union data inside the CreateUsageEventJSONBody_Quantity as a CreateUsageEventJSONBodyQuantity1
+func (t CreateUsageEventJSONBody_Quantity) AsCreateUsageEventJSONBodyQuantity1() (CreateUsageEventJSONBodyQuantity1, error) {
+	var body CreateUsageEventJSONBodyQuantity1
 	err := json.Unmarshal(t.union, &body)
 	return body, err
 }
 
-// FromPostV1UsageEventsJSONBodyQuantity1 overwrites any union data inside the PostV1UsageEventsJSONBody_Quantity as the provided PostV1UsageEventsJSONBodyQuantity1
-func (t *PostV1UsageEventsJSONBody_Quantity) FromPostV1UsageEventsJSONBodyQuantity1(v PostV1UsageEventsJSONBodyQuantity1) error {
+// FromCreateUsageEventJSONBodyQuantity1 overwrites any union data inside the CreateUsageEventJSONBody_Quantity as the provided CreateUsageEventJSONBodyQuantity1
+func (t *CreateUsageEventJSONBody_Quantity) FromCreateUsageEventJSONBodyQuantity1(v CreateUsageEventJSONBodyQuantity1) error {
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
 }
 
-// MergePostV1UsageEventsJSONBodyQuantity1 performs a merge with any union data inside the PostV1UsageEventsJSONBody_Quantity, using the provided PostV1UsageEventsJSONBodyQuantity1
-func (t *PostV1UsageEventsJSONBody_Quantity) MergePostV1UsageEventsJSONBodyQuantity1(v PostV1UsageEventsJSONBodyQuantity1) error {
+// MergeCreateUsageEventJSONBodyQuantity1 performs a merge with any union data inside the CreateUsageEventJSONBody_Quantity, using the provided CreateUsageEventJSONBodyQuantity1
+func (t *CreateUsageEventJSONBody_Quantity) MergeCreateUsageEventJSONBodyQuantity1(v CreateUsageEventJSONBodyQuantity1) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -9878,12 +13408,12 @@ func (t *PostV1UsageEventsJSONBody_Quantity) MergePostV1UsageEventsJSONBodyQuant
 	return err
 }
 
-func (t PostV1UsageEventsJSONBody_Quantity) MarshalJSON() ([]byte, error) {
+func (t CreateUsageEventJSONBody_Quantity) MarshalJSON() ([]byte, error) {
 	b, err := t.union.MarshalJSON()
 	return b, err
 }
 
-func (t *PostV1UsageEventsJSONBody_Quantity) UnmarshalJSON(b []byte) error {
+func (t *CreateUsageEventJSONBody_Quantity) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }
@@ -9950,22 +13480,22 @@ func (t *BackfillUsageEventJSONBody_Quantity) UnmarshalJSON(b []byte) error {
 	return err
 }
 
-// AsPostV1UsageEventsBatchJSONBodyQuantity0 returns the union data inside the PostV1UsageEventsBatchJSONBody_Quantity as a PostV1UsageEventsBatchJSONBodyQuantity0
-func (t PostV1UsageEventsBatchJSONBody_Quantity) AsPostV1UsageEventsBatchJSONBodyQuantity0() (PostV1UsageEventsBatchJSONBodyQuantity0, error) {
-	var body PostV1UsageEventsBatchJSONBodyQuantity0
+// AsCreateUsageEventBatchJSONBodyQuantity0 returns the union data inside the CreateUsageEventBatchJSONBody_Quantity as a CreateUsageEventBatchJSONBodyQuantity0
+func (t CreateUsageEventBatchJSONBody_Quantity) AsCreateUsageEventBatchJSONBodyQuantity0() (CreateUsageEventBatchJSONBodyQuantity0, error) {
+	var body CreateUsageEventBatchJSONBodyQuantity0
 	err := json.Unmarshal(t.union, &body)
 	return body, err
 }
 
-// FromPostV1UsageEventsBatchJSONBodyQuantity0 overwrites any union data inside the PostV1UsageEventsBatchJSONBody_Quantity as the provided PostV1UsageEventsBatchJSONBodyQuantity0
-func (t *PostV1UsageEventsBatchJSONBody_Quantity) FromPostV1UsageEventsBatchJSONBodyQuantity0(v PostV1UsageEventsBatchJSONBodyQuantity0) error {
+// FromCreateUsageEventBatchJSONBodyQuantity0 overwrites any union data inside the CreateUsageEventBatchJSONBody_Quantity as the provided CreateUsageEventBatchJSONBodyQuantity0
+func (t *CreateUsageEventBatchJSONBody_Quantity) FromCreateUsageEventBatchJSONBodyQuantity0(v CreateUsageEventBatchJSONBodyQuantity0) error {
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
 }
 
-// MergePostV1UsageEventsBatchJSONBodyQuantity0 performs a merge with any union data inside the PostV1UsageEventsBatchJSONBody_Quantity, using the provided PostV1UsageEventsBatchJSONBodyQuantity0
-func (t *PostV1UsageEventsBatchJSONBody_Quantity) MergePostV1UsageEventsBatchJSONBodyQuantity0(v PostV1UsageEventsBatchJSONBodyQuantity0) error {
+// MergeCreateUsageEventBatchJSONBodyQuantity0 performs a merge with any union data inside the CreateUsageEventBatchJSONBody_Quantity, using the provided CreateUsageEventBatchJSONBodyQuantity0
+func (t *CreateUsageEventBatchJSONBody_Quantity) MergeCreateUsageEventBatchJSONBodyQuantity0(v CreateUsageEventBatchJSONBodyQuantity0) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -9976,22 +13506,22 @@ func (t *PostV1UsageEventsBatchJSONBody_Quantity) MergePostV1UsageEventsBatchJSO
 	return err
 }
 
-// AsPostV1UsageEventsBatchJSONBodyQuantity1 returns the union data inside the PostV1UsageEventsBatchJSONBody_Quantity as a PostV1UsageEventsBatchJSONBodyQuantity1
-func (t PostV1UsageEventsBatchJSONBody_Quantity) AsPostV1UsageEventsBatchJSONBodyQuantity1() (PostV1UsageEventsBatchJSONBodyQuantity1, error) {
-	var body PostV1UsageEventsBatchJSONBodyQuantity1
+// AsCreateUsageEventBatchJSONBodyQuantity1 returns the union data inside the CreateUsageEventBatchJSONBody_Quantity as a CreateUsageEventBatchJSONBodyQuantity1
+func (t CreateUsageEventBatchJSONBody_Quantity) AsCreateUsageEventBatchJSONBodyQuantity1() (CreateUsageEventBatchJSONBodyQuantity1, error) {
+	var body CreateUsageEventBatchJSONBodyQuantity1
 	err := json.Unmarshal(t.union, &body)
 	return body, err
 }
 
-// FromPostV1UsageEventsBatchJSONBodyQuantity1 overwrites any union data inside the PostV1UsageEventsBatchJSONBody_Quantity as the provided PostV1UsageEventsBatchJSONBodyQuantity1
-func (t *PostV1UsageEventsBatchJSONBody_Quantity) FromPostV1UsageEventsBatchJSONBodyQuantity1(v PostV1UsageEventsBatchJSONBodyQuantity1) error {
+// FromCreateUsageEventBatchJSONBodyQuantity1 overwrites any union data inside the CreateUsageEventBatchJSONBody_Quantity as the provided CreateUsageEventBatchJSONBodyQuantity1
+func (t *CreateUsageEventBatchJSONBody_Quantity) FromCreateUsageEventBatchJSONBodyQuantity1(v CreateUsageEventBatchJSONBodyQuantity1) error {
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
 }
 
-// MergePostV1UsageEventsBatchJSONBodyQuantity1 performs a merge with any union data inside the PostV1UsageEventsBatchJSONBody_Quantity, using the provided PostV1UsageEventsBatchJSONBodyQuantity1
-func (t *PostV1UsageEventsBatchJSONBody_Quantity) MergePostV1UsageEventsBatchJSONBodyQuantity1(v PostV1UsageEventsBatchJSONBodyQuantity1) error {
+// MergeCreateUsageEventBatchJSONBodyQuantity1 performs a merge with any union data inside the CreateUsageEventBatchJSONBody_Quantity, using the provided CreateUsageEventBatchJSONBodyQuantity1
+func (t *CreateUsageEventBatchJSONBody_Quantity) MergeCreateUsageEventBatchJSONBodyQuantity1(v CreateUsageEventBatchJSONBodyQuantity1) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -10002,25 +13532,25 @@ func (t *PostV1UsageEventsBatchJSONBody_Quantity) MergePostV1UsageEventsBatchJSO
 	return err
 }
 
-func (t PostV1UsageEventsBatchJSONBody_Quantity) MarshalJSON() ([]byte, error) {
+func (t CreateUsageEventBatchJSONBody_Quantity) MarshalJSON() ([]byte, error) {
 	b, err := t.union.MarshalJSON()
 	return b, err
 }
 
-func (t *PostV1UsageEventsBatchJSONBody_Quantity) UnmarshalJSON(b []byte) error {
+func (t *CreateUsageEventBatchJSONBody_Quantity) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-	// Health check
+	// Check that the server is up
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
-	// Readiness check for load balancers
+	// Check that the server can take requests
 	// (GET /health/ready)
 	GetHealthReady(w http.ResponseWriter, r *http.Request)
-	// Prometheus metrics
+	// Get Prometheus metrics
 	// (GET /metrics)
 	GetMetrics(w http.ResponseWriter, r *http.Request)
 	// Get MRR movement over time
@@ -10055,47 +13585,47 @@ type ServerInterface interface {
 	GetAuditLogFilters(w http.ResponseWriter, r *http.Request)
 	// Accept a team invitation
 	// (POST /v1/auth/accept-invite)
-	PostV1AuthAcceptInvite(w http.ResponseWriter, r *http.Request)
-	// Preview a team invitation (accept-page context)
+	AcceptInvitation(w http.ResponseWriter, r *http.Request)
+	// Preview a team invitation
 	// (GET /v1/auth/invite/{token})
-	GetV1AuthInviteToken(w http.ResponseWriter, r *http.Request, token string)
-	// Sign in with email and password; mint an httpOnly session cookie
+	GetInvitation(w http.ResponseWriter, r *http.Request, token string)
+	// Sign in to the dashboard with email and password
 	// (POST /v1/auth/login)
-	PostV1AuthLogin(w http.ResponseWriter, r *http.Request)
-	// Revoke the current session and clear the cookie
+	Login(w http.ResponseWriter, r *http.Request)
+	// Sign out of the dashboard
 	// (POST /v1/auth/logout)
-	PostV1AuthLogout(w http.ResponseWriter, r *http.Request)
+	Logout(w http.ResponseWriter, r *http.Request)
 	// Switch the dashboard session between test and live mode
 	// (POST /v1/auth/mode)
-	PostV1AuthMode(w http.ResponseWriter, r *http.Request)
+	SwitchSessionMode(w http.ResponseWriter, r *http.Request)
 	// Check a password reset token
 	// (GET /v1/auth/password-reset/check)
 	CheckPasswordResetToken(w http.ResponseWriter, r *http.Request, params CheckPasswordResetTokenParams)
 	// Set a new password using a reset token
 	// (POST /v1/auth/password-reset/confirm)
-	PostV1AuthPasswordResetConfirm(w http.ResponseWriter, r *http.Request)
+	ConfirmPasswordReset(w http.ResponseWriter, r *http.Request)
 	// Request a password reset link
 	// (POST /v1/auth/password-reset/request)
-	PostV1AuthPasswordResetRequest(w http.ResponseWriter, r *http.Request)
-	// Trigger billing cycle
+	RequestPasswordReset(w http.ResponseWriter, r *http.Request)
+	// Run billing now
 	// (POST /v1/billing/run)
-	PostV1BillingRun(w http.ResponseWriter, r *http.Request, params PostV1BillingRunParams)
+	RunBilling(w http.ResponseWriter, r *http.Request, params RunBillingParams)
 	// Set up a new installation
 	// (POST /v1/bootstrap)
 	Bootstrap(w http.ResponseWriter, r *http.Request)
 	// List credit notes
 	// (GET /v1/credit-notes)
 	ListCreditNotes(w http.ResponseWriter, r *http.Request, params ListCreditNotesParams)
-	// Create a credit note (line-based, or commit relief)
+	// Create a credit note
 	// (POST /v1/credit-notes)
-	PostV1CreditNotes(w http.ResponseWriter, r *http.Request, params PostV1CreditNotesParams)
+	CreateCreditNote(w http.ResponseWriter, r *http.Request, params CreateCreditNoteParams)
 	// Get credit note totals
 	// (GET /v1/credit-notes/stats)
 	GetCreditNoteStats(w http.ResponseWriter, r *http.Request)
 	// Get a credit note
 	// (GET /v1/credit-notes/{id})
 	GetCreditNote(w http.ResponseWriter, r *http.Request, id string)
-	// Attach a refund made in Stripe to a credit note whose refund failed
+	// Attach a refund made in Stripe to a credit note
 	// (POST /v1/credit-notes/{id}/attach-stripe-refund)
 	AttachStripeRefundToCreditNote(w http.ResponseWriter, r *http.Request, id string, params AttachStripeRefundToCreditNoteParams)
 	// Issue a draft credit note
@@ -10107,39 +13637,39 @@ type ServerInterface interface {
 	// Retry a failed credit-note refund
 	// (POST /v1/credit-notes/{id}/retry-refund)
 	RetryCreditNoteRefund(w http.ResponseWriter, r *http.Request, id string, params RetryCreditNoteRefundParams)
-	// Email the credit-note document (PDF attached)
+	// Email a credit note to the customer
 	// (POST /v1/credit-notes/{id}/send)
-	PostV1CreditNotesIdSend(w http.ResponseWriter, r *http.Request, id string, params PostV1CreditNotesIdSendParams)
+	SendCreditNote(w http.ResponseWriter, r *http.Request, id string, params SendCreditNoteParams)
 	// Void a draft credit note
 	// (POST /v1/credit-notes/{id}/void)
 	VoidCreditNote(w http.ResponseWriter, r *http.Request, id string, params VoidCreditNoteParams)
 	// Add or remove credit
 	// (POST /v1/credits/adjust)
 	AdjustCredits(w http.ResponseWriter, r *http.Request, params AdjustCreditsParams)
-	// Get customer credit balance
+	// Get a customer's credit balance
 	// (GET /v1/credits/balance/{customer_id})
-	GetV1CreditsBalanceCustomerId(w http.ResponseWriter, r *http.Request, customerId string)
-	// Get customer live credit balance
+	GetCreditBalance(w http.ResponseWriter, r *http.Request, customerId string)
+	// Get a customer's live credit balance
 	// (GET /v1/credits/balance/{customer_id}/live)
-	GetV1CreditsBalanceCustomerIdLive(w http.ResponseWriter, r *http.Request, customerId string)
-	// List credit balances for all customers
+	GetLiveCreditBalance(w http.ResponseWriter, r *http.Request, customerId string)
+	// List credit balances
 	// (GET /v1/credits/balances)
 	ListCreditBalances(w http.ResponseWriter, r *http.Request, params ListCreditBalancesParams)
-	// Grant credits to customer
+	// Grant credit to a customer
 	// (POST /v1/credits/grant)
-	PostV1CreditsGrant(w http.ResponseWriter, r *http.Request, params PostV1CreditsGrantParams)
-	// Per-grant burndown + kind subtotals
+	GrantCredits(w http.ResponseWriter, r *http.Request, params GrantCreditsParams)
+	// List a customer's credit grants
 	// (GET /v1/credits/grants/{customer_id})
-	GetV1CreditsGrantsCustomerId(w http.ResponseWriter, r *http.Request, customerId string, params GetV1CreditsGrantsCustomerIdParams)
+	GetCreditGrants(w http.ResponseWriter, r *http.Request, customerId string, params GetCreditGrantsParams)
 	// List a customer's credit ledger
 	// (GET /v1/credits/ledger/{customer_id})
 	ListCreditLedgerEntries(w http.ResponseWriter, r *http.Request, customerId string, params ListCreditLedgerEntriesParams)
 	// List customers
 	// (GET /v1/customers)
-	GetV1Customers(w http.ResponseWriter, r *http.Request, params GetV1CustomersParams)
-	// Create customer
+	ListCustomers(w http.ResponseWriter, r *http.Request, params ListCustomersParams)
+	// Create a customer
 	// (POST /v1/customers)
-	PostV1Customers(w http.ResponseWriter, r *http.Request, params PostV1CustomersParams)
+	CreateCustomer(w http.ResponseWriter, r *http.Request, params CreateCustomerParams)
 	// Get a customer overview
 	// (GET /v1/customers/{customer_id}/overview)
 	GetCustomerOverview(w http.ResponseWriter, r *http.Request, customerId string)
@@ -10158,10 +13688,10 @@ type ServerInterface interface {
 	// Make a payment method the default
 	// (POST /v1/customers/{customer_id}/payment-methods/{pmID}/default)
 	SetCustomerDefaultPaymentMethod(w http.ResponseWriter, r *http.Request, customerId string, pmid string, params SetCustomerDefaultPaymentMethodParams)
-	// Get customer
+	// Get a customer
 	// (GET /v1/customers/{id})
 	GetCustomer(w http.ResponseWriter, r *http.Request, id string)
-	// Update customer
+	// Update a customer
 	// (PATCH /v1/customers/{id})
 	UpdateCustomer(w http.ResponseWriter, r *http.Request, id string, params UpdateCustomerParams)
 	// Get the customer's billing profile
@@ -10170,12 +13700,12 @@ type ServerInterface interface {
 	// Create or replace the customer's billing profile
 	// (PUT /v1/customers/{id}/billing-profile)
 	UpsertCustomerBillingProfile(w http.ResponseWriter, r *http.Request, id string, params UpsertCustomerBillingProfileParams)
-	// Per-customer margin report (operator only)
+	// Get a customer's margin report
 	// (GET /v1/customers/{id}/margin)
-	GetV1CustomersIdMargin(w http.ResponseWriter, r *http.Request, id string, params GetV1CustomersIdMarginParams)
-	// Rotate the public cost-dashboard token (ADR-032)
+	GetCustomerMargin(w http.ResponseWriter, r *http.Request, id string, params GetCustomerMarginParams)
+	// Rotate the customer's public cost-dashboard link
 	// (POST /v1/customers/{id}/rotate-cost-dashboard-token)
-	PostV1CustomersIdRotateCostDashboardToken(w http.ResponseWriter, r *http.Request, id string, params PostV1CustomersIdRotateCostDashboardTokenParams)
+	RotateCustomerCostDashboardToken(w http.ResponseWriter, r *http.Request, id string, params RotateCustomerCostDashboardTokenParams)
 	// List emails sent to the customer
 	// (GET /v1/customers/{id}/sent-emails)
 	ListCustomerSentEmails(w http.ResponseWriter, r *http.Request, id string, params ListCustomerSentEmailsParams)
@@ -10185,16 +13715,16 @@ type ServerInterface interface {
 	// List dunning policies
 	// (GET /v1/dunning/policies)
 	ListDunningPolicies(w http.ResponseWriter, r *http.Request, params ListDunningPoliciesParams)
-	// Create dunning policy
+	// Create a dunning policy
 	// (POST /v1/dunning/policies)
 	CreateDunningPolicy(w http.ResponseWriter, r *http.Request, params CreateDunningPolicyParams)
-	// Delete dunning policy
+	// Delete a dunning policy
 	// (DELETE /v1/dunning/policies/{id})
 	DeleteDunningPolicy(w http.ResponseWriter, r *http.Request, id string)
-	// Get dunning policy
+	// Get a dunning policy
 	// (GET /v1/dunning/policies/{id})
 	GetDunningPolicy(w http.ResponseWriter, r *http.Request, id string)
-	// Replace dunning policy settings
+	// Replace a dunning policy's settings
 	// (PATCH /v1/dunning/policies/{id})
 	UpdateDunningPolicy(w http.ResponseWriter, r *http.Request, id string, params UpdateDunningPolicyParams)
 	// Make a dunning policy the default
@@ -10227,19 +13757,19 @@ type ServerInterface interface {
 	// Export usage events as CSV
 	// (GET /v1/exports/usage-events.csv)
 	ExportUsageEventsCsv(w http.ResponseWriter, r *http.Request, params ExportUsageEventsCsvParams)
-	// Ingest LiteLLM spend logs
+	// Receive LiteLLM spend logs
 	// (POST /v1/integrations/litellm/spend)
 	IngestLitellmSpend(w http.ResponseWriter, r *http.Request)
 	// List invoices
 	// (GET /v1/invoices)
-	GetV1Invoices(w http.ResponseWriter, r *http.Request, params GetV1InvoicesParams)
+	ListInvoices(w http.ResponseWriter, r *http.Request, params ListInvoicesParams)
 	// Create a draft invoice
 	// (POST /v1/invoices)
 	CreateInvoice(w http.ResponseWriter, r *http.Request, params CreateInvoiceParams)
-	// Preview the next invoice for a customer (Stripe-equivalent)
+	// Preview a customer's next invoice
 	// (POST /v1/invoices/create_preview)
-	PostV1InvoicesCreatePreview(w http.ResponseWriter, r *http.Request, params PostV1InvoicesCreatePreviewParams)
-	// Get invoice with line items
+	CreateInvoicePreview(w http.ResponseWriter, r *http.Request, params CreateInvoicePreviewParams)
+	// Get an invoice with its line items
 	// (GET /v1/invoices/{id})
 	GetInvoice(w http.ResponseWriter, r *http.Request, id string)
 	// Charge a finalized invoice now
@@ -10248,9 +13778,9 @@ type ServerInterface interface {
 	// List the card disputes on an invoice
 	// (GET /v1/invoices/{id}/disputes)
 	ListInvoiceDisputes(w http.ResponseWriter, r *http.Request, id string, params ListInvoiceDisputesParams)
-	// Finalize draft invoice
+	// Finalize a draft invoice
 	// (POST /v1/invoices/{id}/finalize)
-	PostV1InvoicesIdFinalize(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdFinalizeParams)
+	FinalizeInvoice(w http.ResponseWriter, r *http.Request, id string, params FinalizeInvoiceParams)
 	// Add a line item to a draft invoice
 	// (POST /v1/invoices/{id}/line-items)
 	AddInvoiceLineItem(w http.ResponseWriter, r *http.Request, id string, params AddInvoiceLineItemParams)
@@ -10260,9 +13790,9 @@ type ServerInterface interface {
 	// Get the invoice activity timeline
 	// (GET /v1/invoices/{id}/payment-timeline)
 	GetInvoicePaymentTimeline(w http.ResponseWriter, r *http.Request, id string)
-	// Download invoice PDF
+	// Download an invoice PDF
 	// (GET /v1/invoices/{id}/pdf)
-	GetV1InvoicesIdPdf(w http.ResponseWriter, r *http.Request, id string)
+	GetInvoicePdf(w http.ResponseWriter, r *http.Request, id string)
 	// Record a payment made outside Stripe
 	// (POST /v1/invoices/{id}/record-payment)
 	RecordInvoicePayment(w http.ResponseWriter, r *http.Request, id string, params RecordInvoicePaymentParams)
@@ -10272,15 +13802,15 @@ type ServerInterface interface {
 	// Resend the payment-method setup link
 	// (POST /v1/invoices/{id}/resend-setup-link)
 	ResendInvoiceSetupLink(w http.ResponseWriter, r *http.Request, id string, params ResendInvoiceSetupLinkParams)
-	// Retry tax calculation on a deferred invoice
+	// Retry tax calculation on a draft invoice
 	// (POST /v1/invoices/{id}/retry-tax)
-	PostV1InvoicesIdRetryTax(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdRetryTaxParams)
+	RetryInvoiceTax(w http.ResponseWriter, r *http.Request, id string, params RetryInvoiceTaxParams)
 	// Replace the hosted invoice link
 	// (POST /v1/invoices/{id}/rotate-public-token)
 	RotateInvoicePublicToken(w http.ResponseWriter, r *http.Request, id string, params RotateInvoicePublicTokenParams)
-	// Email the invoice (PDF attached) to a recipient
+	// Email an invoice to the customer
 	// (POST /v1/invoices/{id}/send)
-	PostV1InvoicesIdSend(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdSendParams)
+	SendInvoice(w http.ResponseWriter, r *http.Request, id string, params SendInvoiceParams)
 	// List the refunds made in Stripe on an invoice
 	// (GET /v1/invoices/{id}/stripe-refunds)
 	ListInvoiceStripeRefunds(w http.ResponseWriter, r *http.Request, id string, params ListInvoiceStripeRefundsParams)
@@ -10290,40 +13820,40 @@ type ServerInterface interface {
 	// Void an invoice
 	// (POST /v1/invoices/{id}/void)
 	VoidInvoice(w http.ResponseWriter, r *http.Request, id string, params VoidInvoiceParams)
-	// List workspace members and invitations
+	// List team members and invitations
 	// (GET /v1/members)
 	ListMembers(w http.ResponseWriter, r *http.Request)
-	// Revoke a pending invitation
+	// Revoke an invitation
 	// (DELETE /v1/members/invitations/{id})
 	RevokeMemberInvitation(w http.ResponseWriter, r *http.Request, id string)
 	// Invite a teammate by email
 	// (POST /v1/members/invite)
 	InviteMember(w http.ResponseWriter, r *http.Request, params InviteMemberParams)
-	// Remove a member from the workspace
+	// Remove a member from the account
 	// (DELETE /v1/members/{userID})
 	RemoveMember(w http.ResponseWriter, r *http.Request, userID string)
 	// List meters
 	// (GET /v1/meters)
-	GetV1Meters(w http.ResponseWriter, r *http.Request, params GetV1MetersParams)
-	// Create meter
+	ListMeters(w http.ResponseWriter, r *http.Request, params ListMetersParams)
+	// Create a meter
 	// (POST /v1/meters)
-	PostV1Meters(w http.ResponseWriter, r *http.Request, params PostV1MetersParams)
-	// Get meter
+	CreateMeter(w http.ResponseWriter, r *http.Request, params CreateMeterParams)
+	// Get a meter
 	// (GET /v1/meters/{id})
 	GetMeter(w http.ResponseWriter, r *http.Request, id string)
-	// Update meter
+	// Update a meter
 	// (PATCH /v1/meters/{id})
-	PatchV1MetersId(w http.ResponseWriter, r *http.Request, id string, params PatchV1MetersIdParams)
+	UpdateMeter(w http.ResponseWriter, r *http.Request, id string, params UpdateMeterParams)
 	// List plans
 	// (GET /v1/plans)
-	GetV1Plans(w http.ResponseWriter, r *http.Request, params GetV1PlansParams)
-	// Create plan
+	ListPlans(w http.ResponseWriter, r *http.Request, params ListPlansParams)
+	// Create a plan
 	// (POST /v1/plans)
-	PostV1Plans(w http.ResponseWriter, r *http.Request, params PostV1PlansParams)
-	// Get plan
+	CreatePlan(w http.ResponseWriter, r *http.Request, params CreatePlanParams)
+	// Get a plan
 	// (GET /v1/plans/{id})
 	GetPlan(w http.ResponseWriter, r *http.Request, id string)
-	// Update plan
+	// Update a plan
 	// (PATCH /v1/plans/{id})
 	UpdatePlan(w http.ResponseWriter, r *http.Request, id string, params UpdatePlanParams)
 	// List a plan's prices
@@ -10349,16 +13879,16 @@ type ServerInterface interface {
 	DeletePriceOverride(w http.ResponseWriter, r *http.Request, id string)
 	// List provider cost rates
 	// (GET /v1/provider-costs)
-	GetV1ProviderCosts(w http.ResponseWriter, r *http.Request, params GetV1ProviderCostsParams)
+	ListProviderCosts(w http.ResponseWriter, r *http.Request, params ListProviderCostsParams)
 	// Create or update a provider cost rate
 	// (PUT /v1/provider-costs)
-	PutV1ProviderCosts(w http.ResponseWriter, r *http.Request, params PutV1ProviderCostsParams)
+	UpsertProviderCost(w http.ResponseWriter, r *http.Request, params UpsertProviderCostParams)
 	// Delete a provider cost rate
 	// (DELETE /v1/provider-costs/{id})
-	DeleteV1ProviderCostsId(w http.ResponseWriter, r *http.Request, id string)
-	// Public cost-dashboard projection (ADR-032)
+	DeleteProviderCost(w http.ResponseWriter, r *http.Request, id string)
+	// Get a customer's public cost dashboard
 	// (GET /v1/public/cost-dashboard/{token})
-	GetV1PublicCostDashboardToken(w http.ResponseWriter, r *http.Request, token string)
+	GetPublicCostDashboard(w http.ResponseWriter, r *http.Request, token string)
 	// Data behind the hosted invoice page
 	// (GET /v1/public/invoices/{token})
 	GetHostedInvoice(w http.ResponseWriter, r *http.Request, token string)
@@ -10368,7 +13898,7 @@ type ServerInterface interface {
 	// Download the hosted invoice PDF
 	// (GET /v1/public/invoices/{token}/pdf)
 	GetHostedInvoicePdf(w http.ResponseWriter, r *http.Request, token string)
-	// Data behind the payment-update page
+	// Get what the payment-update page shows
 	// (GET /v1/public/payment-updates/{token})
 	GetPublicPaymentUpdate(w http.ResponseWriter, r *http.Request, token string)
 	// Start adding a card in Stripe Checkout
@@ -10377,25 +13907,25 @@ type ServerInterface interface {
 	// List recipes
 	// (GET /v1/recipes)
 	ListRecipes(w http.ResponseWriter, r *http.Request, params ListRecipesParams)
-	// List installed recipe instances
+	// List installed recipes
 	// (GET /v1/recipes/instances)
 	ListRecipeInstances(w http.ResponseWriter, r *http.Request, params ListRecipeInstancesParams)
-	// Get recipe
+	// Get a recipe
 	// (GET /v1/recipes/{key})
 	GetRecipe(w http.ResponseWriter, r *http.Request, key string)
-	// Instantiate recipe (idempotent apply)
+	// Install a recipe
 	// (POST /v1/recipes/{key}/instantiate)
 	InstantiateRecipe(w http.ResponseWriter, r *http.Request, key string, params InstantiateRecipeParams)
-	// Preview recipe
+	// Preview a recipe
 	// (POST /v1/recipes/{key}/preview)
 	PreviewRecipe(w http.ResponseWriter, r *http.Request, key string, params PreviewRecipeParams)
-	// Get workspace settings
+	// Get account settings
 	// (GET /v1/settings)
 	GetTenantSettings(w http.ResponseWriter, r *http.Request)
-	// Update workspace settings
+	// Update account settings
 	// (PUT /v1/settings)
 	UpdateTenantSettings(w http.ResponseWriter, r *http.Request, params UpdateTenantSettingsParams)
-	// Email setup status
+	// Get the email setup status
 	// (GET /v1/settings/email)
 	GetEmailSettings(w http.ResponseWriter, r *http.Request)
 	// Send a test email
@@ -10415,38 +13945,38 @@ type ServerInterface interface {
 	SetStripeWebhookSecret(w http.ResponseWriter, r *http.Request, mode SetStripeWebhookSecretParamsMode, params SetStripeWebhookSecretParams)
 	// List subscriptions
 	// (GET /v1/subscriptions)
-	GetV1Subscriptions(w http.ResponseWriter, r *http.Request, params GetV1SubscriptionsParams)
-	// Create subscription
+	ListSubscriptions(w http.ResponseWriter, r *http.Request, params ListSubscriptionsParams)
+	// Create a subscription
 	// (POST /v1/subscriptions)
-	PostV1Subscriptions(w http.ResponseWriter, r *http.Request, params PostV1SubscriptionsParams)
-	// Get subscription
+	CreateSubscription(w http.ResponseWriter, r *http.Request, params CreateSubscriptionParams)
+	// Get a subscription
 	// (GET /v1/subscriptions/{id})
 	GetSubscription(w http.ResponseWriter, r *http.Request, id string)
-	// Activate draft subscription
+	// Activate a draft subscription
 	// (POST /v1/subscriptions/{id}/activate)
-	PostV1SubscriptionsIdActivate(w http.ResponseWriter, r *http.Request, id string, params PostV1SubscriptionsIdActivateParams)
+	ActivateSubscription(w http.ResponseWriter, r *http.Request, id string, params ActivateSubscriptionParams)
 	// Clear billing thresholds
 	// (DELETE /v1/subscriptions/{id}/billing-thresholds)
 	ClearSubscriptionBillingThresholds(w http.ResponseWriter, r *http.Request, id string)
 	// Set billing thresholds
 	// (PUT /v1/subscriptions/{id}/billing-thresholds)
 	SetSubscriptionBillingThresholds(w http.ResponseWriter, r *http.Request, id string, params SetSubscriptionBillingThresholdsParams)
-	// Cancel subscription now
+	// Cancel a subscription now
 	// (POST /v1/subscriptions/{id}/cancel)
 	CancelSubscription(w http.ResponseWriter, r *http.Request, id string, params CancelSubscriptionParams)
-	// End trial now
+	// End a trial now
 	// (POST /v1/subscriptions/{id}/end-trial)
 	EndSubscriptionTrial(w http.ResponseWriter, r *http.Request, id string, params EndSubscriptionTrialParams)
-	// Extend trial
+	// Extend a trial
 	// (POST /v1/subscriptions/{id}/extend-trial)
 	ExtendSubscriptionTrial(w http.ResponseWriter, r *http.Request, id string, params ExtendSubscriptionTrialParams)
-	// Add subscription item
+	// Add an item to a subscription
 	// (POST /v1/subscriptions/{id}/items)
 	AddSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, params AddSubscriptionItemParams)
-	// Remove subscription item
+	// Remove a subscription item
 	// (DELETE /v1/subscriptions/{id}/items/{itemID})
 	RemoveSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, itemID string)
-	// Change subscription item
+	// Change a subscription item
 	// (PATCH /v1/subscriptions/{id}/items/{itemID})
 	UpdateSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, itemID string, params UpdateSubscriptionItemParams)
 	// Cancel a scheduled plan change
@@ -10458,57 +13988,57 @@ type ServerInterface interface {
 	// Pause collection
 	// (PUT /v1/subscriptions/{id}/pause-collection)
 	PauseSubscriptionCollection(w http.ResponseWriter, r *http.Request, id string, params PauseSubscriptionCollectionParams)
-	// Retry billing on a subscription whose billing is failing
+	// Retry a subscription's failed billing
 	// (POST /v1/subscriptions/{id}/retry-billing)
-	PostV1SubscriptionsIdRetryBilling(w http.ResponseWriter, r *http.Request, id string, params PostV1SubscriptionsIdRetryBillingParams)
+	RetrySubscriptionBilling(w http.ResponseWriter, r *http.Request, id string, params RetrySubscriptionBillingParams)
 	// Schedule a cancel
 	// (POST /v1/subscriptions/{id}/schedule-cancel)
 	ScheduleSubscriptionCancel(w http.ResponseWriter, r *http.Request, id string, params ScheduleSubscriptionCancelParams)
 	// Clear a scheduled cancel
 	// (DELETE /v1/subscriptions/{id}/scheduled-cancel)
 	ClearSubscriptionScheduledCancel(w http.ResponseWriter, r *http.Request, id string)
-	// Get subscription activity timeline
+	// Get a subscription's activity timeline
 	// (GET /v1/subscriptions/{id}/timeline)
 	GetSubscriptionTimeline(w http.ResponseWriter, r *http.Request, id string)
-	// List test clocks for the active tenant
+	// List test clocks
 	// (GET /v1/test-clocks)
-	GetV1TestClocks(w http.ResponseWriter, r *http.Request, params GetV1TestClocksParams)
+	ListTestClocks(w http.ResponseWriter, r *http.Request, params ListTestClocksParams)
 	// Create a test clock
 	// (POST /v1/test-clocks)
-	PostV1TestClocks(w http.ResponseWriter, r *http.Request, params PostV1TestClocksParams)
-	// Delete a test clock (cascades to pinned subscriptions)
+	CreateTestClock(w http.ResponseWriter, r *http.Request, params CreateTestClockParams)
+	// Delete a test clock and its simulated data
 	// (DELETE /v1/test-clocks/{id})
-	DeleteV1TestClocksId(w http.ResponseWriter, r *http.Request, id string)
-	// Get a test clock by id
+	DeleteTestClock(w http.ResponseWriter, r *http.Request, id string)
+	// Get a test clock
 	// (GET /v1/test-clocks/{id})
-	GetV1TestClocksId(w http.ResponseWriter, r *http.Request, id string)
-	// Advance the clock to a new frozen_time
+	GetTestClock(w http.ResponseWriter, r *http.Request, id string)
+	// Advance a test clock
 	// (POST /v1/test-clocks/{id}/advance)
-	PostV1TestClocksIdAdvance(w http.ResponseWriter, r *http.Request, id string, params PostV1TestClocksIdAdvanceParams)
+	AdvanceTestClock(w http.ResponseWriter, r *http.Request, id string, params AdvanceTestClockParams)
 	// List customers attached to a test clock
 	// (GET /v1/test-clocks/{id}/customers)
 	ListTestClockCustomers(w http.ResponseWriter, r *http.Request, id string, params ListTestClockCustomersParams)
-	// Retry catchup on a clock parked in internal_failure
+	// Retry a failed test clock advance
 	// (POST /v1/test-clocks/{id}/retry-advance)
-	PostV1TestClocksIdRetryAdvance(w http.ResponseWriter, r *http.Request, id string, params PostV1TestClocksIdRetryAdvanceParams)
-	// List subscriptions pinned to this clock
+	RetryTestClockAdvance(w http.ResponseWriter, r *http.Request, id string, params RetryTestClockAdvanceParams)
+	// List a test clock's subscriptions
 	// (GET /v1/test-clocks/{id}/subscriptions)
-	GetV1TestClocksIdSubscriptions(w http.ResponseWriter, r *http.Request, id string, params GetV1TestClocksIdSubscriptionsParams)
+	ListTestClockSubscriptions(w http.ResponseWriter, r *http.Request, id string, params ListTestClockSubscriptionsParams)
 	// List usage events
 	// (GET /v1/usage-events)
-	GetV1UsageEvents(w http.ResponseWriter, r *http.Request, params GetV1UsageEventsParams)
-	// Ingest usage event
+	ListUsageEvents(w http.ResponseWriter, r *http.Request, params ListUsageEventsParams)
+	// Send a usage event
 	// (POST /v1/usage-events)
-	PostV1UsageEvents(w http.ResponseWriter, r *http.Request)
-	// Usage totals
+	CreateUsageEvent(w http.ResponseWriter, r *http.Request)
+	// Get usage totals
 	// (GET /v1/usage-events/aggregate)
 	AggregateUsageEvents(w http.ResponseWriter, r *http.Request, params AggregateUsageEventsParams)
 	// Backfill a past usage event
 	// (POST /v1/usage-events/backfill)
 	BackfillUsageEvent(w http.ResponseWriter, r *http.Request)
-	// Batch ingest usage events (max 1000, all-or-nothing)
+	// Send a batch of usage events
 	// (POST /v1/usage-events/batch)
-	PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request)
+	CreateUsageEventBatch(w http.ResponseWriter, r *http.Request)
 	// List held usage
 	// (GET /v1/usage-events/held)
 	ListHeldUsage(w http.ResponseWriter, r *http.Request)
@@ -10520,38 +14050,38 @@ type ServerInterface interface {
 	ReleaseHeldUsage(w http.ResponseWriter, r *http.Request)
 	// List webhook endpoints
 	// (GET /v1/webhook-endpoints/endpoints)
-	GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request, params GetV1WebhookEndpointsEndpointsParams)
-	// Create webhook endpoint
+	ListWebhookEndpoints(w http.ResponseWriter, r *http.Request, params ListWebhookEndpointsParams)
+	// Create a webhook endpoint
 	// (POST /v1/webhook-endpoints/endpoints)
-	PostV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request, params PostV1WebhookEndpointsEndpointsParams)
-	// Delivery counts per webhook endpoint
+	CreateWebhookEndpoint(w http.ResponseWriter, r *http.Request, params CreateWebhookEndpointParams)
+	// Get delivery counts per webhook endpoint
 	// (GET /v1/webhook-endpoints/endpoints/stats)
 	GetWebhookEndpointStats(w http.ResponseWriter, r *http.Request, params GetWebhookEndpointStatsParams)
-	// Delete (disable) webhook endpoint
+	// Delete a webhook endpoint
 	// (DELETE /v1/webhook-endpoints/endpoints/{id})
-	DeleteV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request, id string)
+	DeleteWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string)
 	// Get a webhook endpoint
 	// (GET /v1/webhook-endpoints/endpoints/{id})
 	GetWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string)
-	// Update webhook endpoint (no secret rotation)
+	// Update a webhook endpoint
 	// (PATCH /v1/webhook-endpoints/endpoints/{id})
-	PatchV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request, id string, params PatchV1WebhookEndpointsEndpointsIdParams)
-	// List an endpoint's recent deliveries
+	UpdateWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string, params UpdateWebhookEndpointParams)
+	// List an endpoint's deliveries
 	// (GET /v1/webhook-endpoints/endpoints/{id}/deliveries)
 	ListWebhookEndpointDeliveries(w http.ResponseWriter, r *http.Request, id string, params ListWebhookEndpointDeliveriesParams)
 	// Resend one delivery to its endpoint
 	// (POST /v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay)
 	ReplayWebhookDelivery(w http.ResponseWriter, r *http.Request, id string, deliveryID string, params ReplayWebhookDeliveryParams)
-	// Rotate signing secret (72h dual-signing grace)
+	// Rotate a webhook endpoint's signing secret
 	// (POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret)
-	PostV1WebhookEndpointsEndpointsIdRotateSecret(w http.ResponseWriter, r *http.Request, id string, params PostV1WebhookEndpointsEndpointsIdRotateSecretParams)
-	// List outbound events, newest first
+	RotateWebhookEndpointSecret(w http.ResponseWriter, r *http.Request, id string, params RotateWebhookEndpointSecretParams)
+	// List webhook events
 	// (GET /v1/webhook-endpoints/events)
-	GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request, params GetV1WebhookEndpointsEventsParams)
-	// Stream webhook events live (Server-Sent Events)
+	ListWebhookEvents(w http.ResponseWriter, r *http.Request, params ListWebhookEventsParams)
+	// Stream webhook events as they happen
 	// (GET /v1/webhook_events/stream)
 	StreamWebhookEvents(w http.ResponseWriter, r *http.Request)
-	// List all delivery attempts for an event
+	// List all deliveries of an event and its replays
 	// (GET /v1/webhook_events/{id}/deliveries)
 	ListWebhookEventDeliveries(w http.ResponseWriter, r *http.Request, id string)
 	// Replay an event to all matching endpoints
@@ -10563,28 +14093,28 @@ type ServerInterface interface {
 	// Receive a Stripe webhook
 	// (POST /v1/webhooks/stripe/{endpoint_id})
 	ReceiveStripeWebhook(w http.ResponseWriter, r *http.Request, endpointId string, params ReceiveStripeWebhookParams)
-	// Resolve the current credential to its tenant context
+	// Get the account and mode of the current credential
 	// (GET /v1/whoami)
-	GetV1Whoami(w http.ResponseWriter, r *http.Request)
+	GetWhoami(w http.ResponseWriter, r *http.Request)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
 
-// Health check
+// Check that the server is up
 // (GET /health)
 func (_ Unimplemented) GetHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Readiness check for load balancers
+// Check that the server can take requests
 // (GET /health/ready)
 func (_ Unimplemented) GetHealthReady(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Prometheus metrics
+// Get Prometheus metrics
 // (GET /metrics)
 func (_ Unimplemented) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -10652,31 +14182,31 @@ func (_ Unimplemented) GetAuditLogFilters(w http.ResponseWriter, r *http.Request
 
 // Accept a team invitation
 // (POST /v1/auth/accept-invite)
-func (_ Unimplemented) PostV1AuthAcceptInvite(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Preview a team invitation (accept-page context)
+// Preview a team invitation
 // (GET /v1/auth/invite/{token})
-func (_ Unimplemented) GetV1AuthInviteToken(w http.ResponseWriter, r *http.Request, token string) {
+func (_ Unimplemented) GetInvitation(w http.ResponseWriter, r *http.Request, token string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Sign in with email and password; mint an httpOnly session cookie
+// Sign in to the dashboard with email and password
 // (POST /v1/auth/login)
-func (_ Unimplemented) PostV1AuthLogin(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) Login(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Revoke the current session and clear the cookie
+// Sign out of the dashboard
 // (POST /v1/auth/logout)
-func (_ Unimplemented) PostV1AuthLogout(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) Logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Switch the dashboard session between test and live mode
 // (POST /v1/auth/mode)
-func (_ Unimplemented) PostV1AuthMode(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) SwitchSessionMode(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10688,19 +14218,19 @@ func (_ Unimplemented) CheckPasswordResetToken(w http.ResponseWriter, r *http.Re
 
 // Set a new password using a reset token
 // (POST /v1/auth/password-reset/confirm)
-func (_ Unimplemented) PostV1AuthPasswordResetConfirm(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Request a password reset link
 // (POST /v1/auth/password-reset/request)
-func (_ Unimplemented) PostV1AuthPasswordResetRequest(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Trigger billing cycle
+// Run billing now
 // (POST /v1/billing/run)
-func (_ Unimplemented) PostV1BillingRun(w http.ResponseWriter, r *http.Request, params PostV1BillingRunParams) {
+func (_ Unimplemented) RunBilling(w http.ResponseWriter, r *http.Request, params RunBillingParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10716,9 +14246,9 @@ func (_ Unimplemented) ListCreditNotes(w http.ResponseWriter, r *http.Request, p
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Create a credit note (line-based, or commit relief)
+// Create a credit note
 // (POST /v1/credit-notes)
-func (_ Unimplemented) PostV1CreditNotes(w http.ResponseWriter, r *http.Request, params PostV1CreditNotesParams) {
+func (_ Unimplemented) CreateCreditNote(w http.ResponseWriter, r *http.Request, params CreateCreditNoteParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10734,7 +14264,7 @@ func (_ Unimplemented) GetCreditNote(w http.ResponseWriter, r *http.Request, id 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Attach a refund made in Stripe to a credit note whose refund failed
+// Attach a refund made in Stripe to a credit note
 // (POST /v1/credit-notes/{id}/attach-stripe-refund)
 func (_ Unimplemented) AttachStripeRefundToCreditNote(w http.ResponseWriter, r *http.Request, id string, params AttachStripeRefundToCreditNoteParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -10758,9 +14288,9 @@ func (_ Unimplemented) RetryCreditNoteRefund(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Email the credit-note document (PDF attached)
+// Email a credit note to the customer
 // (POST /v1/credit-notes/{id}/send)
-func (_ Unimplemented) PostV1CreditNotesIdSend(w http.ResponseWriter, r *http.Request, id string, params PostV1CreditNotesIdSendParams) {
+func (_ Unimplemented) SendCreditNote(w http.ResponseWriter, r *http.Request, id string, params SendCreditNoteParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10776,33 +14306,33 @@ func (_ Unimplemented) AdjustCredits(w http.ResponseWriter, r *http.Request, par
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get customer credit balance
+// Get a customer's credit balance
 // (GET /v1/credits/balance/{customer_id})
-func (_ Unimplemented) GetV1CreditsBalanceCustomerId(w http.ResponseWriter, r *http.Request, customerId string) {
+func (_ Unimplemented) GetCreditBalance(w http.ResponseWriter, r *http.Request, customerId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get customer live credit balance
+// Get a customer's live credit balance
 // (GET /v1/credits/balance/{customer_id}/live)
-func (_ Unimplemented) GetV1CreditsBalanceCustomerIdLive(w http.ResponseWriter, r *http.Request, customerId string) {
+func (_ Unimplemented) GetLiveCreditBalance(w http.ResponseWriter, r *http.Request, customerId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List credit balances for all customers
+// List credit balances
 // (GET /v1/credits/balances)
 func (_ Unimplemented) ListCreditBalances(w http.ResponseWriter, r *http.Request, params ListCreditBalancesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Grant credits to customer
+// Grant credit to a customer
 // (POST /v1/credits/grant)
-func (_ Unimplemented) PostV1CreditsGrant(w http.ResponseWriter, r *http.Request, params PostV1CreditsGrantParams) {
+func (_ Unimplemented) GrantCredits(w http.ResponseWriter, r *http.Request, params GrantCreditsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Per-grant burndown + kind subtotals
+// List a customer's credit grants
 // (GET /v1/credits/grants/{customer_id})
-func (_ Unimplemented) GetV1CreditsGrantsCustomerId(w http.ResponseWriter, r *http.Request, customerId string, params GetV1CreditsGrantsCustomerIdParams) {
+func (_ Unimplemented) GetCreditGrants(w http.ResponseWriter, r *http.Request, customerId string, params GetCreditGrantsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10814,13 +14344,13 @@ func (_ Unimplemented) ListCreditLedgerEntries(w http.ResponseWriter, r *http.Re
 
 // List customers
 // (GET /v1/customers)
-func (_ Unimplemented) GetV1Customers(w http.ResponseWriter, r *http.Request, params GetV1CustomersParams) {
+func (_ Unimplemented) ListCustomers(w http.ResponseWriter, r *http.Request, params ListCustomersParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Create customer
+// Create a customer
 // (POST /v1/customers)
-func (_ Unimplemented) PostV1Customers(w http.ResponseWriter, r *http.Request, params PostV1CustomersParams) {
+func (_ Unimplemented) CreateCustomer(w http.ResponseWriter, r *http.Request, params CreateCustomerParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10860,13 +14390,13 @@ func (_ Unimplemented) SetCustomerDefaultPaymentMethod(w http.ResponseWriter, r 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get customer
+// Get a customer
 // (GET /v1/customers/{id})
 func (_ Unimplemented) GetCustomer(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Update customer
+// Update a customer
 // (PATCH /v1/customers/{id})
 func (_ Unimplemented) UpdateCustomer(w http.ResponseWriter, r *http.Request, id string, params UpdateCustomerParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -10884,15 +14414,15 @@ func (_ Unimplemented) UpsertCustomerBillingProfile(w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Per-customer margin report (operator only)
+// Get a customer's margin report
 // (GET /v1/customers/{id}/margin)
-func (_ Unimplemented) GetV1CustomersIdMargin(w http.ResponseWriter, r *http.Request, id string, params GetV1CustomersIdMarginParams) {
+func (_ Unimplemented) GetCustomerMargin(w http.ResponseWriter, r *http.Request, id string, params GetCustomerMarginParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Rotate the public cost-dashboard token (ADR-032)
+// Rotate the customer's public cost-dashboard link
 // (POST /v1/customers/{id}/rotate-cost-dashboard-token)
-func (_ Unimplemented) PostV1CustomersIdRotateCostDashboardToken(w http.ResponseWriter, r *http.Request, id string, params PostV1CustomersIdRotateCostDashboardTokenParams) {
+func (_ Unimplemented) RotateCustomerCostDashboardToken(w http.ResponseWriter, r *http.Request, id string, params RotateCustomerCostDashboardTokenParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10914,25 +14444,25 @@ func (_ Unimplemented) ListDunningPolicies(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Create dunning policy
+// Create a dunning policy
 // (POST /v1/dunning/policies)
 func (_ Unimplemented) CreateDunningPolicy(w http.ResponseWriter, r *http.Request, params CreateDunningPolicyParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Delete dunning policy
+// Delete a dunning policy
 // (DELETE /v1/dunning/policies/{id})
 func (_ Unimplemented) DeleteDunningPolicy(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get dunning policy
+// Get a dunning policy
 // (GET /v1/dunning/policies/{id})
 func (_ Unimplemented) GetDunningPolicy(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Replace dunning policy settings
+// Replace a dunning policy's settings
 // (PATCH /v1/dunning/policies/{id})
 func (_ Unimplemented) UpdateDunningPolicy(w http.ResponseWriter, r *http.Request, id string, params UpdateDunningPolicyParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -10998,7 +14528,7 @@ func (_ Unimplemented) ExportUsageEventsCsv(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Ingest LiteLLM spend logs
+// Receive LiteLLM spend logs
 // (POST /v1/integrations/litellm/spend)
 func (_ Unimplemented) IngestLitellmSpend(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11006,7 +14536,7 @@ func (_ Unimplemented) IngestLitellmSpend(w http.ResponseWriter, r *http.Request
 
 // List invoices
 // (GET /v1/invoices)
-func (_ Unimplemented) GetV1Invoices(w http.ResponseWriter, r *http.Request, params GetV1InvoicesParams) {
+func (_ Unimplemented) ListInvoices(w http.ResponseWriter, r *http.Request, params ListInvoicesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11016,13 +14546,13 @@ func (_ Unimplemented) CreateInvoice(w http.ResponseWriter, r *http.Request, par
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Preview the next invoice for a customer (Stripe-equivalent)
+// Preview a customer's next invoice
 // (POST /v1/invoices/create_preview)
-func (_ Unimplemented) PostV1InvoicesCreatePreview(w http.ResponseWriter, r *http.Request, params PostV1InvoicesCreatePreviewParams) {
+func (_ Unimplemented) CreateInvoicePreview(w http.ResponseWriter, r *http.Request, params CreateInvoicePreviewParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get invoice with line items
+// Get an invoice with its line items
 // (GET /v1/invoices/{id})
 func (_ Unimplemented) GetInvoice(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11040,9 +14570,9 @@ func (_ Unimplemented) ListInvoiceDisputes(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Finalize draft invoice
+// Finalize a draft invoice
 // (POST /v1/invoices/{id}/finalize)
-func (_ Unimplemented) PostV1InvoicesIdFinalize(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdFinalizeParams) {
+func (_ Unimplemented) FinalizeInvoice(w http.ResponseWriter, r *http.Request, id string, params FinalizeInvoiceParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11064,9 +14594,9 @@ func (_ Unimplemented) GetInvoicePaymentTimeline(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Download invoice PDF
+// Download an invoice PDF
 // (GET /v1/invoices/{id}/pdf)
-func (_ Unimplemented) GetV1InvoicesIdPdf(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) GetInvoicePdf(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11088,9 +14618,9 @@ func (_ Unimplemented) ResendInvoiceSetupLink(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Retry tax calculation on a deferred invoice
+// Retry tax calculation on a draft invoice
 // (POST /v1/invoices/{id}/retry-tax)
-func (_ Unimplemented) PostV1InvoicesIdRetryTax(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdRetryTaxParams) {
+func (_ Unimplemented) RetryInvoiceTax(w http.ResponseWriter, r *http.Request, id string, params RetryInvoiceTaxParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11100,9 +14630,9 @@ func (_ Unimplemented) RotateInvoicePublicToken(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Email the invoice (PDF attached) to a recipient
+// Email an invoice to the customer
 // (POST /v1/invoices/{id}/send)
-func (_ Unimplemented) PostV1InvoicesIdSend(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdSendParams) {
+func (_ Unimplemented) SendInvoice(w http.ResponseWriter, r *http.Request, id string, params SendInvoiceParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11124,13 +14654,13 @@ func (_ Unimplemented) VoidInvoice(w http.ResponseWriter, r *http.Request, id st
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List workspace members and invitations
+// List team members and invitations
 // (GET /v1/members)
 func (_ Unimplemented) ListMembers(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Revoke a pending invitation
+// Revoke an invitation
 // (DELETE /v1/members/invitations/{id})
 func (_ Unimplemented) RevokeMemberInvitation(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11142,7 +14672,7 @@ func (_ Unimplemented) InviteMember(w http.ResponseWriter, r *http.Request, para
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Remove a member from the workspace
+// Remove a member from the account
 // (DELETE /v1/members/{userID})
 func (_ Unimplemented) RemoveMember(w http.ResponseWriter, r *http.Request, userID string) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11150,47 +14680,47 @@ func (_ Unimplemented) RemoveMember(w http.ResponseWriter, r *http.Request, user
 
 // List meters
 // (GET /v1/meters)
-func (_ Unimplemented) GetV1Meters(w http.ResponseWriter, r *http.Request, params GetV1MetersParams) {
+func (_ Unimplemented) ListMeters(w http.ResponseWriter, r *http.Request, params ListMetersParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Create meter
+// Create a meter
 // (POST /v1/meters)
-func (_ Unimplemented) PostV1Meters(w http.ResponseWriter, r *http.Request, params PostV1MetersParams) {
+func (_ Unimplemented) CreateMeter(w http.ResponseWriter, r *http.Request, params CreateMeterParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get meter
+// Get a meter
 // (GET /v1/meters/{id})
 func (_ Unimplemented) GetMeter(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Update meter
+// Update a meter
 // (PATCH /v1/meters/{id})
-func (_ Unimplemented) PatchV1MetersId(w http.ResponseWriter, r *http.Request, id string, params PatchV1MetersIdParams) {
+func (_ Unimplemented) UpdateMeter(w http.ResponseWriter, r *http.Request, id string, params UpdateMeterParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // List plans
 // (GET /v1/plans)
-func (_ Unimplemented) GetV1Plans(w http.ResponseWriter, r *http.Request, params GetV1PlansParams) {
+func (_ Unimplemented) ListPlans(w http.ResponseWriter, r *http.Request, params ListPlansParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Create plan
+// Create a plan
 // (POST /v1/plans)
-func (_ Unimplemented) PostV1Plans(w http.ResponseWriter, r *http.Request, params PostV1PlansParams) {
+func (_ Unimplemented) CreatePlan(w http.ResponseWriter, r *http.Request, params CreatePlanParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get plan
+// Get a plan
 // (GET /v1/plans/{id})
 func (_ Unimplemented) GetPlan(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Update plan
+// Update a plan
 // (PATCH /v1/plans/{id})
 func (_ Unimplemented) UpdatePlan(w http.ResponseWriter, r *http.Request, id string, params UpdatePlanParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11240,25 +14770,25 @@ func (_ Unimplemented) DeletePriceOverride(w http.ResponseWriter, r *http.Reques
 
 // List provider cost rates
 // (GET /v1/provider-costs)
-func (_ Unimplemented) GetV1ProviderCosts(w http.ResponseWriter, r *http.Request, params GetV1ProviderCostsParams) {
+func (_ Unimplemented) ListProviderCosts(w http.ResponseWriter, r *http.Request, params ListProviderCostsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Create or update a provider cost rate
 // (PUT /v1/provider-costs)
-func (_ Unimplemented) PutV1ProviderCosts(w http.ResponseWriter, r *http.Request, params PutV1ProviderCostsParams) {
+func (_ Unimplemented) UpsertProviderCost(w http.ResponseWriter, r *http.Request, params UpsertProviderCostParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Delete a provider cost rate
 // (DELETE /v1/provider-costs/{id})
-func (_ Unimplemented) DeleteV1ProviderCostsId(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) DeleteProviderCost(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Public cost-dashboard projection (ADR-032)
+// Get a customer's public cost dashboard
 // (GET /v1/public/cost-dashboard/{token})
-func (_ Unimplemented) GetV1PublicCostDashboardToken(w http.ResponseWriter, r *http.Request, token string) {
+func (_ Unimplemented) GetPublicCostDashboard(w http.ResponseWriter, r *http.Request, token string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11280,7 +14810,7 @@ func (_ Unimplemented) GetHostedInvoicePdf(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Data behind the payment-update page
+// Get what the payment-update page shows
 // (GET /v1/public/payment-updates/{token})
 func (_ Unimplemented) GetPublicPaymentUpdate(w http.ResponseWriter, r *http.Request, token string) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11298,43 +14828,43 @@ func (_ Unimplemented) ListRecipes(w http.ResponseWriter, r *http.Request, param
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List installed recipe instances
+// List installed recipes
 // (GET /v1/recipes/instances)
 func (_ Unimplemented) ListRecipeInstances(w http.ResponseWriter, r *http.Request, params ListRecipeInstancesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get recipe
+// Get a recipe
 // (GET /v1/recipes/{key})
 func (_ Unimplemented) GetRecipe(w http.ResponseWriter, r *http.Request, key string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Instantiate recipe (idempotent apply)
+// Install a recipe
 // (POST /v1/recipes/{key}/instantiate)
 func (_ Unimplemented) InstantiateRecipe(w http.ResponseWriter, r *http.Request, key string, params InstantiateRecipeParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Preview recipe
+// Preview a recipe
 // (POST /v1/recipes/{key}/preview)
 func (_ Unimplemented) PreviewRecipe(w http.ResponseWriter, r *http.Request, key string, params PreviewRecipeParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get workspace settings
+// Get account settings
 // (GET /v1/settings)
 func (_ Unimplemented) GetTenantSettings(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Update workspace settings
+// Update account settings
 // (PUT /v1/settings)
 func (_ Unimplemented) UpdateTenantSettings(w http.ResponseWriter, r *http.Request, params UpdateTenantSettingsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Email setup status
+// Get the email setup status
 // (GET /v1/settings/email)
 func (_ Unimplemented) GetEmailSettings(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11372,25 +14902,25 @@ func (_ Unimplemented) SetStripeWebhookSecret(w http.ResponseWriter, r *http.Req
 
 // List subscriptions
 // (GET /v1/subscriptions)
-func (_ Unimplemented) GetV1Subscriptions(w http.ResponseWriter, r *http.Request, params GetV1SubscriptionsParams) {
+func (_ Unimplemented) ListSubscriptions(w http.ResponseWriter, r *http.Request, params ListSubscriptionsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Create subscription
+// Create a subscription
 // (POST /v1/subscriptions)
-func (_ Unimplemented) PostV1Subscriptions(w http.ResponseWriter, r *http.Request, params PostV1SubscriptionsParams) {
+func (_ Unimplemented) CreateSubscription(w http.ResponseWriter, r *http.Request, params CreateSubscriptionParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get subscription
+// Get a subscription
 // (GET /v1/subscriptions/{id})
 func (_ Unimplemented) GetSubscription(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Activate draft subscription
+// Activate a draft subscription
 // (POST /v1/subscriptions/{id}/activate)
-func (_ Unimplemented) PostV1SubscriptionsIdActivate(w http.ResponseWriter, r *http.Request, id string, params PostV1SubscriptionsIdActivateParams) {
+func (_ Unimplemented) ActivateSubscription(w http.ResponseWriter, r *http.Request, id string, params ActivateSubscriptionParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11406,37 +14936,37 @@ func (_ Unimplemented) SetSubscriptionBillingThresholds(w http.ResponseWriter, r
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Cancel subscription now
+// Cancel a subscription now
 // (POST /v1/subscriptions/{id}/cancel)
 func (_ Unimplemented) CancelSubscription(w http.ResponseWriter, r *http.Request, id string, params CancelSubscriptionParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// End trial now
+// End a trial now
 // (POST /v1/subscriptions/{id}/end-trial)
 func (_ Unimplemented) EndSubscriptionTrial(w http.ResponseWriter, r *http.Request, id string, params EndSubscriptionTrialParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Extend trial
+// Extend a trial
 // (POST /v1/subscriptions/{id}/extend-trial)
 func (_ Unimplemented) ExtendSubscriptionTrial(w http.ResponseWriter, r *http.Request, id string, params ExtendSubscriptionTrialParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Add subscription item
+// Add an item to a subscription
 // (POST /v1/subscriptions/{id}/items)
 func (_ Unimplemented) AddSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, params AddSubscriptionItemParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Remove subscription item
+// Remove a subscription item
 // (DELETE /v1/subscriptions/{id}/items/{itemID})
 func (_ Unimplemented) RemoveSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, itemID string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Change subscription item
+// Change a subscription item
 // (PATCH /v1/subscriptions/{id}/items/{itemID})
 func (_ Unimplemented) UpdateSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, itemID string, params UpdateSubscriptionItemParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11460,9 +14990,9 @@ func (_ Unimplemented) PauseSubscriptionCollection(w http.ResponseWriter, r *htt
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Retry billing on a subscription whose billing is failing
+// Retry a subscription's failed billing
 // (POST /v1/subscriptions/{id}/retry-billing)
-func (_ Unimplemented) PostV1SubscriptionsIdRetryBilling(w http.ResponseWriter, r *http.Request, id string, params PostV1SubscriptionsIdRetryBillingParams) {
+func (_ Unimplemented) RetrySubscriptionBilling(w http.ResponseWriter, r *http.Request, id string, params RetrySubscriptionBillingParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11478,39 +15008,39 @@ func (_ Unimplemented) ClearSubscriptionScheduledCancel(w http.ResponseWriter, r
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get subscription activity timeline
+// Get a subscription's activity timeline
 // (GET /v1/subscriptions/{id}/timeline)
 func (_ Unimplemented) GetSubscriptionTimeline(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List test clocks for the active tenant
+// List test clocks
 // (GET /v1/test-clocks)
-func (_ Unimplemented) GetV1TestClocks(w http.ResponseWriter, r *http.Request, params GetV1TestClocksParams) {
+func (_ Unimplemented) ListTestClocks(w http.ResponseWriter, r *http.Request, params ListTestClocksParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Create a test clock
 // (POST /v1/test-clocks)
-func (_ Unimplemented) PostV1TestClocks(w http.ResponseWriter, r *http.Request, params PostV1TestClocksParams) {
+func (_ Unimplemented) CreateTestClock(w http.ResponseWriter, r *http.Request, params CreateTestClockParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Delete a test clock (cascades to pinned subscriptions)
+// Delete a test clock and its simulated data
 // (DELETE /v1/test-clocks/{id})
-func (_ Unimplemented) DeleteV1TestClocksId(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) DeleteTestClock(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get a test clock by id
+// Get a test clock
 // (GET /v1/test-clocks/{id})
-func (_ Unimplemented) GetV1TestClocksId(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) GetTestClock(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Advance the clock to a new frozen_time
+// Advance a test clock
 // (POST /v1/test-clocks/{id}/advance)
-func (_ Unimplemented) PostV1TestClocksIdAdvance(w http.ResponseWriter, r *http.Request, id string, params PostV1TestClocksIdAdvanceParams) {
+func (_ Unimplemented) AdvanceTestClock(w http.ResponseWriter, r *http.Request, id string, params AdvanceTestClockParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11520,31 +15050,31 @@ func (_ Unimplemented) ListTestClockCustomers(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Retry catchup on a clock parked in internal_failure
+// Retry a failed test clock advance
 // (POST /v1/test-clocks/{id}/retry-advance)
-func (_ Unimplemented) PostV1TestClocksIdRetryAdvance(w http.ResponseWriter, r *http.Request, id string, params PostV1TestClocksIdRetryAdvanceParams) {
+func (_ Unimplemented) RetryTestClockAdvance(w http.ResponseWriter, r *http.Request, id string, params RetryTestClockAdvanceParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List subscriptions pinned to this clock
+// List a test clock's subscriptions
 // (GET /v1/test-clocks/{id}/subscriptions)
-func (_ Unimplemented) GetV1TestClocksIdSubscriptions(w http.ResponseWriter, r *http.Request, id string, params GetV1TestClocksIdSubscriptionsParams) {
+func (_ Unimplemented) ListTestClockSubscriptions(w http.ResponseWriter, r *http.Request, id string, params ListTestClockSubscriptionsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // List usage events
 // (GET /v1/usage-events)
-func (_ Unimplemented) GetV1UsageEvents(w http.ResponseWriter, r *http.Request, params GetV1UsageEventsParams) {
+func (_ Unimplemented) ListUsageEvents(w http.ResponseWriter, r *http.Request, params ListUsageEventsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Ingest usage event
+// Send a usage event
 // (POST /v1/usage-events)
-func (_ Unimplemented) PostV1UsageEvents(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) CreateUsageEvent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Usage totals
+// Get usage totals
 // (GET /v1/usage-events/aggregate)
 func (_ Unimplemented) AggregateUsageEvents(w http.ResponseWriter, r *http.Request, params AggregateUsageEventsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11556,9 +15086,9 @@ func (_ Unimplemented) BackfillUsageEvent(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Batch ingest usage events (max 1000, all-or-nothing)
+// Send a batch of usage events
 // (POST /v1/usage-events/batch)
-func (_ Unimplemented) PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) CreateUsageEventBatch(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11582,25 +15112,25 @@ func (_ Unimplemented) ReleaseHeldUsage(w http.ResponseWriter, r *http.Request) 
 
 // List webhook endpoints
 // (GET /v1/webhook-endpoints/endpoints)
-func (_ Unimplemented) GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request, params GetV1WebhookEndpointsEndpointsParams) {
+func (_ Unimplemented) ListWebhookEndpoints(w http.ResponseWriter, r *http.Request, params ListWebhookEndpointsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Create webhook endpoint
+// Create a webhook endpoint
 // (POST /v1/webhook-endpoints/endpoints)
-func (_ Unimplemented) PostV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request, params PostV1WebhookEndpointsEndpointsParams) {
+func (_ Unimplemented) CreateWebhookEndpoint(w http.ResponseWriter, r *http.Request, params CreateWebhookEndpointParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Delivery counts per webhook endpoint
+// Get delivery counts per webhook endpoint
 // (GET /v1/webhook-endpoints/endpoints/stats)
 func (_ Unimplemented) GetWebhookEndpointStats(w http.ResponseWriter, r *http.Request, params GetWebhookEndpointStatsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Delete (disable) webhook endpoint
+// Delete a webhook endpoint
 // (DELETE /v1/webhook-endpoints/endpoints/{id})
-func (_ Unimplemented) DeleteV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) DeleteWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11610,13 +15140,13 @@ func (_ Unimplemented) GetWebhookEndpoint(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Update webhook endpoint (no secret rotation)
+// Update a webhook endpoint
 // (PATCH /v1/webhook-endpoints/endpoints/{id})
-func (_ Unimplemented) PatchV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request, id string, params PatchV1WebhookEndpointsEndpointsIdParams) {
+func (_ Unimplemented) UpdateWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string, params UpdateWebhookEndpointParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List an endpoint's recent deliveries
+// List an endpoint's deliveries
 // (GET /v1/webhook-endpoints/endpoints/{id}/deliveries)
 func (_ Unimplemented) ListWebhookEndpointDeliveries(w http.ResponseWriter, r *http.Request, id string, params ListWebhookEndpointDeliveriesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11628,25 +15158,25 @@ func (_ Unimplemented) ReplayWebhookDelivery(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Rotate signing secret (72h dual-signing grace)
+// Rotate a webhook endpoint's signing secret
 // (POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret)
-func (_ Unimplemented) PostV1WebhookEndpointsEndpointsIdRotateSecret(w http.ResponseWriter, r *http.Request, id string, params PostV1WebhookEndpointsEndpointsIdRotateSecretParams) {
+func (_ Unimplemented) RotateWebhookEndpointSecret(w http.ResponseWriter, r *http.Request, id string, params RotateWebhookEndpointSecretParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List outbound events, newest first
+// List webhook events
 // (GET /v1/webhook-endpoints/events)
-func (_ Unimplemented) GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request, params GetV1WebhookEndpointsEventsParams) {
+func (_ Unimplemented) ListWebhookEvents(w http.ResponseWriter, r *http.Request, params ListWebhookEventsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Stream webhook events live (Server-Sent Events)
+// Stream webhook events as they happen
 // (GET /v1/webhook_events/stream)
 func (_ Unimplemented) StreamWebhookEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List all delivery attempts for an event
+// List all deliveries of an event and its replays
 // (GET /v1/webhook_events/{id}/deliveries)
 func (_ Unimplemented) ListWebhookEventDeliveries(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11670,9 +15200,9 @@ func (_ Unimplemented) ReceiveStripeWebhook(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Resolve the current credential to its tenant context
+// Get the account and mode of the current credential
 // (GET /v1/whoami)
-func (_ Unimplemented) GetV1Whoami(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) GetWhoami(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -12278,11 +15808,11 @@ func (siw *ServerInterfaceWrapper) GetAuditLogFilters(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1AuthAcceptInvite operation middleware
-func (siw *ServerInterfaceWrapper) PostV1AuthAcceptInvite(w http.ResponseWriter, r *http.Request) {
+// AcceptInvitation operation middleware
+func (siw *ServerInterfaceWrapper) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1AuthAcceptInvite(w, r)
+		siw.Handler.AcceptInvitation(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12292,8 +15822,8 @@ func (siw *ServerInterfaceWrapper) PostV1AuthAcceptInvite(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1AuthInviteToken operation middleware
-func (siw *ServerInterfaceWrapper) GetV1AuthInviteToken(w http.ResponseWriter, r *http.Request) {
+// GetInvitation operation middleware
+func (siw *ServerInterfaceWrapper) GetInvitation(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -12308,7 +15838,7 @@ func (siw *ServerInterfaceWrapper) GetV1AuthInviteToken(w http.ResponseWriter, r
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1AuthInviteToken(w, r, token)
+		siw.Handler.GetInvitation(w, r, token)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12318,11 +15848,11 @@ func (siw *ServerInterfaceWrapper) GetV1AuthInviteToken(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1AuthLogin operation middleware
-func (siw *ServerInterfaceWrapper) PostV1AuthLogin(w http.ResponseWriter, r *http.Request) {
+// Login operation middleware
+func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1AuthLogin(w, r)
+		siw.Handler.Login(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12332,8 +15862,8 @@ func (siw *ServerInterfaceWrapper) PostV1AuthLogin(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1AuthLogout operation middleware
-func (siw *ServerInterfaceWrapper) PostV1AuthLogout(w http.ResponseWriter, r *http.Request) {
+// Logout operation middleware
+func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
@@ -12342,7 +15872,7 @@ func (siw *ServerInterfaceWrapper) PostV1AuthLogout(w http.ResponseWriter, r *ht
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1AuthLogout(w, r)
+		siw.Handler.Logout(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12352,8 +15882,8 @@ func (siw *ServerInterfaceWrapper) PostV1AuthLogout(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1AuthMode operation middleware
-func (siw *ServerInterfaceWrapper) PostV1AuthMode(w http.ResponseWriter, r *http.Request) {
+// SwitchSessionMode operation middleware
+func (siw *ServerInterfaceWrapper) SwitchSessionMode(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
@@ -12362,7 +15892,7 @@ func (siw *ServerInterfaceWrapper) PostV1AuthMode(w http.ResponseWriter, r *http
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1AuthMode(w, r)
+		siw.Handler.SwitchSessionMode(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12405,11 +15935,11 @@ func (siw *ServerInterfaceWrapper) CheckPasswordResetToken(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1AuthPasswordResetConfirm operation middleware
-func (siw *ServerInterfaceWrapper) PostV1AuthPasswordResetConfirm(w http.ResponseWriter, r *http.Request) {
+// ConfirmPasswordReset operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1AuthPasswordResetConfirm(w, r)
+		siw.Handler.ConfirmPasswordReset(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12419,11 +15949,11 @@ func (siw *ServerInterfaceWrapper) PostV1AuthPasswordResetConfirm(w http.Respons
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1AuthPasswordResetRequest operation middleware
-func (siw *ServerInterfaceWrapper) PostV1AuthPasswordResetRequest(w http.ResponseWriter, r *http.Request) {
+// RequestPasswordReset operation middleware
+func (siw *ServerInterfaceWrapper) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1AuthPasswordResetRequest(w, r)
+		siw.Handler.RequestPasswordReset(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12433,8 +15963,8 @@ func (siw *ServerInterfaceWrapper) PostV1AuthPasswordResetRequest(w http.Respons
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1BillingRun operation middleware
-func (siw *ServerInterfaceWrapper) PostV1BillingRun(w http.ResponseWriter, r *http.Request) {
+// RunBilling operation middleware
+func (siw *ServerInterfaceWrapper) RunBilling(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -12446,7 +15976,7 @@ func (siw *ServerInterfaceWrapper) PostV1BillingRun(w http.ResponseWriter, r *ht
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1BillingRunParams
+	var params RunBillingParams
 
 	headers := r.Header
 
@@ -12470,7 +16000,7 @@ func (siw *ServerInterfaceWrapper) PostV1BillingRun(w http.ResponseWriter, r *ht
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1BillingRun(w, r, params)
+		siw.Handler.RunBilling(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12624,8 +16154,8 @@ func (siw *ServerInterfaceWrapper) ListCreditNotes(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1CreditNotes operation middleware
-func (siw *ServerInterfaceWrapper) PostV1CreditNotes(w http.ResponseWriter, r *http.Request) {
+// CreateCreditNote operation middleware
+func (siw *ServerInterfaceWrapper) CreateCreditNote(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -12637,7 +16167,7 @@ func (siw *ServerInterfaceWrapper) PostV1CreditNotes(w http.ResponseWriter, r *h
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1CreditNotesParams
+	var params CreateCreditNoteParams
 
 	headers := r.Header
 
@@ -12661,7 +16191,7 @@ func (siw *ServerInterfaceWrapper) PostV1CreditNotes(w http.ResponseWriter, r *h
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1CreditNotes(w, r, params)
+		siw.Handler.CreateCreditNote(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12923,8 +16453,8 @@ func (siw *ServerInterfaceWrapper) RetryCreditNoteRefund(w http.ResponseWriter, 
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1CreditNotesIdSend operation middleware
-func (siw *ServerInterfaceWrapper) PostV1CreditNotesIdSend(w http.ResponseWriter, r *http.Request) {
+// SendCreditNote operation middleware
+func (siw *ServerInterfaceWrapper) SendCreditNote(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -12945,7 +16475,7 @@ func (siw *ServerInterfaceWrapper) PostV1CreditNotesIdSend(w http.ResponseWriter
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1CreditNotesIdSendParams
+	var params SendCreditNoteParams
 
 	headers := r.Header
 
@@ -12969,7 +16499,7 @@ func (siw *ServerInterfaceWrapper) PostV1CreditNotesIdSend(w http.ResponseWriter
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1CreditNotesIdSend(w, r, id, params)
+		siw.Handler.SendCreditNote(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13082,8 +16612,8 @@ func (siw *ServerInterfaceWrapper) AdjustCredits(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1CreditsBalanceCustomerId operation middleware
-func (siw *ServerInterfaceWrapper) GetV1CreditsBalanceCustomerId(w http.ResponseWriter, r *http.Request) {
+// GetCreditBalance operation middleware
+func (siw *ServerInterfaceWrapper) GetCreditBalance(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -13104,7 +16634,7 @@ func (siw *ServerInterfaceWrapper) GetV1CreditsBalanceCustomerId(w http.Response
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1CreditsBalanceCustomerId(w, r, customerId)
+		siw.Handler.GetCreditBalance(w, r, customerId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13114,8 +16644,8 @@ func (siw *ServerInterfaceWrapper) GetV1CreditsBalanceCustomerId(w http.Response
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1CreditsBalanceCustomerIdLive operation middleware
-func (siw *ServerInterfaceWrapper) GetV1CreditsBalanceCustomerIdLive(w http.ResponseWriter, r *http.Request) {
+// GetLiveCreditBalance operation middleware
+func (siw *ServerInterfaceWrapper) GetLiveCreditBalance(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -13136,7 +16666,7 @@ func (siw *ServerInterfaceWrapper) GetV1CreditsBalanceCustomerIdLive(w http.Resp
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1CreditsBalanceCustomerIdLive(w, r, customerId)
+		siw.Handler.GetLiveCreditBalance(w, r, customerId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13198,8 +16728,8 @@ func (siw *ServerInterfaceWrapper) ListCreditBalances(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1CreditsGrant operation middleware
-func (siw *ServerInterfaceWrapper) PostV1CreditsGrant(w http.ResponseWriter, r *http.Request) {
+// GrantCredits operation middleware
+func (siw *ServerInterfaceWrapper) GrantCredits(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -13211,7 +16741,7 @@ func (siw *ServerInterfaceWrapper) PostV1CreditsGrant(w http.ResponseWriter, r *
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1CreditsGrantParams
+	var params GrantCreditsParams
 
 	headers := r.Header
 
@@ -13235,7 +16765,7 @@ func (siw *ServerInterfaceWrapper) PostV1CreditsGrant(w http.ResponseWriter, r *
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1CreditsGrant(w, r, params)
+		siw.Handler.GrantCredits(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13245,8 +16775,8 @@ func (siw *ServerInterfaceWrapper) PostV1CreditsGrant(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1CreditsGrantsCustomerId operation middleware
-func (siw *ServerInterfaceWrapper) GetV1CreditsGrantsCustomerId(w http.ResponseWriter, r *http.Request) {
+// GetCreditGrants operation middleware
+func (siw *ServerInterfaceWrapper) GetCreditGrants(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -13267,7 +16797,7 @@ func (siw *ServerInterfaceWrapper) GetV1CreditsGrantsCustomerId(w http.ResponseW
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1CreditsGrantsCustomerIdParams
+	var params GetCreditGrantsParams
 
 	// ------------- Optional query parameter "include_exhausted" -------------
 
@@ -13283,7 +16813,7 @@ func (siw *ServerInterfaceWrapper) GetV1CreditsGrantsCustomerId(w http.ResponseW
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1CreditsGrantsCustomerId(w, r, customerId, params)
+		siw.Handler.GetCreditGrants(w, r, customerId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13393,8 +16923,8 @@ func (siw *ServerInterfaceWrapper) ListCreditLedgerEntries(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1Customers operation middleware
-func (siw *ServerInterfaceWrapper) GetV1Customers(w http.ResponseWriter, r *http.Request) {
+// ListCustomers operation middleware
+func (siw *ServerInterfaceWrapper) ListCustomers(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -13406,7 +16936,7 @@ func (siw *ServerInterfaceWrapper) GetV1Customers(w http.ResponseWriter, r *http
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1CustomersParams
+	var params ListCustomersParams
 
 	// ------------- Optional query parameter "status" -------------
 
@@ -13513,7 +17043,7 @@ func (siw *ServerInterfaceWrapper) GetV1Customers(w http.ResponseWriter, r *http
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Customers(w, r, params)
+		siw.Handler.ListCustomers(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13523,8 +17053,8 @@ func (siw *ServerInterfaceWrapper) GetV1Customers(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1Customers operation middleware
-func (siw *ServerInterfaceWrapper) PostV1Customers(w http.ResponseWriter, r *http.Request) {
+// CreateCustomer operation middleware
+func (siw *ServerInterfaceWrapper) CreateCustomer(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -13536,7 +17066,7 @@ func (siw *ServerInterfaceWrapper) PostV1Customers(w http.ResponseWriter, r *htt
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1CustomersParams
+	var params CreateCustomerParams
 
 	headers := r.Header
 
@@ -13560,7 +17090,7 @@ func (siw *ServerInterfaceWrapper) PostV1Customers(w http.ResponseWriter, r *htt
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1Customers(w, r, params)
+		siw.Handler.CreateCustomer(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -14057,8 +17587,8 @@ func (siw *ServerInterfaceWrapper) UpsertCustomerBillingProfile(w http.ResponseW
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1CustomersIdMargin operation middleware
-func (siw *ServerInterfaceWrapper) GetV1CustomersIdMargin(w http.ResponseWriter, r *http.Request) {
+// GetCustomerMargin operation middleware
+func (siw *ServerInterfaceWrapper) GetCustomerMargin(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -14079,7 +17609,7 @@ func (siw *ServerInterfaceWrapper) GetV1CustomersIdMargin(w http.ResponseWriter,
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1CustomersIdMarginParams
+	var params GetCustomerMarginParams
 
 	// ------------- Optional query parameter "from" -------------
 
@@ -14108,7 +17638,7 @@ func (siw *ServerInterfaceWrapper) GetV1CustomersIdMargin(w http.ResponseWriter,
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1CustomersIdMargin(w, r, id, params)
+		siw.Handler.GetCustomerMargin(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -14118,8 +17648,8 @@ func (siw *ServerInterfaceWrapper) GetV1CustomersIdMargin(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1CustomersIdRotateCostDashboardToken operation middleware
-func (siw *ServerInterfaceWrapper) PostV1CustomersIdRotateCostDashboardToken(w http.ResponseWriter, r *http.Request) {
+// RotateCustomerCostDashboardToken operation middleware
+func (siw *ServerInterfaceWrapper) RotateCustomerCostDashboardToken(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -14140,7 +17670,7 @@ func (siw *ServerInterfaceWrapper) PostV1CustomersIdRotateCostDashboardToken(w h
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1CustomersIdRotateCostDashboardTokenParams
+	var params RotateCustomerCostDashboardTokenParams
 
 	headers := r.Header
 
@@ -14164,7 +17694,7 @@ func (siw *ServerInterfaceWrapper) PostV1CustomersIdRotateCostDashboardToken(w h
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1CustomersIdRotateCostDashboardToken(w, r, id, params)
+		siw.Handler.RotateCustomerCostDashboardToken(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15167,8 +18697,8 @@ func (siw *ServerInterfaceWrapper) IngestLitellmSpend(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1Invoices operation middleware
-func (siw *ServerInterfaceWrapper) GetV1Invoices(w http.ResponseWriter, r *http.Request) {
+// ListInvoices operation middleware
+func (siw *ServerInterfaceWrapper) ListInvoices(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -15180,7 +18710,7 @@ func (siw *ServerInterfaceWrapper) GetV1Invoices(w http.ResponseWriter, r *http.
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1InvoicesParams
+	var params ListInvoicesParams
 
 	// ------------- Optional query parameter "customer_id" -------------
 
@@ -15352,7 +18882,7 @@ func (siw *ServerInterfaceWrapper) GetV1Invoices(w http.ResponseWriter, r *http.
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Invoices(w, r, params)
+		siw.Handler.ListInvoices(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15409,8 +18939,8 @@ func (siw *ServerInterfaceWrapper) CreateInvoice(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1InvoicesCreatePreview operation middleware
-func (siw *ServerInterfaceWrapper) PostV1InvoicesCreatePreview(w http.ResponseWriter, r *http.Request) {
+// CreateInvoicePreview operation middleware
+func (siw *ServerInterfaceWrapper) CreateInvoicePreview(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -15422,7 +18952,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesCreatePreview(w http.ResponseWr
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1InvoicesCreatePreviewParams
+	var params CreateInvoicePreviewParams
 
 	headers := r.Header
 
@@ -15446,7 +18976,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesCreatePreview(w http.ResponseWr
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1InvoicesCreatePreview(w, r, params)
+		siw.Handler.CreateInvoicePreview(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15605,8 +19135,8 @@ func (siw *ServerInterfaceWrapper) ListInvoiceDisputes(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1InvoicesIdFinalize operation middleware
-func (siw *ServerInterfaceWrapper) PostV1InvoicesIdFinalize(w http.ResponseWriter, r *http.Request) {
+// FinalizeInvoice operation middleware
+func (siw *ServerInterfaceWrapper) FinalizeInvoice(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -15627,7 +19157,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdFinalize(w http.ResponseWrite
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1InvoicesIdFinalizeParams
+	var params FinalizeInvoiceParams
 
 	headers := r.Header
 
@@ -15651,7 +19181,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdFinalize(w http.ResponseWrite
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1InvoicesIdFinalize(w, r, id, params)
+		siw.Handler.FinalizeInvoice(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15805,8 +19335,8 @@ func (siw *ServerInterfaceWrapper) GetInvoicePaymentTimeline(w http.ResponseWrit
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1InvoicesIdPdf operation middleware
-func (siw *ServerInterfaceWrapper) GetV1InvoicesIdPdf(w http.ResponseWriter, r *http.Request) {
+// GetInvoicePdf operation middleware
+func (siw *ServerInterfaceWrapper) GetInvoicePdf(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -15827,7 +19357,7 @@ func (siw *ServerInterfaceWrapper) GetV1InvoicesIdPdf(w http.ResponseWriter, r *
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1InvoicesIdPdf(w, r, id)
+		siw.Handler.GetInvoicePdf(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16005,8 +19535,8 @@ func (siw *ServerInterfaceWrapper) ResendInvoiceSetupLink(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1InvoicesIdRetryTax operation middleware
-func (siw *ServerInterfaceWrapper) PostV1InvoicesIdRetryTax(w http.ResponseWriter, r *http.Request) {
+// RetryInvoiceTax operation middleware
+func (siw *ServerInterfaceWrapper) RetryInvoiceTax(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -16027,7 +19557,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdRetryTax(w http.ResponseWrite
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1InvoicesIdRetryTaxParams
+	var params RetryInvoiceTaxParams
 
 	headers := r.Header
 
@@ -16051,7 +19581,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdRetryTax(w http.ResponseWrite
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1InvoicesIdRetryTax(w, r, id, params)
+		siw.Handler.RetryInvoiceTax(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16117,8 +19647,8 @@ func (siw *ServerInterfaceWrapper) RotateInvoicePublicToken(w http.ResponseWrite
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1InvoicesIdSend operation middleware
-func (siw *ServerInterfaceWrapper) PostV1InvoicesIdSend(w http.ResponseWriter, r *http.Request) {
+// SendInvoice operation middleware
+func (siw *ServerInterfaceWrapper) SendInvoice(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -16139,7 +19669,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdSend(w http.ResponseWriter, r
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1InvoicesIdSendParams
+	var params SendInvoiceParams
 
 	headers := r.Header
 
@@ -16163,7 +19693,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdSend(w http.ResponseWriter, r
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1InvoicesIdSend(w, r, id, params)
+		siw.Handler.SendInvoice(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16486,8 +20016,8 @@ func (siw *ServerInterfaceWrapper) RemoveMember(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1Meters operation middleware
-func (siw *ServerInterfaceWrapper) GetV1Meters(w http.ResponseWriter, r *http.Request) {
+// ListMeters operation middleware
+func (siw *ServerInterfaceWrapper) ListMeters(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -16499,7 +20029,7 @@ func (siw *ServerInterfaceWrapper) GetV1Meters(w http.ResponseWriter, r *http.Re
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1MetersParams
+	var params ListMetersParams
 
 	// ------------- Optional query parameter "limit" -------------
 
@@ -16528,7 +20058,7 @@ func (siw *ServerInterfaceWrapper) GetV1Meters(w http.ResponseWriter, r *http.Re
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Meters(w, r, params)
+		siw.Handler.ListMeters(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16538,8 +20068,8 @@ func (siw *ServerInterfaceWrapper) GetV1Meters(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1Meters operation middleware
-func (siw *ServerInterfaceWrapper) PostV1Meters(w http.ResponseWriter, r *http.Request) {
+// CreateMeter operation middleware
+func (siw *ServerInterfaceWrapper) CreateMeter(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -16551,7 +20081,7 @@ func (siw *ServerInterfaceWrapper) PostV1Meters(w http.ResponseWriter, r *http.R
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1MetersParams
+	var params CreateMeterParams
 
 	headers := r.Header
 
@@ -16575,7 +20105,7 @@ func (siw *ServerInterfaceWrapper) PostV1Meters(w http.ResponseWriter, r *http.R
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1Meters(w, r, params)
+		siw.Handler.CreateMeter(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16617,8 +20147,8 @@ func (siw *ServerInterfaceWrapper) GetMeter(w http.ResponseWriter, r *http.Reque
 	handler.ServeHTTP(w, r)
 }
 
-// PatchV1MetersId operation middleware
-func (siw *ServerInterfaceWrapper) PatchV1MetersId(w http.ResponseWriter, r *http.Request) {
+// UpdateMeter operation middleware
+func (siw *ServerInterfaceWrapper) UpdateMeter(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -16639,7 +20169,7 @@ func (siw *ServerInterfaceWrapper) PatchV1MetersId(w http.ResponseWriter, r *htt
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PatchV1MetersIdParams
+	var params UpdateMeterParams
 
 	headers := r.Header
 
@@ -16663,7 +20193,7 @@ func (siw *ServerInterfaceWrapper) PatchV1MetersId(w http.ResponseWriter, r *htt
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PatchV1MetersId(w, r, id, params)
+		siw.Handler.UpdateMeter(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16673,8 +20203,8 @@ func (siw *ServerInterfaceWrapper) PatchV1MetersId(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1Plans operation middleware
-func (siw *ServerInterfaceWrapper) GetV1Plans(w http.ResponseWriter, r *http.Request) {
+// ListPlans operation middleware
+func (siw *ServerInterfaceWrapper) ListPlans(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -16686,7 +20216,7 @@ func (siw *ServerInterfaceWrapper) GetV1Plans(w http.ResponseWriter, r *http.Req
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1PlansParams
+	var params ListPlansParams
 
 	// ------------- Optional query parameter "limit" -------------
 
@@ -16715,7 +20245,7 @@ func (siw *ServerInterfaceWrapper) GetV1Plans(w http.ResponseWriter, r *http.Req
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Plans(w, r, params)
+		siw.Handler.ListPlans(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16725,8 +20255,8 @@ func (siw *ServerInterfaceWrapper) GetV1Plans(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1Plans operation middleware
-func (siw *ServerInterfaceWrapper) PostV1Plans(w http.ResponseWriter, r *http.Request) {
+// CreatePlan operation middleware
+func (siw *ServerInterfaceWrapper) CreatePlan(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -16738,7 +20268,7 @@ func (siw *ServerInterfaceWrapper) PostV1Plans(w http.ResponseWriter, r *http.Re
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1PlansParams
+	var params CreatePlanParams
 
 	headers := r.Header
 
@@ -16762,7 +20292,7 @@ func (siw *ServerInterfaceWrapper) PostV1Plans(w http.ResponseWriter, r *http.Re
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1Plans(w, r, params)
+		siw.Handler.CreatePlan(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17240,8 +20770,8 @@ func (siw *ServerInterfaceWrapper) DeletePriceOverride(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1ProviderCosts operation middleware
-func (siw *ServerInterfaceWrapper) GetV1ProviderCosts(w http.ResponseWriter, r *http.Request) {
+// ListProviderCosts operation middleware
+func (siw *ServerInterfaceWrapper) ListProviderCosts(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -17253,7 +20783,7 @@ func (siw *ServerInterfaceWrapper) GetV1ProviderCosts(w http.ResponseWriter, r *
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1ProviderCostsParams
+	var params ListProviderCostsParams
 
 	// ------------- Optional query parameter "limit" -------------
 
@@ -17282,7 +20812,7 @@ func (siw *ServerInterfaceWrapper) GetV1ProviderCosts(w http.ResponseWriter, r *
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1ProviderCosts(w, r, params)
+		siw.Handler.ListProviderCosts(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17292,8 +20822,8 @@ func (siw *ServerInterfaceWrapper) GetV1ProviderCosts(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// PutV1ProviderCosts operation middleware
-func (siw *ServerInterfaceWrapper) PutV1ProviderCosts(w http.ResponseWriter, r *http.Request) {
+// UpsertProviderCost operation middleware
+func (siw *ServerInterfaceWrapper) UpsertProviderCost(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -17305,7 +20835,7 @@ func (siw *ServerInterfaceWrapper) PutV1ProviderCosts(w http.ResponseWriter, r *
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PutV1ProviderCostsParams
+	var params UpsertProviderCostParams
 
 	headers := r.Header
 
@@ -17329,7 +20859,7 @@ func (siw *ServerInterfaceWrapper) PutV1ProviderCosts(w http.ResponseWriter, r *
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PutV1ProviderCosts(w, r, params)
+		siw.Handler.UpsertProviderCost(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17339,8 +20869,8 @@ func (siw *ServerInterfaceWrapper) PutV1ProviderCosts(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// DeleteV1ProviderCostsId operation middleware
-func (siw *ServerInterfaceWrapper) DeleteV1ProviderCostsId(w http.ResponseWriter, r *http.Request) {
+// DeleteProviderCost operation middleware
+func (siw *ServerInterfaceWrapper) DeleteProviderCost(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -17361,7 +20891,7 @@ func (siw *ServerInterfaceWrapper) DeleteV1ProviderCostsId(w http.ResponseWriter
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteV1ProviderCostsId(w, r, id)
+		siw.Handler.DeleteProviderCost(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17371,8 +20901,8 @@ func (siw *ServerInterfaceWrapper) DeleteV1ProviderCostsId(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1PublicCostDashboardToken operation middleware
-func (siw *ServerInterfaceWrapper) GetV1PublicCostDashboardToken(w http.ResponseWriter, r *http.Request) {
+// GetPublicCostDashboard operation middleware
+func (siw *ServerInterfaceWrapper) GetPublicCostDashboard(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -17387,7 +20917,7 @@ func (siw *ServerInterfaceWrapper) GetV1PublicCostDashboardToken(w http.Response
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1PublicCostDashboardToken(w, r, token)
+		siw.Handler.GetPublicCostDashboard(w, r, token)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18064,8 +21594,8 @@ func (siw *ServerInterfaceWrapper) SetStripeWebhookSecret(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1Subscriptions operation middleware
-func (siw *ServerInterfaceWrapper) GetV1Subscriptions(w http.ResponseWriter, r *http.Request) {
+// ListSubscriptions operation middleware
+func (siw *ServerInterfaceWrapper) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -18077,7 +21607,7 @@ func (siw *ServerInterfaceWrapper) GetV1Subscriptions(w http.ResponseWriter, r *
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1SubscriptionsParams
+	var params ListSubscriptionsParams
 
 	// ------------- Optional query parameter "customer_id" -------------
 
@@ -18210,7 +21740,7 @@ func (siw *ServerInterfaceWrapper) GetV1Subscriptions(w http.ResponseWriter, r *
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Subscriptions(w, r, params)
+		siw.Handler.ListSubscriptions(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18220,8 +21750,8 @@ func (siw *ServerInterfaceWrapper) GetV1Subscriptions(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1Subscriptions operation middleware
-func (siw *ServerInterfaceWrapper) PostV1Subscriptions(w http.ResponseWriter, r *http.Request) {
+// CreateSubscription operation middleware
+func (siw *ServerInterfaceWrapper) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -18233,7 +21763,7 @@ func (siw *ServerInterfaceWrapper) PostV1Subscriptions(w http.ResponseWriter, r 
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1SubscriptionsParams
+	var params CreateSubscriptionParams
 
 	headers := r.Header
 
@@ -18257,7 +21787,7 @@ func (siw *ServerInterfaceWrapper) PostV1Subscriptions(w http.ResponseWriter, r 
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1Subscriptions(w, r, params)
+		siw.Handler.CreateSubscription(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18299,8 +21829,8 @@ func (siw *ServerInterfaceWrapper) GetSubscription(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1SubscriptionsIdActivate operation middleware
-func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdActivate(w http.ResponseWriter, r *http.Request) {
+// ActivateSubscription operation middleware
+func (siw *ServerInterfaceWrapper) ActivateSubscription(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -18321,7 +21851,7 @@ func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdActivate(w http.Response
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1SubscriptionsIdActivateParams
+	var params ActivateSubscriptionParams
 
 	headers := r.Header
 
@@ -18345,7 +21875,7 @@ func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdActivate(w http.Response
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1SubscriptionsIdActivate(w, r, id, params)
+		siw.Handler.ActivateSubscription(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18902,8 +22432,8 @@ func (siw *ServerInterfaceWrapper) PauseSubscriptionCollection(w http.ResponseWr
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1SubscriptionsIdRetryBilling operation middleware
-func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdRetryBilling(w http.ResponseWriter, r *http.Request) {
+// RetrySubscriptionBilling operation middleware
+func (siw *ServerInterfaceWrapper) RetrySubscriptionBilling(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -18924,7 +22454,7 @@ func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdRetryBilling(w http.Resp
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1SubscriptionsIdRetryBillingParams
+	var params RetrySubscriptionBillingParams
 
 	headers := r.Header
 
@@ -18948,7 +22478,7 @@ func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdRetryBilling(w http.Resp
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1SubscriptionsIdRetryBilling(w, r, id, params)
+		siw.Handler.RetrySubscriptionBilling(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19078,8 +22608,8 @@ func (siw *ServerInterfaceWrapper) GetSubscriptionTimeline(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1TestClocks operation middleware
-func (siw *ServerInterfaceWrapper) GetV1TestClocks(w http.ResponseWriter, r *http.Request) {
+// ListTestClocks operation middleware
+func (siw *ServerInterfaceWrapper) ListTestClocks(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19091,7 +22621,7 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocks(w http.ResponseWriter, r *htt
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1TestClocksParams
+	var params ListTestClocksParams
 
 	// ------------- Optional query parameter "limit" -------------
 
@@ -19120,7 +22650,7 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocks(w http.ResponseWriter, r *htt
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1TestClocks(w, r, params)
+		siw.Handler.ListTestClocks(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19130,8 +22660,8 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocks(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1TestClocks operation middleware
-func (siw *ServerInterfaceWrapper) PostV1TestClocks(w http.ResponseWriter, r *http.Request) {
+// CreateTestClock operation middleware
+func (siw *ServerInterfaceWrapper) CreateTestClock(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19143,7 +22673,7 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocks(w http.ResponseWriter, r *ht
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1TestClocksParams
+	var params CreateTestClockParams
 
 	headers := r.Header
 
@@ -19167,7 +22697,7 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocks(w http.ResponseWriter, r *ht
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1TestClocks(w, r, params)
+		siw.Handler.CreateTestClock(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19177,8 +22707,8 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocks(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
-// DeleteV1TestClocksId operation middleware
-func (siw *ServerInterfaceWrapper) DeleteV1TestClocksId(w http.ResponseWriter, r *http.Request) {
+// DeleteTestClock operation middleware
+func (siw *ServerInterfaceWrapper) DeleteTestClock(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19199,7 +22729,7 @@ func (siw *ServerInterfaceWrapper) DeleteV1TestClocksId(w http.ResponseWriter, r
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteV1TestClocksId(w, r, id)
+		siw.Handler.DeleteTestClock(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19209,8 +22739,8 @@ func (siw *ServerInterfaceWrapper) DeleteV1TestClocksId(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1TestClocksId operation middleware
-func (siw *ServerInterfaceWrapper) GetV1TestClocksId(w http.ResponseWriter, r *http.Request) {
+// GetTestClock operation middleware
+func (siw *ServerInterfaceWrapper) GetTestClock(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19231,7 +22761,7 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocksId(w http.ResponseWriter, r *h
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1TestClocksId(w, r, id)
+		siw.Handler.GetTestClock(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19241,8 +22771,8 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocksId(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1TestClocksIdAdvance operation middleware
-func (siw *ServerInterfaceWrapper) PostV1TestClocksIdAdvance(w http.ResponseWriter, r *http.Request) {
+// AdvanceTestClock operation middleware
+func (siw *ServerInterfaceWrapper) AdvanceTestClock(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19263,7 +22793,7 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocksIdAdvance(w http.ResponseWrit
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1TestClocksIdAdvanceParams
+	var params AdvanceTestClockParams
 
 	headers := r.Header
 
@@ -19287,7 +22817,7 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocksIdAdvance(w http.ResponseWrit
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1TestClocksIdAdvance(w, r, id, params)
+		siw.Handler.AdvanceTestClock(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19358,8 +22888,8 @@ func (siw *ServerInterfaceWrapper) ListTestClockCustomers(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1TestClocksIdRetryAdvance operation middleware
-func (siw *ServerInterfaceWrapper) PostV1TestClocksIdRetryAdvance(w http.ResponseWriter, r *http.Request) {
+// RetryTestClockAdvance operation middleware
+func (siw *ServerInterfaceWrapper) RetryTestClockAdvance(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19380,7 +22910,7 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocksIdRetryAdvance(w http.Respons
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1TestClocksIdRetryAdvanceParams
+	var params RetryTestClockAdvanceParams
 
 	headers := r.Header
 
@@ -19404,7 +22934,7 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocksIdRetryAdvance(w http.Respons
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1TestClocksIdRetryAdvance(w, r, id, params)
+		siw.Handler.RetryTestClockAdvance(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19414,8 +22944,8 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocksIdRetryAdvance(w http.Respons
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1TestClocksIdSubscriptions operation middleware
-func (siw *ServerInterfaceWrapper) GetV1TestClocksIdSubscriptions(w http.ResponseWriter, r *http.Request) {
+// ListTestClockSubscriptions operation middleware
+func (siw *ServerInterfaceWrapper) ListTestClockSubscriptions(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19436,7 +22966,7 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocksIdSubscriptions(w http.Respons
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1TestClocksIdSubscriptionsParams
+	var params ListTestClockSubscriptionsParams
 
 	// ------------- Optional query parameter "limit" -------------
 
@@ -19465,7 +22995,7 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocksIdSubscriptions(w http.Respons
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1TestClocksIdSubscriptions(w, r, id, params)
+		siw.Handler.ListTestClockSubscriptions(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19475,8 +23005,8 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocksIdSubscriptions(w http.Respons
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1UsageEvents operation middleware
-func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *http.Request) {
+// ListUsageEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListUsageEvents(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19488,7 +23018,7 @@ func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *ht
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1UsageEventsParams
+	var params ListUsageEventsParams
 
 	// ------------- Optional query parameter "customer_id" -------------
 
@@ -19582,7 +23112,7 @@ func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *ht
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1UsageEvents(w, r, params)
+		siw.Handler.ListUsageEvents(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19592,8 +23122,8 @@ func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1UsageEvents operation middleware
-func (siw *ServerInterfaceWrapper) PostV1UsageEvents(w http.ResponseWriter, r *http.Request) {
+// CreateUsageEvent operation middleware
+func (siw *ServerInterfaceWrapper) CreateUsageEvent(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
@@ -19602,7 +23132,7 @@ func (siw *ServerInterfaceWrapper) PostV1UsageEvents(w http.ResponseWriter, r *h
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1UsageEvents(w, r)
+		siw.Handler.CreateUsageEvent(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19736,8 +23266,8 @@ func (siw *ServerInterfaceWrapper) BackfillUsageEvent(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1UsageEventsBatch operation middleware
-func (siw *ServerInterfaceWrapper) PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request) {
+// CreateUsageEventBatch operation middleware
+func (siw *ServerInterfaceWrapper) CreateUsageEventBatch(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
@@ -19746,7 +23276,7 @@ func (siw *ServerInterfaceWrapper) PostV1UsageEventsBatch(w http.ResponseWriter,
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1UsageEventsBatch(w, r)
+		siw.Handler.CreateUsageEventBatch(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19816,8 +23346,8 @@ func (siw *ServerInterfaceWrapper) ReleaseHeldUsage(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1WebhookEndpointsEndpoints operation middleware
-func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request) {
+// ListWebhookEndpoints operation middleware
+func (siw *ServerInterfaceWrapper) ListWebhookEndpoints(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19829,7 +23359,7 @@ func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEndpoints(w http.Respons
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1WebhookEndpointsEndpointsParams
+	var params ListWebhookEndpointsParams
 
 	// ------------- Optional query parameter "limit" -------------
 
@@ -19858,7 +23388,7 @@ func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEndpoints(w http.Respons
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1WebhookEndpointsEndpoints(w, r, params)
+		siw.Handler.ListWebhookEndpoints(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19868,8 +23398,8 @@ func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEndpoints(w http.Respons
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1WebhookEndpointsEndpoints operation middleware
-func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request) {
+// CreateWebhookEndpoint operation middleware
+func (siw *ServerInterfaceWrapper) CreateWebhookEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19881,7 +23411,7 @@ func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpoints(w http.Respon
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1WebhookEndpointsEndpointsParams
+	var params CreateWebhookEndpointParams
 
 	headers := r.Header
 
@@ -19905,7 +23435,7 @@ func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpoints(w http.Respon
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1WebhookEndpointsEndpoints(w, r, params)
+		siw.Handler.CreateWebhookEndpoint(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19967,8 +23497,8 @@ func (siw *ServerInterfaceWrapper) GetWebhookEndpointStats(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
-// DeleteV1WebhookEndpointsEndpointsId operation middleware
-func (siw *ServerInterfaceWrapper) DeleteV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request) {
+// DeleteWebhookEndpoint operation middleware
+func (siw *ServerInterfaceWrapper) DeleteWebhookEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19989,7 +23519,7 @@ func (siw *ServerInterfaceWrapper) DeleteV1WebhookEndpointsEndpointsId(w http.Re
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteV1WebhookEndpointsEndpointsId(w, r, id)
+		siw.Handler.DeleteWebhookEndpoint(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20031,8 +23561,8 @@ func (siw *ServerInterfaceWrapper) GetWebhookEndpoint(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// PatchV1WebhookEndpointsEndpointsId operation middleware
-func (siw *ServerInterfaceWrapper) PatchV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request) {
+// UpdateWebhookEndpoint operation middleware
+func (siw *ServerInterfaceWrapper) UpdateWebhookEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -20053,7 +23583,7 @@ func (siw *ServerInterfaceWrapper) PatchV1WebhookEndpointsEndpointsId(w http.Res
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PatchV1WebhookEndpointsEndpointsIdParams
+	var params UpdateWebhookEndpointParams
 
 	headers := r.Header
 
@@ -20077,7 +23607,7 @@ func (siw *ServerInterfaceWrapper) PatchV1WebhookEndpointsEndpointsId(w http.Res
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PatchV1WebhookEndpointsEndpointsId(w, r, id, params)
+		siw.Handler.UpdateWebhookEndpoint(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20213,8 +23743,8 @@ func (siw *ServerInterfaceWrapper) ReplayWebhookDelivery(w http.ResponseWriter, 
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1WebhookEndpointsEndpointsIdRotateSecret operation middleware
-func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpointsIdRotateSecret(w http.ResponseWriter, r *http.Request) {
+// RotateWebhookEndpointSecret operation middleware
+func (siw *ServerInterfaceWrapper) RotateWebhookEndpointSecret(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -20235,7 +23765,7 @@ func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpointsIdRotateSecret
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1WebhookEndpointsEndpointsIdRotateSecretParams
+	var params RotateWebhookEndpointSecretParams
 
 	headers := r.Header
 
@@ -20259,7 +23789,7 @@ func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpointsIdRotateSecret
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1WebhookEndpointsEndpointsIdRotateSecret(w, r, id, params)
+		siw.Handler.RotateWebhookEndpointSecret(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20269,8 +23799,8 @@ func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpointsIdRotateSecret
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1WebhookEndpointsEvents operation middleware
-func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request) {
+// ListWebhookEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListWebhookEvents(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -20282,7 +23812,7 @@ func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEvents(w http.ResponseWr
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1WebhookEndpointsEventsParams
+	var params ListWebhookEventsParams
 
 	// ------------- Optional query parameter "limit" -------------
 
@@ -20311,7 +23841,7 @@ func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEvents(w http.ResponseWr
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1WebhookEndpointsEvents(w, r, params)
+		siw.Handler.ListWebhookEvents(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20503,8 +24033,8 @@ func (siw *ServerInterfaceWrapper) ReceiveStripeWebhook(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1Whoami operation middleware
-func (siw *ServerInterfaceWrapper) GetV1Whoami(w http.ResponseWriter, r *http.Request) {
+// GetWhoami operation middleware
+func (siw *ServerInterfaceWrapper) GetWhoami(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
@@ -20513,7 +24043,7 @@ func (siw *ServerInterfaceWrapper) GetV1Whoami(w http.ResponseWriter, r *http.Re
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Whoami(w, r)
+		siw.Handler.GetWhoami(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20676,31 +24206,31 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/audit-log/filters", wrapper.GetAuditLogFilters)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/auth/accept-invite", wrapper.PostV1AuthAcceptInvite)
+		r.Post(options.BaseURL+"/v1/auth/accept-invite", wrapper.AcceptInvitation)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/auth/invite/{token}", wrapper.GetV1AuthInviteToken)
+		r.Get(options.BaseURL+"/v1/auth/invite/{token}", wrapper.GetInvitation)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/auth/login", wrapper.PostV1AuthLogin)
+		r.Post(options.BaseURL+"/v1/auth/login", wrapper.Login)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/auth/logout", wrapper.PostV1AuthLogout)
+		r.Post(options.BaseURL+"/v1/auth/logout", wrapper.Logout)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/auth/mode", wrapper.PostV1AuthMode)
+		r.Post(options.BaseURL+"/v1/auth/mode", wrapper.SwitchSessionMode)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/auth/password-reset/check", wrapper.CheckPasswordResetToken)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/auth/password-reset/confirm", wrapper.PostV1AuthPasswordResetConfirm)
+		r.Post(options.BaseURL+"/v1/auth/password-reset/confirm", wrapper.ConfirmPasswordReset)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/auth/password-reset/request", wrapper.PostV1AuthPasswordResetRequest)
+		r.Post(options.BaseURL+"/v1/auth/password-reset/request", wrapper.RequestPasswordReset)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/billing/run", wrapper.PostV1BillingRun)
+		r.Post(options.BaseURL+"/v1/billing/run", wrapper.RunBilling)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/bootstrap", wrapper.Bootstrap)
@@ -20709,7 +24239,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/credit-notes", wrapper.ListCreditNotes)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/credit-notes", wrapper.PostV1CreditNotes)
+		r.Post(options.BaseURL+"/v1/credit-notes", wrapper.CreateCreditNote)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credit-notes/stats", wrapper.GetCreditNoteStats)
@@ -20730,7 +24260,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/credit-notes/{id}/retry-refund", wrapper.RetryCreditNoteRefund)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/credit-notes/{id}/send", wrapper.PostV1CreditNotesIdSend)
+		r.Post(options.BaseURL+"/v1/credit-notes/{id}/send", wrapper.SendCreditNote)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/credit-notes/{id}/void", wrapper.VoidCreditNote)
@@ -20739,28 +24269,28 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/credits/adjust", wrapper.AdjustCredits)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/credits/balance/{customer_id}", wrapper.GetV1CreditsBalanceCustomerId)
+		r.Get(options.BaseURL+"/v1/credits/balance/{customer_id}", wrapper.GetCreditBalance)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/credits/balance/{customer_id}/live", wrapper.GetV1CreditsBalanceCustomerIdLive)
+		r.Get(options.BaseURL+"/v1/credits/balance/{customer_id}/live", wrapper.GetLiveCreditBalance)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credits/balances", wrapper.ListCreditBalances)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/credits/grant", wrapper.PostV1CreditsGrant)
+		r.Post(options.BaseURL+"/v1/credits/grant", wrapper.GrantCredits)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/credits/grants/{customer_id}", wrapper.GetV1CreditsGrantsCustomerId)
+		r.Get(options.BaseURL+"/v1/credits/grants/{customer_id}", wrapper.GetCreditGrants)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credits/ledger/{customer_id}", wrapper.ListCreditLedgerEntries)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/customers", wrapper.GetV1Customers)
+		r.Get(options.BaseURL+"/v1/customers", wrapper.ListCustomers)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/customers", wrapper.PostV1Customers)
+		r.Post(options.BaseURL+"/v1/customers", wrapper.CreateCustomer)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/customers/{customer_id}/overview", wrapper.GetCustomerOverview)
@@ -20793,10 +24323,10 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Put(options.BaseURL+"/v1/customers/{id}/billing-profile", wrapper.UpsertCustomerBillingProfile)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/customers/{id}/margin", wrapper.GetV1CustomersIdMargin)
+		r.Get(options.BaseURL+"/v1/customers/{id}/margin", wrapper.GetCustomerMargin)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/customers/{id}/rotate-cost-dashboard-token", wrapper.PostV1CustomersIdRotateCostDashboardToken)
+		r.Post(options.BaseURL+"/v1/customers/{id}/rotate-cost-dashboard-token", wrapper.RotateCustomerCostDashboardToken)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/customers/{id}/sent-emails", wrapper.ListCustomerSentEmails)
@@ -20853,13 +24383,13 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/integrations/litellm/spend", wrapper.IngestLitellmSpend)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/invoices", wrapper.GetV1Invoices)
+		r.Get(options.BaseURL+"/v1/invoices", wrapper.ListInvoices)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices", wrapper.CreateInvoice)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/invoices/create_preview", wrapper.PostV1InvoicesCreatePreview)
+		r.Post(options.BaseURL+"/v1/invoices/create_preview", wrapper.CreateInvoicePreview)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/invoices/{id}", wrapper.GetInvoice)
@@ -20871,7 +24401,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/invoices/{id}/disputes", wrapper.ListInvoiceDisputes)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/invoices/{id}/finalize", wrapper.PostV1InvoicesIdFinalize)
+		r.Post(options.BaseURL+"/v1/invoices/{id}/finalize", wrapper.FinalizeInvoice)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices/{id}/line-items", wrapper.AddInvoiceLineItem)
@@ -20883,7 +24413,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/invoices/{id}/payment-timeline", wrapper.GetInvoicePaymentTimeline)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/invoices/{id}/pdf", wrapper.GetV1InvoicesIdPdf)
+		r.Get(options.BaseURL+"/v1/invoices/{id}/pdf", wrapper.GetInvoicePdf)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices/{id}/record-payment", wrapper.RecordInvoicePayment)
@@ -20895,13 +24425,13 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/invoices/{id}/resend-setup-link", wrapper.ResendInvoiceSetupLink)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/invoices/{id}/retry-tax", wrapper.PostV1InvoicesIdRetryTax)
+		r.Post(options.BaseURL+"/v1/invoices/{id}/retry-tax", wrapper.RetryInvoiceTax)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices/{id}/rotate-public-token", wrapper.RotateInvoicePublicToken)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/invoices/{id}/send", wrapper.PostV1InvoicesIdSend)
+		r.Post(options.BaseURL+"/v1/invoices/{id}/send", wrapper.SendInvoice)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/invoices/{id}/stripe-refunds", wrapper.ListInvoiceStripeRefunds)
@@ -20925,22 +24455,22 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Delete(options.BaseURL+"/v1/members/{userID}", wrapper.RemoveMember)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/meters", wrapper.GetV1Meters)
+		r.Get(options.BaseURL+"/v1/meters", wrapper.ListMeters)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/meters", wrapper.PostV1Meters)
+		r.Post(options.BaseURL+"/v1/meters", wrapper.CreateMeter)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/meters/{id}", wrapper.GetMeter)
 	})
 	r.Group(func(r chi.Router) {
-		r.Patch(options.BaseURL+"/v1/meters/{id}", wrapper.PatchV1MetersId)
+		r.Patch(options.BaseURL+"/v1/meters/{id}", wrapper.UpdateMeter)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/plans", wrapper.GetV1Plans)
+		r.Get(options.BaseURL+"/v1/plans", wrapper.ListPlans)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/plans", wrapper.PostV1Plans)
+		r.Post(options.BaseURL+"/v1/plans", wrapper.CreatePlan)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/plans/{id}", wrapper.GetPlan)
@@ -20970,16 +24500,16 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Delete(options.BaseURL+"/v1/price-overrides/{id}", wrapper.DeletePriceOverride)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/provider-costs", wrapper.GetV1ProviderCosts)
+		r.Get(options.BaseURL+"/v1/provider-costs", wrapper.ListProviderCosts)
 	})
 	r.Group(func(r chi.Router) {
-		r.Put(options.BaseURL+"/v1/provider-costs", wrapper.PutV1ProviderCosts)
+		r.Put(options.BaseURL+"/v1/provider-costs", wrapper.UpsertProviderCost)
 	})
 	r.Group(func(r chi.Router) {
-		r.Delete(options.BaseURL+"/v1/provider-costs/{id}", wrapper.DeleteV1ProviderCostsId)
+		r.Delete(options.BaseURL+"/v1/provider-costs/{id}", wrapper.DeleteProviderCost)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/public/cost-dashboard/{token}", wrapper.GetV1PublicCostDashboardToken)
+		r.Get(options.BaseURL+"/v1/public/cost-dashboard/{token}", wrapper.GetPublicCostDashboard)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/public/invoices/{token}", wrapper.GetHostedInvoice)
@@ -21036,16 +24566,16 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Patch(options.BaseURL+"/v1/settings/stripe/{mode}/webhook", wrapper.SetStripeWebhookSecret)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/subscriptions", wrapper.GetV1Subscriptions)
+		r.Get(options.BaseURL+"/v1/subscriptions", wrapper.ListSubscriptions)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/subscriptions", wrapper.PostV1Subscriptions)
+		r.Post(options.BaseURL+"/v1/subscriptions", wrapper.CreateSubscription)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/subscriptions/{id}", wrapper.GetSubscription)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/subscriptions/{id}/activate", wrapper.PostV1SubscriptionsIdActivate)
+		r.Post(options.BaseURL+"/v1/subscriptions/{id}/activate", wrapper.ActivateSubscription)
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/v1/subscriptions/{id}/billing-thresholds", wrapper.ClearSubscriptionBillingThresholds)
@@ -21081,7 +24611,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Put(options.BaseURL+"/v1/subscriptions/{id}/pause-collection", wrapper.PauseSubscriptionCollection)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/subscriptions/{id}/retry-billing", wrapper.PostV1SubscriptionsIdRetryBilling)
+		r.Post(options.BaseURL+"/v1/subscriptions/{id}/retry-billing", wrapper.RetrySubscriptionBilling)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/subscriptions/{id}/schedule-cancel", wrapper.ScheduleSubscriptionCancel)
@@ -21093,34 +24623,34 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/subscriptions/{id}/timeline", wrapper.GetSubscriptionTimeline)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/test-clocks", wrapper.GetV1TestClocks)
+		r.Get(options.BaseURL+"/v1/test-clocks", wrapper.ListTestClocks)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/test-clocks", wrapper.PostV1TestClocks)
+		r.Post(options.BaseURL+"/v1/test-clocks", wrapper.CreateTestClock)
 	})
 	r.Group(func(r chi.Router) {
-		r.Delete(options.BaseURL+"/v1/test-clocks/{id}", wrapper.DeleteV1TestClocksId)
+		r.Delete(options.BaseURL+"/v1/test-clocks/{id}", wrapper.DeleteTestClock)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/test-clocks/{id}", wrapper.GetV1TestClocksId)
+		r.Get(options.BaseURL+"/v1/test-clocks/{id}", wrapper.GetTestClock)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/test-clocks/{id}/advance", wrapper.PostV1TestClocksIdAdvance)
+		r.Post(options.BaseURL+"/v1/test-clocks/{id}/advance", wrapper.AdvanceTestClock)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/test-clocks/{id}/customers", wrapper.ListTestClockCustomers)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/test-clocks/{id}/retry-advance", wrapper.PostV1TestClocksIdRetryAdvance)
+		r.Post(options.BaseURL+"/v1/test-clocks/{id}/retry-advance", wrapper.RetryTestClockAdvance)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/test-clocks/{id}/subscriptions", wrapper.GetV1TestClocksIdSubscriptions)
+		r.Get(options.BaseURL+"/v1/test-clocks/{id}/subscriptions", wrapper.ListTestClockSubscriptions)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/usage-events", wrapper.GetV1UsageEvents)
+		r.Get(options.BaseURL+"/v1/usage-events", wrapper.ListUsageEvents)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/usage-events", wrapper.PostV1UsageEvents)
+		r.Post(options.BaseURL+"/v1/usage-events", wrapper.CreateUsageEvent)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/usage-events/aggregate", wrapper.AggregateUsageEvents)
@@ -21129,7 +24659,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/usage-events/backfill", wrapper.BackfillUsageEvent)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/usage-events/batch", wrapper.PostV1UsageEventsBatch)
+		r.Post(options.BaseURL+"/v1/usage-events/batch", wrapper.CreateUsageEventBatch)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/usage-events/held", wrapper.ListHeldUsage)
@@ -21141,22 +24671,22 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/usage-events/held/release", wrapper.ReleaseHeldUsage)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints", wrapper.GetV1WebhookEndpointsEndpoints)
+		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints", wrapper.ListWebhookEndpoints)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/webhook-endpoints/endpoints", wrapper.PostV1WebhookEndpointsEndpoints)
+		r.Post(options.BaseURL+"/v1/webhook-endpoints/endpoints", wrapper.CreateWebhookEndpoint)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints/stats", wrapper.GetWebhookEndpointStats)
 	})
 	r.Group(func(r chi.Router) {
-		r.Delete(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.DeleteV1WebhookEndpointsEndpointsId)
+		r.Delete(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.DeleteWebhookEndpoint)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.GetWebhookEndpoint)
 	})
 	r.Group(func(r chi.Router) {
-		r.Patch(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.PatchV1WebhookEndpointsEndpointsId)
+		r.Patch(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.UpdateWebhookEndpoint)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}/deliveries", wrapper.ListWebhookEndpointDeliveries)
@@ -21165,10 +24695,10 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay", wrapper.ReplayWebhookDelivery)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}/rotate-secret", wrapper.PostV1WebhookEndpointsEndpointsIdRotateSecret)
+		r.Post(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}/rotate-secret", wrapper.RotateWebhookEndpointSecret)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/webhook-endpoints/events", wrapper.GetV1WebhookEndpointsEvents)
+		r.Get(options.BaseURL+"/v1/webhook-endpoints/events", wrapper.ListWebhookEvents)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook_events/stream", wrapper.StreamWebhookEvents)
@@ -21186,7 +24716,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/webhooks/stripe/{endpoint_id}", wrapper.ReceiveStripeWebhook)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/whoami", wrapper.GetV1Whoami)
+		r.Get(options.BaseURL+"/v1/whoami", wrapper.GetWhoami)
 	})
 
 	return r

@@ -17,7 +17,7 @@ import { formatMarginBps, marginCostNote, marginCostState } from '@/lib/marginCo
 import {
   DEFAULT_MARGIN_PRESET, MARGIN_EMPTY_NOTE, MARGIN_PRESETS, isOutsideWindow, marginWindowFor, marginWindowIsEmpty, rangeIncluding, type MarginPreset,
 } from '@/lib/usageWindow'
-import { useGetV1CustomersIdMargin } from '@/lib/gen/queries.gen'
+import { useGetCustomerMargin } from '@/lib/gen/queries.gen'
 import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
 import { useCurrentCycleUsage, useLastInvoicedPeriod, useLatestUsageAt } from '@/hooks/useCustomerUsageWindows'
 
@@ -58,7 +58,7 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
   const params = marginWindow.kind === 'ready' ? { from: marginWindow.from, to: marginWindow.to } : undefined
   const windowError = (preset === 'cycle' && cycleQuery.isError) || (preset === 'last_invoiced' && invoicedQuery.isError)
 
-  const { data: rep, isError: marginError, refetch } = useGetV1CustomersIdMargin(customerId, params, {
+  const { data: rep, isError: marginError, refetch } = useGetCustomerMargin(customerId, params, {
     query: { enabled: params !== undefined },
   })
   const isError = windowError || marginError

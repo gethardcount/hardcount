@@ -19,6 +19,23 @@ their SDKs aligned with their HTTP surface.
    `$ref: "#/components/parameters/IdempotencyKey"` in its `parameters`.
    The exceptions are `/v1/auth/*`, `/v1/public/*`, the inbound webhooks
    and `/v1/bootstrap`: the server ignores the header there.
+
+   The website builds the API reference from this file, so also add:
+
+   - a `description` on every new schema and property, with the unit on
+     every `*_cents` field (the currency's minor unit, cents for USD);
+   - a realistic `example` next to the request body's `schema` and next to
+     each 2xx JSON response's `schema`, with values the handler accepts;
+   - the shared error answers where they apply:
+     `$ref: "#/components/responses/Unauthorized"` (401) on a route that
+     needs a key, `RateLimited` (429) on a rate-limited route, and
+     `InvalidBody` (400) on a route with a JSON body. Give any other error
+     status the `Error` schema and an example with the handler's real code
+     and message.
+
+   A route only the dashboard calls gets `tags: [Dashboard]`,
+   `x-internal: true`, and the first description line "Used by the
+   dashboard; not part of the integration API."
 2. **Run `make gen` from the repo root.** It runs both Go and TS codegen,
    refreshes `web-v2/public/openapi.yaml`, and rewrites the generated files
    in place.
@@ -110,6 +127,27 @@ the handler decodes whole, goes in the entry's `undocumented` with the
 reason. The test starts from the spec, so it cannot see a handler that
 decodes a body the spec does not declare. When you add one, add its
 `requestBody` too.
+
+`openapi_examples_test.go` checks the examples:
+
+- `TestOpenAPISpec_ExamplesMatchSchemas` holds every example to its schema:
+  schema and property examples, parameters, headers, request bodies,
+  responses and the shared responses. It fails on a missing required key, a
+  key the schema does not have, a value of the wrong type, a value outside
+  the enum, a `null` where the schema is not nullable, and a date-time that
+  is not RFC 3339.
+- `TestOpenAPISpec_EveryOperationHasExamples` fails when a JSON request
+  body or a 2xx JSON response has no `example`.
+- `TestOpenAPISpec_ExampleTimesAreQuoted` fails on an unquoted date-time in
+  an example. JavaScript YAML readers turn one into a date object.
+- `TestOpenAPISpec_EverySchemaFieldDescribed` fails when a component schema
+  or one of its properties has no `description`. A property that is only a
+  `$ref` takes the referenced schema's description.
+
+The first test checks an example against the spec, not against the server.
+A value the schema allows but the handler refuses, such as an unknown
+currency, still passes, so check new examples against the handler's
+validation yourself.
 
 ## Why it is built this way
 

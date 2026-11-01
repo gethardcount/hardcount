@@ -68,6 +68,7 @@ func TestSpecEnumsMatchColumnChecks(t *testing.T) {
 		{"plan_price_versions_mode_check", "PlanPrice", "mode"},
 		{"customer_price_overrides_mode_check", "CustomerPriceOverride", "mode"},
 		{"api_keys_key_type_check", "APIKey", "key_type"},
+		{"audit_log_actor_type_check", "AuditLogEntry", "actor_type"},
 		{"invoice_stripe_refunds_status_check", "InvoiceStripeRefund", "status"},
 		{"invoice_stripe_refunds_outcome_check", "InvoiceStripeRefund", "outcome"},
 		{"invoice_stripe_refunds_review_reason_check", "InvoiceStripeRefund", "review_reason"},

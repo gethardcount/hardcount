@@ -19,7 +19,7 @@ const emptyReport = {
 }
 
 vi.mock('@/lib/gen/queries.gen', () => ({
-  useGetV1CustomersIdMargin: () => ({ data: emptyReport, isError: false, refetch: vi.fn() }),
+  useGetCustomerMargin: () => ({ data: emptyReport, isError: false, refetch: vi.fn() }),
 }))
 
 vi.mock('@/hooks/useClockFrozenMap', () => ({
