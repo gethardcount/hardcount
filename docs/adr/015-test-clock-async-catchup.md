@@ -82,9 +82,11 @@ process stopped.
 ### Queue implementation
 
 In-process buffered Go channel + single worker goroutine. Buffer
-of 100 jobs. On full, `Enqueue` returns `ErrQueueFull` and the
-HTTP handler flips the clock to `internal_failure` so the operator
-gets visible feedback rather than a clock stuck in `advancing`.
+of 100 jobs. On full, `Enqueue` returns `ErrQueueFull`, the service
+flips the clock to `internal_failure` so the operator gets visible
+feedback rather than a clock stuck in `advancing`, and the request
+answers 503 `catchup_queue_full`. The operator resumes the clock with
+`POST /v1/test-clocks/{id}/retry-advance`.
 
 Single-worker on purpose — concurrent catchups against the same
 tenant fight for the same RLS partition and the same DB rows;
