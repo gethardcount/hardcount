@@ -175,13 +175,7 @@ func (h *PublicPaymentHandler) validateToken(w http.ResponseWriter, r *http.Requ
 	// testclock attached-customers panel.
 	cust, err := h.customers.Get(scopedCtx, token.TenantID, token.CustomerID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			respond.Error(w, r, http.StatusNotFound, "invalid_request_error", "customer_not_found",
-				"this payment link is no longer valid — the customer it references is unavailable")
-			return
-		}
-		slog.ErrorContext(scopedCtx, "public payment: failed to fetch customer", "customer_id", token.CustomerID, "error", err)
-		respond.InternalError(w, r)
+		customerReadFailed(scopedCtx, w, r, token.CustomerID, err)
 		return
 	}
 
@@ -202,6 +196,21 @@ func (h *PublicPaymentHandler) validateToken(w http.ResponseWriter, r *http.Requ
 		Currency:       currency,
 		Branding:       branding,
 	})
+}
+
+// customerReadFailed answers a payment-update link whose customer could not
+// be read. The customer store answers a missing row with errs.ErrNotFound,
+// never sql.ErrNoRows (customer.PostgresStore.Get): that is a stale link, a
+// 404 customer_not_found. Any other error is a 500. The check used to compare
+// against sql.ErrNoRows, so a missing customer was answered 500.
+func customerReadFailed(ctx context.Context, w http.ResponseWriter, r *http.Request, customerID string, err error) {
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.Error(w, r, http.StatusNotFound, "invalid_request_error", "customer_not_found",
+			"this payment link is no longer valid — the customer it references is unavailable")
+		return
+	}
+	slog.ErrorContext(ctx, "public payment: failed to fetch customer", "customer_id", customerID, "error", err)
+	respond.InternalError(w, r)
 }
 
 // writeOnlinePaymentUnavailable answers a checkout when the seller has no

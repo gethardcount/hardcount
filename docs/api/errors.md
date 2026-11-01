@@ -81,6 +81,7 @@ the API has one.
 | `not_found` | The resource, or one the body names, does not exist in this account and mode. A bad hosted invoice link gets it too. | Check the ID and the key's mode |
 | `route_not_found` | No route has this path | Check the URL |
 | `invoice_not_found` | The invoice behind a payment-update link was removed while the request ran | Ask for a new link |
+| `customer_not_found` | The customer behind a payment-update link no longer exists | Ask for a new link |
 
 ### 405 Method Not Allowed
 

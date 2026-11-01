@@ -843,9 +843,8 @@ func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, t
 // trigger (clearLiftedPauseTx; onResume writes its audit row). Rejects a
 // canceled row since collection-pause on a terminated sub has no meaning —
 // the engine wouldn't observe the row anyway, but failing loudly here keeps
-// the API honest. Active and paused (hard) are both allowed: a hard-paused
-// sub can simultaneously have pause_collection configured for the moment
-// status flips back to active.
+// the API honest. Draft, trialing and active are allowed; there is no
+// paused status.
 func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection, onResume ResumeAudit) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1233,7 +1232,7 @@ func (s *PostgresStore) ResumeLiftedPause(ctx context.Context, tenantID string, 
 // timestamp on re-runs). Used by the billing engine when the trial window
 // has elapsed during a cycle scan, and by the operator-facing EndTrial
 // service action. Returns errs.InvalidState if the row's status was not
-// 'trialing' at UPDATE time (e.g. it was already canceled or hard-paused);
+// 'trialing' at UPDATE time (e.g. it was already activated or canceled);
 // the caller distinguishes this from missing-row by querying current
 // status when no row matches.
 func (s *PostgresStore) ActivateAfterTrial(ctx context.Context, tenantID, id string, at time.Time) (domain.Subscription, error) {
@@ -1493,8 +1492,8 @@ func (s *PostgresStore) endTrialEarlyInTx(ctx context.Context, tx *sql.Tx, id st
 // newTrialEnd makes sense (in the future, after the existing
 // trial_end_at) and computes the new period via firstPeriodAfterTrial.
 // Returns errs.InvalidState if the row's status is not 'trialing' at
-// UPDATE time — distinguishes operator-already-ended / hard-paused /
-// canceled from missing-row by re-querying status when no row matches.
+// UPDATE time — distinguishes operator-already-ended / canceled from
+// missing-row by re-querying status when no row matches.
 func (s *PostgresStore) ExtendTrial(ctx context.Context, tenantID, id string, newTrialEnd, periodStart, periodEnd, nextBilling time.Time, anchorDay int) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
