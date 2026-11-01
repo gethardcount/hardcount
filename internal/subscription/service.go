@@ -634,24 +634,35 @@ func (s *Service) rejectMeterOverlap(ctx context.Context, tenantID, customerID, 
 }
 
 // firstPlanInterval returns the BillingInterval to use for period
-// anchoring on a sub. Reads the first item's plan via PlanReader; on
-// any failure (reader not wired, plan deleted, RLS gap) defaults to
-// BillingMonthly — the pre-Bug-#10 behavior, so unwired test paths
-// don't break.
+// anchoring on a sub: the first item's plan's, read via PlanReader. A plan
+// that cannot be read, or has no interval, is an error, and the caller stops
+// before it writes anything (#1449). It used to anchor the period as monthly,
+// so a yearly plan got a one-month first period, billed as a month, after a
+// database blip. Without a PlanReader (narrow unit tests; production always
+// wires the pricing store) and without items, the anchor is monthly.
 //
 // Stripe / Lago reject mixed intervals on the same sub. Hardcount should
 // too eventually; for now the first-item-wins approach is consistent
 // with how plans / currencies are resolved elsewhere (engine.go's
 // firstPlanCurrency pattern).
-func (s *Service) firstPlanInterval(ctx context.Context, tenantID string, items []domain.SubscriptionItem) domain.BillingInterval {
+func (s *Service) firstPlanInterval(ctx context.Context, tenantID string, items []domain.SubscriptionItem) (domain.BillingInterval, error) {
 	if s.plans == nil || len(items) == 0 {
-		return domain.BillingMonthly
+		return domain.BillingMonthly, nil
 	}
 	plan, err := s.plans.GetPlan(ctx, tenantID, items[0].PlanID)
-	if err != nil || plan.BillingInterval == "" {
-		return domain.BillingMonthly
+	if errors.Is(err, errs.ErrNotFound) {
+		// An item's plan cannot be deleted (ON DELETE RESTRICT), so a
+		// missing one is a fault on this side: a 500, not a 404 that would
+		// name the subscription.
+		return "", fmt.Errorf("plan %s of the subscription's first item could not be found", items[0].PlanID)
 	}
-	return plan.BillingInterval
+	if err != nil {
+		return "", fmt.Errorf("read plan %s for the billing period: %w", items[0].PlanID, err)
+	}
+	if plan.BillingInterval == "" {
+		return "", fmt.Errorf("plan %s has no billing interval", items[0].PlanID)
+	}
+	return plan.BillingInterval, nil
 }
 
 // CreateItemInput is a single priced line the caller wants on a new
@@ -872,7 +883,10 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		// the trial_end → next-month-start stub (Stripe parity);
 		// monthly + anniversary produces a full month from trial_end.
 		// See helper doc for edge cases.
-		interval := s.firstPlanInterval(ctx, tenantID, items)
+		interval, err := s.firstPlanInterval(ctx, tenantID, items)
+		if err != nil {
+			return domain.Subscription{}, err
+		}
 		ps, pe, anchorDay := firstPeriodAfterTrial(te, billingTime, interval, loc)
 		periodStart = &ps
 		periodEnd = &pe
@@ -891,7 +905,10 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		// reconciled. Trialing subs are NOT activated here (their
 		// activated_at is stamped at trial-end).
 		activatedAt = &now
-		interval := s.firstPlanInterval(ctx, tenantID, items)
+		interval, err := s.firstPlanInterval(ctx, tenantID, items)
+		if err != nil {
+			return domain.Subscription{}, err
+		}
 		ps, pe, anchorDay := firstPeriodForActivate(now, billingTime, interval, loc)
 		periodStart = &ps
 		periodEnd = &pe
@@ -1002,7 +1019,10 @@ func (s *Service) Activate(ctx context.Context, tenantID, id string) (domain.Sub
 		if err != nil {
 			return domain.Subscription{}, err
 		}
-		interval := s.firstPlanInterval(ctx, tenantID, sub.Items)
+		interval, err := s.firstPlanInterval(ctx, tenantID, sub.Items)
+		if err != nil {
+			return domain.Subscription{}, err
+		}
 		p1, p2, a := firstPeriodForActivate(now, sub.BillingTime, interval, loc)
 		ps, pe, anchorDay = &p1, &p2, a
 	}
@@ -2942,7 +2962,10 @@ func (s *Service) EndTrial(ctx context.Context, tenantID, id string) (domain.Sub
 	if err != nil {
 		return domain.Subscription{}, err
 	}
-	interval := s.firstPlanInterval(ctx, tenantID, sub.Items)
+	interval, err := s.firstPlanInterval(ctx, tenantID, sub.Items)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
 	ps, pe, anchorDay := firstPeriodForActivate(now, sub.BillingTime, interval, loc)
 
 	// ADR-031 / ADR-056: in_advance items get a day-1 invoice covering the first
@@ -3416,7 +3439,10 @@ func (s *Service) ExtendTrial(ctx context.Context, tenantID, id string, newTrial
 	if current.TrialStartAt != nil && newEnd.After(domain.AddDaysIn(*current.TrialStartAt, maxTrialDays, loc)) {
 		return domain.Subscription{}, errs.Invalid("trial_end", fmt.Sprintf("A trial can last at most %d days from its start. Pick an earlier date.", maxTrialDays))
 	}
-	interval := s.firstPlanInterval(ctx, tenantID, current.Items)
+	interval, err := s.firstPlanInterval(ctx, tenantID, current.Items)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
 	ps, pe, anchorDay := firstPeriodAfterTrial(newEnd, current.BillingTime, interval, loc)
 	return s.store.ExtendTrial(ctx, tenantID, id, newEnd, ps, pe, pe, anchorDay)
 }
