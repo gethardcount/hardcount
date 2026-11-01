@@ -53,6 +53,8 @@ original text.
 
 ### Fixed
 
+- **Unknown values for the subscription list's closed-set filters answer 422.** `status`, `billing` and `collection` on `GET /v1/subscriptions` and `state` on `GET /v1/dunning/runs` reply 422 `validation_error` with `param` naming the filter and the allowed values, the same shape a bad `limit` or `offset` gets, instead of a 400 without `param`. Integrators branching on the 400 must accept the 422. ([#1519](https://github.com/gethardcount/hardcount/issues/1519))
+
 - **A full LiteLLM batch is no longer lost.** `POST /v1/integrations/litellm/spend` accepts bodies up to 32 MB (other routes keep 1 MB), so LiteLLM's default batch of 512 records, about 4 MB, lands instead of getting a 400, which LiteLLM never resends. A larger body gets 413 `batch_too_large`. ([#1509](https://github.com/gethardcount/hardcount/pull/1509))
 - **The dashboard no longer stops loading after about 10 pages a minute.** The general rate limit is now 1,000 requests a minute, up from 100. Sign-in and bootstrap keep 100 per address, set by the new `HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN`. A refused page says it is trying again and reloads after `Retry-After`. ([#1502](https://github.com/gethardcount/hardcount/pull/1502))
 - **A refund made in the Stripe dashboard is now recorded.** Once it succeeds, one that fits the invoice becomes a credit note that reverses its tax; any other is flagged on the invoice to record, attach or dismiss, never by hand. `payment.refunded_in_stripe` is sent. Add `refund.created` to your Stripe webhook endpoint. ([#1500](https://github.com/gethardcount/hardcount/pull/1500))

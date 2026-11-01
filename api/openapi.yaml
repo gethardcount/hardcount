@@ -8365,7 +8365,7 @@ paths:
         - name: status
           in: query
           description: |
-            Exact status. Any other value is a 400. Paused collection is not
+            Exact status. Any other value is a 422. Paused collection is not
             a status: use `collection=paused`.
           schema:
             type: string
@@ -8375,7 +8375,7 @@ paths:
           description: |
             `failing` returns only subscriptions that carry a
             `billing_failure`: those waiting for their next billing attempt
-            and those that are parked. Any other value is a 400.
+            and those that are parked. Any other value is a 422.
           schema:
             type: string
             enum: [failing]
@@ -8386,7 +8386,7 @@ paths:
             `pause_collection` is in force, whether an operator or dunning set
             it. A timed pause ends at `resumes_at` (on the subscription's test
             clock, if it has one), even while the response still carries it.
-            Any other value is a 400.
+            Any other value is a 422.
           schema:
             type: string
             enum: [paused]
@@ -13206,6 +13206,7 @@ paths:
             type: string
         - name: state
           in: query
+          description: Exact run state. Any other value is a 422.
           schema:
             type: string
             enum: [active, escalated, resolved]

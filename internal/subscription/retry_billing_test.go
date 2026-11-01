@@ -194,7 +194,7 @@ func TestRetryBilling_ClockPinnedIsRefused(t *testing.T) {
 }
 
 // TestListHandler_BillingParam: ?billing= is a closed set. An unknown value is
-// a 400, never an unfiltered list.
+// a 422, never an unfiltered list.
 func TestListHandler_BillingParam(t *testing.T) {
 	const tenantID = "t1"
 	store := newMemStore()
@@ -204,9 +204,9 @@ func TestListHandler_BillingParam(t *testing.T) {
 	for query, want := range map[string]int{
 		"":                  http.StatusOK,
 		"?billing=failing":  http.StatusOK,
-		"?billing=parked":   http.StatusBadRequest,
-		"?billing=FAILING":  http.StatusBadRequest,
-		"?billing=failing+": http.StatusBadRequest,
+		"?billing=parked":   http.StatusUnprocessableEntity,
+		"?billing=FAILING":  http.StatusUnprocessableEntity,
+		"?billing=failing+": http.StatusUnprocessableEntity,
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/subscriptions"+query, nil)
 		req = req.WithContext(context.WithValue(req.Context(), auth.TestTenantIDKey(), tenantID))
