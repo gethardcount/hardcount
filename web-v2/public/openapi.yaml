@@ -12132,8 +12132,9 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "404":
           description: |
-            The invoice the token names was deleted while the request ran.
-            Code `invoice_not_found`.
+            The link's customer no longer exists (code `customer_not_found`),
+            or the invoice it names was deleted while the request ran (code
+            `invoice_not_found`).
           content:
             application/json:
               schema:
@@ -12141,8 +12142,8 @@ paths:
               example:
                 error:
                   type: invalid_request_error
-                  code: invoice_not_found
-                  message: this payment link is no longer valid — the invoice it references is unavailable
+                  code: customer_not_found
+                  message: this payment link is no longer valid — the customer it references is unavailable
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "429":
           $ref: "#/components/responses/RateLimited"
@@ -13362,7 +13363,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: validation_error
-                  message: 'unknown event type "invoice.payment_failed" — Hardcount never emits it, so this subscription would receive silence; see the event catalog in docs/webhooks.md'
+                  message: 'unknown event type "invoice.payment_failed" — Hardcount never emits it, so this subscription would receive silence; see the event catalog in docs/api/webhook-events.md'
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: events
         "429":
@@ -26921,7 +26922,10 @@ paths:
                 not_on_plan: 0
                 outside_subscription: 0
         "400":
-          description: "`invalid_request`: empty body, not valid JSON, or a body over 1 MB."
+          description: |
+            Code `invalid_request`: the body is empty (message `empty body`)
+            or is not valid JSON (message `invalid JSON body`). Nothing was
+            recorded.
           content:
             application/json:
               schema:
@@ -26934,6 +26938,21 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "413":
+          description: |
+            Code `batch_too_large`: the body is over the 32 MB limit
+            (33,554,432 bytes). Nothing was recorded. Send fewer records per
+            batch (in LiteLLM, lower `DEFAULT_BATCH_SIZE`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: invalid_request_error
+                  code: batch_too_large
+                  message: "the request body is over the 32 MB limit, so the batch was not saved — send fewer records per batch (LiteLLM: lower DEFAULT_BATCH_SIZE)"
+                  request_id: req_dbjg652q3gpgqfoq5cd0
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":

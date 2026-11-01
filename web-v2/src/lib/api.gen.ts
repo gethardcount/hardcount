@@ -16744,8 +16744,9 @@ export interface operations {
                 };
             };
             /**
-             * @description The invoice the token names was deleted while the request ran.
-             *     Code `invoice_not_found`.
+             * @description The link's customer no longer exists (code `customer_not_found`),
+             *     or the invoice it names was deleted while the request ran (code
+             *     `invoice_not_found`).
              */
             404: {
                 headers: {
@@ -16756,8 +16757,8 @@ export interface operations {
                      * @example {
                      *       "error": {
                      *         "type": "invalid_request_error",
-                     *         "code": "invoice_not_found",
-                     *         "message": "this payment link is no longer valid — the invoice it references is unavailable",
+                     *         "code": "customer_not_found",
+                     *         "message": "this payment link is no longer valid — the customer it references is unavailable",
                      *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
                      *       }
                      *     }
@@ -18215,7 +18216,7 @@ export interface operations {
                      *       "error": {
                      *         "type": "invalid_request_error",
                      *         "code": "validation_error",
-                     *         "message": "unknown event type \"invoice.payment_failed\" — Hardcount never emits it, so this subscription would receive silence; see the event catalog in docs/webhooks.md",
+                     *         "message": "unknown event type \"invoice.payment_failed\" — Hardcount never emits it, so this subscription would receive silence; see the event catalog in docs/api/webhook-events.md",
                      *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
                      *         "param": "events"
                      *       }
@@ -33814,7 +33815,11 @@ export interface operations {
                     "application/json": components["schemas"]["LitellmSpendResult"];
                 };
             };
-            /** @description `invalid_request`: empty body, not valid JSON, or a body over 1 MB. */
+            /**
+             * @description Code `invalid_request`: the body is empty (message `empty body`)
+             *     or is not valid JSON (message `invalid JSON body`). Nothing was
+             *     recorded.
+             */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -33834,6 +33839,29 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /**
+             * @description Code `batch_too_large`: the body is over the 32 MB limit
+             *     (33,554,432 bytes). Nothing was recorded. Send fewer records per
+             *     batch (in LiteLLM, lower `DEFAULT_BATCH_SIZE`).
+             */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "batch_too_large",
+                     *         "message": "the request body is over the 32 MB limit, so the batch was not saved — send fewer records per batch (LiteLLM: lower DEFAULT_BATCH_SIZE)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
             /**
              * @description `ingest_unavailable`: the usage store could not be reached.
