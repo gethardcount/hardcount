@@ -18,9 +18,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import {
-  getGetV1ProviderCostsQueryKey,
-  useDeleteV1ProviderCostsId,
-  usePutV1ProviderCosts,
+  getListProviderCostsQueryKey,
+  useDeleteProviderCost,
+  useUpsertProviderCost,
 } from '@/lib/gen/queries.gen'
 import { api } from '@/lib/api'
 import { usePageTitle } from '@/hooks/usePageTitle'
@@ -42,7 +42,7 @@ export default function ProviderCostsPage() {
 
   // The whole rate table, every page.
   const { data, isLoading, error: loadError, refetch } = useQuery({
-    queryKey: getGetV1ProviderCostsQueryKey(),
+    queryKey: getListProviderCostsQueryKey(),
     queryFn: () => api.listProviderCosts(),
   })
   const rates = data?.data ?? []
@@ -53,9 +53,9 @@ export default function ProviderCostsPage() {
   const [costPerMillion, setCostPerMillion] = useState('')
 
   const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: getGetV1ProviderCostsQueryKey() })
+    queryClient.invalidateQueries({ queryKey: getListProviderCostsQueryKey() })
 
-  const upsert = usePutV1ProviderCosts({
+  const upsert = useUpsertProviderCost({
     mutation: {
       onSuccess: () => {
         invalidate()
@@ -68,7 +68,7 @@ export default function ProviderCostsPage() {
   // Deleting a rate asks first: new usage of that model and token type then
   // records no cost, and there is no undo.
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; model: string; token_type: string } | null>(null)
-  const remove = useDeleteV1ProviderCostsId({
+  const remove = useDeleteProviderCost({
     mutation: {
       onSuccess: () => {
         invalidate()

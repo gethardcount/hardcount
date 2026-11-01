@@ -12,29 +12,7 @@ export interface paths {
             cookie?: never;
         };
         /** Health check */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Service is healthy */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {string} */
-                            status: "ok";
-                        };
-                    };
-                };
-            };
-        };
+        get: operations["getHealth"];
         put?: never;
         post?: never;
         delete?: never;
@@ -99,124 +77,10 @@ export interface paths {
             cookie?: never;
         };
         /** List customers */
-        get: {
-            parameters: {
-                query?: {
-                    status?: string;
-                    /** @description Exact-match filter on the caller-assigned external ID. */
-                    external_id?: string;
-                    /** @description Comma-separated customer IDs to fetch exactly. */
-                    ids?: string;
-                    /**
-                     * @description Case-insensitive substring match on display name, email,
-                     *     external ID, or ID. Matching runs post-decryption (PII
-                     *     columns are encrypted at rest), bounded to the first 5000
-                     *     rows of the tenant's filtered set; the rows and `total` stop
-                     *     there.
-                     */
-                    search?: string;
-                    /**
-                     * @description One of display_name, email, external_id, status, created_at
-                     *     (default). A sort by display_name or email looks at 5,000
-                     *     customers at most; the rows and `total` stop there.
-                     */
-                    sort?: string;
-                    dir?: "asc" | "desc";
-                    /**
-                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                     *     that is not a whole number, is a 422 with `param: limit`.
-                     */
-                    limit?: components["parameters"]["Limit"];
-                    /**
-                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                     *     not a whole number, is a 422 with `param: offset`.
-                     */
-                    offset?: components["parameters"]["Offset"];
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Customer list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["Customer"][];
-                            total: components["schemas"]["ListTotal"];
-                        };
-                    };
-                };
-                422: components["responses"]["InvalidPage"];
-            };
-        };
+        get: operations["listCustomers"];
         put?: never;
         /** Create customer */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        external_id: string;
-                        display_name: string;
-                        email?: string;
-                        additional_emails?: string[];
-                        /** @description Test mode only. Attaches the customer to a test clock. */
-                        test_clock_id?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Customer created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Customer"];
-                    };
-                };
-                /** @description Customer already exists */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /**
-                 * @description A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
-                 *     `dunning_policy_id` is not a create field: assign a policy with
-                 *     `PATCH /v1/customers/{id}`.
-                 */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["createCustomer"];
         delete?: never;
         options?: never;
         head?: never;
@@ -241,50 +105,7 @@ export interface paths {
          *     and is shown ONCE — Hardcount never returns it again after this
          *     response. Audit log records the rotation without the token.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Rotated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @example hc_pcd_a3f9c4... */
-                            token: string;
-                            /** @example https://api.example.com/v1/public/cost-dashboard/hc_pcd_a3f9c4... */
-                            public_url: string;
-                        };
-                    };
-                };
-                /** @description Customer not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        post: operations["rotateCustomerCostDashboardToken"];
         delete?: never;
         options?: never;
         head?: never;
@@ -604,118 +425,7 @@ export interface paths {
          *     `subscriptions`, `usage` and `totals` are empty, and `credits`
          *     still lists the customer's credit balance.
          */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    token: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Projection */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            customer_id: string;
-                            tenant_id: string;
-                            livemode: boolean;
-                            billing_period: {
-                                /** Format: date-time */
-                                start: string;
-                                /** Format: date-time */
-                                end: string;
-                                /**
-                                 * @description Branch on this before rendering the period. When it is `no_subscription` the customer has no active subscription, `subscriptions`, `usage` and `totals` are empty (`credits` is not), and `start`/`end` carry the zero time (`0001-01-01T00:00:00Z`) rather than a real range — display them and the page reads "January 1, year 1".
-                                 * @enum {string}
-                                 */
-                                source: "subscription" | "no_subscription";
-                            };
-                            subscriptions: {
-                                id: string;
-                                plan_name: string;
-                                currency: string;
-                                /** Format: date-time */
-                                current_period_start: string;
-                                /** Format: date-time */
-                                current_period_end: string;
-                            }[];
-                            usage: {
-                                event_name: string;
-                                meter_name: string;
-                                unit: string;
-                                currency: string;
-                                total_quantity: string;
-                                /** Format: int64 */
-                                total_amount_cents: number;
-                                /** @description One row per price that took usage this period. */
-                                prices: {
-                                    /** @description The labels the price takes. Absent for a price that takes every event. */
-                                    dimension_match?: {
-                                        [key: string]: string;
-                                    };
-                                    quantity: string;
-                                    /** Format: int64 */
-                                    amount_cents: number;
-                                    /** @description Per-unit price in DECIMAL CENTS (ADR-045, the Stripe unit_amount_decimal model) — NOT dollars. "0.0003" is 0.0003 CENTS per unit ($3.00 per 1M units); multiplying it by `quantity` yields CENTS, matching the sibling `amount_cents`. Reading it as dollars overstates the cost 100x. */
-                                    unit_amount_decimal?: string;
-                                }[];
-                            }[];
-                            /** @description One entry per currency present in `usage`. */
-                            totals: {
-                                currency: string;
-                                /** Format: int64 */
-                                amount_cents: number;
-                            }[];
-                            /**
-                             * Format: int64
-                             * @description The metered cost of the current billing period so far, in cents, including usage a threshold invoice already billed. Recurring base fees are not included — an in_advance base is already invoiced at period open.
-                             */
-                            projected_total_cents: number;
-                            /** @description The customer's credit position, one entry per currency, ordered by currency. `balance_cents` is the ledger balance in that currency, less any grant past its expiry date that is not yet written off: credit is drawn down when an invoice is issued, so it does not move with usage. `unbilled_usage_cents` is the usage no invoice has billed yet that will be invoiced in that currency, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` differs from `projected_total_cents` after a threshold invoice: it leaves out the usage that invoice billed. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted. */
-                            credits: {
-                                currency: string;
-                                /** Format: int64 */
-                                balance_cents: number;
-                                /** Format: int64 */
-                                unbilled_usage_cents: number;
-                                /**
-                                 * Format: int64
-                                 * @description What is left of the customer's prepaid commit.
-                                 */
-                                commit_remaining_cents: number;
-                                /**
-                                 * Format: int64
-                                 * @description What is left of promotional credit.
-                                 */
-                                promotional_remaining_cents: number;
-                                /** Format: int64 */
-                                estimated_remaining_cents: number;
-                            }[];
-                        };
-                    };
-                };
-                /** @description Invalid token */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Rate limited (60/min/IP) */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        get: operations["getPublicCostDashboard"];
         put?: never;
         post?: never;
         delete?: never;
@@ -848,89 +558,10 @@ export interface paths {
             cookie?: never;
         };
         /** List meters */
-        get: {
-            parameters: {
-                query?: {
-                    /**
-                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                     *     that is not a whole number, is a 422 with `param: limit`.
-                     */
-                    limit?: components["parameters"]["Limit"];
-                    /**
-                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                     *     not a whole number, is a 422 with `param: offset`.
-                     */
-                    offset?: components["parameters"]["Offset"];
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Meter list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["Meter"][];
-                            total: components["schemas"]["ListTotal"];
-                        };
-                    };
-                };
-                422: components["responses"]["InvalidPage"];
-            };
-        };
+        get: operations["listMeters"];
         put?: never;
         /** Create meter */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** @description The `event_name` usage events will send for this meter. Letters, digits, `-` and `_`; at most 100 characters. */
-                        event_name: string;
-                        name: string;
-                        /** @default unit */
-                        unit?: string;
-                        /**
-                         * @description How the meter rolls its events into one quantity per billing period. Fixed once the meter has a usage event.
-                         * @default sum
-                         * @enum {string}
-                         */
-                        aggregation?: "sum" | "count" | "max" | "last";
-                    };
-                };
-            };
-            responses: {
-                /** @description Meter created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Meter"];
-                    };
-                };
-            };
-        };
+        post: operations["createMeter"];
         delete?: never;
         options?: never;
         head?: never;
@@ -964,74 +595,7 @@ export interface paths {
          *     meter's aggregation once released. `name` and `unit` can always
          *     change, at once.
          */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        name?: string;
-                        unit?: string;
-                        /** @enum {string} */
-                        aggregation?: "sum" | "count" | "max" | "last";
-                    };
-                };
-            };
-            responses: {
-                /** @description Updated meter */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Meter"];
-                    };
-                };
-                /** @description Meter not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /**
-                 * @description `meter_has_usage`: the meter has usage events, so its
-                 *     `aggregation` cannot change. `invalid_state`: another write
-                 *     changed the meter during this one.
-                 */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Validation failure (bad aggregation, an empty name, or an unknown field) */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        patch: operations["updateMeter"];
         trace?: never;
     };
     "/v1/credit-notes": {
@@ -1062,110 +626,7 @@ export interface paths {
          *     forbidden on relief. Unpaid commit invoices: void the invoice
          *     instead.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        invoice_id: string;
-                        reason?: string;
-                        lines?: {
-                            /** @description Optional. The invoice line this credit line reverses. */
-                            invoice_line_item_id?: string;
-                            description?: string;
-                            quantity?: number;
-                            unit_amount_cents?: number;
-                        }[];
-                        /** @description Not with commit_relief; put the relief's split inside commit_relief. */
-                        refund_amount_cents?: number;
-                        credit_amount_cents?: number;
-                        /** @description Not with commit_relief; put the relief's split inside commit_relief. */
-                        out_of_band_amount_cents?: number;
-                        /**
-                         * @description Older single-channel form. On a paid invoice whose three
-                         *     `*_amount_cents` fields are all 0, `refund` or `credit`
-                         *     puts the whole note in that channel. Not with commit_relief.
-                         * @enum {string}
-                         */
-                        refund_type?: "refund" | "credit";
-                        auto_issue?: boolean;
-                        /**
-                         * @description Links a refund made in Stripe outside Hardcount as this
-                         *     note's card refund, Stripe's `refunds[]` shape: Hardcount
-                         *     reads the refund from Stripe and calls nothing else
-                         *     there for it. The refund must be of the payment that paid
-                         *     this invoice, not made by Hardcount, and succeeded; `refund_amount_cents` must be its amount,
-                         *     `credit_amount_cents` 0, and `auto_issue` true (the
-                         *     note is issued at once). The caps on the invoice still
-                         *     apply. A refund Hardcount flagged on the invoice
-                         *     (`refunded_in_stripe`) is then marked recorded. Not with
-                         *     commit_relief.
-                         */
-                        stripe_refund_id?: string;
-                        /**
-                         * @description Mutually exclusive with lines and credit_amount_cents. The
-                         *     relief's split goes in here, not at the top level: a top-level
-                         *     `refund_amount_cents`, `out_of_band_amount_cents` or
-                         *     `refund_type` is a 422. Example after a lost dispute:
-                         *     `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
-                         */
-                        commit_relief?: {
-                            /** @description Optional. Defaults to the top-level invoice_id. */
-                            invoice_id?: string;
-                            /** @description Optional. Defaults to the top-level reason. */
-                            reason?: string;
-                            /** @description Commit credits to retire (1..remaining). */
-                            retire_cents?: number;
-                            /** @description Retire the LIVE remaining (absorbs racing drawdowns). */
-                            retire_all?: boolean;
-                            /** @description Optional allocation; must sum with out_of_band to the derived cash. */
-                            refund_amount_cents?: number;
-                            out_of_band_amount_cents?: number;
-                        };
-                    };
-                };
-            };
-            responses: {
-                /** @description Credit note (issued immediately for commit relief) */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["CreditNote"];
-                    };
-                };
-                /** @description State gate (unpaid commit → void; fully-consumed commit; in-flight charge) */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Validation (over-retire with live remaining; allocation mismatch; zero-cash slice), or an unknown field (`param` names it; the body must use only the fields listed here) */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        post: operations["createCreditNote"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1193,39 +654,7 @@ export interface paths {
          *     adjustment) drew from this grant. The credit invoices actually used
          *     is `consumed_cents - expired_cents - retired_cents - deducted_cents`.
          */
-        get: {
-            parameters: {
-                query?: {
-                    include_exhausted?: boolean;
-                };
-                header?: never;
-                path: {
-                    customer_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Grants with remaining + kind subtotals */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["CreditGrants"];
-                    };
-                };
-                /** @description No customer with this ID in this tenant and mode. */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        get: operations["getCreditGrants"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1318,41 +747,7 @@ export interface paths {
             cookie?: never;
         };
         /** List webhook endpoints */
-        get: {
-            parameters: {
-                query?: {
-                    /**
-                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                     *     that is not a whole number, is a 422 with `param: limit`.
-                     */
-                    limit?: components["parameters"]["Limit"];
-                    /**
-                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                     *     not a whole number, is a 422 with `param: offset`.
-                     */
-                    offset?: components["parameters"]["Offset"];
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Endpoint list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["WebhookEndpoint"][];
-                            total: components["schemas"]["ListTotal"];
-                        };
-                    };
-                };
-                422: components["responses"]["InvalidPage"];
-            };
-        };
+        get: operations["listWebhookEndpoints"];
         put?: never;
         /**
          * Create webhook endpoint
@@ -1362,51 +757,7 @@ export interface paths {
          *     events = all events ("*"); "invoice.*"-style prefix wildcards are
          *     supported.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        url: string;
-                        description?: string;
-                        events?: string[];
-                    };
-                };
-            };
-            responses: {
-                /** @description Endpoint created (response carries the one-time signing secret) */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["WebhookEndpointCreated"];
-                    };
-                };
-                /** @description Invalid URL or unknown event type */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        post: operations["createWebhookEndpoint"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1428,31 +779,7 @@ export interface paths {
         put?: never;
         post?: never;
         /** Delete (disable) webhook endpoint */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Endpoint disabled */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {string} */
-                            status: "deleted";
-                        };
-                    };
-                };
-            };
-        };
+        delete: operations["deleteWebhookEndpoint"];
         options?: never;
         head?: never;
         /**
@@ -1462,61 +789,7 @@ export interface paths {
          *     event set changes. Fields omitted are left unchanged; events are
          *     validated against the emit catalog.
          */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        url?: string;
-                        description?: string;
-                        events?: string[];
-                        active?: boolean;
-                    };
-                };
-            };
-            responses: {
-                /** @description Updated endpoint */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["WebhookEndpoint"];
-                    };
-                };
-                /** @description Endpoint not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Invalid URL or unknown event type */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        patch: operations["updateWebhookEndpoint"];
         trace?: never;
     };
     "/v1/webhook-endpoints/endpoints/{id}/rotate-secret": {
@@ -1529,38 +802,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** Rotate signing secret (72h dual-signing grace) */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description New secret (old secret keeps verifying during the grace window) */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["WebhookSecretRotation"];
-                    };
-                };
-            };
-        };
+        post: operations["rotateWebhookEndpointSecret"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1645,41 +887,7 @@ export interface paths {
             cookie?: never;
         };
         /** List outbound events, newest first */
-        get: {
-            parameters: {
-                query?: {
-                    /**
-                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                     *     that is not a whole number, is a 422 with `param: limit`.
-                     */
-                    limit?: components["parameters"]["Limit"];
-                    /**
-                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                     *     not a whole number, is a 422 with `param: offset`.
-                     */
-                    offset?: components["parameters"]["Offset"];
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Event list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["WebhookEvent"][];
-                            total: components["schemas"]["ListTotal"];
-                        };
-                    };
-                };
-                422: components["responses"]["InvalidPage"];
-            };
-        };
+        get: operations["listWebhookEvents"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1786,7 +994,8 @@ export interface paths {
         put?: never;
         /**
          * Receive a Stripe webhook
-         * @description Stripe calls this route; your code does not. Point a webhook in your
+         * @description Stripe calls this route; your code does not. It is not part of the
+         *     integration API. Point a webhook in your
          *     Stripe dashboard at it for each connected mode. `endpoint_id` is the
          *     `id` of that mode's Stripe connection (`GET /v1/settings/stripe`).
          *     The request is checked against the `Stripe-Signature` header and
@@ -1814,7 +1023,8 @@ export interface paths {
         put?: never;
         /**
          * Receive a Postmark delivery webhook
-         * @description Postmark calls this route; your code does not. Hardcount reads
+         * @description Postmark calls this route; your code does not. It is not part of the
+         *     integration API. Hardcount reads
          *     `Delivery`, `Bounce` and `SpamComplaint` records and ignores other
          *     record types and soft bounces. Without `POSTMARK_WEBHOOK_USER` and
          *     `POSTMARK_WEBHOOK_PASS` set, every request gets 401. See
@@ -1840,142 +1050,10 @@ export interface paths {
             cookie?: never;
         };
         /** List plans */
-        get: {
-            parameters: {
-                query?: {
-                    /**
-                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                     *     that is not a whole number, is a 422 with `param: limit`.
-                     */
-                    limit?: components["parameters"]["Limit"];
-                    /**
-                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                     *     not a whole number, is a 422 with `param: offset`.
-                     */
-                    offset?: components["parameters"]["Offset"];
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Plan list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["Plan"][];
-                            total: components["schemas"]["ListTotal"];
-                        };
-                    };
-                };
-                422: components["responses"]["InvalidPage"];
-            };
-        };
+        get: operations["listPlans"];
         put?: never;
         /** Create plan */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        code: string;
-                        name: string;
-                        description?: string;
-                        currency: string;
-                        /** @enum {string} */
-                        billing_interval: "monthly" | "yearly";
-                        /** Format: int64 */
-                        base_amount_cents?: number;
-                        /**
-                         * @description Required when `base_amount_cents` is above 0. With a base
-                         *     of 0 it may be left out, and the plan is in_arrears;
-                         *     `in_advance` with a base of 0 is refused. See
-                         *     Plan.base_bill_timing (ADR-031).
-                         * @enum {string}
-                         */
-                        base_bill_timing?: "in_advance" | "in_arrears";
-                        /**
-                         * @description The plan's usage prices, created with it in one request.
-                         *     Each takes the plan's currency.
-                         */
-                        prices?: components["schemas"]["PriceInput"][];
-                        /**
-                         * @description Optional. A plan is created active; archive it with PATCH.
-                         * @enum {string}
-                         */
-                        status?: "active";
-                        /**
-                         * @description Stripe product tax code for the base fee, such as
-                         *     `txcd_10103001`. Empty or omitted means the tenant's
-                         *     `default_product_tax_code`.
-                         */
-                        tax_code?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Plan created, with its prices */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PlanDetail"];
-                    };
-                };
-                /**
-                 * @description `price_exists`: two prices name the same meter and
-                 *     `dimension_match`. `price_conflict`: two prices on one meter
-                 *     could both take one event with the same number of labels, so
-                 *     neither would win; the message names the other price, and
-                 *     `param` names the second one. Nothing is created.
-                 */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /**
-                 * @description A field failed validation (a price names an unknown meter, a
-                 *     rate is outside its limits, `base_bill_timing` is missing with a
-                 *     base fee above 0 or is `in_advance` with a base of 0), `status`
-                 *     is set to anything but `active` (a plan is created active;
-                 *     archive it with PATCH), or the body has an unknown field
-                 *     (`param` names it, `prices[i].` first for a price; the body must
-                 *     use only the fields listed here).
-                 */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["createPlan"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2093,165 +1171,10 @@ export interface paths {
             cookie?: never;
         };
         /** List subscriptions */
-        get: {
-            parameters: {
-                query?: {
-                    customer_id?: string;
-                    /** @description Filter to subscriptions with a live item on this plan. */
-                    plan_id?: string;
-                    /**
-                     * @description Exact status. Any other value is a 422. Paused collection is not
-                     *     a status: use `collection=paused`.
-                     */
-                    status?: "draft" | "trialing" | "active" | "canceled";
-                    /**
-                     * @description `failing` returns only subscriptions that carry a
-                     *     `billing_failure`: those waiting for their next billing attempt
-                     *     and those that are parked. Any other value is a 422.
-                     */
-                    billing?: "failing";
-                    /**
-                     * @description `paused` returns only active and trialing subscriptions whose
-                     *     `pause_collection` is in force, whether an operator or dunning set
-                     *     it. A timed pause ends at `resumes_at` (on the subscription's test
-                     *     clock, if it has one), even while the response still carries it.
-                     *     Any other value is a 422.
-                     */
-                    collection?: "paused";
-                    /** @description Case-insensitive substring match on display name or code. */
-                    search?: string;
-                    /** @description One of display_name, status, next_billing_at, trial_end_at, created_at (default). */
-                    sort?: string;
-                    dir?: "asc" | "desc";
-                    /**
-                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                     *     that is not a whole number, is a 422 with `param: limit`.
-                     */
-                    limit?: components["parameters"]["Limit"];
-                    /**
-                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                     *     not a whole number, is a 422 with `param: offset`.
-                     */
-                    offset?: components["parameters"]["Offset"];
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Subscription list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["Subscription"][];
-                            total: components["schemas"]["ListTotal"];
-                        };
-                    };
-                };
-                /** @description A `status`, `billing` or `collection` value the API does not know. */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                422: components["responses"]["InvalidPage"];
-            };
-        };
+        get: operations["listSubscriptions"];
         put?: never;
         /** Create subscription */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        code: string;
-                        display_name: string;
-                        customer_id: string;
-                        /** @description Plan items — a subscription bills one or more plans. */
-                        items: {
-                            plan_id: string;
-                            /** @default 1 */
-                            quantity?: number;
-                        }[];
-                        /**
-                         * @default calendar
-                         * @enum {string}
-                         */
-                        billing_time?: "calendar" | "anniversary";
-                        /**
-                         * @description Days of free trial; 0 means no trial. Above 0, the
-                         *     subscription is `trialing` from now and its first paid
-                         *     period starts on the day the trial ends.
-                         */
-                        trial_days?: number;
-                        /**
-                         * @description Leave it out and the subscription starts now. Without
-                         *     `trial_days` it is `active`, its first period starts
-                         *     today in the account's billing time zone (the clock's
-                         *     day for a customer on a test clock), and a non-zero base
-                         *     fee billed in advance is invoiced now. With `trial_days`
-                         *     above 0 it is `trialing` from now. Send `draft` to create it
-                         *     without starting it: it bills nothing until you activate
-                         *     it with `POST /v1/subscriptions/{id}/activate`. A draft
-                         *     cannot have a trial (`trial_days` above 0). An empty or
-                         *     null `status` is refused.
-                         * @enum {string}
-                         */
-                        status?: "draft";
-                    };
-                };
-            };
-            responses: {
-                /** @description Subscription created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Subscription"];
-                    };
-                };
-                /**
-                 * @description A field failed validation (`param` names it), for example
-                 *     `trial_days` outside 0 to 730, `status` other than `draft`
-                 *     (empty and null included), or `trial_days` above 0 with
-                 *     `status: draft`. Or the body has an unknown
-                 *     field (`param` names it; the body must use only the fields
-                 *     listed here). `start_now` is such a field since 2026-10-23: a
-                 *     subscription starts now unless `status` is `draft`.
-                 */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["createSubscription"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2268,38 +1191,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** Activate draft subscription */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Subscription activated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Subscription"];
-                    };
-                };
-            };
-        };
+        post: operations["activateSubscription"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2344,81 +1236,7 @@ export interface paths {
          *     stay, and the next billing run finishes the rest. The failure may
          *     already be cleared at that point, so a repeat call can answer 409.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /**
-                 * @description The retry ran. Read the outcome from two fields.
-                 *     `subscription.billing_failure` is present when the attempt
-                 *     failed again. When it is absent, `still_due` false means the
-                 *     subscription billed or had nothing left to bill, and
-                 *     `still_due` true means the attempt did not complete and the
-                 *     subscription is still unbilled.
-                 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            subscription: components["schemas"]["Subscription"];
-                            /**
-                             * @description Period-close invoices this call created. The final
-                             *     invoice of a scheduled cancel and the first invoice
-                             *     at a trial end are not counted, so 0 does not mean
-                             *     the retry failed. Read success from
-                             *     `subscription.billing_failure` and `still_due`.
-                             */
-                            invoices_generated: number;
-                            /**
-                             * @description True when, after the attempt, the subscription has
-                             *     no `billing_failure` and is still due for billing.
-                             *     The attempt did not complete and nothing was saved;
-                             *     the next billing run attempts the subscription.
-                             */
-                            still_due: boolean;
-                        };
-                    };
-                };
-                /** @description Subscription not found. */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /**
-                 * @description The retry was refused. Code `billing_not_failing`: the
-                 *     subscription has no `billing_failure`, so there is nothing to
-                 *     retry. Code `invalid_state`: the subscription is attached to
-                 *     a test clock; use the clock's retry advance instead.
-                 */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        post: operations["retrySubscriptionBilling"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2819,173 +1637,14 @@ export interface paths {
             cookie?: never;
         };
         /** List usage events */
-        get: {
-            parameters: {
-                query?: {
-                    customer_id?: string;
-                    meter_id?: string;
-                    /**
-                     * @description Comma-separated key=value pairs matched against the event's
-                     *     dimensions via JSONB containment (multiple pairs AND).
-                     *     Values that parse as JSON booleans/numbers are matched
-                     *     typed ("cached=true", "attempt=2"); everything else as a
-                     *     string. Malformed pairs → 422. Example:
-                     *     `model=gpt-4o,token_type=input`.
-                     */
-                    dimensions?: string;
-                    /** @description Only events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC. */
-                    from?: string;
-                    /** @description Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included. */
-                    to?: string;
-                    /**
-                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                     *     that is not a whole number, is a 422 with `param: limit`.
-                     */
-                    limit?: components["parameters"]["Limit"];
-                    /**
-                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                     *     not a whole number, is a 422 with `param: offset`.
-                     */
-                    offset?: components["parameters"]["Offset"];
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Event list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["UsageEvent"][];
-                            total: components["schemas"]["ListTotal"];
-                        };
-                    };
-                };
-                /** @description `validation_error`: a malformed `dimensions` pair, a `from` or `to` that cannot be parsed, `to` before `from`, or a `limit` or `offset` out of range (param names the field). */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        get: operations["listUsageEvents"];
         put?: never;
         /**
          * Ingest usage event
          * @description Needs the `usage:ingest` permission: an ingest key or a secret
          *     key.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** @description The customer's external_id (your identifier), not the internal hc_cus_ id. */
-                        external_customer_id: string;
-                        /** @description The meter's `event_name` (e.g. "tokens"). */
-                        event_name: string;
-                        /**
-                         * @description A JSON number (`5`) or a string holding one (`"5.5"`,
-                         *     for exact decimals). At most 12 decimal places; trailing
-                         *     zeros do not count. Its size must be under 10^26, and it
-                         *     is at most 100 characters. A negative value is a
-                         *     correction. A missing quantity, or any other value, is
-                         *     refused with 422 and `param: quantity`.
-                         */
-                        quantity: number | string;
-                        /** @description Scalar labels of the event (e.g. {"model", "token_type"}). A price takes an event whose labels include the price's `dimension_match`. */
-                        dimensions?: {
-                            [key: string]: unknown;
-                        };
-                        /**
-                         * @description Your unique ID for this event. Pick it once, before the
-                         *     first send, and send the same key on every retry of the
-                         *     event. Keys are unique per tenant and mode (live or
-                         *     test), forever. An event whose key was already used is
-                         *     not stored again: the first event wins and the new body
-                         *     is discarded. So never reuse a key for a different
-                         *     event, such as a batch index or a timestamp that can
-                         *     repeat, or that usage is lost. Empty or whitespace-only
-                         *     keys are refused with 422, and so are keys longer than
-                         *     255 characters. This is the only dedup key: the usage
-                         *     routes ignore the `Idempotency-Key` header.
-                         */
-                        idempotency_key: string;
-                        /** Format: date-time */
-                        timestamp?: string;
-                    };
-                };
-            };
-            responses: {
-                /**
-                 * @description Idempotency replay — the original event is returned unchanged
-                 *     with an `Idempotent-Replayed: true` header. No duplicate row
-                 *     is written. The new body is not compared with the original.
-                 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["UsageEvent"];
-                    };
-                };
-                /**
-                 * @description Event ingested. A `billing_status` is what Hardcount found when the
-                 *     event arrived (see `UsageBillingStatus`); the event is stored
-                 *     all the same.
-                 */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["UsageEvent"];
-                    };
-                };
-                /**
-                 * @description Validation failed and nothing was stored. `param` names the
-                 *     field: `idempotency_key` when it is missing, blank or longer
-                 *     than 255 characters, `quantity` when it is missing or not as
-                 *     described above, `external_customer_id` or `event_name` for an
-                 *     unknown customer or meter, `timestamp` for a malformed one, and
-                 *     `properties` when it has a key (it was renamed `dimensions`;
-                 *     `null` or `{}` is ignored).
-                 */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /**
-                 * @description `ingest_unavailable`: a customer or meter lookup, or the read of
-                 *     the customer's billing periods, could not be answered. Nothing
-                 *     was recorded; retry.
-                 */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["createUsageEvent"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3015,96 +1674,7 @@ export interface paths {
          *     were not stored. Needs the `usage:ingest` permission: an ingest
          *     key or a secret key.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** @description The customer's external_id (your identifier), not the internal hc_cus_ id. */
-                        external_customer_id: string;
-                        /** @description The meter's `event_name` (e.g. "tokens"). */
-                        event_name: string;
-                        /**
-                         * @description A JSON number (`5`) or a string holding one (`"5.5"`,
-                         *     for exact decimals). At most 12 decimal places;
-                         *     trailing zeros do not count. Its size must be under
-                         *     10^26, and it is at most 100 characters. A negative
-                         *     value is a correction. A missing quantity, or any
-                         *     other value, fails validation.
-                         */
-                        quantity: number | string;
-                        dimensions?: {
-                            [key: string]: unknown;
-                        };
-                        /**
-                         * @description Your unique ID for this event. Pick it once, before the
-                         *     first send, and send the same key on every retry of the
-                         *     event. Keys are unique per tenant and mode (live or
-                         *     test), forever. An event whose key was already used is
-                         *     not stored again: the first event wins and the new body
-                         *     is discarded. So never reuse a key for a different
-                         *     event, such as a batch index or a timestamp that can
-                         *     repeat, or that usage is lost. Empty or whitespace-only
-                         *     keys are refused with 422, and so are keys longer than
-                         *     255 characters. This is the only dedup key: the usage
-                         *     routes ignore the `Idempotency-Key` header.
-                         */
-                        idempotency_key: string;
-                        /** Format: date-time */
-                        timestamp?: string;
-                    }[];
-                };
-            };
-            responses: {
-                /** @description Batch committed */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["UsageEventBatchResult"];
-                    };
-                };
-                /** @description Request body over the 1MB cap — send smaller batches. */
-                413: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /**
-                 * @description Batch rejected — one or more events failed validation and
-                 *     NOTHING was ingested. The body is the error envelope (code
-                 *     `batch_rejected`) plus `errors[]`, which names every failing
-                 *     index (`event[i]: reason`), `ingested: 0` and `total`. Fix them
-                 *     and retry the whole batch.
-                 */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /**
-                 * @description `ingest_unavailable`: a customer or meter lookup, or the read of
-                 *     the customer's billing periods, could not be answered. Nothing
-                 *     was recorded; retry the whole batch.
-                 */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["createUsageEventBatch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3266,69 +1836,7 @@ export interface paths {
             cookie?: never;
         };
         /** List invoices */
-        get: {
-            parameters: {
-                query?: {
-                    customer_id?: string;
-                    subscription_id?: string;
-                    status?: string;
-                    payment_status?: string;
-                    /** @description Case-insensitive substring match on the invoice number or the customer's name or email. */
-                    search?: string;
-                    /**
-                     * @description Lower bound on created_at, inclusive. RFC3339 instant or
-                     *     bare YYYY-MM-DD (anchored at 00:00:00Z).
-                     */
-                    from?: string;
-                    /**
-                     * @description Upper bound on created_at, inclusive. RFC3339 instant or
-                     *     bare YYYY-MM-DD (anchored at 23:59:59.999999Z, the end of that day).
-                     */
-                    to?: string;
-                    /**
-                     * @description When true, restrict to open invoices past their due date
-                     *     that haven't settled (finalized + due_at < now +
-                     *     payment_status not succeeded/processing). Backs the
-                     *     dashboard's "Past due" segment.
-                     */
-                    overdue?: boolean;
-                    /** @description Comma-separated invoice IDs to fetch exactly. */
-                    ids?: string;
-                    /** @description One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps. */
-                    sort?: string;
-                    dir?: "asc" | "desc";
-                    /**
-                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                     *     that is not a whole number, is a 422 with `param: limit`.
-                     */
-                    limit?: components["parameters"]["Limit"];
-                    /**
-                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                     *     not a whole number, is a 422 with `param: offset`.
-                     */
-                    offset?: components["parameters"]["Offset"];
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Invoice list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["Invoice"][];
-                            total: components["schemas"]["ListTotal"];
-                        };
-                    };
-                };
-                422: components["responses"]["InvalidPage"];
-            };
-        };
+        get: operations["listInvoices"];
         put?: never;
         /**
          * Create a draft invoice
@@ -3387,87 +1895,7 @@ export interface paths {
          *     specific pattern, otherwise `/{id}` would capture
          *     `create_preview` as an invoice ID).
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** @description Customer to preview the invoice for. */
-                        customer_id: string;
-                        /**
-                         * @description Optional. Defaults to the customer's primary active
-                         *     subscription if not supplied.
-                         */
-                        subscription_id?: string;
-                        /**
-                         * @description Optional explicit window. Both bounds must be
-                         *     supplied together; partial windows are rejected.
-                         *     Defaults to the resolved subscription's current
-                         *     cycle.
-                         */
-                        period?: {
-                            /** Format: date-time */
-                            from: string;
-                            /** Format: date-time */
-                            to: string;
-                        };
-                    };
-                };
-            };
-            responses: {
-                /** @description Preview result */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["InvoicePreview"];
-                    };
-                };
-                /** @description Invalid request body */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Customer or subscription not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Validation error (missing customer_id, partial period, no active sub, ...) */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["createInvoicePreview"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3499,28 +1927,7 @@ export interface paths {
             cookie?: never;
         };
         /** Download invoice PDF */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description PDF file */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/pdf": string;
-                    };
-                };
-            };
-        };
+        get: operations["getInvoicePdf"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3549,77 +1956,7 @@ export interface paths {
          *     explicit list → validated exact override (same rules as the
          *     customer field — normalize, dedupe, not-the-recipient, cap 10).
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: email */
-                        email: string;
-                        additional_emails?: string[];
-                    };
-                };
-            };
-            responses: {
-                /** @description Email enqueued */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {string} */
-                            status: "sent";
-                        };
-                    };
-                };
-                /** @description Invoice not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /**
-                 * @description Nothing was sent. Codes: `invoice_not_sendable` (the invoice
-                 *     is a draft, not issued yet, or voided), `email_not_configured`
-                 *     (this server has no SMTP set up), or `payment_in_flight` /
-                 *     `payment_unidentifiable` (a charge on the invoice is unresolved).
-                 */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description `email` is missing or invalid, a CC entry is invalid, or the body has an unknown field (`param` names it) */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        post: operations["sendInvoice"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4030,75 +2367,7 @@ export interface paths {
          *     `additional_emails`). The send is recorded on the applied
          *     invoice's timeline and the customer's Sent-emails section.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: email */
-                        email: string;
-                        additional_emails?: string[];
-                    };
-                };
-            };
-            responses: {
-                /** @description Email enqueued */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {string} */
-                            status: "sent";
-                        };
-                    };
-                };
-                /** @description Credit note not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /**
-                 * @description Nothing was sent. `email_not_configured`: this server has no
-                 *     SMTP set up.
-                 */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Not issued (draft/voided), `email` is missing or invalid, or the body has an unknown field (`param` names it) */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        post: operations["sendCreditNote"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4270,38 +2539,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** Finalize draft invoice */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Invoice finalized */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Invoice"];
-                    };
-                };
-            };
-        };
+        post: operations["finalizeInvoice"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4342,57 +2580,7 @@ export interface paths {
          *     409 and the invoice stays a draft with its tax saved: finalize
          *     it.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Invoice updated; check `attention` for the new state. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Invoice"];
-                    };
-                };
-                /** @description Invoice not found. */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /**
-                 * @description Invoice is not in a retryable state (status != draft, or
-                 *     tax_status is not pending). Also returned when the
-                 *     tax was saved but the invoice's state then stopped the
-                 *     finalize.
-                 */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        post: operations["retryInvoiceTax"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4410,7 +2598,9 @@ export interface paths {
         put?: never;
         /**
          * Sign in with email and password; mint an httpOnly session cookie
-         * @description Validates email + password, mints a server-side session row, and
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Validates email + password, mints a server-side session row, and
          *     sets `Set-Cookie: hardcount_session=...; HttpOnly; SameSite=Lax; Path=/`.
          *     Subsequent dashboard requests authenticate via the cookie; sessions
          *     are bound to `users.id` and are independent of API key lifecycle.
@@ -4421,86 +2611,7 @@ export interface paths {
          *     in to this email, so the sign-in throttle counts its attempts on
          *     their own. It never replaces the password.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: email */
-                        email: string;
-                        password: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Session minted; cookie set on response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            user_id: string;
-                            tenant_id: string;
-                            email: string;
-                            livemode: boolean;
-                            /** Format: date-time */
-                            expires_at: string;
-                        };
-                    };
-                };
-                /** @description Invalid email or password */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /**
-                 * @description Too many attempts. Two limits answer 429, and neither locks
-                 *     the account:
-                 *
-                 *     - Code `login_throttled`: the sign-in throttle. Repeated wrong
-                 *       passwords for one email, from one address or from many,
-                 *       start a wait of 1 to 15 minutes. The message names the wait
-                 *       in minutes and `Retry-After` gives it in seconds. The answer
-                 *       is the same for an email with no account. A browser that
-                 *       signed in to the email before is counted on its own.
-                 *     - Code `rate_limited`: the shared per-address request limit on
-                 *       `/v1/auth`.
-                 */
-                429: {
-                    headers: {
-                        /** @description Seconds until an attempt is counted again. */
-                        "Retry-After"?: number;
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /**
-                 * @description Code `authentication_unavailable`: the sign-in throttle could not
-                 *     read the database, so the attempt was refused before the password
-                 *     check. Try again shortly.
-                 */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["login"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4518,28 +2629,13 @@ export interface paths {
         put?: never;
         /**
          * Revoke the current session and clear the cookie
-         * @description Marks the session row as revoked server-side and clears the
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Marks the session row as revoked server-side and clears the
          *     cookie on the response. Idempotent — a missing or stale cookie
          *     is treated as already-logged-out.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Session revoked */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        post: operations["logout"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4557,49 +2653,15 @@ export interface paths {
         put?: never;
         /**
          * Switch the dashboard session between test and live mode
-         * @description Updates `dashboard_sessions.livemode` for the cookie session.
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Updates `dashboard_sessions.livemode` for the cookie session.
          *     All subsequent requests inherit the new mode via session middleware,
          *     so customers / invoices / subscriptions / API keys reads filter to
          *     the active mode without per-call mode parameters. The same operator
          *     flips back and forth without re-authenticating.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        livemode: boolean;
-                    };
-                };
-            };
-            responses: {
-                /** @description Mode updated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            livemode: boolean;
-                        };
-                    };
-                };
-                /** @description Missing or expired session */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["switchSessionMode"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4617,7 +2679,9 @@ export interface paths {
         put?: never;
         /**
          * Request a password reset link
-         * @description Always returns the same 200 body regardless of whether the email
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Always returns the same 200 body regardless of whether the email
          *     exists, to avoid account enumeration. If a user matches, a
          *     single-use 1-hour token is generated and the reset link is
          *     emailed via SMTP (requires `SMTP_HOST` and `DASHBOARD_BASE_URL`;
@@ -4626,42 +2690,7 @@ export interface paths {
          *     posture, computed independently of any match, so it leaks no
          *     account existence.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: email */
-                        email: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Request accepted (identical body regardless of email existence) */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            message: string;
-                            /**
-                             * @description Whether this deployment can deliver reset emails
-                             *     (SMTP configured AND `DASHBOARD_BASE_URL` set).
-                             *     Deployment posture, never account state.
-                             * @enum {string}
-                             */
-                            email_delivery: "ok" | "not_configured";
-                        };
-                    };
-                };
-            };
-        };
+        post: operations["requestPasswordReset"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4679,48 +2708,12 @@ export interface paths {
         put?: never;
         /**
          * Set a new password using a reset token
-         * @description Consumes a single-use reset token and updates the user's password.
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Consumes a single-use reset token and updates the user's password.
          *     The token is invalidated on use; reuse or expired tokens return 422.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        token: string;
-                        password: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Password updated. Every session the user had is signed out. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @example password updated — sign in with your new password */
-                            message: string;
-                        };
-                    };
-                };
-                /** @description Token invalid/expired or password does not meet policy */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["confirmPasswordReset"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4736,7 +2729,9 @@ export interface paths {
         };
         /**
          * Check a password reset token
-         * @description Tells whether a reset token can still be used, without using it up.
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Tells whether a reset token can still be used, without using it up.
          *     The reset-password page calls it on load, so it can show "this link
          *     is no longer valid" before the user types a new password. An
          *     unknown, expired or already-used token returns 422 with code
@@ -4760,51 +2755,15 @@ export interface paths {
         };
         /**
          * Preview a team invitation (accept-page context)
-         * @description Unauthenticated — the token IS the credential (mirrors password
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Unauthenticated — the token IS the credential (mirrors password
          *     reset). Returns the invited email, workspace name, and whether
          *     the invitee needs to create an account. Invalid, expired,
          *     revoked, and already-used tokens all return the same generic
          *     422 (no state oracle for token guessing). ADR-081.
          */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    token: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Invitation preview */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            email: string;
-                            tenant_id: string;
-                            tenant_name: string;
-                            needs_new_account: boolean;
-                            invited_by_email: string;
-                            /** Format: date-time */
-                            expires_at: string;
-                        };
-                    };
-                };
-                /** @description Token invalid, expired, revoked, or already used */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        get: operations["getInvitation"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4824,7 +2783,9 @@ export interface paths {
         put?: never;
         /**
          * Accept a team invitation
-         * @description Consumes the single-use invite token (CAS — a replay or a race
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Consumes the single-use invite token (CAS — a replay or a race
          *     loses) and attaches the membership. If no account exists for the
          *     invited email, `password` is required (min 12 chars), the account
          *     is created, and a session cookie is minted (`session_minted:
@@ -4833,51 +2794,7 @@ export interface paths {
          *     already-privileged account; the user signs in with their own
          *     password afterwards. ADR-081.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        token: string;
-                        /** @description Required (and validated) only when no account exists for the invited email; ignored otherwise. */
-                        password?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Membership attached; cookie set when session_minted is true */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            user_id: string;
-                            email: string;
-                            tenant_id: string;
-                            session_minted: boolean;
-                            livemode: boolean;
-                            /** @description Session expiry (RFC 3339) when session_minted; empty string otherwise. */
-                            expires_at: string;
-                        };
-                    };
-                };
-                /** @description Token invalid/expired/revoked/used, or password does not meet policy */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["acceptInvitation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4893,7 +2810,9 @@ export interface paths {
         };
         /**
          * List workspace members and invitations
-         * @description Dashboard-session only (403 for API keys — membership is a human
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Dashboard-session only (403 for API keys — membership is a human
          *     act with a human actor). Members are every user attached to the
          *     tenant; invitations carry a server-derived status
          *     (pending/accepted/revoked/expired). No RBAC yet: `role` is
@@ -4919,7 +2838,9 @@ export interface paths {
         put?: never;
         /**
          * Invite a teammate by email
-         * @description Creates a pending invitation (7-day expiry, one pending per
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Creates a pending invitation (7-day expiry, one pending per
          *     email) and sends the accept link via the transactional email
          *     outbox. Requires `DASHBOARD_BASE_URL` — accept links are never
          *     derived from request headers. 409 when the email is already a
@@ -4944,7 +2865,9 @@ export interface paths {
         post?: never;
         /**
          * Revoke a pending invitation
-         * @description Stamps the invitation revoked; its accept link stops working
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Stamps the invitation revoked; its accept link stops working
          *     immediately (revoke racing an accept: exactly one wins). Only
          *     pending invitations can be revoked — accepted/revoked ones 404.
          */
@@ -4966,7 +2889,9 @@ export interface paths {
         post?: never;
         /**
          * Remove a member from the workspace
-         * @description Deletes the membership AND revokes all of the user's sessions
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Deletes the membership AND revokes all of the user's sessions
          *     (sessions pin the tenant — without revocation an active session
          *     would keep full access). Guards: self-removal is blocked
          *     (another member must remove you) and the last member cannot be
@@ -4994,62 +2919,7 @@ export interface paths {
          *     All callers get `tenant_id`, `livemode`,
          *     `can_email_setup_links`, `can_send_invites` and `smtp_configured`.
          */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Resolved auth context */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            tenant_id: string;
-                            livemode: boolean;
-                            /**
-                             * @description Whether this server can email a customer a link to add
-                             *     a payment method. False when email sending (SMTP) or
-                             *     PAYMENT_UPDATE_URL is not set up; resending a setup
-                             *     link then fails.
-                             */
-                            can_email_setup_links: boolean;
-                            /**
-                             * @description Whether this server can invite a teammate. False when
-                             *     email sending (SMTP) or DASHBOARD_BASE_URL is not set
-                             *     up; inviting then fails with 409.
-                             */
-                            can_send_invites: boolean;
-                            /**
-                             * @description Whether this server has SMTP set up (SMTP_HOST). False
-                             *     means no email of any kind is sent. Settings → Email
-                             *     (`GET /v1/settings/email`) has the details.
-                             */
-                            smtp_configured: boolean;
-                            user_id?: string;
-                            email?: string;
-                            key_id?: string;
-                            /** @enum {string} */
-                            key_type?: "secret" | "ingest";
-                        };
-                    };
-                };
-                /** @description Missing, revoked, or expired credential */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        get: operations["getWhoami"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5068,63 +2938,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** Trigger billing cycle */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Every due subscription was billed. `errors` is empty. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            invoices_generated: number;
-                            errors: string[];
-                        };
-                    };
-                };
-                /**
-                 * @description `errors` is not empty. The invoices the run made are kept. Each
-                 *     entry is one of:
-                 *     - `subscription <id>: billing failed`: that subscription could
-                 *       not be billed.
-                 *     - `billing run failed`: the run stopped before it reached every
-                 *       due subscription, because the list of due subscriptions could
-                 *       not be read or the request ran out of time (30 seconds). The
-                 *       subscriptions it did not reach are still due, and the next
-                 *       billing run bills them.
-                 *     - `billing run completed but its audit record failed`: the run's
-                 *       audit record could not be written.
-                 */
-                206: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            invoices_generated: number;
-                            errors: string[];
-                        };
-                    };
-                };
-            };
-        };
+        post: operations["runBilling"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5144,100 +2958,9 @@ export interface paths {
          *     token, keyed by provider/model/token_type. Current-rate semantics —
          *     one row per key, edited in place; per-event stamps are the history.
          */
-        get: {
-            parameters: {
-                query?: {
-                    /**
-                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                     *     that is not a whole number, is a 422 with `param: limit`.
-                     */
-                    limit?: components["parameters"]["Limit"];
-                    /**
-                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                     *     not a whole number, is a 422 with `param: offset`.
-                     */
-                    offset?: components["parameters"]["Offset"];
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Rates */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["ProviderCostRate"][];
-                            total: components["schemas"]["ListTotal"];
-                        };
-                    };
-                };
-                422: components["responses"]["InvalidPage"];
-            };
-        };
+        get: operations["listProviderCosts"];
         /** Create or update a provider cost rate */
-        put: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        provider: string;
-                        /** @description Model family token or raw snapshot id — raw ids match first at ingest. */
-                        model: string;
-                        /** @description ADR-044 role — input / output / cache_read. */
-                        token_type: string;
-                        /** @description US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens). 0 or more, under 10^10, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. */
-                        unit_cost_cents: string;
-                        /**
-                         * @description Rates are in USD only, the currency LiteLLM reports cost
-                         *     in. Any other value is 422.
-                         * @default USD
-                         * @enum {string}
-                         */
-                        currency?: "USD";
-                    };
-                };
-            };
-            responses: {
-                /** @description Upserted rate */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ProviderCostRate"];
-                    };
-                };
-                /** @description `validation_error`: a required field is missing, `unit_cost_cents` is not a number or is outside its limits, `currency` is not USD, or the body has an unknown field such as `cost_per_token` (`param` names the field; the body must use only the fields listed here). */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        put: operations["upsertProviderCost"];
         post?: never;
         delete?: never;
         options?: never;
@@ -5259,26 +2982,7 @@ export interface paths {
          * Delete a provider cost rate
          * @description Stamped events keep their snapshot — deletion never rewrites history.
          */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Deleted */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        delete: operations["deleteProviderCost"];
         options?: never;
         head?: never;
         patch?: never;
@@ -5305,60 +3009,7 @@ export interface paths {
          *     customer is on a test clock. `from` and `to` take RFC 3339 instants
          *     only (no bare dates), and `from` must be before `to`.
          */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Window start, inclusive. RFC 3339. Default is 30 days before the customer's current time. */
-                    from?: string;
-                    /** @description Window end, exclusive. RFC 3339. Default is the customer's current time (test clock time for a customer on a test clock). */
-                    to?: string;
-                };
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Margin report */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["MarginReport"];
-                    };
-                };
-                /** @description `from` or `to` is not RFC 3339, or `from` is not before `to`. */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Customer not found. */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The window is longer than one year. */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        get: operations["getCustomerMargin"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5383,79 +3034,7 @@ export interface paths {
          *     grant in a currency the customer is not billed in is accepted and
          *     shows as its own balance.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        customer_id: string;
-                        /**
-                         * @description ISO 4217 code of the credit. Required. Case-insensitive;
-                         *     stored uppercase. Zero-decimal currencies (such as JPY)
-                         *     are not supported yet.
-                         * @example USD
-                         */
-                        currency: string;
-                        /** Format: int64 */
-                        amount_cents: number;
-                        description?: string;
-                        /**
-                         * Format: date-time
-                         * @description Optional expiry; must be in the future. Omitted = never
-                         *     expires. The credit can be drawn up to and including this
-                         *     instant; a period invoice draws it when its period ends
-                         *     at or before it. The dashboard sends the local midnight
-                         *     after the picked day.
-                         */
-                        expires_at?: string;
-                        /**
-                         * @description Optional cost-basis class (ADR-078). `promotional` marks
-                         *     free/marketing credits, drained BEFORE all paid-class
-                         *     blocks. Omitted = unclassified (drains in the paid
-                         *     class). `commit` is reserved for the invoice-finalize
-                         *     funding path and rejected here.
-                         * @enum {string}
-                         */
-                        grant_kind?: "promotional";
-                    };
-                };
-            };
-            responses: {
-                /** @description Credits granted */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["CreditLedgerEntry"];
-                    };
-                };
-                /** @description A field failed validation (a missing or unsupported `currency` has `param` `currency`), or the body has an unknown field (`param` names it; the body must use only the fields listed here). */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["grantCredits"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5475,39 +3054,7 @@ export interface paths {
          *     ledger holds, ordered by currency. Empty when the customer has no
          *     ledger entry.
          */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    customer_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Credit balances, one per currency. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["CreditBalance"][];
-                        };
-                    };
-                };
-                /** @description No customer with this ID in this tenant and mode. */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        get: operations["getCreditBalance"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5540,35 +3087,7 @@ export interface paths {
          *     Not included, so the figure can read high: tax, base fees billed at
          *     period end, and amounts due on unpaid invoices. Requires a secret key.
          */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    customer_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Live credit balance */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["CreditLiveBalance"];
-                    };
-                };
-                /** @description Customer not found in this tenant and mode */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        get: operations["getLiveCreditBalance"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5590,94 +3109,14 @@ export interface paths {
          *     operators simulate time-bound billing flows without waiting for
          *     wall-clock advances. See ADR / docs for the simulator semantics.
          */
-        get: {
-            parameters: {
-                query?: {
-                    /**
-                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                     *     that is not a whole number, is a 422 with `param: limit`.
-                     */
-                    limit?: components["parameters"]["Limit"];
-                    /**
-                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                     *     not a whole number, is a 422 with `param: offset`.
-                     */
-                    offset?: components["parameters"]["Offset"];
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Test clocks */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["TestClock"][];
-                            total: components["schemas"]["ListTotal"];
-                        };
-                    };
-                };
-                /** @description Caller is in live mode */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                422: components["responses"]["InvalidPage"];
-            };
-        };
+        get: operations["listTestClocks"];
         put?: never;
         /**
          * Create a test clock
          * @description Test mode only. The clock starts in `ready` state at
          *     `frozen_time`. Use `/advance` to move it forward.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        name?: string;
-                        /** Format: date-time */
-                        frozen_time: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Clock created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["TestClock"];
-                    };
-                };
-            };
-        };
+        post: operations["createTestClock"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5692,63 +3131,11 @@ export interface paths {
             cookie?: never;
         };
         /** Get a test clock by id */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Clock */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["TestClock"];
-                    };
-                };
-                /** @description Clock not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        get: operations["getTestClock"];
         put?: never;
         post?: never;
         /** Delete a test clock (cascades to pinned subscriptions) */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Clock deleted */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {string} */
-                            status: "deleted";
-                        };
-                    };
-                };
-            };
-        };
+        delete: operations["deleteTestClock"];
         options?: never;
         head?: never;
         patch?: never;
@@ -5762,50 +3149,7 @@ export interface paths {
             cookie?: never;
         };
         /** List subscriptions pinned to this clock */
-        get: {
-            parameters: {
-                query?: {
-                    /**
-                     * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
-                     *     that is not a whole number, is a 422 with `param: limit`.
-                     */
-                    limit?: components["parameters"]["Limit"];
-                    /**
-                     * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
-                     *     not a whole number, is a 422 with `param: offset`.
-                     */
-                    offset?: components["parameters"]["Offset"];
-                };
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Subscriptions */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["Subscription"][];
-                            total: components["schemas"]["ListTotal"];
-                        };
-                    };
-                };
-                /** @description Clock not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                422: components["responses"]["InvalidPage"];
-            };
-        };
+        get: operations["listTestClockSubscriptions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5839,59 +3183,7 @@ export interface paths {
          *     The cancel or pause is dated at the advance target, and one
          *     longer advance bills a period a real clock would not (#1276).
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: date-time */
-                        frozen_time: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Advance accepted — clock returned in `advancing` state */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["TestClock"];
-                    };
-                };
-                /** @description Clock is not in `ready` state */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description New frozen_time is not strictly after the current frozen_time, or is more than one year after it */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        post: operations["advanceTestClock"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5918,52 +3210,7 @@ export interface paths {
          *     poll `GET /v1/test-clocks/{id}` until status leaves `advancing`.
          *     ADR-018.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md. The usage routes do not take
-                     *     it: each usage event carries its own `idempotency_key`.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Retry accepted — clock returned in `advancing` state */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["TestClock"];
-                    };
-                };
-                /** @description Clock not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Clock is not in `internal_failure` state */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        post: operations["retryTestClockAdvance"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6113,7 +3360,9 @@ export interface paths {
         };
         /**
          * Export customers as CSV
-         * @description Streams every customer, newest first, from one consistent
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Streams every customer, newest first, from one consistent
          *     snapshot. Columns: id, external_id, display_name, email, status,
          *     email_status, created_at, updated_at.
          *
@@ -6142,7 +3391,9 @@ export interface paths {
         };
         /**
          * Export invoices as CSV
-         * @description Streams every invoice, newest first, from one consistent
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Streams every invoice, newest first, from one consistent
          *     snapshot. Amounts are in cents. Columns: id, invoice_number,
          *     customer_id, subscription_id, status, payment_status, currency,
          *     subtotal_cents, tax_amount_cents, discount_cents,
@@ -6172,7 +3423,9 @@ export interface paths {
         };
         /**
          * Export subscriptions as CSV
-         * @description Streams every subscription, newest first, from one consistent
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Streams every subscription, newest first, from one consistent
          *     snapshot. Columns: id, code, display_name, customer_id, status,
          *     billing_time, trial_start_at, trial_end_at, started_at,
          *     activated_at, canceled_at, current_billing_period_start,
@@ -6200,7 +3453,9 @@ export interface paths {
         };
         /**
          * Export usage events as CSV
-         * @description Streams usage events whose `timestamp` falls in the window,
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Streams usage events whose `timestamp` falls in the window,
          *     newest first, from one consistent snapshot. `from` and `to` are
          *     both required and may span at most 366 days. `customer_id`,
          *     `meter_id` and `dimensions` narrow it like the event list. Columns: id,
@@ -6229,7 +3484,9 @@ export interface paths {
         };
         /**
          * Export the audit log as CSV
-         * @description Streams the audit log for the caller's mode (test or live), newest
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Streams the audit log for the caller's mode (test or live), newest
          *     first, with no row limit. Settings changes are recorded in test
          *     mode, so they appear only in a test-mode export.
          *     Takes the same filters as the audit-log list, so the dashboard's
@@ -6264,7 +3521,9 @@ export interface paths {
         };
         /**
          * Get headline billing metrics
-         * @description Returns the dashboard's headline metrics for a rolling window that
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Returns the dashboard's headline metrics for a rolling window that
          *     ends now, with values for the window before it where a comparison
          *     makes sense.
          *
@@ -6293,7 +3552,9 @@ export interface paths {
         };
         /**
          * Get revenue over time
-         * @description Returns paid-invoice revenue per day, or per month for `12m`.
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Returns paid-invoice revenue per day, or per month for `12m`.
          *     Only invoices in the tenant's default currency are counted; the
          *     currency is the `currency` of `GET /v1/analytics/overview`.
          *     Buckets with no paid invoices are left out. Data from test clocks
@@ -6317,7 +3578,9 @@ export interface paths {
         };
         /**
          * Get MRR movement over time
-         * @description Returns how MRR (monthly recurring revenue from plan base fees)
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Returns how MRR (monthly recurring revenue from plan base fees)
          *     changed, per day, or per month for `12m`, with totals.
          *
          *     - `new`: subscriptions activated in the bucket.
@@ -6349,7 +3612,9 @@ export interface paths {
         };
         /**
          * Get usage over time
-         * @description Returns usage-event counts and summed quantities per day, or per
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Returns usage-event counts and summed quantities per day, or per
          *     month for `12m`, the 10 meters with the most events, and totals.
          *     Buckets and meters with no events are left out. Data from
          *     customers on test clocks is left out.
@@ -6750,7 +4015,9 @@ export interface paths {
         };
         /**
          * Get workspace settings
-         * @description Returns the tenant's billing settings: currency, timezone, invoice
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Returns the tenant's billing settings: currency, timezone, invoice
          *     numbering, payment terms, tax setup and the company details printed
          *     on invoices. Settings are shared by test and live mode. A tenant
          *     that never saved settings gets the defaults (USD, UTC, prefix
@@ -6761,7 +4028,9 @@ export interface paths {
         get: operations["getTenantSettings"];
         /**
          * Update workspace settings
-         * @description Merges the body into the current settings. A field you leave out
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Merges the body into the current settings. A field you leave out
          *     keeps its stored value. A field you send is set, even to `""` or
          *     `0`. Send `credit_balance_low_threshold_cents: null` to turn
          *     low-balance alerts off.
@@ -6795,7 +4064,9 @@ export interface paths {
         };
         /**
          * Email setup status
-         * @description Read-only. Email is configured in the server environment, not per
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Read-only. Email is configured in the server environment, not per
          *     workspace: `SMTP_HOST` and friends, plus the base URLs email links
          *     are built from. Never returns credentials.
          */
@@ -6819,7 +4090,9 @@ export interface paths {
         put?: never;
         /**
          * Send a test email
-         * @description Dashboard sessions only. Sends one plain-text email to the signed-in
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Dashboard sessions only. Sends one plain-text email to the signed-in
          *     member's own address, directly over SMTP (not queued), and returns
          *     the server's answer. Writes an audit row on success.
          */
@@ -6839,7 +4112,9 @@ export interface paths {
         };
         /**
          * List Stripe connections
-         * @description Returns the tenant's Stripe connections for both modes in one list
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Returns the tenant's Stripe connections for both modes in one list
          *     (at most two rows, live first), whatever the caller's mode. No
          *     secret values are returned, only prefixes and last four characters.
          */
@@ -6847,7 +4122,9 @@ export interface paths {
         put?: never;
         /**
          * Connect a Stripe account
-         * @description Saves your own Stripe keys for one mode (`livemode` in the body
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Saves your own Stripe keys for one mode (`livemode` in the body
          *     picks the mode, not the caller's mode). Calling it again for the
          *     same mode replaces the keys. Key prefixes must match the mode:
          *     `sk_test_`/`rk_test_` and `pk_test_` for test, `sk_live_`/`rk_live_`
@@ -6885,7 +4162,9 @@ export interface paths {
         head?: never;
         /**
          * Set the Stripe webhook signing secret
-         * @description Saves the `whsec_` signing secret for a mode that is already
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Saves the `whsec_` signing secret for a mode that is already
          *     connected, without entering the API keys again. Hardcount does not call
          *     Stripe here; the secret is checked on each incoming webhook.
          *     Writes an audit row (never the secret).
@@ -6905,7 +4184,9 @@ export interface paths {
         post?: never;
         /**
          * Disconnect Stripe for one mode
-         * @description Deletes the saved Stripe keys for the mode. Hardcount cannot reach
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Deletes the saved Stripe keys for the mode. Hardcount cannot reach
          *     Stripe in that mode until you connect again. Writes an audit row.
          */
         delete: operations["disconnectStripe"];
@@ -6925,7 +4206,9 @@ export interface paths {
         put?: never;
         /**
          * Set up a new installation
-         * @description One-time setup for a new installation. It works only while no
+         * @description Run once, by hand, to create the first account on a new install; not part of the integration API.
+         *
+         *     One-time setup for a new installation. It works only while no
          *     tenant exists and only when the server has `HARDCOUNT_BOOTSTRAP_TOKEN`
          *     set. Send that token as `token` in the body or as
          *     `Authorization: Bearer <token>`. Never send it in the query string.
@@ -6956,7 +4239,9 @@ export interface paths {
         };
         /**
          * List audit log entries
-         * @description Returns the tenant's audit entries in the caller's mode, newest
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Returns the tenant's audit entries in the caller's mode, newest
          *     first (by `created_at`, then `id`). All filters are exact matches
          *     and can be combined.
          *
@@ -6985,7 +4270,9 @@ export interface paths {
         };
         /**
          * List audit log filter values
-         * @description Returns the distinct `action` and `resource_type` values recorded
+         * @description Used by the dashboard; not part of the integration API.
+         *
+         *     Returns the distinct `action` and `resource_type` values recorded
          *     for the tenant in the caller's mode, plus the test clocks that
          *     appear in the log. Deleted test clocks are included, named from
          *     their audit entries. Use these to fill filter menus.
@@ -10795,6 +8082,90 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "type": "invalid_request_error",
+                 *         "code": "validation_error",
+                 *         "message": "limit must be a whole number from 1 to 100",
+                 *         "request_id": "req_d42h7q5kls1g00b3c4d0",
+                 *         "param": "limit"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /**
+         * @description No valid credential: the API key or session is missing, wrong,
+         *     expired or revoked.
+         */
+        Unauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "type": "authentication_error",
+                 *         "code": "unauthorized",
+                 *         "message": "invalid or expired API key",
+                 *         "request_id": "req_d42h7q5kls1g00b3c4d0"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /**
+         * @description Too many requests. Wait for the number of seconds in `Retry-After`,
+         *     then retry. The answers that pass the limit carry the
+         *     `X-RateLimit-*` headers too.
+         */
+        RateLimited: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                "X-RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                "X-RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                "X-RateLimit-Reset": components["headers"]["RateLimitReset"];
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "type": "rate_limit_error",
+                 *         "code": "rate_limited",
+                 *         "message": "too many requests — please retry after the rate limit resets",
+                 *         "request_id": "req_d42h7q5kls1g00b3c4d0"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /**
+         * @description The body is not one valid JSON value, or a field has the wrong JSON
+         *     type (such as a string where a number belongs). On a route that
+         *     takes `Idempotency-Key`, a 400 is kept for the key: send the
+         *     corrected request with a new key.
+         */
+        InvalidBody: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "type": "invalid_request_error",
+                 *         "code": "invalid_request",
+                 *         "message": "invalid JSON body",
+                 *         "request_id": "req_d42h7q5kls1g00b3c4d0"
+                 *       }
+                 *     }
+                 */
                 "application/json": components["schemas"]["Error"];
             };
         };
@@ -10821,11 +8192,43 @@ export interface components {
         Offset: number;
     };
     requestBodies: never;
-    headers: never;
+    headers: {
+        /** @description Seconds to wait before the next request can pass. */
+        RetryAfter: number;
+        /** @description How many requests the limit allows in its period. */
+        RateLimitLimit: number;
+        /** @description How many requests are left in the current period. */
+        RateLimitRemaining: number;
+        /** @description When the limit is full again, as Unix seconds. */
+        RateLimitReset: number;
+    };
     pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Service is healthy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "ok";
+                    };
+                };
+            };
+        };
+    };
     getHealthReady: {
         parameters: {
             query?: never;
@@ -10884,6 +8287,173 @@ export interface operations {
             };
         };
     };
+    listCustomers: {
+        parameters: {
+            query?: {
+                status?: string;
+                /** @description Exact-match filter on the caller-assigned external ID. */
+                external_id?: string;
+                /** @description Comma-separated customer IDs to fetch exactly. */
+                ids?: string;
+                /**
+                 * @description Case-insensitive substring match on display name, email,
+                 *     external ID, or ID. Matching runs post-decryption (PII
+                 *     columns are encrypted at rest), bounded to the first 5000
+                 *     rows of the tenant's filtered set; the rows and `total` stop
+                 *     there.
+                 */
+                search?: string;
+                /**
+                 * @description One of display_name, email, external_id, status, created_at
+                 *     (default). A sort by display_name or email looks at 5,000
+                 *     customers at most; the rows and `total` stop there.
+                 */
+                sort?: string;
+                dir?: "asc" | "desc";
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Customer list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Customer"][];
+                        total: components["schemas"]["ListTotal"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createCustomer: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    external_id: string;
+                    display_name: string;
+                    email?: string;
+                    additional_emails?: string[];
+                    /** @description Test mode only. Attaches the customer to a test clock. */
+                    test_clock_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Customer created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Customer"];
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Customer already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /**
+             * @description A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+             *     `dunning_policy_id` is not a create field: assign a policy with
+             *     `PATCH /v1/customers/{id}`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    rotateCustomerCostDashboardToken: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rotated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example hc_pcd_a3f9c4... */
+                        token: string;
+                        /** @example https://api.example.com/v1/public/cost-dashboard/hc_pcd_a3f9c4... */
+                        public_url: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Customer not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
     getCustomer: {
         parameters: {
             query?: never;
@@ -10904,6 +8474,7 @@ export interface operations {
                     "application/json": components["schemas"]["Customer"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description No customer with this ID in this tenant and mode. */
             404: {
                 headers: {
@@ -10913,6 +8484,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     updateCustomer: {
@@ -10966,6 +8538,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Customer, or the named dunning policy, not found. */
             404: {
                 headers: {
@@ -10993,6 +8566,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getCustomerBillingProfile: {
@@ -11015,6 +8589,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerBillingProfile"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /**
              * @description The customer has no billing profile yet, or the customer does
              *     not exist. Both return `billing profile not found`.
@@ -11027,6 +8602,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     upsertCustomerBillingProfile: {
@@ -11072,6 +8648,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Customer not found. */
             404: {
                 headers: {
@@ -11104,6 +8681,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     listCustomerSentEmails: {
@@ -11140,6 +8718,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description No customer with this ID in this tenant and mode. */
             404: {
                 headers: {
@@ -11150,6 +8729,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getCustomerUsage: {
@@ -11177,6 +8757,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerUsage"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Customer not found. */
             404: {
                 headers: {
@@ -11195,6 +8776,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getCustomerOverview: {
@@ -11217,6 +8799,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerOverview"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Customer not found. */
             404: {
                 headers: {
@@ -11226,6 +8809,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     listCustomerPaymentMethods: {
@@ -11262,6 +8846,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Customer not found. */
             404: {
                 headers: {
@@ -11272,6 +8857,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     sendCustomerPaymentSetupEmail: {
@@ -11327,6 +8913,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Customer not found. */
             404: {
                 headers: {
@@ -11452,6 +9039,8 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
             /** @description Customer not found. */
             404: {
                 headers: {
@@ -11479,6 +9068,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     detachCustomerPaymentMethod: {
@@ -11503,6 +9093,7 @@ export interface operations {
                     "application/json": components["schemas"]["PaymentMethod"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description No such payment method for this customer. */
             404: {
                 headers: {
@@ -11512,6 +9103,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     setCustomerDefaultPaymentMethod: {
@@ -11546,6 +9138,7 @@ export interface operations {
                     "application/json": components["schemas"]["PaymentMethod"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description No such active payment method for this customer. */
             404: {
                 headers: {
@@ -11554,6 +9147,119 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                 };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getPublicCostDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Projection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        customer_id: string;
+                        tenant_id: string;
+                        livemode: boolean;
+                        billing_period: {
+                            /** Format: date-time */
+                            start: string;
+                            /** Format: date-time */
+                            end: string;
+                            /**
+                             * @description Branch on this before rendering the period. When it is `no_subscription` the customer has no active subscription, `subscriptions`, `usage` and `totals` are empty (`credits` is not), and `start`/`end` carry the zero time (`0001-01-01T00:00:00Z`) rather than a real range — display them and the page reads "January 1, year 1".
+                             * @enum {string}
+                             */
+                            source: "subscription" | "no_subscription";
+                        };
+                        subscriptions: {
+                            id: string;
+                            plan_name: string;
+                            currency: string;
+                            /** Format: date-time */
+                            current_period_start: string;
+                            /** Format: date-time */
+                            current_period_end: string;
+                        }[];
+                        usage: {
+                            event_name: string;
+                            meter_name: string;
+                            unit: string;
+                            currency: string;
+                            total_quantity: string;
+                            /** Format: int64 */
+                            total_amount_cents: number;
+                            /** @description One row per price that took usage this period. */
+                            prices: {
+                                /** @description The labels the price takes. Absent for a price that takes every event. */
+                                dimension_match?: {
+                                    [key: string]: string;
+                                };
+                                quantity: string;
+                                /** Format: int64 */
+                                amount_cents: number;
+                                /** @description Per-unit price in DECIMAL CENTS (ADR-045, the Stripe unit_amount_decimal model) — NOT dollars. "0.0003" is 0.0003 CENTS per unit ($3.00 per 1M units); multiplying it by `quantity` yields CENTS, matching the sibling `amount_cents`. Reading it as dollars overstates the cost 100x. */
+                                unit_amount_decimal?: string;
+                            }[];
+                        }[];
+                        /** @description One entry per currency present in `usage`. */
+                        totals: {
+                            currency: string;
+                            /** Format: int64 */
+                            amount_cents: number;
+                        }[];
+                        /**
+                         * Format: int64
+                         * @description The metered cost of the current billing period so far, in cents, including usage a threshold invoice already billed. Recurring base fees are not included — an in_advance base is already invoiced at period open.
+                         */
+                        projected_total_cents: number;
+                        /** @description The customer's credit position, one entry per currency, ordered by currency. `balance_cents` is the ledger balance in that currency, less any grant past its expiry date that is not yet written off: credit is drawn down when an invoice is issued, so it does not move with usage. `unbilled_usage_cents` is the usage no invoice has billed yet that will be invoiced in that currency, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` differs from `projected_total_cents` after a threshold invoice: it leaves out the usage that invoice billed. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted. */
+                        credits: {
+                            currency: string;
+                            /** Format: int64 */
+                            balance_cents: number;
+                            /** Format: int64 */
+                            unbilled_usage_cents: number;
+                            /**
+                             * Format: int64
+                             * @description What is left of the customer's prepaid commit.
+                             */
+                            commit_remaining_cents: number;
+                            /**
+                             * Format: int64
+                             * @description What is left of promotional credit.
+                             */
+                            promotional_remaining_cents: number;
+                            /** Format: int64 */
+                            estimated_remaining_cents: number;
+                        }[];
+                    };
+                };
+            };
+            /** @description Invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Rate limited (60/min/IP) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -11816,6 +9522,92 @@ export interface operations {
             };
         };
     };
+    listMeters: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Meter list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Meter"][];
+                        total: components["schemas"]["ListTotal"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createMeter: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The `event_name` usage events will send for this meter. Letters, digits, `-` and `_`; at most 100 characters. */
+                    event_name: string;
+                    name: string;
+                    /** @default unit */
+                    unit?: string;
+                    /**
+                     * @description How the meter rolls its events into one quantity per billing period. Fixed once the meter has a usage event.
+                     * @default sum
+                     * @enum {string}
+                     */
+                    aggregation?: "sum" | "count" | "max" | "last";
+                };
+            };
+        };
+        responses: {
+            /** @description Meter created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Meter"];
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
     getMeter: {
         parameters: {
             query?: never;
@@ -11836,6 +9628,7 @@ export interface operations {
                     "application/json": components["schemas"]["Meter"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `not_found`: no meter with this id in this tenant and mode. */
             404: {
                 headers: {
@@ -11845,6 +9638,78 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    updateMeter: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    unit?: string;
+                    /** @enum {string} */
+                    aggregation?: "sum" | "count" | "max" | "last";
+                };
+            };
+        };
+        responses: {
+            /** @description Updated meter */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Meter"];
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Meter not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /**
+             * @description `meter_has_usage`: the meter has usage events, so its
+             *     `aggregation` cannot change. `invalid_state`: another write
+             *     changed the meter during this one.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation failure (bad aggregation, an empty name, or an unknown field) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     listCreditNotes: {
@@ -11892,7 +9757,151 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createCreditNote: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    invoice_id: string;
+                    reason?: string;
+                    lines?: {
+                        /** @description Optional. The invoice line this credit line reverses. */
+                        invoice_line_item_id?: string;
+                        description?: string;
+                        quantity?: number;
+                        unit_amount_cents?: number;
+                    }[];
+                    /** @description Not with commit_relief; put the relief's split inside commit_relief. */
+                    refund_amount_cents?: number;
+                    credit_amount_cents?: number;
+                    /** @description Not with commit_relief; put the relief's split inside commit_relief. */
+                    out_of_band_amount_cents?: number;
+                    /**
+                     * @description Older single-channel form. On a paid invoice whose three
+                     *     `*_amount_cents` fields are all 0, `refund` or `credit`
+                     *     puts the whole note in that channel. Not with commit_relief.
+                     * @enum {string}
+                     */
+                    refund_type?: "refund" | "credit";
+                    auto_issue?: boolean;
+                    /**
+                     * @description Links a refund made in Stripe outside Hardcount as this
+                     *     note's card refund, Stripe's `refunds[]` shape: Hardcount
+                     *     reads the refund from Stripe and calls nothing else
+                     *     there for it. The refund must be of the payment that paid
+                     *     this invoice, not made by Hardcount, and succeeded; `refund_amount_cents` must be its amount,
+                     *     `credit_amount_cents` 0, and `auto_issue` true (the
+                     *     note is issued at once). The caps on the invoice still
+                     *     apply. A refund Hardcount flagged on the invoice
+                     *     (`refunded_in_stripe`) is then marked recorded. Not with
+                     *     commit_relief.
+                     */
+                    stripe_refund_id?: string;
+                    /**
+                     * @description Mutually exclusive with lines and credit_amount_cents. The
+                     *     relief's split goes in here, not at the top level: a top-level
+                     *     `refund_amount_cents`, `out_of_band_amount_cents` or
+                     *     `refund_type` is a 422. Example after a lost dispute:
+                     *     `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
+                     */
+                    commit_relief?: {
+                        /** @description Optional. Defaults to the top-level invoice_id. */
+                        invoice_id?: string;
+                        /** @description Optional. Defaults to the top-level reason. */
+                        reason?: string;
+                        /** @description Commit credits to retire (1..remaining). */
+                        retire_cents?: number;
+                        /** @description Retire the LIVE remaining (absorbs racing drawdowns). */
+                        retire_all?: boolean;
+                        /** @description Optional allocation; must sum with out_of_band to the derived cash. */
+                        refund_amount_cents?: number;
+                        out_of_band_amount_cents?: number;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Credit note (issued immediately for commit relief) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditNote"];
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            /** @description State gate (unpaid commit → void; fully-consumed commit; in-flight charge) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation (over-retire with live remaining; allocation mismatch; zero-cash slice), or an unknown field (`param` names it; the body must use only the fields listed here) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getCreditGrants: {
+        parameters: {
+            query?: {
+                include_exhausted?: boolean;
+            };
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Grants with remaining + kind subtotals */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditGrants"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description No customer with this ID in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     adjustCredits: {
@@ -11949,6 +9958,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Customer not found. */
             404: {
                 headers: {
@@ -11967,6 +9977,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     listCreditBalances: {
@@ -12001,7 +10012,9 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listCreditLedgerEntries: {
@@ -12043,6 +10056,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description No customer with this ID in this tenant and mode. */
             404: {
                 headers: {
@@ -12053,6 +10067,92 @@ export interface operations {
                 };
             };
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listWebhookEndpoints: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Endpoint list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WebhookEndpoint"][];
+                        total: components["schemas"]["ListTotal"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createWebhookEndpoint: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    url: string;
+                    description?: string;
+                    events?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Endpoint created (response carries the one-time signing secret) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookEndpointCreated"];
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Invalid URL or unknown event type */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     getWebhookEndpoint: {
@@ -12075,6 +10175,7 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookEndpoint"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description No such endpoint in the caller's mode */
             404: {
                 headers: {
@@ -12084,6 +10185,126 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteWebhookEndpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Endpoint disabled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "deleted";
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    updateWebhookEndpoint: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    url?: string;
+                    description?: string;
+                    events?: string[];
+                    active?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated endpoint */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookEndpoint"];
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Endpoint not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid URL or unknown event type */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    rotateWebhookEndpointSecret: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description New secret (old secret keeps verifying during the grace window) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookSecretRotation"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listWebhookEndpointDeliveries: {
@@ -12120,6 +10341,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description No such endpoint, or it was deleted */
             404: {
                 headers: {
@@ -12130,6 +10352,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     replayWebhookDelivery: {
@@ -12165,6 +10388,7 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookDeliveryReplayResult"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description No such delivery, the delivery belongs to another endpoint, or the endpoint was deleted */
             404: {
                 headers: {
@@ -12183,6 +10407,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getWebhookEndpointStats: {
@@ -12217,7 +10442,46 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listWebhookEvents: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Event list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WebhookEvent"][];
+                        total: components["schemas"]["ListTotal"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listWebhookEventDeliveries: {
@@ -12245,6 +10509,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller lacks the `apikey:read` permission */
             403: {
                 headers: {
@@ -12263,6 +10528,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     replayWebhookEvent: {
@@ -12295,6 +10561,7 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookReplayResult"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller lacks the `apikey:read` permission */
             403: {
                 headers: {
@@ -12313,6 +10580,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     streamWebhookEvents: {
@@ -12354,6 +10622,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     receiveStripeWebhook: {
@@ -12479,6 +10748,145 @@ export interface operations {
             };
         };
     };
+    listPlans: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Plan list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Plan"][];
+                        total: components["schemas"]["ListTotal"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createPlan: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    code: string;
+                    name: string;
+                    description?: string;
+                    currency: string;
+                    /** @enum {string} */
+                    billing_interval: "monthly" | "yearly";
+                    /** Format: int64 */
+                    base_amount_cents?: number;
+                    /**
+                     * @description Required when `base_amount_cents` is above 0. With a base
+                     *     of 0 it may be left out, and the plan is in_arrears;
+                     *     `in_advance` with a base of 0 is refused. See
+                     *     Plan.base_bill_timing (ADR-031).
+                     * @enum {string}
+                     */
+                    base_bill_timing?: "in_advance" | "in_arrears";
+                    /**
+                     * @description The plan's usage prices, created with it in one request.
+                     *     Each takes the plan's currency.
+                     */
+                    prices?: components["schemas"]["PriceInput"][];
+                    /**
+                     * @description Optional. A plan is created active; archive it with PATCH.
+                     * @enum {string}
+                     */
+                    status?: "active";
+                    /**
+                     * @description Stripe product tax code for the base fee, such as
+                     *     `txcd_10103001`. Empty or omitted means the tenant's
+                     *     `default_product_tax_code`.
+                     */
+                    tax_code?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Plan created, with its prices */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanDetail"];
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            /**
+             * @description `price_exists`: two prices name the same meter and
+             *     `dimension_match`. `price_conflict`: two prices on one meter
+             *     could both take one event with the same number of labels, so
+             *     neither would win; the message names the other price, and
+             *     `param` names the second one. Nothing is created.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description A field failed validation (a price names an unknown meter, a
+             *     rate is outside its limits, `base_bill_timing` is missing with a
+             *     base fee above 0 or is `in_advance` with a base of 0), `status`
+             *     is set to anything but `active` (a plan is created active;
+             *     archive it with PATCH), or the body has an unknown field
+             *     (`param` names it, `prices[i].` first for a price; the body must
+             *     use only the fields listed here).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
     getPlan: {
         parameters: {
             query?: never;
@@ -12499,6 +10907,7 @@ export interface operations {
                     "application/json": components["schemas"]["PlanDetail"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `not_found`: no plan with this id in this tenant and mode. */
             404: {
                 headers: {
@@ -12508,6 +10917,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     updatePlan: {
@@ -12569,6 +10979,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `not_found`: no plan with this id in this tenant and mode. */
             404: {
                 headers: {
@@ -12606,6 +11017,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
             /** @description `internal_error`. Nothing is changed. */
             500: {
                 headers: {
@@ -12651,6 +11063,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `not_found`: no plan with this id in this tenant and mode. */
             404: {
                 headers: {
@@ -12661,6 +11074,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     addPlanPrice: {
@@ -12706,6 +11120,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `not_found`: no plan with this id in this tenant and mode. */
             404: {
                 headers: {
@@ -12747,6 +11162,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     removePlanPrice: {
@@ -12770,6 +11186,7 @@ export interface operations {
                     "application/json": components["schemas"]["PriceWrite"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `not_found`: no such plan, or no such price on it (a removed price included). */
             404: {
                 headers: {
@@ -12779,6 +11196,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     updatePlanPrice: {
@@ -12825,6 +11243,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `not_found`: no such plan, or no such price on it (a removed price included). */
             404: {
                 headers: {
@@ -12847,6 +11266,280 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listSubscriptions: {
+        parameters: {
+            query?: {
+                customer_id?: string;
+                /** @description Filter to subscriptions with a live item on this plan. */
+                plan_id?: string;
+                /**
+                 * @description Exact status. Any other value is a 400. Paused collection is not
+                 *     a status: use `collection=paused`.
+                 */
+                status?: "draft" | "trialing" | "active" | "canceled";
+                /**
+                 * @description `failing` returns only subscriptions that carry a
+                 *     `billing_failure`: those waiting for their next billing attempt
+                 *     and those that are parked. Any other value is a 400.
+                 */
+                billing?: "failing";
+                /**
+                 * @description `paused` returns only active and trialing subscriptions whose
+                 *     `pause_collection` is in force, whether an operator or dunning set
+                 *     it. A timed pause ends at `resumes_at` (on the subscription's test
+                 *     clock, if it has one), even while the response still carries it.
+                 *     Any other value is a 400.
+                 */
+                collection?: "paused";
+                /** @description Case-insensitive substring match on display name or code. */
+                search?: string;
+                /** @description One of display_name, status, next_billing_at, trial_end_at, created_at (default). */
+                sort?: string;
+                dir?: "asc" | "desc";
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Subscription list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Subscription"][];
+                        total: components["schemas"]["ListTotal"];
+                    };
+                };
+            };
+            /** @description A `status`, `billing` or `collection` value the API does not know. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createSubscription: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    code: string;
+                    display_name: string;
+                    customer_id: string;
+                    /** @description Plan items — a subscription bills one or more plans. */
+                    items: {
+                        plan_id: string;
+                        /** @default 1 */
+                        quantity?: number;
+                    }[];
+                    /**
+                     * @default calendar
+                     * @enum {string}
+                     */
+                    billing_time?: "calendar" | "anniversary";
+                    /**
+                     * @description Days of free trial; 0 means no trial. Above 0, the
+                     *     subscription is `trialing` from now and its first paid
+                     *     period starts on the day the trial ends.
+                     */
+                    trial_days?: number;
+                    /**
+                     * @description Leave it out and the subscription starts now. Without
+                     *     `trial_days` it is `active`, its first period starts
+                     *     today in the account's billing time zone (the clock's
+                     *     day for a customer on a test clock), and a non-zero base
+                     *     fee billed in advance is invoiced now. With `trial_days`
+                     *     above 0 it is `trialing` from now. Send `draft` to create it
+                     *     without starting it: it bills nothing until you activate
+                     *     it with `POST /v1/subscriptions/{id}/activate`. A draft
+                     *     cannot have a trial (`trial_days` above 0). An empty or
+                     *     null `status` is refused.
+                     * @enum {string}
+                     */
+                    status?: "draft";
+                };
+            };
+        };
+        responses: {
+            /** @description Subscription created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscription"];
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            /**
+             * @description A field failed validation (`param` names it), for example
+             *     `trial_days` outside 0 to 730, `status` other than `draft`
+             *     (empty and null included), or `trial_days` above 0 with
+             *     `status: draft`. Or the body has an unknown
+             *     field (`param` names it; the body must use only the fields
+             *     listed here). `start_now` is such a field since 2026-10-23: a
+             *     subscription starts now unless `status` is `draft`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    activateSubscription: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Subscription activated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscription"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    retrySubscriptionBilling: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /**
+             * @description The retry ran. Read the outcome from two fields.
+             *     `subscription.billing_failure` is present when the attempt
+             *     failed again. When it is absent, `still_due` false means the
+             *     subscription billed or had nothing left to bill, and
+             *     `still_due` true means the attempt did not complete and the
+             *     subscription is still unbilled.
+             */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        subscription: components["schemas"]["Subscription"];
+                        /**
+                         * @description Period-close invoices this call created. The final
+                         *     invoice of a scheduled cancel and the first invoice
+                         *     at a trial end are not counted, so 0 does not mean
+                         *     the retry failed. Read success from
+                         *     `subscription.billing_failure` and `still_due`.
+                         */
+                        invoices_generated: number;
+                        /**
+                         * @description True when, after the attempt, the subscription has
+                         *     no `billing_failure` and is still due for billing.
+                         *     The attempt did not complete and nothing was saved;
+                         *     the next billing run attempts the subscription.
+                         */
+                        still_due: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Subscription not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /**
+             * @description The retry was refused. Code `billing_not_failing`: the
+             *     subscription has no `billing_failure`, so there is nothing to
+             *     retry. Code `invalid_state`: the subscription is attached to
+             *     a test clock; use the clock's retry advance instead.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     getSubscription: {
@@ -12869,6 +11562,7 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Subscription not found (code `not_found`). */
             404: {
                 headers: {
@@ -12878,6 +11572,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     cancelSubscription: {
@@ -12910,6 +11605,7 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Subscription not found. */
             404: {
                 headers: {
@@ -12932,6 +11628,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     scheduleSubscriptionCancel: {
@@ -12985,6 +11682,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Subscription not found. */
             404: {
                 headers: {
@@ -13022,6 +11720,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     clearSubscriptionScheduledCancel: {
@@ -13044,6 +11743,7 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Subscription not found. */
             404: {
                 headers: {
@@ -13066,6 +11766,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     pauseSubscriptionCollection: {
@@ -13119,6 +11820,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Subscription not found. */
             404: {
                 headers: {
@@ -13154,6 +11856,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     resumeSubscriptionCollection: {
@@ -13176,6 +11879,7 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Subscription not found. */
             404: {
                 headers: {
@@ -13197,6 +11901,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     endSubscriptionTrial: {
@@ -13229,6 +11934,7 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Subscription not found. */
             404: {
                 headers: {
@@ -13250,6 +11956,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     extendSubscriptionTrial: {
@@ -13301,6 +12008,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Subscription not found. */
             404: {
                 headers: {
@@ -13335,6 +12043,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     setSubscriptionBillingThresholds: {
@@ -13392,6 +12101,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Subscription not found. */
             404: {
                 headers: {
@@ -13426,6 +12136,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     clearSubscriptionBillingThresholds: {
@@ -13448,6 +12159,7 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Subscription not found. */
             404: {
                 headers: {
@@ -13457,6 +12169,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     addSubscriptionItem: {
@@ -13509,6 +12222,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Subscription not found. */
             404: {
                 headers: {
@@ -13552,6 +12266,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     removeSubscriptionItem: {
@@ -13573,6 +12288,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Subscription not found, or the item is not on this subscription. */
             404: {
                 headers: {
@@ -13595,6 +12311,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     updateSubscriptionItem: {
@@ -13654,6 +12371,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Subscription not found, or the item is not on this subscription. */
             404: {
                 headers: {
@@ -13701,6 +12419,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     cancelSubscriptionItemPendingChange: {
@@ -13724,6 +12443,7 @@ export interface operations {
                     "application/json": components["schemas"]["SubscriptionItem"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description The item is not found or is not on this subscription. */
             404: {
                 headers: {
@@ -13746,6 +12466,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getSubscriptionTimeline: {
@@ -13772,8 +12493,269 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Subscription not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listUsageEvents: {
+        parameters: {
+            query?: {
+                customer_id?: string;
+                meter_id?: string;
+                /**
+                 * @description Comma-separated key=value pairs matched against the event's
+                 *     dimensions via JSONB containment (multiple pairs AND).
+                 *     Values that parse as JSON booleans/numbers are matched
+                 *     typed ("cached=true", "attempt=2"); everything else as a
+                 *     string. Malformed pairs → 422. Example:
+                 *     `model=gpt-4o,token_type=input`.
+                 */
+                dimensions?: string;
+                /** @description Only events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC. */
+                from?: string;
+                /** @description Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included. */
+                to?: string;
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Event list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["UsageEvent"][];
+                        total: components["schemas"]["ListTotal"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description `validation_error`: a malformed `dimensions` pair, a `from` or `to` that cannot be parsed, `to` before `from`, or a `limit` or `offset` out of range (param names the field). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createUsageEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The customer's external_id (your identifier), not the internal hc_cus_ id. */
+                    external_customer_id: string;
+                    /** @description The meter's `event_name` (e.g. "tokens"). */
+                    event_name: string;
+                    /**
+                     * @description A JSON number (`5`) or a string holding one (`"5.5"`,
+                     *     for exact decimals). At most 12 decimal places; trailing
+                     *     zeros do not count. Its size must be under 10^26, and it
+                     *     is at most 100 characters. A negative value is a
+                     *     correction. A missing quantity, or any other value, is
+                     *     refused with 422 and `param: quantity`.
+                     */
+                    quantity: number | string;
+                    /** @description Scalar labels of the event (e.g. {"model", "token_type"}). A price takes an event whose labels include the price's `dimension_match`. */
+                    dimensions?: {
+                        [key: string]: unknown;
+                    };
+                    /**
+                     * @description Your unique ID for this event. Pick it once, before the
+                     *     first send, and send the same key on every retry of the
+                     *     event. Keys are unique per tenant and mode (live or
+                     *     test), forever. An event whose key was already used is
+                     *     not stored again: the first event wins and the new body
+                     *     is discarded. So never reuse a key for a different
+                     *     event, such as a batch index or a timestamp that can
+                     *     repeat, or that usage is lost. Empty or whitespace-only
+                     *     keys are refused with 422, and so are keys longer than
+                     *     255 characters. This is the only dedup key: the usage
+                     *     routes ignore the `Idempotency-Key` header.
+                     */
+                    idempotency_key: string;
+                    /** Format: date-time */
+                    timestamp?: string;
+                };
+            };
+        };
+        responses: {
+            /**
+             * @description Idempotency replay — the original event is returned unchanged
+             *     with an `Idempotent-Replayed: true` header. No duplicate row
+             *     is written. The new body is not compared with the original.
+             */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageEvent"];
+                };
+            };
+            /**
+             * @description Event ingested. A `billing_status` is what Hardcount found when the
+             *     event arrived (see `UsageBillingStatus`); the event is stored
+             *     all the same.
+             */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageEvent"];
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            /**
+             * @description Validation failed and nothing was stored. `param` names the
+             *     field: `idempotency_key` when it is missing, blank or longer
+             *     than 255 characters, `quantity` when it is missing or not as
+             *     described above, `external_customer_id` or `event_name` for an
+             *     unknown customer or meter, `timestamp` for a malformed one, and
+             *     `properties` when it has a key (it was renamed `dimensions`;
+             *     `null` or `{}` is ignored).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+            /**
+             * @description `ingest_unavailable`: a customer or meter lookup, or the read of
+             *     the customer's billing periods, could not be answered. Nothing
+             *     was recorded; retry.
+             */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createUsageEventBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The customer's external_id (your identifier), not the internal hc_cus_ id. */
+                    external_customer_id: string;
+                    /** @description The meter's `event_name` (e.g. "tokens"). */
+                    event_name: string;
+                    /**
+                     * @description A JSON number (`5`) or a string holding one (`"5.5"`,
+                     *     for exact decimals). At most 12 decimal places;
+                     *     trailing zeros do not count. Its size must be under
+                     *     10^26, and it is at most 100 characters. A negative
+                     *     value is a correction. A missing quantity, or any
+                     *     other value, fails validation.
+                     */
+                    quantity: number | string;
+                    dimensions?: {
+                        [key: string]: unknown;
+                    };
+                    /**
+                     * @description Your unique ID for this event. Pick it once, before the
+                     *     first send, and send the same key on every retry of the
+                     *     event. Keys are unique per tenant and mode (live or
+                     *     test), forever. An event whose key was already used is
+                     *     not stored again: the first event wins and the new body
+                     *     is discarded. So never reuse a key for a different
+                     *     event, such as a batch index or a timestamp that can
+                     *     repeat, or that usage is lost. Empty or whitespace-only
+                     *     keys are refused with 422, and so are keys longer than
+                     *     255 characters. This is the only dedup key: the usage
+                     *     routes ignore the `Idempotency-Key` header.
+                     */
+                    idempotency_key: string;
+                    /** Format: date-time */
+                    timestamp?: string;
+                }[];
+            };
+        };
+        responses: {
+            /** @description Batch committed */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageEventBatchResult"];
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Request body over the 1MB cap — send smaller batches. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /**
+             * @description Batch rejected — one or more events failed validation and
+             *     NOTHING was ingested. The body is the error envelope (code
+             *     `batch_rejected`) plus `errors[]`, which names every failing
+             *     index (`event[i]: reason`), `ingested: 0` and `total`. Fix them
+             *     and retry the whole batch.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+            /**
+             * @description `ingest_unavailable`: a customer or meter lookup, or the read of
+             *     the customer's billing periods, could not be answered. Nothing
+             *     was recorded; retry the whole batch.
+             */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13865,6 +12847,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /**
              * @description `validation_error`: a missing, empty or whitespace-only
              *     `idempotency_key`, or one longer than 255 characters (param
@@ -13884,6 +12867,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
             /**
              * @description `ingest_unavailable`: the customer or meter lookup, or the read
              *     of the customer's billing periods, could not be answered.
@@ -13923,6 +12907,8 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
         };
     };
     releaseHeldUsage: {
@@ -13956,6 +12942,8 @@ export interface operations {
                     "application/json": components["schemas"]["HeldUsageReleaseResult"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
             /** @description `validation_error`: no customer has that external ID yet and no `customer_id` was given, or `customer_id` was not found. */
             422: {
                 headers: {
@@ -13965,6 +12953,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     discardHeldUsage: {
@@ -13995,6 +12984,8 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
             /** @description `validation_error`: `external_customer_id` is missing, or the body has an unknown field (`param` names it; the body must use only the fields listed here). */
             422: {
                 headers: {
@@ -14004,6 +12995,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     aggregateUsageEvents: {
@@ -14042,6 +13034,7 @@ export interface operations {
                     "application/json": components["schemas"]["UsageAggregate"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `validation_error`: a malformed `dimensions` pair, an unknown `tz`, a `from` or `to` that cannot be parsed, or `to` before `from`. */
             422: {
                 headers: {
@@ -14051,6 +13044,72 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listInvoices: {
+        parameters: {
+            query?: {
+                customer_id?: string;
+                subscription_id?: string;
+                status?: string;
+                payment_status?: string;
+                /** @description Case-insensitive substring match on the invoice number or the customer's name or email. */
+                search?: string;
+                /**
+                 * @description Lower bound on created_at, inclusive. RFC3339 instant or
+                 *     bare YYYY-MM-DD (anchored at 00:00:00Z).
+                 */
+                from?: string;
+                /**
+                 * @description Upper bound on created_at, inclusive. RFC3339 instant or
+                 *     bare YYYY-MM-DD (anchored at 23:59:59.999999Z, the end of that day).
+                 */
+                to?: string;
+                /**
+                 * @description When true, restrict to open invoices past their due date
+                 *     that haven't settled (finalized + due_at < now +
+                 *     payment_status not succeeded/processing). Backs the
+                 *     dashboard's "Past due" segment.
+                 */
+                overdue?: boolean;
+                /** @description Comma-separated invoice IDs to fetch exactly. */
+                ids?: string;
+                /** @description One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps. */
+                sort?: string;
+                dir?: "asc" | "desc";
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invoice list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Invoice"][];
+                        total: components["schemas"]["ListTotal"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createInvoice: {
@@ -14094,6 +13153,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Customer or subscription not found (code `not_found`). */
             404: {
                 headers: {
@@ -14131,6 +13191,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
             /**
              * @description The customer's currency could not be read (code
              *     `currency_unavailable`). Retry the request.
@@ -14143,6 +13204,89 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    createInvoicePreview: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Customer to preview the invoice for. */
+                    customer_id: string;
+                    /**
+                     * @description Optional. Defaults to the customer's primary active
+                     *     subscription if not supplied.
+                     */
+                    subscription_id?: string;
+                    /**
+                     * @description Optional explicit window. Both bounds must be
+                     *     supplied together; partial windows are rejected.
+                     *     Defaults to the resolved subscription's current
+                     *     cycle.
+                     */
+                    period?: {
+                        /** Format: date-time */
+                        from: string;
+                        /** Format: date-time */
+                        to: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Preview result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoicePreview"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Customer or subscription not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation error (missing customer_id, partial period, no active sub, ...) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     getInvoice: {
@@ -14165,6 +13309,7 @@ export interface operations {
                     "application/json": components["schemas"]["InvoiceWithLineItems"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Invoice not found. */
             404: {
                 headers: {
@@ -14174,6 +13319,105 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getInvoicePdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PDF file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    sendInvoice: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                    additional_emails?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Email enqueued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "sent";
+                    };
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Invoice not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /**
+             * @description Nothing was sent. Codes: `invoice_not_sendable` (the invoice
+             *     is a draft, not issued yet, or voided), `email_not_configured`
+             *     (this server has no SMTP set up), or `payment_in_flight` /
+             *     `payment_unidentifiable` (a charge on the invoice is unresolved).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `email` is missing or invalid, a CC entry is invalid, or the body has an unknown field (`param` names it) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     addInvoiceLineItem: {
@@ -14219,6 +13463,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Invoice not found. */
             404: {
                 headers: {
@@ -14241,6 +13486,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     voidInvoice: {
@@ -14273,6 +13519,7 @@ export interface operations {
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Invoice not found. */
             404: {
                 headers: {
@@ -14297,6 +13544,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     resendInvoiceSetupLink: {
@@ -14332,6 +13580,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Invoice not found. */
             404: {
                 headers: {
@@ -14356,6 +13605,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     markInvoiceUncollectible: {
@@ -14388,6 +13638,7 @@ export interface operations {
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Invoice not found. */
             404: {
                 headers: {
@@ -14410,6 +13661,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     recordInvoicePayment: {
@@ -14458,6 +13710,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Invoice not found. */
             404: {
                 headers: {
@@ -14480,6 +13733,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     rotateInvoicePublicToken: {
@@ -14512,6 +13766,7 @@ export interface operations {
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Invoice not found. */
             404: {
                 headers: {
@@ -14530,6 +13785,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     collectInvoicePayment: {
@@ -14562,6 +13818,7 @@ export interface operations {
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Invoice not found. */
             404: {
                 headers: {
@@ -14612,6 +13869,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
             /**
              * @description Stripe declined or refused the charge (code `provider_error`),
              *     so nothing was charged. The message gives the reason in plain
@@ -14685,6 +13943,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Invoice not found. */
             404: {
                 headers: {
@@ -14721,6 +13980,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getInvoicePaymentTimeline: {
@@ -14743,6 +14003,7 @@ export interface operations {
                     "application/json": components["schemas"]["InvoicePaymentTimeline"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Invoice not found. */
             404: {
                 headers: {
@@ -14752,6 +14013,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     listInvoiceDisputes: {
@@ -14785,6 +14047,7 @@ export interface operations {
                     "application/json": components["schemas"]["InvoiceDisputeList"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Invoice not found. */
             404: {
                 headers: {
@@ -14795,6 +14058,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listInvoiceStripeRefunds: {
@@ -14828,6 +14092,7 @@ export interface operations {
                     "application/json": components["schemas"]["InvoiceStripeRefundList"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Invoice not found. */
             404: {
                 headers: {
@@ -14838,6 +14103,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     dismissInvoiceStripeRefund: {
@@ -14878,6 +14144,8 @@ export interface operations {
                     "application/json": components["schemas"]["InvoiceStripeRefund"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
             /** @description Invoice or refund not found. */
             404: {
                 headers: {
@@ -14905,6 +14173,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getCreditNoteStats: {
@@ -14925,6 +14194,80 @@ export interface operations {
                     "application/json": components["schemas"]["CreditNoteStats"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    sendCreditNote: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                    additional_emails?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Email enqueued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "sent";
+                    };
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Credit note not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /**
+             * @description Nothing was sent. `email_not_configured`: this server has no
+             *     SMTP set up.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not issued (draft/voided), `email` is missing or invalid, or the body has an unknown field (`param` names it) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     getCreditNote: {
@@ -14947,6 +14290,7 @@ export interface operations {
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Credit note not found. */
             404: {
                 headers: {
@@ -14956,6 +14300,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     issueCreditNote: {
@@ -14988,6 +14333,7 @@ export interface operations {
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Credit note not found. */
             404: {
                 headers: {
@@ -15006,6 +14352,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     attachStripeRefundToCreditNote: {
@@ -15044,6 +14391,8 @@ export interface operations {
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
             /** @description Credit note not found. */
             404: {
                 headers: {
@@ -15071,6 +14420,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     retryCreditNoteRefund: {
@@ -15103,6 +14453,7 @@ export interface operations {
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Credit note not found. */
             404: {
                 headers: {
@@ -15132,6 +14483,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
             /**
              * @description Stripe refused the refund (code `provider_error`): the note's
              *     `refund_status` is `failed`. Or Stripe gave no clear answer (code
@@ -15178,6 +14530,7 @@ export interface operations {
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Credit note not found. */
             404: {
                 headers: {
@@ -15199,6 +14552,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getCreditNotePdf: {
@@ -15221,6 +14575,7 @@ export interface operations {
                     "application/pdf": string;
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Credit note not found. */
             404: {
                 headers: {
@@ -15230,6 +14585,312 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    finalizeInvoice: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invoice finalized */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    retryInvoiceTax: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invoice updated; check `attention` for the new state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Invoice not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /**
+             * @description Invoice is not in a retryable state (status != draft, or
+             *     tax_status is not pending). Also returned when the
+             *     tax was saved but the invoice's state then stopped the
+             *     finalize.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Session minted; cookie set on response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        user_id: string;
+                        tenant_id: string;
+                        email: string;
+                        livemode: boolean;
+                        /** Format: date-time */
+                        expires_at: string;
+                    };
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            /** @description Invalid email or password */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Too many attempts. Two limits answer 429, and neither locks
+             *     the account:
+             *
+             *     - Code `login_throttled`: the sign-in throttle. Repeated wrong
+             *       passwords for one email, from one address or from many,
+             *       start a wait of 1 to 15 minutes. The message names the wait
+             *       in minutes and `Retry-After` gives it in seconds. The answer
+             *       is the same for an email with no account. A browser that
+             *       signed in to the email before is counted on its own.
+             *     - Code `rate_limited`: the shared per-address request limit on
+             *       `/v1/auth`.
+             */
+            429: {
+                headers: {
+                    /** @description Seconds until an attempt is counted again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `authentication_unavailable`: the sign-in throttle could not
+             *     read the database, so the attempt was refused before the password
+             *     check. Try again shortly.
+             */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    switchSessionMode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    livemode: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Mode updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        livemode: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            /** @description Missing or expired session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    requestPasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Request accepted (identical body regardless of email existence) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message: string;
+                        /**
+                         * @description Whether this deployment can deliver reset emails
+                         *     (SMTP configured AND `DASHBOARD_BASE_URL` set).
+                         *     Deployment posture, never account state.
+                         * @enum {string}
+                         */
+                        email_delivery: "ok" | "not_configured";
+                    };
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    confirmPasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Password updated. Every session the user had is signed out. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example password updated — sign in with your new password */
+                        message: string;
+                    };
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            /** @description Token invalid/expired or password does not meet policy */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     checkPasswordResetToken: {
@@ -15276,6 +14937,93 @@ export interface operations {
             };
         };
     };
+    getInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invitation preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        email: string;
+                        tenant_id: string;
+                        tenant_name: string;
+                        needs_new_account: boolean;
+                        invited_by_email: string;
+                        /** Format: date-time */
+                        expires_at: string;
+                    };
+                };
+            };
+            /** @description Token invalid, expired, revoked, or already used */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    acceptInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                    /** @description Required (and validated) only when no account exists for the invited email; ignored otherwise. */
+                    password?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Membership attached; cookie set when session_minted is true */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        user_id: string;
+                        email: string;
+                        tenant_id: string;
+                        session_minted: boolean;
+                        livemode: boolean;
+                        /** @description Session expiry (RFC 3339) when session_minted; empty string otherwise. */
+                        expires_at: string;
+                    };
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            /** @description Token invalid/expired/revoked/used, or password does not meet policy */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
     listMembers: {
         parameters: {
             query?: never;
@@ -15303,6 +15051,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller is not a dashboard session */
             403: {
                 headers: {
@@ -15312,6 +15061,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     inviteMember: {
@@ -15349,6 +15099,8 @@ export interface operations {
                     "application/json": components["schemas"]["MemberInvitation"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
             /**
              * @description No invitation was created when the code is
              *     `email_not_configured` (this server has no SMTP set up, so the
@@ -15373,6 +15125,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     revokeMemberInvitation: {
@@ -15393,6 +15146,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
             /** @description No pending invitation with this id (code `not_found`). */
             404: {
                 headers: {
@@ -15402,6 +15156,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     removeMember: {
@@ -15422,6 +15177,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
             /** @description User is not a member of this workspace (code `not_found`). */
             404: {
                 headers: {
@@ -15440,6 +15196,736 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getWhoami: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resolved auth context */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        tenant_id: string;
+                        livemode: boolean;
+                        /**
+                         * @description Whether this server can email a customer a link to add
+                         *     a payment method. False when email sending (SMTP) or
+                         *     PAYMENT_UPDATE_URL is not set up; resending a setup
+                         *     link then fails.
+                         */
+                        can_email_setup_links: boolean;
+                        /**
+                         * @description Whether this server can invite a teammate. False when
+                         *     email sending (SMTP) or DASHBOARD_BASE_URL is not set
+                         *     up; inviting then fails with 409.
+                         */
+                        can_send_invites: boolean;
+                        /**
+                         * @description Whether this server has SMTP set up (SMTP_HOST). False
+                         *     means no email of any kind is sent. Settings → Email
+                         *     (`GET /v1/settings/email`) has the details.
+                         */
+                        smtp_configured: boolean;
+                        user_id?: string;
+                        email?: string;
+                        key_id?: string;
+                        /** @enum {string} */
+                        key_type?: "secret" | "ingest";
+                    };
+                };
+            };
+            /** @description Missing, revoked, or expired credential */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    runBilling: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every due subscription was billed. `errors` is empty. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        invoices_generated: number;
+                        errors: string[];
+                    };
+                };
+            };
+            /**
+             * @description `errors` is not empty. The invoices the run made are kept. Each
+             *     entry is one of:
+             *     - `subscription <id>: billing failed`: that subscription could
+             *       not be billed.
+             *     - `billing run failed`: the run stopped before it reached every
+             *       due subscription, because the list of due subscriptions could
+             *       not be read or the request ran out of time (30 seconds). The
+             *       subscriptions it did not reach are still due, and the next
+             *       billing run bills them.
+             *     - `billing run completed but its audit record failed`: the run's
+             *       audit record could not be written.
+             */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        invoices_generated: number;
+                        errors: string[];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listProviderCosts: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ProviderCostRate"][];
+                        total: components["schemas"]["ListTotal"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    upsertProviderCost: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    provider: string;
+                    /** @description Model family token or raw snapshot id — raw ids match first at ingest. */
+                    model: string;
+                    /** @description ADR-044 role — input / output / cache_read. */
+                    token_type: string;
+                    /** @description US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens). 0 or more, under 10^10, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. */
+                    unit_cost_cents: string;
+                    /**
+                     * @description Rates are in USD only, the currency LiteLLM reports cost
+                     *     in. Any other value is 422.
+                     * @default USD
+                     * @enum {string}
+                     */
+                    currency?: "USD";
+                };
+            };
+        };
+        responses: {
+            /** @description Upserted rate */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderCostRate"];
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            /** @description `validation_error`: a required field is missing, `unit_cost_cents` is not a number or is outside its limits, `currency` is not USD, or the body has an unknown field such as `cost_per_token` (`param` names the field; the body must use only the fields listed here). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteProviderCost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getCustomerMargin: {
+        parameters: {
+            query?: {
+                /** @description Window start, inclusive. RFC 3339. Default is 30 days before the customer's current time. */
+                from?: string;
+                /** @description Window end, exclusive. RFC 3339. Default is the customer's current time (test clock time for a customer on a test clock). */
+                to?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Margin report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarginReport"];
+                };
+            };
+            /** @description `from` or `to` is not RFC 3339, or `from` is not before `to`. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Customer not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The window is longer than one year. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    grantCredits: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    customer_id: string;
+                    /**
+                     * @description ISO 4217 code of the credit. Required. Case-insensitive;
+                     *     stored uppercase. Zero-decimal currencies (such as JPY)
+                     *     are not supported yet.
+                     * @example USD
+                     */
+                    currency: string;
+                    /** Format: int64 */
+                    amount_cents: number;
+                    description?: string;
+                    /**
+                     * Format: date-time
+                     * @description Optional expiry; must be in the future. Omitted = never
+                     *     expires. The credit can be drawn up to and including this
+                     *     instant; a period invoice draws it when its period ends
+                     *     at or before it. The dashboard sends the local midnight
+                     *     after the picked day.
+                     */
+                    expires_at?: string;
+                    /**
+                     * @description Optional cost-basis class (ADR-078). `promotional` marks
+                     *     free/marketing credits, drained BEFORE all paid-class
+                     *     blocks. Omitted = unclassified (drains in the paid
+                     *     class). `commit` is reserved for the invoice-finalize
+                     *     funding path and rejected here.
+                     * @enum {string}
+                     */
+                    grant_kind?: "promotional";
+                };
+            };
+        };
+        responses: {
+            /** @description Credits granted */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditLedgerEntry"];
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            /** @description A field failed validation (a missing or unsupported `currency` has `param` `currency`), or the body has an unknown field (`param` names it; the body must use only the fields listed here). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getCreditBalance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Credit balances, one per currency. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CreditBalance"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description No customer with this ID in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getLiveCreditBalance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Live credit balance */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditLiveBalance"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Customer not found in this tenant and mode */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listTestClocks: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Test clocks */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TestClock"][];
+                        total: components["schemas"]["ListTotal"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is in live mode */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createTestClock: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    /** Format: date-time */
+                    frozen_time: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Clock created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestClock"];
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getTestClock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Clock */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestClock"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Clock not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteTestClock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Clock deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "deleted";
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listTestClockSubscriptions: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
+                 *     that is not a whole number, is a 422 with `param: limit`.
+                 */
+                limit?: components["parameters"]["Limit"];
+                /**
+                 * @description Rows to skip, 0 or more. Default 0. A negative value, or one that is
+                 *     not a whole number, is a 422 with `param: offset`.
+                 */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Subscriptions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Subscription"][];
+                        total: components["schemas"]["ListTotal"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Clock not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    advanceTestClock: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: date-time */
+                    frozen_time: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Advance accepted — clock returned in `advancing` state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestClock"];
+                };
+            };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Clock is not in `ready` state */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description New frozen_time is not strictly after the current frozen_time, or is more than one year after it */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    retryTestClockAdvance: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Retry accepted — clock returned in `advancing` state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestClock"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Clock not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Clock is not in `internal_failure` state */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     listTestClockCustomers: {
@@ -15476,6 +15962,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller is in live mode, or the key lacks the `testclock:write` permission (needed even to read test clocks). */
             403: {
                 headers: {
@@ -15495,6 +15982,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listRecipes: {
@@ -15529,7 +16017,9 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listRecipeInstances: {
@@ -15564,7 +16054,9 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getRecipe: {
@@ -15587,6 +16079,7 @@ export interface operations {
                     "application/json": components["schemas"]["RecipeDetail"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Unknown recipe key */
             404: {
                 headers: {
@@ -15594,6 +16087,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     previewRecipe: {
@@ -15634,6 +16128,8 @@ export interface operations {
                     "application/json": components["schemas"]["RecipePreviewResult"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
             /** @description Unknown recipe key */
             404: {
                 headers: {
@@ -15648,6 +16144,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     instantiateRecipe: {
@@ -15688,6 +16185,8 @@ export interface operations {
                     "application/json": components["schemas"]["RecipeInstance"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
+            401: components["responses"]["Unauthorized"];
             /** @description Unknown recipe key */
             404: {
                 headers: {
@@ -15709,6 +16208,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     exportCustomersCsv: {
@@ -15734,6 +16234,7 @@ export interface operations {
                     "text/csv": string;
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `from` or `to` is malformed, or `to` is before `from`. */
             422: {
                 headers: {
@@ -15743,6 +16244,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
             /** @description The export's audit row could not be written; nothing was sent. */
             500: {
                 headers: {
@@ -15777,6 +16279,7 @@ export interface operations {
                     "text/csv": string;
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `from` or `to` is malformed, or `to` is before `from`. */
             422: {
                 headers: {
@@ -15786,6 +16289,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
             /** @description The export's audit row could not be written; nothing was sent. */
             500: {
                 headers: {
@@ -15820,6 +16324,7 @@ export interface operations {
                     "text/csv": string;
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `from` or `to` is malformed, or `to` is before `from`. */
             422: {
                 headers: {
@@ -15829,6 +16334,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
             /** @description The export's audit row could not be written; nothing was sent. */
             500: {
                 headers: {
@@ -15878,6 +16384,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `from` or `to` is malformed, `to` is before `from`, or a `dimensions` pair is malformed. */
             422: {
                 headers: {
@@ -15887,6 +16394,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
             /** @description The export's audit row could not be written; nothing was sent. */
             500: {
                 headers: {
@@ -15931,6 +16439,7 @@ export interface operations {
                     "text/csv": string;
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description A date filter is malformed, or an upper bound is before its lower bound. */
             422: {
                 headers: {
@@ -15940,6 +16449,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
             /** @description The export's audit row could not be written; nothing was sent. */
             500: {
                 headers: {
@@ -15972,6 +16482,8 @@ export interface operations {
                     "application/json": components["schemas"]["AnalyticsOverview"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getAnalyticsRevenueChart: {
@@ -15998,6 +16510,8 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getAnalyticsMrrMovement: {
@@ -16025,6 +16539,8 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getAnalyticsUsage: {
@@ -16058,13 +16574,14 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listDunningRuns: {
         parameters: {
             query?: {
                 invoice_id?: string;
-                /** @description Exact run state. Any other value is a 422. */
                 state?: "active" | "escalated" | "resolved";
                 /**
                  * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
@@ -16095,7 +16612,9 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getDunningRun: {
@@ -16118,6 +16637,7 @@ export interface operations {
                     "application/json": components["schemas"]["DunningRunDetail"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Dunning run not found. */
             404: {
                 headers: {
@@ -16127,6 +16647,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     resolveDunningRun: {
@@ -16178,6 +16699,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Dunning run or invoice not found. */
             404: {
                 headers: {
@@ -16209,6 +16731,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getDunningStats: {
@@ -16229,6 +16752,8 @@ export interface operations {
                     "application/json": components["schemas"]["DunningStats"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listDunningPolicies: {
@@ -16263,7 +16788,9 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createDunningPolicy: {
@@ -16307,6 +16834,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /**
              * @description `validation_error`: a replaced field was sent (`final_action`,
              *     `retry_schedule`, `max_retry_attempts`, `grace_period_days`),
@@ -16321,6 +16849,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getDunningPolicy: {
@@ -16343,6 +16872,7 @@ export interface operations {
                     "application/json": components["schemas"]["DunningPolicy"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `not_found`: no policy with this id in this tenant and mode. */
             404: {
                 headers: {
@@ -16352,6 +16882,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     deleteDunningPolicy: {
@@ -16377,6 +16908,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `not_found`: no policy with this id in this tenant and mode. */
             404: {
                 headers: {
@@ -16399,6 +16931,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     updateDunningPolicy: {
@@ -16444,6 +16977,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `not_found`: no policy with this id in this tenant and mode. */
             404: {
                 headers: {
@@ -16462,6 +16996,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     setDefaultDunningPolicy: {
@@ -16497,6 +17032,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `not_found`: no policy with this id in this tenant and mode. */
             404: {
                 headers: {
@@ -16506,6 +17042,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     listPriceOverrides: {
@@ -16544,7 +17081,9 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createPriceOverride: {
@@ -16614,6 +17153,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `not_found`: no customer with this id in this tenant and mode. */
             404: {
                 headers: {
@@ -16652,6 +17192,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     deletePriceOverride: {
@@ -16674,6 +17215,7 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerPriceOverride"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `not_found`: no active override with this id (it may already be ended). */
             404: {
                 headers: {
@@ -16683,6 +17225,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     ingestLitellmSpend: {
@@ -16718,6 +17261,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
             /**
              * @description `ingest_unavailable`: the usage store could not be reached.
              *     Retry the whole batch; events already recorded come back as
@@ -16765,6 +17310,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller lacks the `apikey:write` permission */
             403: {
                 headers: {
@@ -16775,6 +17321,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["InvalidPage"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createApiKey: {
@@ -16831,6 +17378,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller lacks the `apikey:write` permission */
             403: {
                 headers: {
@@ -16849,6 +17397,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     revokeApiKey: {
@@ -16872,6 +17421,7 @@ export interface operations {
                     "application/json": components["schemas"]["APIKey"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description No such key in this mode, or it is already revoked */
             404: {
                 headers: {
@@ -16881,6 +17431,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     rotateApiKey: {
@@ -16933,6 +17484,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller lacks the `apikey:write` permission */
             403: {
                 headers: {
@@ -16969,6 +17521,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getTenantSettings: {
@@ -16989,6 +17542,7 @@ export interface operations {
                     "application/json": components["schemas"]["TenantSettings"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller lacks the `apikey:write` permission */
             403: {
                 headers: {
@@ -16998,6 +17552,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     updateTenantSettings: {
@@ -17041,6 +17596,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller lacks the `apikey:write` permission */
             403: {
                 headers: {
@@ -17059,6 +17615,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getEmailSettings: {
@@ -17098,6 +17655,8 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
         };
     };
     sendTestEmail: {
@@ -17130,6 +17689,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description `email_not_configured`: SMTP_HOST is not set. */
             409: {
                 headers: {
@@ -17139,6 +17699,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
             /** @description `smtp_error`: the SMTP server refused the email or could not be reached. The message carries its answer. */
             502: {
                 headers: {
@@ -17170,6 +17731,8 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
         };
     };
     connectStripe: {
@@ -17222,6 +17785,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description A key has the wrong prefix for the mode. `error.param` names the field. */
             422: {
                 headers: {
@@ -17231,6 +17795,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     setStripeWebhookSecret: {
@@ -17279,6 +17844,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Stripe is not connected for this mode. Connect it first. */
             404: {
                 headers: {
@@ -17297,6 +17863,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     disconnectStripe: {
@@ -17326,6 +17893,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Stripe is not connected for this mode */
             404: {
                 headers: {
@@ -17335,6 +17903,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     bootstrap: {
@@ -17371,6 +17940,7 @@ export interface operations {
                     "application/json": components["schemas"]["BootstrapResult"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             /** @description Bootstrap is disabled (`HARDCOUNT_BOOTSTRAP_TOKEN` not set) or the token is wrong */
             403: {
                 headers: {
@@ -17472,6 +18042,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller lacks the `apikey:read` permission */
             403: {
                 headers: {
@@ -17490,6 +18061,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getAuditLogFilters: {
@@ -17510,6 +18082,7 @@ export interface operations {
                     "application/json": components["schemas"]["AuditLogFilters"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller lacks the `apikey:read` permission */
             403: {
                 headers: {
@@ -17519,6 +18092,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
 }

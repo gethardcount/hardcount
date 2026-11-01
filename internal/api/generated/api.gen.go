@@ -2255,14 +2255,14 @@ func (e CheckPasswordResetToken200JSONResponseBodyValid) Valid() bool {
 	}
 }
 
-// Defines values for PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery.
+// Defines values for RequestPasswordReset200JSONResponseBodyEmailDelivery.
 const (
-	NotConfigured PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery = "not_configured"
-	Ok            PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery = "ok"
+	NotConfigured RequestPasswordReset200JSONResponseBodyEmailDelivery = "not_configured"
+	Ok            RequestPasswordReset200JSONResponseBodyEmailDelivery = "ok"
 )
 
-// Valid indicates whether the value is a known member of the PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery enum.
-func (e PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery) Valid() bool {
+// Valid indicates whether the value is a known member of the RequestPasswordReset200JSONResponseBodyEmailDelivery enum.
+func (e RequestPasswordReset200JSONResponseBodyEmailDelivery) Valid() bool {
 	switch e {
 	case NotConfigured:
 		return true
@@ -2342,46 +2342,46 @@ func (e ListCreditNotesParamsDir) Valid() bool {
 	}
 }
 
-// Defines values for PostV1CreditNotesJSONBodyRefundType.
+// Defines values for CreateCreditNoteJSONBodyRefundType.
 const (
-	PostV1CreditNotesJSONBodyRefundTypeCredit PostV1CreditNotesJSONBodyRefundType = "credit"
-	PostV1CreditNotesJSONBodyRefundTypeRefund PostV1CreditNotesJSONBodyRefundType = "refund"
+	CreateCreditNoteJSONBodyRefundTypeCredit CreateCreditNoteJSONBodyRefundType = "credit"
+	CreateCreditNoteJSONBodyRefundTypeRefund CreateCreditNoteJSONBodyRefundType = "refund"
 )
 
-// Valid indicates whether the value is a known member of the PostV1CreditNotesJSONBodyRefundType enum.
-func (e PostV1CreditNotesJSONBodyRefundType) Valid() bool {
+// Valid indicates whether the value is a known member of the CreateCreditNoteJSONBodyRefundType enum.
+func (e CreateCreditNoteJSONBodyRefundType) Valid() bool {
 	switch e {
-	case PostV1CreditNotesJSONBodyRefundTypeCredit:
+	case CreateCreditNoteJSONBodyRefundTypeCredit:
 		return true
-	case PostV1CreditNotesJSONBodyRefundTypeRefund:
+	case CreateCreditNoteJSONBodyRefundTypeRefund:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for PostV1CreditNotesIdSend200JSONResponseBodyStatus.
+// Defines values for SendCreditNote200JSONResponseBodyStatus.
 const (
-	PostV1CreditNotesIdSend200JSONResponseBodyStatusSent PostV1CreditNotesIdSend200JSONResponseBodyStatus = "sent"
+	SendCreditNote200JSONResponseBodyStatusSent SendCreditNote200JSONResponseBodyStatus = "sent"
 )
 
-// Valid indicates whether the value is a known member of the PostV1CreditNotesIdSend200JSONResponseBodyStatus enum.
-func (e PostV1CreditNotesIdSend200JSONResponseBodyStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the SendCreditNote200JSONResponseBodyStatus enum.
+func (e SendCreditNote200JSONResponseBodyStatus) Valid() bool {
 	switch e {
-	case PostV1CreditNotesIdSend200JSONResponseBodyStatusSent:
+	case SendCreditNote200JSONResponseBodyStatusSent:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for PostV1CreditsGrantJSONBodyGrantKind.
+// Defines values for GrantCreditsJSONBodyGrantKind.
 const (
-	Promotional PostV1CreditsGrantJSONBodyGrantKind = "promotional"
+	Promotional GrantCreditsJSONBodyGrantKind = "promotional"
 )
 
-// Valid indicates whether the value is a known member of the PostV1CreditsGrantJSONBodyGrantKind enum.
-func (e PostV1CreditsGrantJSONBodyGrantKind) Valid() bool {
+// Valid indicates whether the value is a known member of the GrantCreditsJSONBodyGrantKind enum.
+func (e GrantCreditsJSONBodyGrantKind) Valid() bool {
 	switch e {
 	case Promotional:
 		return true
@@ -2432,18 +2432,18 @@ func (e ListCreditLedgerEntriesParamsDir) Valid() bool {
 	}
 }
 
-// Defines values for GetV1CustomersParamsDir.
+// Defines values for ListCustomersParamsDir.
 const (
-	GetV1CustomersParamsDirAsc  GetV1CustomersParamsDir = "asc"
-	GetV1CustomersParamsDirDesc GetV1CustomersParamsDir = "desc"
+	ListCustomersParamsDirAsc  ListCustomersParamsDir = "asc"
+	ListCustomersParamsDirDesc ListCustomersParamsDir = "desc"
 )
 
-// Valid indicates whether the value is a known member of the GetV1CustomersParamsDir enum.
-func (e GetV1CustomersParamsDir) Valid() bool {
+// Valid indicates whether the value is a known member of the ListCustomersParamsDir enum.
+func (e ListCustomersParamsDir) Valid() bool {
 	switch e {
-	case GetV1CustomersParamsDirAsc:
+	case ListCustomersParamsDirAsc:
 		return true
-	case GetV1CustomersParamsDirDesc:
+	case ListCustomersParamsDirDesc:
 		return true
 	default:
 		return false
@@ -2540,18 +2540,18 @@ func (e ResolveDunningRunJSONBodyResolution) Valid() bool {
 	}
 }
 
-// Defines values for GetV1InvoicesParamsDir.
+// Defines values for ListInvoicesParamsDir.
 const (
-	GetV1InvoicesParamsDirAsc  GetV1InvoicesParamsDir = "asc"
-	GetV1InvoicesParamsDirDesc GetV1InvoicesParamsDir = "desc"
+	ListInvoicesParamsDirAsc  ListInvoicesParamsDir = "asc"
+	ListInvoicesParamsDirDesc ListInvoicesParamsDir = "desc"
 )
 
-// Valid indicates whether the value is a known member of the GetV1InvoicesParamsDir enum.
-func (e GetV1InvoicesParamsDir) Valid() bool {
+// Valid indicates whether the value is a known member of the ListInvoicesParamsDir enum.
+func (e ListInvoicesParamsDir) Valid() bool {
 	switch e {
-	case GetV1InvoicesParamsDirAsc:
+	case ListInvoicesParamsDirAsc:
 		return true
-	case GetV1InvoicesParamsDirDesc:
+	case ListInvoicesParamsDirDesc:
 		return true
 	default:
 		return false
@@ -2597,13 +2597,13 @@ func (e ResendInvoiceSetupLink200JSONResponseBodyStatus) Valid() bool {
 	}
 }
 
-// Defines values for PostV1InvoicesIdSend200JSONResponseBodyStatus.
+// Defines values for SendInvoice200JSONResponseBodyStatus.
 const (
-	Sent PostV1InvoicesIdSend200JSONResponseBodyStatus = "sent"
+	Sent SendInvoice200JSONResponseBodyStatus = "sent"
 )
 
-// Valid indicates whether the value is a known member of the PostV1InvoicesIdSend200JSONResponseBodyStatus enum.
-func (e PostV1InvoicesIdSend200JSONResponseBodyStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the SendInvoice200JSONResponseBodyStatus enum.
+func (e SendInvoice200JSONResponseBodyStatus) Valid() bool {
 	switch e {
 	case Sent:
 		return true
@@ -2612,40 +2612,40 @@ func (e PostV1InvoicesIdSend200JSONResponseBodyStatus) Valid() bool {
 	}
 }
 
-// Defines values for PostV1MetersJSONBodyAggregation.
+// Defines values for CreateMeterJSONBodyAggregation.
 const (
-	PostV1MetersJSONBodyAggregationCount PostV1MetersJSONBodyAggregation = "count"
-	PostV1MetersJSONBodyAggregationLast  PostV1MetersJSONBodyAggregation = "last"
-	PostV1MetersJSONBodyAggregationMax   PostV1MetersJSONBodyAggregation = "max"
-	PostV1MetersJSONBodyAggregationSum   PostV1MetersJSONBodyAggregation = "sum"
+	CreateMeterJSONBodyAggregationCount CreateMeterJSONBodyAggregation = "count"
+	CreateMeterJSONBodyAggregationLast  CreateMeterJSONBodyAggregation = "last"
+	CreateMeterJSONBodyAggregationMax   CreateMeterJSONBodyAggregation = "max"
+	CreateMeterJSONBodyAggregationSum   CreateMeterJSONBodyAggregation = "sum"
 )
 
-// Valid indicates whether the value is a known member of the PostV1MetersJSONBodyAggregation enum.
-func (e PostV1MetersJSONBodyAggregation) Valid() bool {
+// Valid indicates whether the value is a known member of the CreateMeterJSONBodyAggregation enum.
+func (e CreateMeterJSONBodyAggregation) Valid() bool {
 	switch e {
-	case PostV1MetersJSONBodyAggregationCount:
+	case CreateMeterJSONBodyAggregationCount:
 		return true
-	case PostV1MetersJSONBodyAggregationLast:
+	case CreateMeterJSONBodyAggregationLast:
 		return true
-	case PostV1MetersJSONBodyAggregationMax:
+	case CreateMeterJSONBodyAggregationMax:
 		return true
-	case PostV1MetersJSONBodyAggregationSum:
+	case CreateMeterJSONBodyAggregationSum:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for PatchV1MetersIdJSONBodyAggregation.
+// Defines values for UpdateMeterJSONBodyAggregation.
 const (
-	Count PatchV1MetersIdJSONBodyAggregation = "count"
-	Last  PatchV1MetersIdJSONBodyAggregation = "last"
-	Max   PatchV1MetersIdJSONBodyAggregation = "max"
-	Sum   PatchV1MetersIdJSONBodyAggregation = "sum"
+	Count UpdateMeterJSONBodyAggregation = "count"
+	Last  UpdateMeterJSONBodyAggregation = "last"
+	Max   UpdateMeterJSONBodyAggregation = "max"
+	Sum   UpdateMeterJSONBodyAggregation = "sum"
 )
 
-// Valid indicates whether the value is a known member of the PatchV1MetersIdJSONBodyAggregation enum.
-func (e PatchV1MetersIdJSONBodyAggregation) Valid() bool {
+// Valid indicates whether the value is a known member of the UpdateMeterJSONBodyAggregation enum.
+func (e UpdateMeterJSONBodyAggregation) Valid() bool {
 	switch e {
 	case Count:
 		return true
@@ -2660,51 +2660,51 @@ func (e PatchV1MetersIdJSONBodyAggregation) Valid() bool {
 	}
 }
 
-// Defines values for PostV1PlansJSONBodyBaseBillTiming.
+// Defines values for CreatePlanJSONBodyBaseBillTiming.
 const (
-	PostV1PlansJSONBodyBaseBillTimingInAdvance PostV1PlansJSONBodyBaseBillTiming = "in_advance"
-	PostV1PlansJSONBodyBaseBillTimingInArrears PostV1PlansJSONBodyBaseBillTiming = "in_arrears"
+	CreatePlanJSONBodyBaseBillTimingInAdvance CreatePlanJSONBodyBaseBillTiming = "in_advance"
+	CreatePlanJSONBodyBaseBillTimingInArrears CreatePlanJSONBodyBaseBillTiming = "in_arrears"
 )
 
-// Valid indicates whether the value is a known member of the PostV1PlansJSONBodyBaseBillTiming enum.
-func (e PostV1PlansJSONBodyBaseBillTiming) Valid() bool {
+// Valid indicates whether the value is a known member of the CreatePlanJSONBodyBaseBillTiming enum.
+func (e CreatePlanJSONBodyBaseBillTiming) Valid() bool {
 	switch e {
-	case PostV1PlansJSONBodyBaseBillTimingInAdvance:
+	case CreatePlanJSONBodyBaseBillTimingInAdvance:
 		return true
-	case PostV1PlansJSONBodyBaseBillTimingInArrears:
+	case CreatePlanJSONBodyBaseBillTimingInArrears:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for PostV1PlansJSONBodyBillingInterval.
+// Defines values for CreatePlanJSONBodyBillingInterval.
 const (
-	PostV1PlansJSONBodyBillingIntervalMonthly PostV1PlansJSONBodyBillingInterval = "monthly"
-	PostV1PlansJSONBodyBillingIntervalYearly  PostV1PlansJSONBodyBillingInterval = "yearly"
+	CreatePlanJSONBodyBillingIntervalMonthly CreatePlanJSONBodyBillingInterval = "monthly"
+	CreatePlanJSONBodyBillingIntervalYearly  CreatePlanJSONBodyBillingInterval = "yearly"
 )
 
-// Valid indicates whether the value is a known member of the PostV1PlansJSONBodyBillingInterval enum.
-func (e PostV1PlansJSONBodyBillingInterval) Valid() bool {
+// Valid indicates whether the value is a known member of the CreatePlanJSONBodyBillingInterval enum.
+func (e CreatePlanJSONBodyBillingInterval) Valid() bool {
 	switch e {
-	case PostV1PlansJSONBodyBillingIntervalMonthly:
+	case CreatePlanJSONBodyBillingIntervalMonthly:
 		return true
-	case PostV1PlansJSONBodyBillingIntervalYearly:
+	case CreatePlanJSONBodyBillingIntervalYearly:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for PostV1PlansJSONBodyStatus.
+// Defines values for CreatePlanJSONBodyStatus.
 const (
-	PostV1PlansJSONBodyStatusActive PostV1PlansJSONBodyStatus = "active"
+	CreatePlanJSONBodyStatusActive CreatePlanJSONBodyStatus = "active"
 )
 
-// Valid indicates whether the value is a known member of the PostV1PlansJSONBodyStatus enum.
-func (e PostV1PlansJSONBodyStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the CreatePlanJSONBodyStatus enum.
+func (e CreatePlanJSONBodyStatus) Valid() bool {
 	switch e {
-	case PostV1PlansJSONBodyStatusActive:
+	case CreatePlanJSONBodyStatusActive:
 		return true
 	default:
 		return false
@@ -2768,33 +2768,33 @@ func (e CreatePriceOverrideJSONBodyMode) Valid() bool {
 	}
 }
 
-// Defines values for PutV1ProviderCostsJSONBodyCurrency.
+// Defines values for UpsertProviderCostJSONBodyCurrency.
 const (
-	PutV1ProviderCostsJSONBodyCurrencyUSD PutV1ProviderCostsJSONBodyCurrency = "USD"
+	UpsertProviderCostJSONBodyCurrencyUSD UpsertProviderCostJSONBodyCurrency = "USD"
 )
 
-// Valid indicates whether the value is a known member of the PutV1ProviderCostsJSONBodyCurrency enum.
-func (e PutV1ProviderCostsJSONBodyCurrency) Valid() bool {
+// Valid indicates whether the value is a known member of the UpsertProviderCostJSONBodyCurrency enum.
+func (e UpsertProviderCostJSONBodyCurrency) Valid() bool {
 	switch e {
-	case PutV1ProviderCostsJSONBodyCurrencyUSD:
+	case UpsertProviderCostJSONBodyCurrencyUSD:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource.
+// Defines values for GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource.
 const (
-	GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSourceNoSubscription GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource = "no_subscription"
-	GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSourceSubscription   GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource = "subscription"
+	GetPublicCostDashboard200JSONResponseBodyBillingPeriodSourceNoSubscription GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource = "no_subscription"
+	GetPublicCostDashboard200JSONResponseBodyBillingPeriodSourceSubscription   GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource = "subscription"
 )
 
-// Valid indicates whether the value is a known member of the GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource enum.
-func (e GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource) Valid() bool {
+// Valid indicates whether the value is a known member of the GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource enum.
+func (e GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource) Valid() bool {
 	switch e {
-	case GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSourceNoSubscription:
+	case GetPublicCostDashboard200JSONResponseBodyBillingPeriodSourceNoSubscription:
 		return true
-	case GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSourceSubscription:
+	case GetPublicCostDashboard200JSONResponseBodyBillingPeriodSourceSubscription:
 		return true
 	default:
 		return false
@@ -2879,37 +2879,37 @@ func (e SetStripeWebhookSecretParamsMode) Valid() bool {
 	}
 }
 
-// Defines values for GetV1SubscriptionsParamsStatus.
+// Defines values for ListSubscriptionsParamsStatus.
 const (
-	GetV1SubscriptionsParamsStatusActive   GetV1SubscriptionsParamsStatus = "active"
-	GetV1SubscriptionsParamsStatusCanceled GetV1SubscriptionsParamsStatus = "canceled"
-	GetV1SubscriptionsParamsStatusDraft    GetV1SubscriptionsParamsStatus = "draft"
-	GetV1SubscriptionsParamsStatusTrialing GetV1SubscriptionsParamsStatus = "trialing"
+	ListSubscriptionsParamsStatusActive   ListSubscriptionsParamsStatus = "active"
+	ListSubscriptionsParamsStatusCanceled ListSubscriptionsParamsStatus = "canceled"
+	ListSubscriptionsParamsStatusDraft    ListSubscriptionsParamsStatus = "draft"
+	ListSubscriptionsParamsStatusTrialing ListSubscriptionsParamsStatus = "trialing"
 )
 
-// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsStatus enum.
-func (e GetV1SubscriptionsParamsStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the ListSubscriptionsParamsStatus enum.
+func (e ListSubscriptionsParamsStatus) Valid() bool {
 	switch e {
-	case GetV1SubscriptionsParamsStatusActive:
+	case ListSubscriptionsParamsStatusActive:
 		return true
-	case GetV1SubscriptionsParamsStatusCanceled:
+	case ListSubscriptionsParamsStatusCanceled:
 		return true
-	case GetV1SubscriptionsParamsStatusDraft:
+	case ListSubscriptionsParamsStatusDraft:
 		return true
-	case GetV1SubscriptionsParamsStatusTrialing:
+	case ListSubscriptionsParamsStatusTrialing:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for GetV1SubscriptionsParamsBilling.
+// Defines values for ListSubscriptionsParamsBilling.
 const (
-	Failing GetV1SubscriptionsParamsBilling = "failing"
+	Failing ListSubscriptionsParamsBilling = "failing"
 )
 
-// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsBilling enum.
-func (e GetV1SubscriptionsParamsBilling) Valid() bool {
+// Valid indicates whether the value is a known member of the ListSubscriptionsParamsBilling enum.
+func (e ListSubscriptionsParamsBilling) Valid() bool {
 	switch e {
 	case Failing:
 		return true
@@ -2918,13 +2918,13 @@ func (e GetV1SubscriptionsParamsBilling) Valid() bool {
 	}
 }
 
-// Defines values for GetV1SubscriptionsParamsCollection.
+// Defines values for ListSubscriptionsParamsCollection.
 const (
-	Paused GetV1SubscriptionsParamsCollection = "paused"
+	Paused ListSubscriptionsParamsCollection = "paused"
 )
 
-// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsCollection enum.
-func (e GetV1SubscriptionsParamsCollection) Valid() bool {
+// Valid indicates whether the value is a known member of the ListSubscriptionsParamsCollection enum.
+func (e ListSubscriptionsParamsCollection) Valid() bool {
 	switch e {
 	case Paused:
 		return true
@@ -2933,14 +2933,14 @@ func (e GetV1SubscriptionsParamsCollection) Valid() bool {
 	}
 }
 
-// Defines values for GetV1SubscriptionsParamsDir.
+// Defines values for ListSubscriptionsParamsDir.
 const (
-	Asc  GetV1SubscriptionsParamsDir = "asc"
-	Desc GetV1SubscriptionsParamsDir = "desc"
+	Asc  ListSubscriptionsParamsDir = "asc"
+	Desc ListSubscriptionsParamsDir = "desc"
 )
 
-// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsDir enum.
-func (e GetV1SubscriptionsParamsDir) Valid() bool {
+// Valid indicates whether the value is a known member of the ListSubscriptionsParamsDir enum.
+func (e ListSubscriptionsParamsDir) Valid() bool {
 	switch e {
 	case Asc:
 		return true
@@ -2951,31 +2951,31 @@ func (e GetV1SubscriptionsParamsDir) Valid() bool {
 	}
 }
 
-// Defines values for PostV1SubscriptionsJSONBodyBillingTime.
+// Defines values for CreateSubscriptionJSONBodyBillingTime.
 const (
-	PostV1SubscriptionsJSONBodyBillingTimeAnniversary PostV1SubscriptionsJSONBodyBillingTime = "anniversary"
-	PostV1SubscriptionsJSONBodyBillingTimeCalendar    PostV1SubscriptionsJSONBodyBillingTime = "calendar"
+	CreateSubscriptionJSONBodyBillingTimeAnniversary CreateSubscriptionJSONBodyBillingTime = "anniversary"
+	CreateSubscriptionJSONBodyBillingTimeCalendar    CreateSubscriptionJSONBodyBillingTime = "calendar"
 )
 
-// Valid indicates whether the value is a known member of the PostV1SubscriptionsJSONBodyBillingTime enum.
-func (e PostV1SubscriptionsJSONBodyBillingTime) Valid() bool {
+// Valid indicates whether the value is a known member of the CreateSubscriptionJSONBodyBillingTime enum.
+func (e CreateSubscriptionJSONBodyBillingTime) Valid() bool {
 	switch e {
-	case PostV1SubscriptionsJSONBodyBillingTimeAnniversary:
+	case CreateSubscriptionJSONBodyBillingTimeAnniversary:
 		return true
-	case PostV1SubscriptionsJSONBodyBillingTimeCalendar:
+	case CreateSubscriptionJSONBodyBillingTimeCalendar:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for PostV1SubscriptionsJSONBodyStatus.
+// Defines values for CreateSubscriptionJSONBodyStatus.
 const (
-	Draft PostV1SubscriptionsJSONBodyStatus = "draft"
+	Draft CreateSubscriptionJSONBodyStatus = "draft"
 )
 
-// Valid indicates whether the value is a known member of the PostV1SubscriptionsJSONBodyStatus enum.
-func (e PostV1SubscriptionsJSONBodyStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the CreateSubscriptionJSONBodyStatus enum.
+func (e CreateSubscriptionJSONBodyStatus) Valid() bool {
 	switch e {
 	case Draft:
 		return true
@@ -2999,28 +2999,28 @@ func (e PauseSubscriptionCollectionJSONBodyBehavior) Valid() bool {
 	}
 }
 
-// Defines values for DeleteV1TestClocksId200JSONResponseBodyStatus.
+// Defines values for DeleteTestClock200JSONResponseBodyStatus.
 const (
-	DeleteV1TestClocksId200JSONResponseBodyStatusDeleted DeleteV1TestClocksId200JSONResponseBodyStatus = "deleted"
+	DeleteTestClock200JSONResponseBodyStatusDeleted DeleteTestClock200JSONResponseBodyStatus = "deleted"
 )
 
-// Valid indicates whether the value is a known member of the DeleteV1TestClocksId200JSONResponseBodyStatus enum.
-func (e DeleteV1TestClocksId200JSONResponseBodyStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the DeleteTestClock200JSONResponseBodyStatus enum.
+func (e DeleteTestClock200JSONResponseBodyStatus) Valid() bool {
 	switch e {
-	case DeleteV1TestClocksId200JSONResponseBodyStatusDeleted:
+	case DeleteTestClock200JSONResponseBodyStatusDeleted:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus.
+// Defines values for DeleteWebhookEndpoint200JSONResponseBodyStatus.
 const (
-	Deleted DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus = "deleted"
+	Deleted DeleteWebhookEndpoint200JSONResponseBodyStatus = "deleted"
 )
 
-// Valid indicates whether the value is a known member of the DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus enum.
-func (e DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the DeleteWebhookEndpoint200JSONResponseBodyStatus enum.
+func (e DeleteWebhookEndpoint200JSONResponseBodyStatus) Valid() bool {
 	switch e {
 	case Deleted:
 		return true
@@ -3068,14 +3068,14 @@ func (e ReceiveStripeWebhook200JSONResponseBodyStatus) Valid() bool {
 	}
 }
 
-// Defines values for GetV1Whoami200JSONResponseBodyKeyType.
+// Defines values for GetWhoami200JSONResponseBodyKeyType.
 const (
-	Ingest GetV1Whoami200JSONResponseBodyKeyType = "ingest"
-	Secret GetV1Whoami200JSONResponseBodyKeyType = "secret"
+	Ingest GetWhoami200JSONResponseBodyKeyType = "ingest"
+	Secret GetWhoami200JSONResponseBodyKeyType = "secret"
 )
 
-// Valid indicates whether the value is a known member of the GetV1Whoami200JSONResponseBodyKeyType enum.
-func (e GetV1Whoami200JSONResponseBodyKeyType) Valid() bool {
+// Valid indicates whether the value is a known member of the GetWhoami200JSONResponseBodyKeyType enum.
+func (e GetWhoami200JSONResponseBodyKeyType) Valid() bool {
 	switch e {
 	case Ingest:
 		return true
@@ -7318,8 +7318,17 @@ type Limit = int
 // Offset defines model for Offset.
 type Offset = int
 
+// InvalidBody defines model for InvalidBody.
+type InvalidBody = Error
+
 // InvalidPage defines model for InvalidPage.
 type InvalidPage = Error
+
+// RateLimited defines model for RateLimited.
+type RateLimited = Error
+
+// Unauthorized defines model for Unauthorized.
+type Unauthorized = Error
 
 // bearerAuthContextKey is the context key for BearerAuth security scheme
 type bearerAuthContextKey string
@@ -7454,21 +7463,21 @@ type ListAuditLogParams struct {
 // ListAuditLogParamsOrder defines parameters for ListAuditLog.
 type ListAuditLogParamsOrder string
 
-// PostV1AuthAcceptInviteJSONBody defines parameters for PostV1AuthAcceptInvite.
-type PostV1AuthAcceptInviteJSONBody struct {
+// AcceptInvitationJSONBody defines parameters for AcceptInvitation.
+type AcceptInvitationJSONBody struct {
 	// Password Required (and validated) only when no account exists for the invited email; ignored otherwise.
 	Password string `json:"password,omitempty"`
 	Token    string `json:"token"`
 }
 
-// PostV1AuthLoginJSONBody defines parameters for PostV1AuthLogin.
-type PostV1AuthLoginJSONBody struct {
+// LoginJSONBody defines parameters for Login.
+type LoginJSONBody struct {
 	Email    openapi_types.Email `json:"email"`
 	Password string              `json:"password"`
 }
 
-// PostV1AuthModeJSONBody defines parameters for PostV1AuthMode.
-type PostV1AuthModeJSONBody struct {
+// SwitchSessionModeJSONBody defines parameters for SwitchSessionMode.
+type SwitchSessionModeJSONBody struct {
 	Livemode bool `json:"livemode"`
 }
 
@@ -7481,22 +7490,22 @@ type CheckPasswordResetTokenParams struct {
 // CheckPasswordResetToken200JSONResponseBodyValid defines parameters for CheckPasswordResetToken.
 type CheckPasswordResetToken200JSONResponseBodyValid bool
 
-// PostV1AuthPasswordResetConfirmJSONBody defines parameters for PostV1AuthPasswordResetConfirm.
-type PostV1AuthPasswordResetConfirmJSONBody struct {
+// ConfirmPasswordResetJSONBody defines parameters for ConfirmPasswordReset.
+type ConfirmPasswordResetJSONBody struct {
 	Password string `json:"password"`
 	Token    string `json:"token"`
 }
 
-// PostV1AuthPasswordResetRequestJSONBody defines parameters for PostV1AuthPasswordResetRequest.
-type PostV1AuthPasswordResetRequestJSONBody struct {
+// RequestPasswordResetJSONBody defines parameters for RequestPasswordReset.
+type RequestPasswordResetJSONBody struct {
 	Email openapi_types.Email `json:"email"`
 }
 
-// PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery defines parameters for PostV1AuthPasswordResetRequest.
-type PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery string
+// RequestPasswordReset200JSONResponseBodyEmailDelivery defines parameters for RequestPasswordReset.
+type RequestPasswordReset200JSONResponseBodyEmailDelivery string
 
-// PostV1BillingRunParams defines parameters for PostV1BillingRun.
-type PostV1BillingRunParams struct {
+// RunBillingParams defines parameters for RunBilling.
+type RunBillingParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -7553,8 +7562,8 @@ type ListCreditNotesParamsRefundStatus string
 // ListCreditNotesParamsDir defines parameters for ListCreditNotes.
 type ListCreditNotesParamsDir string
 
-// PostV1CreditNotesJSONBody defines parameters for PostV1CreditNotes.
-type PostV1CreditNotesJSONBody struct {
+// CreateCreditNoteJSONBody defines parameters for CreateCreditNote.
+type CreateCreditNoteJSONBody struct {
 	AutoIssue bool `json:"auto_issue,omitempty"`
 
 	// CommitRelief Mutually exclusive with lines and credit_amount_cents. The
@@ -7600,7 +7609,7 @@ type PostV1CreditNotesJSONBody struct {
 	// RefundType Older single-channel form. On a paid invoice whose three
 	// `*_amount_cents` fields are all 0, `refund` or `credit`
 	// puts the whole note in that channel. Not with commit_relief.
-	RefundType PostV1CreditNotesJSONBodyRefundType `json:"refund_type,omitempty"`
+	RefundType CreateCreditNoteJSONBodyRefundType `json:"refund_type,omitempty"`
 
 	// StripeRefundId Links a refund made in Stripe outside Hardcount as this
 	// note's card refund, Stripe's `refunds[]` shape: Hardcount
@@ -7615,8 +7624,8 @@ type PostV1CreditNotesJSONBody struct {
 	StripeRefundId string `json:"stripe_refund_id,omitempty"`
 }
 
-// PostV1CreditNotesParams defines parameters for PostV1CreditNotes.
-type PostV1CreditNotesParams struct {
+// CreateCreditNoteParams defines parameters for CreateCreditNote.
+type CreateCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -7626,8 +7635,8 @@ type PostV1CreditNotesParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1CreditNotesJSONBodyRefundType defines parameters for PostV1CreditNotes.
-type PostV1CreditNotesJSONBodyRefundType string
+// CreateCreditNoteJSONBodyRefundType defines parameters for CreateCreditNote.
+type CreateCreditNoteJSONBodyRefundType string
 
 // AttachStripeRefundToCreditNoteJSONBody defines parameters for AttachStripeRefundToCreditNote.
 type AttachStripeRefundToCreditNoteJSONBody struct {
@@ -7667,14 +7676,14 @@ type RetryCreditNoteRefundParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1CreditNotesIdSendJSONBody defines parameters for PostV1CreditNotesIdSend.
-type PostV1CreditNotesIdSendJSONBody struct {
+// SendCreditNoteJSONBody defines parameters for SendCreditNote.
+type SendCreditNoteJSONBody struct {
 	AdditionalEmails []string            `json:"additional_emails,omitempty"`
 	Email            openapi_types.Email `json:"email"`
 }
 
-// PostV1CreditNotesIdSendParams defines parameters for PostV1CreditNotesIdSend.
-type PostV1CreditNotesIdSendParams struct {
+// SendCreditNoteParams defines parameters for SendCreditNote.
+type SendCreditNoteParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -7684,8 +7693,8 @@ type PostV1CreditNotesIdSendParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1CreditNotesIdSend200JSONResponseBodyStatus defines parameters for PostV1CreditNotesIdSend.
-type PostV1CreditNotesIdSend200JSONResponseBodyStatus string
+// SendCreditNote200JSONResponseBodyStatus defines parameters for SendCreditNote.
+type SendCreditNote200JSONResponseBodyStatus string
 
 // VoidCreditNoteParams defines parameters for VoidCreditNote.
 type VoidCreditNoteParams struct {
@@ -7731,8 +7740,8 @@ type ListCreditBalancesParams struct {
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1CreditsGrantJSONBody defines parameters for PostV1CreditsGrant.
-type PostV1CreditsGrantJSONBody struct {
+// GrantCreditsJSONBody defines parameters for GrantCredits.
+type GrantCreditsJSONBody struct {
 	AmountCents int64 `json:"amount_cents"`
 
 	// Currency ISO 4217 code of the credit. Required. Case-insensitive;
@@ -7754,11 +7763,11 @@ type PostV1CreditsGrantJSONBody struct {
 	// blocks. Omitted = unclassified (drains in the paid
 	// class). `commit` is reserved for the invoice-finalize
 	// funding path and rejected here.
-	GrantKind PostV1CreditsGrantJSONBodyGrantKind `json:"grant_kind,omitempty"`
+	GrantKind GrantCreditsJSONBodyGrantKind `json:"grant_kind,omitempty"`
 }
 
-// PostV1CreditsGrantParams defines parameters for PostV1CreditsGrant.
-type PostV1CreditsGrantParams struct {
+// GrantCreditsParams defines parameters for GrantCredits.
+type GrantCreditsParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -7768,11 +7777,11 @@ type PostV1CreditsGrantParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1CreditsGrantJSONBodyGrantKind defines parameters for PostV1CreditsGrant.
-type PostV1CreditsGrantJSONBodyGrantKind string
+// GrantCreditsJSONBodyGrantKind defines parameters for GrantCredits.
+type GrantCreditsJSONBodyGrantKind string
 
-// GetV1CreditsGrantsCustomerIdParams defines parameters for GetV1CreditsGrantsCustomerId.
-type GetV1CreditsGrantsCustomerIdParams struct {
+// GetCreditGrantsParams defines parameters for GetCreditGrants.
+type GetCreditGrantsParams struct {
 	IncludeExhausted bool `form:"include_exhausted,omitempty" json:"include_exhausted,omitempty"`
 }
 
@@ -7801,8 +7810,8 @@ type ListCreditLedgerEntriesParamsEntryType string
 // ListCreditLedgerEntriesParamsDir defines parameters for ListCreditLedgerEntries.
 type ListCreditLedgerEntriesParamsDir string
 
-// GetV1CustomersParams defines parameters for GetV1Customers.
-type GetV1CustomersParams struct {
+// ListCustomersParams defines parameters for ListCustomers.
+type ListCustomersParams struct {
 	Status string `form:"status,omitempty" json:"status,omitempty"`
 
 	// ExternalId Exact-match filter on the caller-assigned external ID.
@@ -7821,8 +7830,8 @@ type GetV1CustomersParams struct {
 	// Sort One of display_name, email, external_id, status, created_at
 	// (default). A sort by display_name or email looks at 5,000
 	// customers at most; the rows and `total` stop there.
-	Sort string                  `form:"sort,omitempty" json:"sort,omitempty"`
-	Dir  GetV1CustomersParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+	Sort string                 `form:"sort,omitempty" json:"sort,omitempty"`
+	Dir  ListCustomersParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
@@ -7833,11 +7842,11 @@ type GetV1CustomersParams struct {
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// GetV1CustomersParamsDir defines parameters for GetV1Customers.
-type GetV1CustomersParamsDir string
+// ListCustomersParamsDir defines parameters for ListCustomers.
+type ListCustomersParamsDir string
 
-// PostV1CustomersJSONBody defines parameters for PostV1Customers.
-type PostV1CustomersJSONBody struct {
+// CreateCustomerJSONBody defines parameters for CreateCustomer.
+type CreateCustomerJSONBody struct {
 	AdditionalEmails []string `json:"additional_emails,omitempty"`
 	DisplayName      string   `json:"display_name"`
 	Email            string   `json:"email,omitempty"`
@@ -7847,8 +7856,8 @@ type PostV1CustomersJSONBody struct {
 	TestClockId string `json:"test_clock_id,omitempty"`
 }
 
-// PostV1CustomersParams defines parameters for PostV1Customers.
-type PostV1CustomersParams struct {
+// CreateCustomerParams defines parameters for CreateCustomer.
+type CreateCustomerParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -7952,8 +7961,8 @@ type UpsertCustomerBillingProfileParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// GetV1CustomersIdMarginParams defines parameters for GetV1CustomersIdMargin.
-type GetV1CustomersIdMarginParams struct {
+// GetCustomerMarginParams defines parameters for GetCustomerMargin.
+type GetCustomerMarginParams struct {
 	// From Window start, inclusive. RFC 3339. Default is 30 days before the customer's current time.
 	From time.Time `form:"from,omitempty" json:"from,omitempty"`
 
@@ -7961,8 +7970,8 @@ type GetV1CustomersIdMarginParams struct {
 	To time.Time `form:"to,omitempty" json:"to,omitempty"`
 }
 
-// PostV1CustomersIdRotateCostDashboardTokenParams defines parameters for PostV1CustomersIdRotateCostDashboardToken.
-type PostV1CustomersIdRotateCostDashboardTokenParams struct {
+// RotateCustomerCostDashboardTokenParams defines parameters for RotateCustomerCostDashboardToken.
+type RotateCustomerCostDashboardTokenParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -8044,10 +8053,8 @@ type SetDefaultDunningPolicy200JSONResponseBodyStatus string
 
 // ListDunningRunsParams defines parameters for ListDunningRuns.
 type ListDunningRunsParams struct {
-	InvoiceId string `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
-
-	// State Exact run state. Any other value is a 422.
-	State ListDunningRunsParamsState `form:"state,omitempty" json:"state,omitempty"`
+	InvoiceId string                     `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
+	State     ListDunningRunsParamsState `form:"state,omitempty" json:"state,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
@@ -8160,8 +8167,8 @@ type IngestLitellmSpendJSONBody2 struct {
 	Events []LitellmSpendLog `json:"events"`
 }
 
-// GetV1InvoicesParams defines parameters for GetV1Invoices.
-type GetV1InvoicesParams struct {
+// ListInvoicesParams defines parameters for ListInvoices.
+type ListInvoicesParams struct {
 	CustomerId     string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
 	SubscriptionId string `form:"subscription_id,omitempty" json:"subscription_id,omitempty"`
 	Status         string `form:"status,omitempty" json:"status,omitempty"`
@@ -8188,8 +8195,8 @@ type GetV1InvoicesParams struct {
 	Ids string `form:"ids,omitempty" json:"ids,omitempty"`
 
 	// Sort One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps.
-	Sort string                 `form:"sort,omitempty" json:"sort,omitempty"`
-	Dir  GetV1InvoicesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+	Sort string                `form:"sort,omitempty" json:"sort,omitempty"`
+	Dir  ListInvoicesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
@@ -8200,8 +8207,8 @@ type GetV1InvoicesParams struct {
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// GetV1InvoicesParamsDir defines parameters for GetV1Invoices.
-type GetV1InvoicesParamsDir string
+// ListInvoicesParamsDir defines parameters for ListInvoices.
+type ListInvoicesParamsDir string
 
 // CreateInvoiceParams defines parameters for CreateInvoice.
 type CreateInvoiceParams struct {
@@ -8214,8 +8221,8 @@ type CreateInvoiceParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1InvoicesCreatePreviewJSONBody defines parameters for PostV1InvoicesCreatePreview.
-type PostV1InvoicesCreatePreviewJSONBody struct {
+// CreateInvoicePreviewJSONBody defines parameters for CreateInvoicePreview.
+type CreateInvoicePreviewJSONBody struct {
 	// CustomerId Customer to preview the invoice for.
 	CustomerId string `json:"customer_id"`
 
@@ -8233,8 +8240,8 @@ type PostV1InvoicesCreatePreviewJSONBody struct {
 	SubscriptionId string `json:"subscription_id,omitempty"`
 }
 
-// PostV1InvoicesCreatePreviewParams defines parameters for PostV1InvoicesCreatePreview.
-type PostV1InvoicesCreatePreviewParams struct {
+// CreateInvoicePreviewParams defines parameters for CreateInvoicePreview.
+type CreateInvoicePreviewParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -8266,8 +8273,8 @@ type ListInvoiceDisputesParams struct {
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1InvoicesIdFinalizeParams defines parameters for PostV1InvoicesIdFinalize.
-type PostV1InvoicesIdFinalizeParams struct {
+// FinalizeInvoiceParams defines parameters for FinalizeInvoice.
+type FinalizeInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -8354,8 +8361,8 @@ type ResendInvoiceSetupLinkParams struct {
 // ResendInvoiceSetupLink200JSONResponseBodyStatus defines parameters for ResendInvoiceSetupLink.
 type ResendInvoiceSetupLink200JSONResponseBodyStatus string
 
-// PostV1InvoicesIdRetryTaxParams defines parameters for PostV1InvoicesIdRetryTax.
-type PostV1InvoicesIdRetryTaxParams struct {
+// RetryInvoiceTaxParams defines parameters for RetryInvoiceTax.
+type RetryInvoiceTaxParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -8376,14 +8383,14 @@ type RotateInvoicePublicTokenParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1InvoicesIdSendJSONBody defines parameters for PostV1InvoicesIdSend.
-type PostV1InvoicesIdSendJSONBody struct {
+// SendInvoiceJSONBody defines parameters for SendInvoice.
+type SendInvoiceJSONBody struct {
 	AdditionalEmails []string            `json:"additional_emails,omitempty"`
 	Email            openapi_types.Email `json:"email"`
 }
 
-// PostV1InvoicesIdSendParams defines parameters for PostV1InvoicesIdSend.
-type PostV1InvoicesIdSendParams struct {
+// SendInvoiceParams defines parameters for SendInvoice.
+type SendInvoiceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -8393,8 +8400,8 @@ type PostV1InvoicesIdSendParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1InvoicesIdSend200JSONResponseBodyStatus defines parameters for PostV1InvoicesIdSend.
-type PostV1InvoicesIdSend200JSONResponseBodyStatus string
+// SendInvoice200JSONResponseBodyStatus defines parameters for SendInvoice.
+type SendInvoice200JSONResponseBodyStatus string
 
 // ListInvoiceStripeRefundsParams defines parameters for ListInvoiceStripeRefunds.
 type ListInvoiceStripeRefundsParams struct {
@@ -8451,8 +8458,8 @@ type InviteMemberParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// GetV1MetersParams defines parameters for GetV1Meters.
-type GetV1MetersParams struct {
+// ListMetersParams defines parameters for ListMeters.
+type ListMetersParams struct {
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -8462,10 +8469,10 @@ type GetV1MetersParams struct {
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1MetersJSONBody defines parameters for PostV1Meters.
-type PostV1MetersJSONBody struct {
+// CreateMeterJSONBody defines parameters for CreateMeter.
+type CreateMeterJSONBody struct {
 	// Aggregation How the meter rolls its events into one quantity per billing period. Fixed once the meter has a usage event.
-	Aggregation PostV1MetersJSONBodyAggregation `json:"aggregation,omitempty"`
+	Aggregation CreateMeterJSONBodyAggregation `json:"aggregation,omitempty"`
 
 	// EventName The `event_name` usage events will send for this meter. Letters, digits, `-` and `_`; at most 100 characters.
 	EventName string `json:"event_name"`
@@ -8473,8 +8480,8 @@ type PostV1MetersJSONBody struct {
 	Unit      string `json:"unit,omitempty"`
 }
 
-// PostV1MetersParams defines parameters for PostV1Meters.
-type PostV1MetersParams struct {
+// CreateMeterParams defines parameters for CreateMeter.
+type CreateMeterParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -8484,18 +8491,18 @@ type PostV1MetersParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1MetersJSONBodyAggregation defines parameters for PostV1Meters.
-type PostV1MetersJSONBodyAggregation string
+// CreateMeterJSONBodyAggregation defines parameters for CreateMeter.
+type CreateMeterJSONBodyAggregation string
 
-// PatchV1MetersIdJSONBody defines parameters for PatchV1MetersId.
-type PatchV1MetersIdJSONBody struct {
-	Aggregation PatchV1MetersIdJSONBodyAggregation `json:"aggregation,omitempty"`
-	Name        string                             `json:"name,omitempty"`
-	Unit        string                             `json:"unit,omitempty"`
+// UpdateMeterJSONBody defines parameters for UpdateMeter.
+type UpdateMeterJSONBody struct {
+	Aggregation UpdateMeterJSONBodyAggregation `json:"aggregation,omitempty"`
+	Name        string                         `json:"name,omitempty"`
+	Unit        string                         `json:"unit,omitempty"`
 }
 
-// PatchV1MetersIdParams defines parameters for PatchV1MetersId.
-type PatchV1MetersIdParams struct {
+// UpdateMeterParams defines parameters for UpdateMeter.
+type UpdateMeterParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -8505,11 +8512,11 @@ type PatchV1MetersIdParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PatchV1MetersIdJSONBodyAggregation defines parameters for PatchV1MetersId.
-type PatchV1MetersIdJSONBodyAggregation string
+// UpdateMeterJSONBodyAggregation defines parameters for UpdateMeter.
+type UpdateMeterJSONBodyAggregation string
 
-// GetV1PlansParams defines parameters for GetV1Plans.
-type GetV1PlansParams struct {
+// ListPlansParams defines parameters for ListPlans.
+type ListPlansParams struct {
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -8519,27 +8526,27 @@ type GetV1PlansParams struct {
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1PlansJSONBody defines parameters for PostV1Plans.
-type PostV1PlansJSONBody struct {
+// CreatePlanJSONBody defines parameters for CreatePlan.
+type CreatePlanJSONBody struct {
 	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
 
 	// BaseBillTiming Required when `base_amount_cents` is above 0. With a base
 	// of 0 it may be left out, and the plan is in_arrears;
 	// `in_advance` with a base of 0 is refused. See
 	// Plan.base_bill_timing (ADR-031).
-	BaseBillTiming  PostV1PlansJSONBodyBaseBillTiming  `json:"base_bill_timing,omitempty"`
-	BillingInterval PostV1PlansJSONBodyBillingInterval `json:"billing_interval"`
-	Code            string                             `json:"code"`
-	Currency        string                             `json:"currency"`
-	Description     string                             `json:"description,omitempty"`
-	Name            string                             `json:"name"`
+	BaseBillTiming  CreatePlanJSONBodyBaseBillTiming  `json:"base_bill_timing,omitempty"`
+	BillingInterval CreatePlanJSONBodyBillingInterval `json:"billing_interval"`
+	Code            string                            `json:"code"`
+	Currency        string                            `json:"currency"`
+	Description     string                            `json:"description,omitempty"`
+	Name            string                            `json:"name"`
 
 	// Prices The plan's usage prices, created with it in one request.
 	// Each takes the plan's currency.
 	Prices []PriceInput `json:"prices,omitempty"`
 
 	// Status Optional. A plan is created active; archive it with PATCH.
-	Status PostV1PlansJSONBodyStatus `json:"status,omitempty"`
+	Status CreatePlanJSONBodyStatus `json:"status,omitempty"`
 
 	// TaxCode Stripe product tax code for the base fee, such as
 	// `txcd_10103001`. Empty or omitted means the tenant's
@@ -8547,8 +8554,8 @@ type PostV1PlansJSONBody struct {
 	TaxCode string `json:"tax_code,omitempty"`
 }
 
-// PostV1PlansParams defines parameters for PostV1Plans.
-type PostV1PlansParams struct {
+// CreatePlanParams defines parameters for CreatePlan.
+type CreatePlanParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -8558,14 +8565,14 @@ type PostV1PlansParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1PlansJSONBodyBaseBillTiming defines parameters for PostV1Plans.
-type PostV1PlansJSONBodyBaseBillTiming string
+// CreatePlanJSONBodyBaseBillTiming defines parameters for CreatePlan.
+type CreatePlanJSONBodyBaseBillTiming string
 
-// PostV1PlansJSONBodyBillingInterval defines parameters for PostV1Plans.
-type PostV1PlansJSONBodyBillingInterval string
+// CreatePlanJSONBodyBillingInterval defines parameters for CreatePlan.
+type CreatePlanJSONBodyBillingInterval string
 
-// PostV1PlansJSONBodyStatus defines parameters for PostV1Plans.
-type PostV1PlansJSONBodyStatus string
+// CreatePlanJSONBodyStatus defines parameters for CreatePlan.
+type CreatePlanJSONBodyStatus string
 
 // UpdatePlanJSONBody defines parameters for UpdatePlan.
 type UpdatePlanJSONBody struct {
@@ -8693,8 +8700,8 @@ type CreatePriceOverrideParams struct {
 // CreatePriceOverrideJSONBodyMode defines parameters for CreatePriceOverride.
 type CreatePriceOverrideJSONBodyMode string
 
-// GetV1ProviderCostsParams defines parameters for GetV1ProviderCosts.
-type GetV1ProviderCostsParams struct {
+// ListProviderCostsParams defines parameters for ListProviderCosts.
+type ListProviderCostsParams struct {
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -8704,11 +8711,11 @@ type GetV1ProviderCostsParams struct {
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PutV1ProviderCostsJSONBody defines parameters for PutV1ProviderCosts.
-type PutV1ProviderCostsJSONBody struct {
+// UpsertProviderCostJSONBody defines parameters for UpsertProviderCost.
+type UpsertProviderCostJSONBody struct {
 	// Currency Rates are in USD only, the currency LiteLLM reports cost
 	// in. Any other value is 422.
-	Currency PutV1ProviderCostsJSONBodyCurrency `json:"currency,omitempty"`
+	Currency UpsertProviderCostJSONBodyCurrency `json:"currency,omitempty"`
 
 	// Model Model family token or raw snapshot id — raw ids match first at ingest.
 	Model    string `json:"model"`
@@ -8721,8 +8728,8 @@ type PutV1ProviderCostsJSONBody struct {
 	UnitCostCents string `json:"unit_cost_cents"`
 }
 
-// PutV1ProviderCostsParams defines parameters for PutV1ProviderCosts.
-type PutV1ProviderCostsParams struct {
+// UpsertProviderCostParams defines parameters for UpsertProviderCost.
+type UpsertProviderCostParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -8732,11 +8739,11 @@ type PutV1ProviderCostsParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PutV1ProviderCostsJSONBodyCurrency defines parameters for PutV1ProviderCosts.
-type PutV1ProviderCostsJSONBodyCurrency string
+// UpsertProviderCostJSONBodyCurrency defines parameters for UpsertProviderCost.
+type UpsertProviderCostJSONBodyCurrency string
 
-// GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource defines parameters for GetV1PublicCostDashboardToken.
-type GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource string
+// GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource defines parameters for GetPublicCostDashboard.
+type GetPublicCostDashboard200JSONResponseBodyBillingPeriodSource string
 
 // ListRecipesParams defines parameters for ListRecipes.
 type ListRecipesParams struct {
@@ -8869,35 +8876,35 @@ type SetStripeWebhookSecretParams struct {
 // SetStripeWebhookSecretParamsMode defines parameters for SetStripeWebhookSecret.
 type SetStripeWebhookSecretParamsMode string
 
-// GetV1SubscriptionsParams defines parameters for GetV1Subscriptions.
-type GetV1SubscriptionsParams struct {
+// ListSubscriptionsParams defines parameters for ListSubscriptions.
+type ListSubscriptionsParams struct {
 	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
 
 	// PlanId Filter to subscriptions with a live item on this plan.
 	PlanId string `form:"plan_id,omitempty" json:"plan_id,omitempty"`
 
-	// Status Exact status. Any other value is a 422. Paused collection is not
+	// Status Exact status. Any other value is a 400. Paused collection is not
 	// a status: use `collection=paused`.
-	Status GetV1SubscriptionsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Status ListSubscriptionsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 
 	// Billing `failing` returns only subscriptions that carry a
 	// `billing_failure`: those waiting for their next billing attempt
-	// and those that are parked. Any other value is a 422.
-	Billing GetV1SubscriptionsParamsBilling `form:"billing,omitempty" json:"billing,omitempty"`
+	// and those that are parked. Any other value is a 400.
+	Billing ListSubscriptionsParamsBilling `form:"billing,omitempty" json:"billing,omitempty"`
 
 	// Collection `paused` returns only active and trialing subscriptions whose
 	// `pause_collection` is in force, whether an operator or dunning set
 	// it. A timed pause ends at `resumes_at` (on the subscription's test
 	// clock, if it has one), even while the response still carries it.
-	// Any other value is a 422.
-	Collection GetV1SubscriptionsParamsCollection `form:"collection,omitempty" json:"collection,omitempty"`
+	// Any other value is a 400.
+	Collection ListSubscriptionsParamsCollection `form:"collection,omitempty" json:"collection,omitempty"`
 
 	// Search Case-insensitive substring match on display name or code.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
 	// Sort One of display_name, status, next_billing_at, trial_end_at, created_at (default).
-	Sort string                      `form:"sort,omitempty" json:"sort,omitempty"`
-	Dir  GetV1SubscriptionsParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+	Sort string                     `form:"sort,omitempty" json:"sort,omitempty"`
+	Dir  ListSubscriptionsParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
@@ -8908,24 +8915,24 @@ type GetV1SubscriptionsParams struct {
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// GetV1SubscriptionsParamsStatus defines parameters for GetV1Subscriptions.
-type GetV1SubscriptionsParamsStatus string
+// ListSubscriptionsParamsStatus defines parameters for ListSubscriptions.
+type ListSubscriptionsParamsStatus string
 
-// GetV1SubscriptionsParamsBilling defines parameters for GetV1Subscriptions.
-type GetV1SubscriptionsParamsBilling string
+// ListSubscriptionsParamsBilling defines parameters for ListSubscriptions.
+type ListSubscriptionsParamsBilling string
 
-// GetV1SubscriptionsParamsCollection defines parameters for GetV1Subscriptions.
-type GetV1SubscriptionsParamsCollection string
+// ListSubscriptionsParamsCollection defines parameters for ListSubscriptions.
+type ListSubscriptionsParamsCollection string
 
-// GetV1SubscriptionsParamsDir defines parameters for GetV1Subscriptions.
-type GetV1SubscriptionsParamsDir string
+// ListSubscriptionsParamsDir defines parameters for ListSubscriptions.
+type ListSubscriptionsParamsDir string
 
-// PostV1SubscriptionsJSONBody defines parameters for PostV1Subscriptions.
-type PostV1SubscriptionsJSONBody struct {
-	BillingTime PostV1SubscriptionsJSONBodyBillingTime `json:"billing_time,omitempty"`
-	Code        string                                 `json:"code"`
-	CustomerId  string                                 `json:"customer_id"`
-	DisplayName string                                 `json:"display_name"`
+// CreateSubscriptionJSONBody defines parameters for CreateSubscription.
+type CreateSubscriptionJSONBody struct {
+	BillingTime CreateSubscriptionJSONBodyBillingTime `json:"billing_time,omitempty"`
+	Code        string                                `json:"code"`
+	CustomerId  string                                `json:"customer_id"`
+	DisplayName string                                `json:"display_name"`
 
 	// Items Plan items — a subscription bills one or more plans.
 	Items []struct {
@@ -8943,7 +8950,7 @@ type PostV1SubscriptionsJSONBody struct {
 	// it with `POST /v1/subscriptions/{id}/activate`. A draft
 	// cannot have a trial (`trial_days` above 0). An empty or
 	// null `status` is refused.
-	Status PostV1SubscriptionsJSONBodyStatus `json:"status,omitempty"`
+	Status CreateSubscriptionJSONBodyStatus `json:"status,omitempty"`
 
 	// TrialDays Days of free trial; 0 means no trial. Above 0, the
 	// subscription is `trialing` from now and its first paid
@@ -8951,8 +8958,8 @@ type PostV1SubscriptionsJSONBody struct {
 	TrialDays int `json:"trial_days,omitempty"`
 }
 
-// PostV1SubscriptionsParams defines parameters for PostV1Subscriptions.
-type PostV1SubscriptionsParams struct {
+// CreateSubscriptionParams defines parameters for CreateSubscription.
+type CreateSubscriptionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -8962,14 +8969,14 @@ type PostV1SubscriptionsParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1SubscriptionsJSONBodyBillingTime defines parameters for PostV1Subscriptions.
-type PostV1SubscriptionsJSONBodyBillingTime string
+// CreateSubscriptionJSONBodyBillingTime defines parameters for CreateSubscription.
+type CreateSubscriptionJSONBodyBillingTime string
 
-// PostV1SubscriptionsJSONBodyStatus defines parameters for PostV1Subscriptions.
-type PostV1SubscriptionsJSONBodyStatus string
+// CreateSubscriptionJSONBodyStatus defines parameters for CreateSubscription.
+type CreateSubscriptionJSONBodyStatus string
 
-// PostV1SubscriptionsIdActivateParams defines parameters for PostV1SubscriptionsIdActivate.
-type PostV1SubscriptionsIdActivateParams struct {
+// ActivateSubscriptionParams defines parameters for ActivateSubscription.
+type ActivateSubscriptionParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -9104,8 +9111,8 @@ type PauseSubscriptionCollectionParams struct {
 // PauseSubscriptionCollectionJSONBodyBehavior defines parameters for PauseSubscriptionCollection.
 type PauseSubscriptionCollectionJSONBodyBehavior string
 
-// PostV1SubscriptionsIdRetryBillingParams defines parameters for PostV1SubscriptionsIdRetryBilling.
-type PostV1SubscriptionsIdRetryBillingParams struct {
+// RetrySubscriptionBillingParams defines parameters for RetrySubscriptionBilling.
+type RetrySubscriptionBillingParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -9135,8 +9142,8 @@ type ScheduleSubscriptionCancelParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// GetV1TestClocksParams defines parameters for GetV1TestClocks.
-type GetV1TestClocksParams struct {
+// ListTestClocksParams defines parameters for ListTestClocks.
+type ListTestClocksParams struct {
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -9146,14 +9153,14 @@ type GetV1TestClocksParams struct {
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1TestClocksJSONBody defines parameters for PostV1TestClocks.
-type PostV1TestClocksJSONBody struct {
+// CreateTestClockJSONBody defines parameters for CreateTestClock.
+type CreateTestClockJSONBody struct {
 	FrozenTime time.Time `json:"frozen_time"`
 	Name       string    `json:"name,omitempty"`
 }
 
-// PostV1TestClocksParams defines parameters for PostV1TestClocks.
-type PostV1TestClocksParams struct {
+// CreateTestClockParams defines parameters for CreateTestClock.
+type CreateTestClockParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -9163,16 +9170,16 @@ type PostV1TestClocksParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// DeleteV1TestClocksId200JSONResponseBodyStatus defines parameters for DeleteV1TestClocksId.
-type DeleteV1TestClocksId200JSONResponseBodyStatus string
+// DeleteTestClock200JSONResponseBodyStatus defines parameters for DeleteTestClock.
+type DeleteTestClock200JSONResponseBodyStatus string
 
-// PostV1TestClocksIdAdvanceJSONBody defines parameters for PostV1TestClocksIdAdvance.
-type PostV1TestClocksIdAdvanceJSONBody struct {
+// AdvanceTestClockJSONBody defines parameters for AdvanceTestClock.
+type AdvanceTestClockJSONBody struct {
 	FrozenTime time.Time `json:"frozen_time"`
 }
 
-// PostV1TestClocksIdAdvanceParams defines parameters for PostV1TestClocksIdAdvance.
-type PostV1TestClocksIdAdvanceParams struct {
+// AdvanceTestClockParams defines parameters for AdvanceTestClock.
+type AdvanceTestClockParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -9193,8 +9200,8 @@ type ListTestClockCustomersParams struct {
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1TestClocksIdRetryAdvanceParams defines parameters for PostV1TestClocksIdRetryAdvance.
-type PostV1TestClocksIdRetryAdvanceParams struct {
+// RetryTestClockAdvanceParams defines parameters for RetryTestClockAdvance.
+type RetryTestClockAdvanceParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -9204,8 +9211,8 @@ type PostV1TestClocksIdRetryAdvanceParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// GetV1TestClocksIdSubscriptionsParams defines parameters for GetV1TestClocksIdSubscriptions.
-type GetV1TestClocksIdSubscriptionsParams struct {
+// ListTestClockSubscriptionsParams defines parameters for ListTestClockSubscriptions.
+type ListTestClockSubscriptionsParams struct {
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -9215,8 +9222,8 @@ type GetV1TestClocksIdSubscriptionsParams struct {
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// GetV1UsageEventsParams defines parameters for GetV1UsageEvents.
-type GetV1UsageEventsParams struct {
+// ListUsageEventsParams defines parameters for ListUsageEvents.
+type ListUsageEventsParams struct {
 	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
 	MeterId    string `form:"meter_id,omitempty" json:"meter_id,omitempty"`
 
@@ -9243,8 +9250,8 @@ type GetV1UsageEventsParams struct {
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1UsageEventsJSONBody defines parameters for PostV1UsageEvents.
-type PostV1UsageEventsJSONBody struct {
+// CreateUsageEventJSONBody defines parameters for CreateUsageEvent.
+type CreateUsageEventJSONBody struct {
 	// Dimensions Scalar labels of the event (e.g. {"model", "token_type"}). A price takes an event whose labels include the price's `dimension_match`.
 	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
 
@@ -9273,18 +9280,18 @@ type PostV1UsageEventsJSONBody struct {
 	// is at most 100 characters. A negative value is a
 	// correction. A missing quantity, or any other value, is
 	// refused with 422 and `param: quantity`.
-	Quantity  PostV1UsageEventsJSONBody_Quantity `json:"quantity"`
-	Timestamp time.Time                          `json:"timestamp,omitempty"`
+	Quantity  CreateUsageEventJSONBody_Quantity `json:"quantity"`
+	Timestamp time.Time                         `json:"timestamp,omitempty"`
 }
 
-// PostV1UsageEventsJSONBodyQuantity0 defines parameters for PostV1UsageEvents.
-type PostV1UsageEventsJSONBodyQuantity0 = float32
+// CreateUsageEventJSONBodyQuantity0 defines parameters for CreateUsageEvent.
+type CreateUsageEventJSONBodyQuantity0 = float32
 
-// PostV1UsageEventsJSONBodyQuantity1 defines parameters for PostV1UsageEvents.
-type PostV1UsageEventsJSONBodyQuantity1 = string
+// CreateUsageEventJSONBodyQuantity1 defines parameters for CreateUsageEvent.
+type CreateUsageEventJSONBodyQuantity1 = string
 
-// PostV1UsageEventsJSONBody_Quantity defines parameters for PostV1UsageEvents.
-type PostV1UsageEventsJSONBody_Quantity struct {
+// CreateUsageEventJSONBody_Quantity defines parameters for CreateUsageEvent.
+type CreateUsageEventJSONBody_Quantity struct {
 	union json.RawMessage
 }
 
@@ -9356,8 +9363,8 @@ type BackfillUsageEventJSONBody_Quantity struct {
 	union json.RawMessage
 }
 
-// PostV1UsageEventsBatchJSONBody defines parameters for PostV1UsageEventsBatch.
-type PostV1UsageEventsBatchJSONBody = []struct {
+// CreateUsageEventBatchJSONBody defines parameters for CreateUsageEventBatch.
+type CreateUsageEventBatchJSONBody = []struct {
 	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
 
 	// EventName The meter's `event_name` (e.g. "tokens").
@@ -9385,18 +9392,18 @@ type PostV1UsageEventsBatchJSONBody = []struct {
 	// 10^26, and it is at most 100 characters. A negative
 	// value is a correction. A missing quantity, or any
 	// other value, fails validation.
-	Quantity  PostV1UsageEventsBatchJSONBody_Quantity `json:"quantity"`
-	Timestamp time.Time                               `json:"timestamp,omitempty"`
+	Quantity  CreateUsageEventBatchJSONBody_Quantity `json:"quantity"`
+	Timestamp time.Time                              `json:"timestamp,omitempty"`
 }
 
-// PostV1UsageEventsBatchJSONBodyQuantity0 defines parameters for PostV1UsageEventsBatch.
-type PostV1UsageEventsBatchJSONBodyQuantity0 = float32
+// CreateUsageEventBatchJSONBodyQuantity0 defines parameters for CreateUsageEventBatch.
+type CreateUsageEventBatchJSONBodyQuantity0 = float32
 
-// PostV1UsageEventsBatchJSONBodyQuantity1 defines parameters for PostV1UsageEventsBatch.
-type PostV1UsageEventsBatchJSONBodyQuantity1 = string
+// CreateUsageEventBatchJSONBodyQuantity1 defines parameters for CreateUsageEventBatch.
+type CreateUsageEventBatchJSONBodyQuantity1 = string
 
-// PostV1UsageEventsBatchJSONBody_Quantity defines parameters for PostV1UsageEventsBatch.
-type PostV1UsageEventsBatchJSONBody_Quantity struct {
+// CreateUsageEventBatchJSONBody_Quantity defines parameters for CreateUsageEventBatch.
+type CreateUsageEventBatchJSONBody_Quantity struct {
 	union json.RawMessage
 }
 
@@ -9418,8 +9425,8 @@ type ReleaseHeldUsageJSONBody struct {
 	ExternalCustomerId string `json:"external_customer_id"`
 }
 
-// GetV1WebhookEndpointsEndpointsParams defines parameters for GetV1WebhookEndpointsEndpoints.
-type GetV1WebhookEndpointsEndpointsParams struct {
+// ListWebhookEndpointsParams defines parameters for ListWebhookEndpoints.
+type ListWebhookEndpointsParams struct {
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -9429,15 +9436,15 @@ type GetV1WebhookEndpointsEndpointsParams struct {
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// PostV1WebhookEndpointsEndpointsJSONBody defines parameters for PostV1WebhookEndpointsEndpoints.
-type PostV1WebhookEndpointsEndpointsJSONBody struct {
+// CreateWebhookEndpointJSONBody defines parameters for CreateWebhookEndpoint.
+type CreateWebhookEndpointJSONBody struct {
 	Description string   `json:"description,omitempty"`
 	Events      []string `json:"events,omitempty"`
 	Url         string   `json:"url"`
 }
 
-// PostV1WebhookEndpointsEndpointsParams defines parameters for PostV1WebhookEndpointsEndpoints.
-type PostV1WebhookEndpointsEndpointsParams struct {
+// CreateWebhookEndpointParams defines parameters for CreateWebhookEndpoint.
+type CreateWebhookEndpointParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -9458,19 +9465,19 @@ type GetWebhookEndpointStatsParams struct {
 	Offset Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
-// DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus defines parameters for DeleteV1WebhookEndpointsEndpointsId.
-type DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus string
+// DeleteWebhookEndpoint200JSONResponseBodyStatus defines parameters for DeleteWebhookEndpoint.
+type DeleteWebhookEndpoint200JSONResponseBodyStatus string
 
-// PatchV1WebhookEndpointsEndpointsIdJSONBody defines parameters for PatchV1WebhookEndpointsEndpointsId.
-type PatchV1WebhookEndpointsEndpointsIdJSONBody struct {
+// UpdateWebhookEndpointJSONBody defines parameters for UpdateWebhookEndpoint.
+type UpdateWebhookEndpointJSONBody struct {
 	Active      bool     `json:"active,omitempty"`
 	Description string   `json:"description,omitempty"`
 	Events      []string `json:"events,omitempty"`
 	Url         string   `json:"url,omitempty"`
 }
 
-// PatchV1WebhookEndpointsEndpointsIdParams defines parameters for PatchV1WebhookEndpointsEndpointsId.
-type PatchV1WebhookEndpointsEndpointsIdParams struct {
+// UpdateWebhookEndpointParams defines parameters for UpdateWebhookEndpoint.
+type UpdateWebhookEndpointParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -9502,8 +9509,8 @@ type ReplayWebhookDeliveryParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// PostV1WebhookEndpointsEndpointsIdRotateSecretParams defines parameters for PostV1WebhookEndpointsEndpointsIdRotateSecret.
-type PostV1WebhookEndpointsEndpointsIdRotateSecretParams struct {
+// RotateWebhookEndpointSecretParams defines parameters for RotateWebhookEndpointSecret.
+type RotateWebhookEndpointSecretParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
@@ -9513,8 +9520,8 @@ type PostV1WebhookEndpointsEndpointsIdRotateSecretParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// GetV1WebhookEndpointsEventsParams defines parameters for GetV1WebhookEndpointsEvents.
-type GetV1WebhookEndpointsEventsParams struct {
+// ListWebhookEventsParams defines parameters for ListWebhookEvents.
+type ListWebhookEventsParams struct {
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
 	Limit Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -9552,8 +9559,8 @@ type ReceiveStripeWebhookParams struct {
 // ReceiveStripeWebhook200JSONResponseBodyStatus defines parameters for ReceiveStripeWebhook.
 type ReceiveStripeWebhook200JSONResponseBodyStatus string
 
-// GetV1Whoami200JSONResponseBodyKeyType defines parameters for GetV1Whoami.
-type GetV1Whoami200JSONResponseBodyKeyType string
+// GetWhoami200JSONResponseBodyKeyType defines parameters for GetWhoami.
+type GetWhoami200JSONResponseBodyKeyType string
 
 // CreateApiKeyJSONRequestBody defines body for CreateApiKey for application/json ContentType.
 type CreateApiKeyJSONRequestBody CreateApiKeyJSONBody
@@ -9561,41 +9568,41 @@ type CreateApiKeyJSONRequestBody CreateApiKeyJSONBody
 // RotateApiKeyJSONRequestBody defines body for RotateApiKey for application/json ContentType.
 type RotateApiKeyJSONRequestBody RotateApiKeyJSONBody
 
-// PostV1AuthAcceptInviteJSONRequestBody defines body for PostV1AuthAcceptInvite for application/json ContentType.
-type PostV1AuthAcceptInviteJSONRequestBody PostV1AuthAcceptInviteJSONBody
+// AcceptInvitationJSONRequestBody defines body for AcceptInvitation for application/json ContentType.
+type AcceptInvitationJSONRequestBody AcceptInvitationJSONBody
 
-// PostV1AuthLoginJSONRequestBody defines body for PostV1AuthLogin for application/json ContentType.
-type PostV1AuthLoginJSONRequestBody PostV1AuthLoginJSONBody
+// LoginJSONRequestBody defines body for Login for application/json ContentType.
+type LoginJSONRequestBody LoginJSONBody
 
-// PostV1AuthModeJSONRequestBody defines body for PostV1AuthMode for application/json ContentType.
-type PostV1AuthModeJSONRequestBody PostV1AuthModeJSONBody
+// SwitchSessionModeJSONRequestBody defines body for SwitchSessionMode for application/json ContentType.
+type SwitchSessionModeJSONRequestBody SwitchSessionModeJSONBody
 
-// PostV1AuthPasswordResetConfirmJSONRequestBody defines body for PostV1AuthPasswordResetConfirm for application/json ContentType.
-type PostV1AuthPasswordResetConfirmJSONRequestBody PostV1AuthPasswordResetConfirmJSONBody
+// ConfirmPasswordResetJSONRequestBody defines body for ConfirmPasswordReset for application/json ContentType.
+type ConfirmPasswordResetJSONRequestBody ConfirmPasswordResetJSONBody
 
-// PostV1AuthPasswordResetRequestJSONRequestBody defines body for PostV1AuthPasswordResetRequest for application/json ContentType.
-type PostV1AuthPasswordResetRequestJSONRequestBody PostV1AuthPasswordResetRequestJSONBody
+// RequestPasswordResetJSONRequestBody defines body for RequestPasswordReset for application/json ContentType.
+type RequestPasswordResetJSONRequestBody RequestPasswordResetJSONBody
 
 // BootstrapJSONRequestBody defines body for Bootstrap for application/json ContentType.
 type BootstrapJSONRequestBody BootstrapJSONBody
 
-// PostV1CreditNotesJSONRequestBody defines body for PostV1CreditNotes for application/json ContentType.
-type PostV1CreditNotesJSONRequestBody PostV1CreditNotesJSONBody
+// CreateCreditNoteJSONRequestBody defines body for CreateCreditNote for application/json ContentType.
+type CreateCreditNoteJSONRequestBody CreateCreditNoteJSONBody
 
 // AttachStripeRefundToCreditNoteJSONRequestBody defines body for AttachStripeRefundToCreditNote for application/json ContentType.
 type AttachStripeRefundToCreditNoteJSONRequestBody AttachStripeRefundToCreditNoteJSONBody
 
-// PostV1CreditNotesIdSendJSONRequestBody defines body for PostV1CreditNotesIdSend for application/json ContentType.
-type PostV1CreditNotesIdSendJSONRequestBody PostV1CreditNotesIdSendJSONBody
+// SendCreditNoteJSONRequestBody defines body for SendCreditNote for application/json ContentType.
+type SendCreditNoteJSONRequestBody SendCreditNoteJSONBody
 
 // AdjustCreditsJSONRequestBody defines body for AdjustCredits for application/json ContentType.
 type AdjustCreditsJSONRequestBody AdjustCreditsJSONBody
 
-// PostV1CreditsGrantJSONRequestBody defines body for PostV1CreditsGrant for application/json ContentType.
-type PostV1CreditsGrantJSONRequestBody PostV1CreditsGrantJSONBody
+// GrantCreditsJSONRequestBody defines body for GrantCredits for application/json ContentType.
+type GrantCreditsJSONRequestBody GrantCreditsJSONBody
 
-// PostV1CustomersJSONRequestBody defines body for PostV1Customers for application/json ContentType.
-type PostV1CustomersJSONRequestBody PostV1CustomersJSONBody
+// CreateCustomerJSONRequestBody defines body for CreateCustomer for application/json ContentType.
+type CreateCustomerJSONRequestBody CreateCustomerJSONBody
 
 // SendCustomerPaymentSetupEmailJSONRequestBody defines body for SendCustomerPaymentSetupEmail for application/json ContentType.
 type SendCustomerPaymentSetupEmailJSONRequestBody SendCustomerPaymentSetupEmailJSONBody
@@ -9624,8 +9631,8 @@ type IngestLitellmSpendJSONRequestBody IngestLitellmSpendJSONBody
 // CreateInvoiceJSONRequestBody defines body for CreateInvoice for application/json ContentType.
 type CreateInvoiceJSONRequestBody = InvoiceCreateRequest
 
-// PostV1InvoicesCreatePreviewJSONRequestBody defines body for PostV1InvoicesCreatePreview for application/json ContentType.
-type PostV1InvoicesCreatePreviewJSONRequestBody PostV1InvoicesCreatePreviewJSONBody
+// CreateInvoicePreviewJSONRequestBody defines body for CreateInvoicePreview for application/json ContentType.
+type CreateInvoicePreviewJSONRequestBody CreateInvoicePreviewJSONBody
 
 // AddInvoiceLineItemJSONRequestBody defines body for AddInvoiceLineItem for application/json ContentType.
 type AddInvoiceLineItemJSONRequestBody = InvoiceLineItemInput
@@ -9636,8 +9643,8 @@ type RecordInvoicePaymentJSONRequestBody RecordInvoicePaymentJSONBody
 // RefundInvoiceJSONRequestBody defines body for RefundInvoice for application/json ContentType.
 type RefundInvoiceJSONRequestBody RefundInvoiceJSONBody
 
-// PostV1InvoicesIdSendJSONRequestBody defines body for PostV1InvoicesIdSend for application/json ContentType.
-type PostV1InvoicesIdSendJSONRequestBody PostV1InvoicesIdSendJSONBody
+// SendInvoiceJSONRequestBody defines body for SendInvoice for application/json ContentType.
+type SendInvoiceJSONRequestBody SendInvoiceJSONBody
 
 // DismissInvoiceStripeRefundJSONRequestBody defines body for DismissInvoiceStripeRefund for application/json ContentType.
 type DismissInvoiceStripeRefundJSONRequestBody DismissInvoiceStripeRefundJSONBody
@@ -9645,14 +9652,14 @@ type DismissInvoiceStripeRefundJSONRequestBody DismissInvoiceStripeRefundJSONBod
 // InviteMemberJSONRequestBody defines body for InviteMember for application/json ContentType.
 type InviteMemberJSONRequestBody InviteMemberJSONBody
 
-// PostV1MetersJSONRequestBody defines body for PostV1Meters for application/json ContentType.
-type PostV1MetersJSONRequestBody PostV1MetersJSONBody
+// CreateMeterJSONRequestBody defines body for CreateMeter for application/json ContentType.
+type CreateMeterJSONRequestBody CreateMeterJSONBody
 
-// PatchV1MetersIdJSONRequestBody defines body for PatchV1MetersId for application/json ContentType.
-type PatchV1MetersIdJSONRequestBody PatchV1MetersIdJSONBody
+// UpdateMeterJSONRequestBody defines body for UpdateMeter for application/json ContentType.
+type UpdateMeterJSONRequestBody UpdateMeterJSONBody
 
-// PostV1PlansJSONRequestBody defines body for PostV1Plans for application/json ContentType.
-type PostV1PlansJSONRequestBody PostV1PlansJSONBody
+// CreatePlanJSONRequestBody defines body for CreatePlan for application/json ContentType.
+type CreatePlanJSONRequestBody CreatePlanJSONBody
 
 // UpdatePlanJSONRequestBody defines body for UpdatePlan for application/json ContentType.
 type UpdatePlanJSONRequestBody UpdatePlanJSONBody
@@ -9666,8 +9673,8 @@ type UpdatePlanPriceJSONRequestBody = PriceShape
 // CreatePriceOverrideJSONRequestBody defines body for CreatePriceOverride for application/json ContentType.
 type CreatePriceOverrideJSONRequestBody CreatePriceOverrideJSONBody
 
-// PutV1ProviderCostsJSONRequestBody defines body for PutV1ProviderCosts for application/json ContentType.
-type PutV1ProviderCostsJSONRequestBody PutV1ProviderCostsJSONBody
+// UpsertProviderCostJSONRequestBody defines body for UpsertProviderCost for application/json ContentType.
+type UpsertProviderCostJSONRequestBody UpsertProviderCostJSONBody
 
 // InstantiateRecipeJSONRequestBody defines body for InstantiateRecipe for application/json ContentType.
 type InstantiateRecipeJSONRequestBody InstantiateRecipeJSONBody
@@ -9684,8 +9691,8 @@ type ConnectStripeJSONRequestBody ConnectStripeJSONBody
 // SetStripeWebhookSecretJSONRequestBody defines body for SetStripeWebhookSecret for application/json ContentType.
 type SetStripeWebhookSecretJSONRequestBody SetStripeWebhookSecretJSONBody
 
-// PostV1SubscriptionsJSONRequestBody defines body for PostV1Subscriptions for application/json ContentType.
-type PostV1SubscriptionsJSONRequestBody PostV1SubscriptionsJSONBody
+// CreateSubscriptionJSONRequestBody defines body for CreateSubscription for application/json ContentType.
+type CreateSubscriptionJSONRequestBody CreateSubscriptionJSONBody
 
 // SetSubscriptionBillingThresholdsJSONRequestBody defines body for SetSubscriptionBillingThresholds for application/json ContentType.
 type SetSubscriptionBillingThresholdsJSONRequestBody SetSubscriptionBillingThresholdsJSONBody
@@ -9705,20 +9712,20 @@ type PauseSubscriptionCollectionJSONRequestBody PauseSubscriptionCollectionJSONB
 // ScheduleSubscriptionCancelJSONRequestBody defines body for ScheduleSubscriptionCancel for application/json ContentType.
 type ScheduleSubscriptionCancelJSONRequestBody ScheduleSubscriptionCancelJSONBody
 
-// PostV1TestClocksJSONRequestBody defines body for PostV1TestClocks for application/json ContentType.
-type PostV1TestClocksJSONRequestBody PostV1TestClocksJSONBody
+// CreateTestClockJSONRequestBody defines body for CreateTestClock for application/json ContentType.
+type CreateTestClockJSONRequestBody CreateTestClockJSONBody
 
-// PostV1TestClocksIdAdvanceJSONRequestBody defines body for PostV1TestClocksIdAdvance for application/json ContentType.
-type PostV1TestClocksIdAdvanceJSONRequestBody PostV1TestClocksIdAdvanceJSONBody
+// AdvanceTestClockJSONRequestBody defines body for AdvanceTestClock for application/json ContentType.
+type AdvanceTestClockJSONRequestBody AdvanceTestClockJSONBody
 
-// PostV1UsageEventsJSONRequestBody defines body for PostV1UsageEvents for application/json ContentType.
-type PostV1UsageEventsJSONRequestBody PostV1UsageEventsJSONBody
+// CreateUsageEventJSONRequestBody defines body for CreateUsageEvent for application/json ContentType.
+type CreateUsageEventJSONRequestBody CreateUsageEventJSONBody
 
 // BackfillUsageEventJSONRequestBody defines body for BackfillUsageEvent for application/json ContentType.
 type BackfillUsageEventJSONRequestBody BackfillUsageEventJSONBody
 
-// PostV1UsageEventsBatchJSONRequestBody defines body for PostV1UsageEventsBatch for application/json ContentType.
-type PostV1UsageEventsBatchJSONRequestBody = PostV1UsageEventsBatchJSONBody
+// CreateUsageEventBatchJSONRequestBody defines body for CreateUsageEventBatch for application/json ContentType.
+type CreateUsageEventBatchJSONRequestBody = CreateUsageEventBatchJSONBody
 
 // DiscardHeldUsageJSONRequestBody defines body for DiscardHeldUsage for application/json ContentType.
 type DiscardHeldUsageJSONRequestBody DiscardHeldUsageJSONBody
@@ -9726,11 +9733,11 @@ type DiscardHeldUsageJSONRequestBody DiscardHeldUsageJSONBody
 // ReleaseHeldUsageJSONRequestBody defines body for ReleaseHeldUsage for application/json ContentType.
 type ReleaseHeldUsageJSONRequestBody ReleaseHeldUsageJSONBody
 
-// PostV1WebhookEndpointsEndpointsJSONRequestBody defines body for PostV1WebhookEndpointsEndpoints for application/json ContentType.
-type PostV1WebhookEndpointsEndpointsJSONRequestBody PostV1WebhookEndpointsEndpointsJSONBody
+// CreateWebhookEndpointJSONRequestBody defines body for CreateWebhookEndpoint for application/json ContentType.
+type CreateWebhookEndpointJSONRequestBody CreateWebhookEndpointJSONBody
 
-// PatchV1WebhookEndpointsEndpointsIdJSONRequestBody defines body for PatchV1WebhookEndpointsEndpointsId for application/json ContentType.
-type PatchV1WebhookEndpointsEndpointsIdJSONRequestBody PatchV1WebhookEndpointsEndpointsIdJSONBody
+// UpdateWebhookEndpointJSONRequestBody defines body for UpdateWebhookEndpoint for application/json ContentType.
+type UpdateWebhookEndpointJSONRequestBody UpdateWebhookEndpointJSONBody
 
 // ReceivePostmarkWebhookJSONRequestBody defines body for ReceivePostmarkWebhook for application/json ContentType.
 type ReceivePostmarkWebhookJSONRequestBody ReceivePostmarkWebhookJSONBody
@@ -9826,22 +9833,22 @@ func (t *IngestLitellmSpendJSONBody) UnmarshalJSON(b []byte) error {
 	return err
 }
 
-// AsPostV1UsageEventsJSONBodyQuantity0 returns the union data inside the PostV1UsageEventsJSONBody_Quantity as a PostV1UsageEventsJSONBodyQuantity0
-func (t PostV1UsageEventsJSONBody_Quantity) AsPostV1UsageEventsJSONBodyQuantity0() (PostV1UsageEventsJSONBodyQuantity0, error) {
-	var body PostV1UsageEventsJSONBodyQuantity0
+// AsCreateUsageEventJSONBodyQuantity0 returns the union data inside the CreateUsageEventJSONBody_Quantity as a CreateUsageEventJSONBodyQuantity0
+func (t CreateUsageEventJSONBody_Quantity) AsCreateUsageEventJSONBodyQuantity0() (CreateUsageEventJSONBodyQuantity0, error) {
+	var body CreateUsageEventJSONBodyQuantity0
 	err := json.Unmarshal(t.union, &body)
 	return body, err
 }
 
-// FromPostV1UsageEventsJSONBodyQuantity0 overwrites any union data inside the PostV1UsageEventsJSONBody_Quantity as the provided PostV1UsageEventsJSONBodyQuantity0
-func (t *PostV1UsageEventsJSONBody_Quantity) FromPostV1UsageEventsJSONBodyQuantity0(v PostV1UsageEventsJSONBodyQuantity0) error {
+// FromCreateUsageEventJSONBodyQuantity0 overwrites any union data inside the CreateUsageEventJSONBody_Quantity as the provided CreateUsageEventJSONBodyQuantity0
+func (t *CreateUsageEventJSONBody_Quantity) FromCreateUsageEventJSONBodyQuantity0(v CreateUsageEventJSONBodyQuantity0) error {
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
 }
 
-// MergePostV1UsageEventsJSONBodyQuantity0 performs a merge with any union data inside the PostV1UsageEventsJSONBody_Quantity, using the provided PostV1UsageEventsJSONBodyQuantity0
-func (t *PostV1UsageEventsJSONBody_Quantity) MergePostV1UsageEventsJSONBodyQuantity0(v PostV1UsageEventsJSONBodyQuantity0) error {
+// MergeCreateUsageEventJSONBodyQuantity0 performs a merge with any union data inside the CreateUsageEventJSONBody_Quantity, using the provided CreateUsageEventJSONBodyQuantity0
+func (t *CreateUsageEventJSONBody_Quantity) MergeCreateUsageEventJSONBodyQuantity0(v CreateUsageEventJSONBodyQuantity0) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -9852,22 +9859,22 @@ func (t *PostV1UsageEventsJSONBody_Quantity) MergePostV1UsageEventsJSONBodyQuant
 	return err
 }
 
-// AsPostV1UsageEventsJSONBodyQuantity1 returns the union data inside the PostV1UsageEventsJSONBody_Quantity as a PostV1UsageEventsJSONBodyQuantity1
-func (t PostV1UsageEventsJSONBody_Quantity) AsPostV1UsageEventsJSONBodyQuantity1() (PostV1UsageEventsJSONBodyQuantity1, error) {
-	var body PostV1UsageEventsJSONBodyQuantity1
+// AsCreateUsageEventJSONBodyQuantity1 returns the union data inside the CreateUsageEventJSONBody_Quantity as a CreateUsageEventJSONBodyQuantity1
+func (t CreateUsageEventJSONBody_Quantity) AsCreateUsageEventJSONBodyQuantity1() (CreateUsageEventJSONBodyQuantity1, error) {
+	var body CreateUsageEventJSONBodyQuantity1
 	err := json.Unmarshal(t.union, &body)
 	return body, err
 }
 
-// FromPostV1UsageEventsJSONBodyQuantity1 overwrites any union data inside the PostV1UsageEventsJSONBody_Quantity as the provided PostV1UsageEventsJSONBodyQuantity1
-func (t *PostV1UsageEventsJSONBody_Quantity) FromPostV1UsageEventsJSONBodyQuantity1(v PostV1UsageEventsJSONBodyQuantity1) error {
+// FromCreateUsageEventJSONBodyQuantity1 overwrites any union data inside the CreateUsageEventJSONBody_Quantity as the provided CreateUsageEventJSONBodyQuantity1
+func (t *CreateUsageEventJSONBody_Quantity) FromCreateUsageEventJSONBodyQuantity1(v CreateUsageEventJSONBodyQuantity1) error {
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
 }
 
-// MergePostV1UsageEventsJSONBodyQuantity1 performs a merge with any union data inside the PostV1UsageEventsJSONBody_Quantity, using the provided PostV1UsageEventsJSONBodyQuantity1
-func (t *PostV1UsageEventsJSONBody_Quantity) MergePostV1UsageEventsJSONBodyQuantity1(v PostV1UsageEventsJSONBodyQuantity1) error {
+// MergeCreateUsageEventJSONBodyQuantity1 performs a merge with any union data inside the CreateUsageEventJSONBody_Quantity, using the provided CreateUsageEventJSONBodyQuantity1
+func (t *CreateUsageEventJSONBody_Quantity) MergeCreateUsageEventJSONBodyQuantity1(v CreateUsageEventJSONBodyQuantity1) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -9878,12 +9885,12 @@ func (t *PostV1UsageEventsJSONBody_Quantity) MergePostV1UsageEventsJSONBodyQuant
 	return err
 }
 
-func (t PostV1UsageEventsJSONBody_Quantity) MarshalJSON() ([]byte, error) {
+func (t CreateUsageEventJSONBody_Quantity) MarshalJSON() ([]byte, error) {
 	b, err := t.union.MarshalJSON()
 	return b, err
 }
 
-func (t *PostV1UsageEventsJSONBody_Quantity) UnmarshalJSON(b []byte) error {
+func (t *CreateUsageEventJSONBody_Quantity) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }
@@ -9950,22 +9957,22 @@ func (t *BackfillUsageEventJSONBody_Quantity) UnmarshalJSON(b []byte) error {
 	return err
 }
 
-// AsPostV1UsageEventsBatchJSONBodyQuantity0 returns the union data inside the PostV1UsageEventsBatchJSONBody_Quantity as a PostV1UsageEventsBatchJSONBodyQuantity0
-func (t PostV1UsageEventsBatchJSONBody_Quantity) AsPostV1UsageEventsBatchJSONBodyQuantity0() (PostV1UsageEventsBatchJSONBodyQuantity0, error) {
-	var body PostV1UsageEventsBatchJSONBodyQuantity0
+// AsCreateUsageEventBatchJSONBodyQuantity0 returns the union data inside the CreateUsageEventBatchJSONBody_Quantity as a CreateUsageEventBatchJSONBodyQuantity0
+func (t CreateUsageEventBatchJSONBody_Quantity) AsCreateUsageEventBatchJSONBodyQuantity0() (CreateUsageEventBatchJSONBodyQuantity0, error) {
+	var body CreateUsageEventBatchJSONBodyQuantity0
 	err := json.Unmarshal(t.union, &body)
 	return body, err
 }
 
-// FromPostV1UsageEventsBatchJSONBodyQuantity0 overwrites any union data inside the PostV1UsageEventsBatchJSONBody_Quantity as the provided PostV1UsageEventsBatchJSONBodyQuantity0
-func (t *PostV1UsageEventsBatchJSONBody_Quantity) FromPostV1UsageEventsBatchJSONBodyQuantity0(v PostV1UsageEventsBatchJSONBodyQuantity0) error {
+// FromCreateUsageEventBatchJSONBodyQuantity0 overwrites any union data inside the CreateUsageEventBatchJSONBody_Quantity as the provided CreateUsageEventBatchJSONBodyQuantity0
+func (t *CreateUsageEventBatchJSONBody_Quantity) FromCreateUsageEventBatchJSONBodyQuantity0(v CreateUsageEventBatchJSONBodyQuantity0) error {
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
 }
 
-// MergePostV1UsageEventsBatchJSONBodyQuantity0 performs a merge with any union data inside the PostV1UsageEventsBatchJSONBody_Quantity, using the provided PostV1UsageEventsBatchJSONBodyQuantity0
-func (t *PostV1UsageEventsBatchJSONBody_Quantity) MergePostV1UsageEventsBatchJSONBodyQuantity0(v PostV1UsageEventsBatchJSONBodyQuantity0) error {
+// MergeCreateUsageEventBatchJSONBodyQuantity0 performs a merge with any union data inside the CreateUsageEventBatchJSONBody_Quantity, using the provided CreateUsageEventBatchJSONBodyQuantity0
+func (t *CreateUsageEventBatchJSONBody_Quantity) MergeCreateUsageEventBatchJSONBodyQuantity0(v CreateUsageEventBatchJSONBodyQuantity0) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -9976,22 +9983,22 @@ func (t *PostV1UsageEventsBatchJSONBody_Quantity) MergePostV1UsageEventsBatchJSO
 	return err
 }
 
-// AsPostV1UsageEventsBatchJSONBodyQuantity1 returns the union data inside the PostV1UsageEventsBatchJSONBody_Quantity as a PostV1UsageEventsBatchJSONBodyQuantity1
-func (t PostV1UsageEventsBatchJSONBody_Quantity) AsPostV1UsageEventsBatchJSONBodyQuantity1() (PostV1UsageEventsBatchJSONBodyQuantity1, error) {
-	var body PostV1UsageEventsBatchJSONBodyQuantity1
+// AsCreateUsageEventBatchJSONBodyQuantity1 returns the union data inside the CreateUsageEventBatchJSONBody_Quantity as a CreateUsageEventBatchJSONBodyQuantity1
+func (t CreateUsageEventBatchJSONBody_Quantity) AsCreateUsageEventBatchJSONBodyQuantity1() (CreateUsageEventBatchJSONBodyQuantity1, error) {
+	var body CreateUsageEventBatchJSONBodyQuantity1
 	err := json.Unmarshal(t.union, &body)
 	return body, err
 }
 
-// FromPostV1UsageEventsBatchJSONBodyQuantity1 overwrites any union data inside the PostV1UsageEventsBatchJSONBody_Quantity as the provided PostV1UsageEventsBatchJSONBodyQuantity1
-func (t *PostV1UsageEventsBatchJSONBody_Quantity) FromPostV1UsageEventsBatchJSONBodyQuantity1(v PostV1UsageEventsBatchJSONBodyQuantity1) error {
+// FromCreateUsageEventBatchJSONBodyQuantity1 overwrites any union data inside the CreateUsageEventBatchJSONBody_Quantity as the provided CreateUsageEventBatchJSONBodyQuantity1
+func (t *CreateUsageEventBatchJSONBody_Quantity) FromCreateUsageEventBatchJSONBodyQuantity1(v CreateUsageEventBatchJSONBodyQuantity1) error {
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
 }
 
-// MergePostV1UsageEventsBatchJSONBodyQuantity1 performs a merge with any union data inside the PostV1UsageEventsBatchJSONBody_Quantity, using the provided PostV1UsageEventsBatchJSONBodyQuantity1
-func (t *PostV1UsageEventsBatchJSONBody_Quantity) MergePostV1UsageEventsBatchJSONBodyQuantity1(v PostV1UsageEventsBatchJSONBodyQuantity1) error {
+// MergeCreateUsageEventBatchJSONBodyQuantity1 performs a merge with any union data inside the CreateUsageEventBatchJSONBody_Quantity, using the provided CreateUsageEventBatchJSONBodyQuantity1
+func (t *CreateUsageEventBatchJSONBody_Quantity) MergeCreateUsageEventBatchJSONBodyQuantity1(v CreateUsageEventBatchJSONBodyQuantity1) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -10002,12 +10009,12 @@ func (t *PostV1UsageEventsBatchJSONBody_Quantity) MergePostV1UsageEventsBatchJSO
 	return err
 }
 
-func (t PostV1UsageEventsBatchJSONBody_Quantity) MarshalJSON() ([]byte, error) {
+func (t CreateUsageEventBatchJSONBody_Quantity) MarshalJSON() ([]byte, error) {
 	b, err := t.union.MarshalJSON()
 	return b, err
 }
 
-func (t *PostV1UsageEventsBatchJSONBody_Quantity) UnmarshalJSON(b []byte) error {
+func (t *CreateUsageEventBatchJSONBody_Quantity) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }
@@ -10055,31 +10062,31 @@ type ServerInterface interface {
 	GetAuditLogFilters(w http.ResponseWriter, r *http.Request)
 	// Accept a team invitation
 	// (POST /v1/auth/accept-invite)
-	PostV1AuthAcceptInvite(w http.ResponseWriter, r *http.Request)
+	AcceptInvitation(w http.ResponseWriter, r *http.Request)
 	// Preview a team invitation (accept-page context)
 	// (GET /v1/auth/invite/{token})
-	GetV1AuthInviteToken(w http.ResponseWriter, r *http.Request, token string)
+	GetInvitation(w http.ResponseWriter, r *http.Request, token string)
 	// Sign in with email and password; mint an httpOnly session cookie
 	// (POST /v1/auth/login)
-	PostV1AuthLogin(w http.ResponseWriter, r *http.Request)
+	Login(w http.ResponseWriter, r *http.Request)
 	// Revoke the current session and clear the cookie
 	// (POST /v1/auth/logout)
-	PostV1AuthLogout(w http.ResponseWriter, r *http.Request)
+	Logout(w http.ResponseWriter, r *http.Request)
 	// Switch the dashboard session between test and live mode
 	// (POST /v1/auth/mode)
-	PostV1AuthMode(w http.ResponseWriter, r *http.Request)
+	SwitchSessionMode(w http.ResponseWriter, r *http.Request)
 	// Check a password reset token
 	// (GET /v1/auth/password-reset/check)
 	CheckPasswordResetToken(w http.ResponseWriter, r *http.Request, params CheckPasswordResetTokenParams)
 	// Set a new password using a reset token
 	// (POST /v1/auth/password-reset/confirm)
-	PostV1AuthPasswordResetConfirm(w http.ResponseWriter, r *http.Request)
+	ConfirmPasswordReset(w http.ResponseWriter, r *http.Request)
 	// Request a password reset link
 	// (POST /v1/auth/password-reset/request)
-	PostV1AuthPasswordResetRequest(w http.ResponseWriter, r *http.Request)
+	RequestPasswordReset(w http.ResponseWriter, r *http.Request)
 	// Trigger billing cycle
 	// (POST /v1/billing/run)
-	PostV1BillingRun(w http.ResponseWriter, r *http.Request, params PostV1BillingRunParams)
+	RunBilling(w http.ResponseWriter, r *http.Request, params RunBillingParams)
 	// Set up a new installation
 	// (POST /v1/bootstrap)
 	Bootstrap(w http.ResponseWriter, r *http.Request)
@@ -10088,7 +10095,7 @@ type ServerInterface interface {
 	ListCreditNotes(w http.ResponseWriter, r *http.Request, params ListCreditNotesParams)
 	// Create a credit note (line-based, or commit relief)
 	// (POST /v1/credit-notes)
-	PostV1CreditNotes(w http.ResponseWriter, r *http.Request, params PostV1CreditNotesParams)
+	CreateCreditNote(w http.ResponseWriter, r *http.Request, params CreateCreditNoteParams)
 	// Get credit note totals
 	// (GET /v1/credit-notes/stats)
 	GetCreditNoteStats(w http.ResponseWriter, r *http.Request)
@@ -10109,7 +10116,7 @@ type ServerInterface interface {
 	RetryCreditNoteRefund(w http.ResponseWriter, r *http.Request, id string, params RetryCreditNoteRefundParams)
 	// Email the credit-note document (PDF attached)
 	// (POST /v1/credit-notes/{id}/send)
-	PostV1CreditNotesIdSend(w http.ResponseWriter, r *http.Request, id string, params PostV1CreditNotesIdSendParams)
+	SendCreditNote(w http.ResponseWriter, r *http.Request, id string, params SendCreditNoteParams)
 	// Void a draft credit note
 	// (POST /v1/credit-notes/{id}/void)
 	VoidCreditNote(w http.ResponseWriter, r *http.Request, id string, params VoidCreditNoteParams)
@@ -10118,28 +10125,28 @@ type ServerInterface interface {
 	AdjustCredits(w http.ResponseWriter, r *http.Request, params AdjustCreditsParams)
 	// Get customer credit balance
 	// (GET /v1/credits/balance/{customer_id})
-	GetV1CreditsBalanceCustomerId(w http.ResponseWriter, r *http.Request, customerId string)
+	GetCreditBalance(w http.ResponseWriter, r *http.Request, customerId string)
 	// Get customer live credit balance
 	// (GET /v1/credits/balance/{customer_id}/live)
-	GetV1CreditsBalanceCustomerIdLive(w http.ResponseWriter, r *http.Request, customerId string)
+	GetLiveCreditBalance(w http.ResponseWriter, r *http.Request, customerId string)
 	// List credit balances for all customers
 	// (GET /v1/credits/balances)
 	ListCreditBalances(w http.ResponseWriter, r *http.Request, params ListCreditBalancesParams)
 	// Grant credits to customer
 	// (POST /v1/credits/grant)
-	PostV1CreditsGrant(w http.ResponseWriter, r *http.Request, params PostV1CreditsGrantParams)
+	GrantCredits(w http.ResponseWriter, r *http.Request, params GrantCreditsParams)
 	// Per-grant burndown + kind subtotals
 	// (GET /v1/credits/grants/{customer_id})
-	GetV1CreditsGrantsCustomerId(w http.ResponseWriter, r *http.Request, customerId string, params GetV1CreditsGrantsCustomerIdParams)
+	GetCreditGrants(w http.ResponseWriter, r *http.Request, customerId string, params GetCreditGrantsParams)
 	// List a customer's credit ledger
 	// (GET /v1/credits/ledger/{customer_id})
 	ListCreditLedgerEntries(w http.ResponseWriter, r *http.Request, customerId string, params ListCreditLedgerEntriesParams)
 	// List customers
 	// (GET /v1/customers)
-	GetV1Customers(w http.ResponseWriter, r *http.Request, params GetV1CustomersParams)
+	ListCustomers(w http.ResponseWriter, r *http.Request, params ListCustomersParams)
 	// Create customer
 	// (POST /v1/customers)
-	PostV1Customers(w http.ResponseWriter, r *http.Request, params PostV1CustomersParams)
+	CreateCustomer(w http.ResponseWriter, r *http.Request, params CreateCustomerParams)
 	// Get a customer overview
 	// (GET /v1/customers/{customer_id}/overview)
 	GetCustomerOverview(w http.ResponseWriter, r *http.Request, customerId string)
@@ -10172,10 +10179,10 @@ type ServerInterface interface {
 	UpsertCustomerBillingProfile(w http.ResponseWriter, r *http.Request, id string, params UpsertCustomerBillingProfileParams)
 	// Per-customer margin report (operator only)
 	// (GET /v1/customers/{id}/margin)
-	GetV1CustomersIdMargin(w http.ResponseWriter, r *http.Request, id string, params GetV1CustomersIdMarginParams)
+	GetCustomerMargin(w http.ResponseWriter, r *http.Request, id string, params GetCustomerMarginParams)
 	// Rotate the public cost-dashboard token (ADR-032)
 	// (POST /v1/customers/{id}/rotate-cost-dashboard-token)
-	PostV1CustomersIdRotateCostDashboardToken(w http.ResponseWriter, r *http.Request, id string, params PostV1CustomersIdRotateCostDashboardTokenParams)
+	RotateCustomerCostDashboardToken(w http.ResponseWriter, r *http.Request, id string, params RotateCustomerCostDashboardTokenParams)
 	// List emails sent to the customer
 	// (GET /v1/customers/{id}/sent-emails)
 	ListCustomerSentEmails(w http.ResponseWriter, r *http.Request, id string, params ListCustomerSentEmailsParams)
@@ -10232,13 +10239,13 @@ type ServerInterface interface {
 	IngestLitellmSpend(w http.ResponseWriter, r *http.Request)
 	// List invoices
 	// (GET /v1/invoices)
-	GetV1Invoices(w http.ResponseWriter, r *http.Request, params GetV1InvoicesParams)
+	ListInvoices(w http.ResponseWriter, r *http.Request, params ListInvoicesParams)
 	// Create a draft invoice
 	// (POST /v1/invoices)
 	CreateInvoice(w http.ResponseWriter, r *http.Request, params CreateInvoiceParams)
 	// Preview the next invoice for a customer (Stripe-equivalent)
 	// (POST /v1/invoices/create_preview)
-	PostV1InvoicesCreatePreview(w http.ResponseWriter, r *http.Request, params PostV1InvoicesCreatePreviewParams)
+	CreateInvoicePreview(w http.ResponseWriter, r *http.Request, params CreateInvoicePreviewParams)
 	// Get invoice with line items
 	// (GET /v1/invoices/{id})
 	GetInvoice(w http.ResponseWriter, r *http.Request, id string)
@@ -10250,7 +10257,7 @@ type ServerInterface interface {
 	ListInvoiceDisputes(w http.ResponseWriter, r *http.Request, id string, params ListInvoiceDisputesParams)
 	// Finalize draft invoice
 	// (POST /v1/invoices/{id}/finalize)
-	PostV1InvoicesIdFinalize(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdFinalizeParams)
+	FinalizeInvoice(w http.ResponseWriter, r *http.Request, id string, params FinalizeInvoiceParams)
 	// Add a line item to a draft invoice
 	// (POST /v1/invoices/{id}/line-items)
 	AddInvoiceLineItem(w http.ResponseWriter, r *http.Request, id string, params AddInvoiceLineItemParams)
@@ -10262,7 +10269,7 @@ type ServerInterface interface {
 	GetInvoicePaymentTimeline(w http.ResponseWriter, r *http.Request, id string)
 	// Download invoice PDF
 	// (GET /v1/invoices/{id}/pdf)
-	GetV1InvoicesIdPdf(w http.ResponseWriter, r *http.Request, id string)
+	GetInvoicePdf(w http.ResponseWriter, r *http.Request, id string)
 	// Record a payment made outside Stripe
 	// (POST /v1/invoices/{id}/record-payment)
 	RecordInvoicePayment(w http.ResponseWriter, r *http.Request, id string, params RecordInvoicePaymentParams)
@@ -10274,13 +10281,13 @@ type ServerInterface interface {
 	ResendInvoiceSetupLink(w http.ResponseWriter, r *http.Request, id string, params ResendInvoiceSetupLinkParams)
 	// Retry tax calculation on a deferred invoice
 	// (POST /v1/invoices/{id}/retry-tax)
-	PostV1InvoicesIdRetryTax(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdRetryTaxParams)
+	RetryInvoiceTax(w http.ResponseWriter, r *http.Request, id string, params RetryInvoiceTaxParams)
 	// Replace the hosted invoice link
 	// (POST /v1/invoices/{id}/rotate-public-token)
 	RotateInvoicePublicToken(w http.ResponseWriter, r *http.Request, id string, params RotateInvoicePublicTokenParams)
 	// Email the invoice (PDF attached) to a recipient
 	// (POST /v1/invoices/{id}/send)
-	PostV1InvoicesIdSend(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdSendParams)
+	SendInvoice(w http.ResponseWriter, r *http.Request, id string, params SendInvoiceParams)
 	// List the refunds made in Stripe on an invoice
 	// (GET /v1/invoices/{id}/stripe-refunds)
 	ListInvoiceStripeRefunds(w http.ResponseWriter, r *http.Request, id string, params ListInvoiceStripeRefundsParams)
@@ -10304,22 +10311,22 @@ type ServerInterface interface {
 	RemoveMember(w http.ResponseWriter, r *http.Request, userID string)
 	// List meters
 	// (GET /v1/meters)
-	GetV1Meters(w http.ResponseWriter, r *http.Request, params GetV1MetersParams)
+	ListMeters(w http.ResponseWriter, r *http.Request, params ListMetersParams)
 	// Create meter
 	// (POST /v1/meters)
-	PostV1Meters(w http.ResponseWriter, r *http.Request, params PostV1MetersParams)
+	CreateMeter(w http.ResponseWriter, r *http.Request, params CreateMeterParams)
 	// Get meter
 	// (GET /v1/meters/{id})
 	GetMeter(w http.ResponseWriter, r *http.Request, id string)
 	// Update meter
 	// (PATCH /v1/meters/{id})
-	PatchV1MetersId(w http.ResponseWriter, r *http.Request, id string, params PatchV1MetersIdParams)
+	UpdateMeter(w http.ResponseWriter, r *http.Request, id string, params UpdateMeterParams)
 	// List plans
 	// (GET /v1/plans)
-	GetV1Plans(w http.ResponseWriter, r *http.Request, params GetV1PlansParams)
+	ListPlans(w http.ResponseWriter, r *http.Request, params ListPlansParams)
 	// Create plan
 	// (POST /v1/plans)
-	PostV1Plans(w http.ResponseWriter, r *http.Request, params PostV1PlansParams)
+	CreatePlan(w http.ResponseWriter, r *http.Request, params CreatePlanParams)
 	// Get plan
 	// (GET /v1/plans/{id})
 	GetPlan(w http.ResponseWriter, r *http.Request, id string)
@@ -10349,16 +10356,16 @@ type ServerInterface interface {
 	DeletePriceOverride(w http.ResponseWriter, r *http.Request, id string)
 	// List provider cost rates
 	// (GET /v1/provider-costs)
-	GetV1ProviderCosts(w http.ResponseWriter, r *http.Request, params GetV1ProviderCostsParams)
+	ListProviderCosts(w http.ResponseWriter, r *http.Request, params ListProviderCostsParams)
 	// Create or update a provider cost rate
 	// (PUT /v1/provider-costs)
-	PutV1ProviderCosts(w http.ResponseWriter, r *http.Request, params PutV1ProviderCostsParams)
+	UpsertProviderCost(w http.ResponseWriter, r *http.Request, params UpsertProviderCostParams)
 	// Delete a provider cost rate
 	// (DELETE /v1/provider-costs/{id})
-	DeleteV1ProviderCostsId(w http.ResponseWriter, r *http.Request, id string)
+	DeleteProviderCost(w http.ResponseWriter, r *http.Request, id string)
 	// Public cost-dashboard projection (ADR-032)
 	// (GET /v1/public/cost-dashboard/{token})
-	GetV1PublicCostDashboardToken(w http.ResponseWriter, r *http.Request, token string)
+	GetPublicCostDashboard(w http.ResponseWriter, r *http.Request, token string)
 	// Data behind the hosted invoice page
 	// (GET /v1/public/invoices/{token})
 	GetHostedInvoice(w http.ResponseWriter, r *http.Request, token string)
@@ -10415,16 +10422,16 @@ type ServerInterface interface {
 	SetStripeWebhookSecret(w http.ResponseWriter, r *http.Request, mode SetStripeWebhookSecretParamsMode, params SetStripeWebhookSecretParams)
 	// List subscriptions
 	// (GET /v1/subscriptions)
-	GetV1Subscriptions(w http.ResponseWriter, r *http.Request, params GetV1SubscriptionsParams)
+	ListSubscriptions(w http.ResponseWriter, r *http.Request, params ListSubscriptionsParams)
 	// Create subscription
 	// (POST /v1/subscriptions)
-	PostV1Subscriptions(w http.ResponseWriter, r *http.Request, params PostV1SubscriptionsParams)
+	CreateSubscription(w http.ResponseWriter, r *http.Request, params CreateSubscriptionParams)
 	// Get subscription
 	// (GET /v1/subscriptions/{id})
 	GetSubscription(w http.ResponseWriter, r *http.Request, id string)
 	// Activate draft subscription
 	// (POST /v1/subscriptions/{id}/activate)
-	PostV1SubscriptionsIdActivate(w http.ResponseWriter, r *http.Request, id string, params PostV1SubscriptionsIdActivateParams)
+	ActivateSubscription(w http.ResponseWriter, r *http.Request, id string, params ActivateSubscriptionParams)
 	// Clear billing thresholds
 	// (DELETE /v1/subscriptions/{id}/billing-thresholds)
 	ClearSubscriptionBillingThresholds(w http.ResponseWriter, r *http.Request, id string)
@@ -10460,7 +10467,7 @@ type ServerInterface interface {
 	PauseSubscriptionCollection(w http.ResponseWriter, r *http.Request, id string, params PauseSubscriptionCollectionParams)
 	// Retry billing on a subscription whose billing is failing
 	// (POST /v1/subscriptions/{id}/retry-billing)
-	PostV1SubscriptionsIdRetryBilling(w http.ResponseWriter, r *http.Request, id string, params PostV1SubscriptionsIdRetryBillingParams)
+	RetrySubscriptionBilling(w http.ResponseWriter, r *http.Request, id string, params RetrySubscriptionBillingParams)
 	// Schedule a cancel
 	// (POST /v1/subscriptions/{id}/schedule-cancel)
 	ScheduleSubscriptionCancel(w http.ResponseWriter, r *http.Request, id string, params ScheduleSubscriptionCancelParams)
@@ -10472,34 +10479,34 @@ type ServerInterface interface {
 	GetSubscriptionTimeline(w http.ResponseWriter, r *http.Request, id string)
 	// List test clocks for the active tenant
 	// (GET /v1/test-clocks)
-	GetV1TestClocks(w http.ResponseWriter, r *http.Request, params GetV1TestClocksParams)
+	ListTestClocks(w http.ResponseWriter, r *http.Request, params ListTestClocksParams)
 	// Create a test clock
 	// (POST /v1/test-clocks)
-	PostV1TestClocks(w http.ResponseWriter, r *http.Request, params PostV1TestClocksParams)
+	CreateTestClock(w http.ResponseWriter, r *http.Request, params CreateTestClockParams)
 	// Delete a test clock (cascades to pinned subscriptions)
 	// (DELETE /v1/test-clocks/{id})
-	DeleteV1TestClocksId(w http.ResponseWriter, r *http.Request, id string)
+	DeleteTestClock(w http.ResponseWriter, r *http.Request, id string)
 	// Get a test clock by id
 	// (GET /v1/test-clocks/{id})
-	GetV1TestClocksId(w http.ResponseWriter, r *http.Request, id string)
+	GetTestClock(w http.ResponseWriter, r *http.Request, id string)
 	// Advance the clock to a new frozen_time
 	// (POST /v1/test-clocks/{id}/advance)
-	PostV1TestClocksIdAdvance(w http.ResponseWriter, r *http.Request, id string, params PostV1TestClocksIdAdvanceParams)
+	AdvanceTestClock(w http.ResponseWriter, r *http.Request, id string, params AdvanceTestClockParams)
 	// List customers attached to a test clock
 	// (GET /v1/test-clocks/{id}/customers)
 	ListTestClockCustomers(w http.ResponseWriter, r *http.Request, id string, params ListTestClockCustomersParams)
 	// Retry catchup on a clock parked in internal_failure
 	// (POST /v1/test-clocks/{id}/retry-advance)
-	PostV1TestClocksIdRetryAdvance(w http.ResponseWriter, r *http.Request, id string, params PostV1TestClocksIdRetryAdvanceParams)
+	RetryTestClockAdvance(w http.ResponseWriter, r *http.Request, id string, params RetryTestClockAdvanceParams)
 	// List subscriptions pinned to this clock
 	// (GET /v1/test-clocks/{id}/subscriptions)
-	GetV1TestClocksIdSubscriptions(w http.ResponseWriter, r *http.Request, id string, params GetV1TestClocksIdSubscriptionsParams)
+	ListTestClockSubscriptions(w http.ResponseWriter, r *http.Request, id string, params ListTestClockSubscriptionsParams)
 	// List usage events
 	// (GET /v1/usage-events)
-	GetV1UsageEvents(w http.ResponseWriter, r *http.Request, params GetV1UsageEventsParams)
+	ListUsageEvents(w http.ResponseWriter, r *http.Request, params ListUsageEventsParams)
 	// Ingest usage event
 	// (POST /v1/usage-events)
-	PostV1UsageEvents(w http.ResponseWriter, r *http.Request)
+	CreateUsageEvent(w http.ResponseWriter, r *http.Request)
 	// Usage totals
 	// (GET /v1/usage-events/aggregate)
 	AggregateUsageEvents(w http.ResponseWriter, r *http.Request, params AggregateUsageEventsParams)
@@ -10508,7 +10515,7 @@ type ServerInterface interface {
 	BackfillUsageEvent(w http.ResponseWriter, r *http.Request)
 	// Batch ingest usage events (max 1000, all-or-nothing)
 	// (POST /v1/usage-events/batch)
-	PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request)
+	CreateUsageEventBatch(w http.ResponseWriter, r *http.Request)
 	// List held usage
 	// (GET /v1/usage-events/held)
 	ListHeldUsage(w http.ResponseWriter, r *http.Request)
@@ -10520,22 +10527,22 @@ type ServerInterface interface {
 	ReleaseHeldUsage(w http.ResponseWriter, r *http.Request)
 	// List webhook endpoints
 	// (GET /v1/webhook-endpoints/endpoints)
-	GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request, params GetV1WebhookEndpointsEndpointsParams)
+	ListWebhookEndpoints(w http.ResponseWriter, r *http.Request, params ListWebhookEndpointsParams)
 	// Create webhook endpoint
 	// (POST /v1/webhook-endpoints/endpoints)
-	PostV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request, params PostV1WebhookEndpointsEndpointsParams)
+	CreateWebhookEndpoint(w http.ResponseWriter, r *http.Request, params CreateWebhookEndpointParams)
 	// Delivery counts per webhook endpoint
 	// (GET /v1/webhook-endpoints/endpoints/stats)
 	GetWebhookEndpointStats(w http.ResponseWriter, r *http.Request, params GetWebhookEndpointStatsParams)
 	// Delete (disable) webhook endpoint
 	// (DELETE /v1/webhook-endpoints/endpoints/{id})
-	DeleteV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request, id string)
+	DeleteWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string)
 	// Get a webhook endpoint
 	// (GET /v1/webhook-endpoints/endpoints/{id})
 	GetWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string)
 	// Update webhook endpoint (no secret rotation)
 	// (PATCH /v1/webhook-endpoints/endpoints/{id})
-	PatchV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request, id string, params PatchV1WebhookEndpointsEndpointsIdParams)
+	UpdateWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string, params UpdateWebhookEndpointParams)
 	// List an endpoint's recent deliveries
 	// (GET /v1/webhook-endpoints/endpoints/{id}/deliveries)
 	ListWebhookEndpointDeliveries(w http.ResponseWriter, r *http.Request, id string, params ListWebhookEndpointDeliveriesParams)
@@ -10544,10 +10551,10 @@ type ServerInterface interface {
 	ReplayWebhookDelivery(w http.ResponseWriter, r *http.Request, id string, deliveryID string, params ReplayWebhookDeliveryParams)
 	// Rotate signing secret (72h dual-signing grace)
 	// (POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret)
-	PostV1WebhookEndpointsEndpointsIdRotateSecret(w http.ResponseWriter, r *http.Request, id string, params PostV1WebhookEndpointsEndpointsIdRotateSecretParams)
+	RotateWebhookEndpointSecret(w http.ResponseWriter, r *http.Request, id string, params RotateWebhookEndpointSecretParams)
 	// List outbound events, newest first
 	// (GET /v1/webhook-endpoints/events)
-	GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request, params GetV1WebhookEndpointsEventsParams)
+	ListWebhookEvents(w http.ResponseWriter, r *http.Request, params ListWebhookEventsParams)
 	// Stream webhook events live (Server-Sent Events)
 	// (GET /v1/webhook_events/stream)
 	StreamWebhookEvents(w http.ResponseWriter, r *http.Request)
@@ -10565,7 +10572,7 @@ type ServerInterface interface {
 	ReceiveStripeWebhook(w http.ResponseWriter, r *http.Request, endpointId string, params ReceiveStripeWebhookParams)
 	// Resolve the current credential to its tenant context
 	// (GET /v1/whoami)
-	GetV1Whoami(w http.ResponseWriter, r *http.Request)
+	GetWhoami(w http.ResponseWriter, r *http.Request)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -10652,31 +10659,31 @@ func (_ Unimplemented) GetAuditLogFilters(w http.ResponseWriter, r *http.Request
 
 // Accept a team invitation
 // (POST /v1/auth/accept-invite)
-func (_ Unimplemented) PostV1AuthAcceptInvite(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Preview a team invitation (accept-page context)
 // (GET /v1/auth/invite/{token})
-func (_ Unimplemented) GetV1AuthInviteToken(w http.ResponseWriter, r *http.Request, token string) {
+func (_ Unimplemented) GetInvitation(w http.ResponseWriter, r *http.Request, token string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Sign in with email and password; mint an httpOnly session cookie
 // (POST /v1/auth/login)
-func (_ Unimplemented) PostV1AuthLogin(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) Login(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Revoke the current session and clear the cookie
 // (POST /v1/auth/logout)
-func (_ Unimplemented) PostV1AuthLogout(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) Logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Switch the dashboard session between test and live mode
 // (POST /v1/auth/mode)
-func (_ Unimplemented) PostV1AuthMode(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) SwitchSessionMode(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10688,19 +10695,19 @@ func (_ Unimplemented) CheckPasswordResetToken(w http.ResponseWriter, r *http.Re
 
 // Set a new password using a reset token
 // (POST /v1/auth/password-reset/confirm)
-func (_ Unimplemented) PostV1AuthPasswordResetConfirm(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Request a password reset link
 // (POST /v1/auth/password-reset/request)
-func (_ Unimplemented) PostV1AuthPasswordResetRequest(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Trigger billing cycle
 // (POST /v1/billing/run)
-func (_ Unimplemented) PostV1BillingRun(w http.ResponseWriter, r *http.Request, params PostV1BillingRunParams) {
+func (_ Unimplemented) RunBilling(w http.ResponseWriter, r *http.Request, params RunBillingParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10718,7 +10725,7 @@ func (_ Unimplemented) ListCreditNotes(w http.ResponseWriter, r *http.Request, p
 
 // Create a credit note (line-based, or commit relief)
 // (POST /v1/credit-notes)
-func (_ Unimplemented) PostV1CreditNotes(w http.ResponseWriter, r *http.Request, params PostV1CreditNotesParams) {
+func (_ Unimplemented) CreateCreditNote(w http.ResponseWriter, r *http.Request, params CreateCreditNoteParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10760,7 +10767,7 @@ func (_ Unimplemented) RetryCreditNoteRefund(w http.ResponseWriter, r *http.Requ
 
 // Email the credit-note document (PDF attached)
 // (POST /v1/credit-notes/{id}/send)
-func (_ Unimplemented) PostV1CreditNotesIdSend(w http.ResponseWriter, r *http.Request, id string, params PostV1CreditNotesIdSendParams) {
+func (_ Unimplemented) SendCreditNote(w http.ResponseWriter, r *http.Request, id string, params SendCreditNoteParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10778,13 +10785,13 @@ func (_ Unimplemented) AdjustCredits(w http.ResponseWriter, r *http.Request, par
 
 // Get customer credit balance
 // (GET /v1/credits/balance/{customer_id})
-func (_ Unimplemented) GetV1CreditsBalanceCustomerId(w http.ResponseWriter, r *http.Request, customerId string) {
+func (_ Unimplemented) GetCreditBalance(w http.ResponseWriter, r *http.Request, customerId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Get customer live credit balance
 // (GET /v1/credits/balance/{customer_id}/live)
-func (_ Unimplemented) GetV1CreditsBalanceCustomerIdLive(w http.ResponseWriter, r *http.Request, customerId string) {
+func (_ Unimplemented) GetLiveCreditBalance(w http.ResponseWriter, r *http.Request, customerId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10796,13 +10803,13 @@ func (_ Unimplemented) ListCreditBalances(w http.ResponseWriter, r *http.Request
 
 // Grant credits to customer
 // (POST /v1/credits/grant)
-func (_ Unimplemented) PostV1CreditsGrant(w http.ResponseWriter, r *http.Request, params PostV1CreditsGrantParams) {
+func (_ Unimplemented) GrantCredits(w http.ResponseWriter, r *http.Request, params GrantCreditsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Per-grant burndown + kind subtotals
 // (GET /v1/credits/grants/{customer_id})
-func (_ Unimplemented) GetV1CreditsGrantsCustomerId(w http.ResponseWriter, r *http.Request, customerId string, params GetV1CreditsGrantsCustomerIdParams) {
+func (_ Unimplemented) GetCreditGrants(w http.ResponseWriter, r *http.Request, customerId string, params GetCreditGrantsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10814,13 +10821,13 @@ func (_ Unimplemented) ListCreditLedgerEntries(w http.ResponseWriter, r *http.Re
 
 // List customers
 // (GET /v1/customers)
-func (_ Unimplemented) GetV1Customers(w http.ResponseWriter, r *http.Request, params GetV1CustomersParams) {
+func (_ Unimplemented) ListCustomers(w http.ResponseWriter, r *http.Request, params ListCustomersParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Create customer
 // (POST /v1/customers)
-func (_ Unimplemented) PostV1Customers(w http.ResponseWriter, r *http.Request, params PostV1CustomersParams) {
+func (_ Unimplemented) CreateCustomer(w http.ResponseWriter, r *http.Request, params CreateCustomerParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10886,13 +10893,13 @@ func (_ Unimplemented) UpsertCustomerBillingProfile(w http.ResponseWriter, r *ht
 
 // Per-customer margin report (operator only)
 // (GET /v1/customers/{id}/margin)
-func (_ Unimplemented) GetV1CustomersIdMargin(w http.ResponseWriter, r *http.Request, id string, params GetV1CustomersIdMarginParams) {
+func (_ Unimplemented) GetCustomerMargin(w http.ResponseWriter, r *http.Request, id string, params GetCustomerMarginParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Rotate the public cost-dashboard token (ADR-032)
 // (POST /v1/customers/{id}/rotate-cost-dashboard-token)
-func (_ Unimplemented) PostV1CustomersIdRotateCostDashboardToken(w http.ResponseWriter, r *http.Request, id string, params PostV1CustomersIdRotateCostDashboardTokenParams) {
+func (_ Unimplemented) RotateCustomerCostDashboardToken(w http.ResponseWriter, r *http.Request, id string, params RotateCustomerCostDashboardTokenParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11006,7 +11013,7 @@ func (_ Unimplemented) IngestLitellmSpend(w http.ResponseWriter, r *http.Request
 
 // List invoices
 // (GET /v1/invoices)
-func (_ Unimplemented) GetV1Invoices(w http.ResponseWriter, r *http.Request, params GetV1InvoicesParams) {
+func (_ Unimplemented) ListInvoices(w http.ResponseWriter, r *http.Request, params ListInvoicesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11018,7 +11025,7 @@ func (_ Unimplemented) CreateInvoice(w http.ResponseWriter, r *http.Request, par
 
 // Preview the next invoice for a customer (Stripe-equivalent)
 // (POST /v1/invoices/create_preview)
-func (_ Unimplemented) PostV1InvoicesCreatePreview(w http.ResponseWriter, r *http.Request, params PostV1InvoicesCreatePreviewParams) {
+func (_ Unimplemented) CreateInvoicePreview(w http.ResponseWriter, r *http.Request, params CreateInvoicePreviewParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11042,7 +11049,7 @@ func (_ Unimplemented) ListInvoiceDisputes(w http.ResponseWriter, r *http.Reques
 
 // Finalize draft invoice
 // (POST /v1/invoices/{id}/finalize)
-func (_ Unimplemented) PostV1InvoicesIdFinalize(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdFinalizeParams) {
+func (_ Unimplemented) FinalizeInvoice(w http.ResponseWriter, r *http.Request, id string, params FinalizeInvoiceParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11066,7 +11073,7 @@ func (_ Unimplemented) GetInvoicePaymentTimeline(w http.ResponseWriter, r *http.
 
 // Download invoice PDF
 // (GET /v1/invoices/{id}/pdf)
-func (_ Unimplemented) GetV1InvoicesIdPdf(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) GetInvoicePdf(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11090,7 +11097,7 @@ func (_ Unimplemented) ResendInvoiceSetupLink(w http.ResponseWriter, r *http.Req
 
 // Retry tax calculation on a deferred invoice
 // (POST /v1/invoices/{id}/retry-tax)
-func (_ Unimplemented) PostV1InvoicesIdRetryTax(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdRetryTaxParams) {
+func (_ Unimplemented) RetryInvoiceTax(w http.ResponseWriter, r *http.Request, id string, params RetryInvoiceTaxParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11102,7 +11109,7 @@ func (_ Unimplemented) RotateInvoicePublicToken(w http.ResponseWriter, r *http.R
 
 // Email the invoice (PDF attached) to a recipient
 // (POST /v1/invoices/{id}/send)
-func (_ Unimplemented) PostV1InvoicesIdSend(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdSendParams) {
+func (_ Unimplemented) SendInvoice(w http.ResponseWriter, r *http.Request, id string, params SendInvoiceParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11150,13 +11157,13 @@ func (_ Unimplemented) RemoveMember(w http.ResponseWriter, r *http.Request, user
 
 // List meters
 // (GET /v1/meters)
-func (_ Unimplemented) GetV1Meters(w http.ResponseWriter, r *http.Request, params GetV1MetersParams) {
+func (_ Unimplemented) ListMeters(w http.ResponseWriter, r *http.Request, params ListMetersParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Create meter
 // (POST /v1/meters)
-func (_ Unimplemented) PostV1Meters(w http.ResponseWriter, r *http.Request, params PostV1MetersParams) {
+func (_ Unimplemented) CreateMeter(w http.ResponseWriter, r *http.Request, params CreateMeterParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11168,19 +11175,19 @@ func (_ Unimplemented) GetMeter(w http.ResponseWriter, r *http.Request, id strin
 
 // Update meter
 // (PATCH /v1/meters/{id})
-func (_ Unimplemented) PatchV1MetersId(w http.ResponseWriter, r *http.Request, id string, params PatchV1MetersIdParams) {
+func (_ Unimplemented) UpdateMeter(w http.ResponseWriter, r *http.Request, id string, params UpdateMeterParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // List plans
 // (GET /v1/plans)
-func (_ Unimplemented) GetV1Plans(w http.ResponseWriter, r *http.Request, params GetV1PlansParams) {
+func (_ Unimplemented) ListPlans(w http.ResponseWriter, r *http.Request, params ListPlansParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Create plan
 // (POST /v1/plans)
-func (_ Unimplemented) PostV1Plans(w http.ResponseWriter, r *http.Request, params PostV1PlansParams) {
+func (_ Unimplemented) CreatePlan(w http.ResponseWriter, r *http.Request, params CreatePlanParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11240,25 +11247,25 @@ func (_ Unimplemented) DeletePriceOverride(w http.ResponseWriter, r *http.Reques
 
 // List provider cost rates
 // (GET /v1/provider-costs)
-func (_ Unimplemented) GetV1ProviderCosts(w http.ResponseWriter, r *http.Request, params GetV1ProviderCostsParams) {
+func (_ Unimplemented) ListProviderCosts(w http.ResponseWriter, r *http.Request, params ListProviderCostsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Create or update a provider cost rate
 // (PUT /v1/provider-costs)
-func (_ Unimplemented) PutV1ProviderCosts(w http.ResponseWriter, r *http.Request, params PutV1ProviderCostsParams) {
+func (_ Unimplemented) UpsertProviderCost(w http.ResponseWriter, r *http.Request, params UpsertProviderCostParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Delete a provider cost rate
 // (DELETE /v1/provider-costs/{id})
-func (_ Unimplemented) DeleteV1ProviderCostsId(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) DeleteProviderCost(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Public cost-dashboard projection (ADR-032)
 // (GET /v1/public/cost-dashboard/{token})
-func (_ Unimplemented) GetV1PublicCostDashboardToken(w http.ResponseWriter, r *http.Request, token string) {
+func (_ Unimplemented) GetPublicCostDashboard(w http.ResponseWriter, r *http.Request, token string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11372,13 +11379,13 @@ func (_ Unimplemented) SetStripeWebhookSecret(w http.ResponseWriter, r *http.Req
 
 // List subscriptions
 // (GET /v1/subscriptions)
-func (_ Unimplemented) GetV1Subscriptions(w http.ResponseWriter, r *http.Request, params GetV1SubscriptionsParams) {
+func (_ Unimplemented) ListSubscriptions(w http.ResponseWriter, r *http.Request, params ListSubscriptionsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Create subscription
 // (POST /v1/subscriptions)
-func (_ Unimplemented) PostV1Subscriptions(w http.ResponseWriter, r *http.Request, params PostV1SubscriptionsParams) {
+func (_ Unimplemented) CreateSubscription(w http.ResponseWriter, r *http.Request, params CreateSubscriptionParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11390,7 +11397,7 @@ func (_ Unimplemented) GetSubscription(w http.ResponseWriter, r *http.Request, i
 
 // Activate draft subscription
 // (POST /v1/subscriptions/{id}/activate)
-func (_ Unimplemented) PostV1SubscriptionsIdActivate(w http.ResponseWriter, r *http.Request, id string, params PostV1SubscriptionsIdActivateParams) {
+func (_ Unimplemented) ActivateSubscription(w http.ResponseWriter, r *http.Request, id string, params ActivateSubscriptionParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11462,7 +11469,7 @@ func (_ Unimplemented) PauseSubscriptionCollection(w http.ResponseWriter, r *htt
 
 // Retry billing on a subscription whose billing is failing
 // (POST /v1/subscriptions/{id}/retry-billing)
-func (_ Unimplemented) PostV1SubscriptionsIdRetryBilling(w http.ResponseWriter, r *http.Request, id string, params PostV1SubscriptionsIdRetryBillingParams) {
+func (_ Unimplemented) RetrySubscriptionBilling(w http.ResponseWriter, r *http.Request, id string, params RetrySubscriptionBillingParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11486,31 +11493,31 @@ func (_ Unimplemented) GetSubscriptionTimeline(w http.ResponseWriter, r *http.Re
 
 // List test clocks for the active tenant
 // (GET /v1/test-clocks)
-func (_ Unimplemented) GetV1TestClocks(w http.ResponseWriter, r *http.Request, params GetV1TestClocksParams) {
+func (_ Unimplemented) ListTestClocks(w http.ResponseWriter, r *http.Request, params ListTestClocksParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Create a test clock
 // (POST /v1/test-clocks)
-func (_ Unimplemented) PostV1TestClocks(w http.ResponseWriter, r *http.Request, params PostV1TestClocksParams) {
+func (_ Unimplemented) CreateTestClock(w http.ResponseWriter, r *http.Request, params CreateTestClockParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Delete a test clock (cascades to pinned subscriptions)
 // (DELETE /v1/test-clocks/{id})
-func (_ Unimplemented) DeleteV1TestClocksId(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) DeleteTestClock(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Get a test clock by id
 // (GET /v1/test-clocks/{id})
-func (_ Unimplemented) GetV1TestClocksId(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) GetTestClock(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Advance the clock to a new frozen_time
 // (POST /v1/test-clocks/{id}/advance)
-func (_ Unimplemented) PostV1TestClocksIdAdvance(w http.ResponseWriter, r *http.Request, id string, params PostV1TestClocksIdAdvanceParams) {
+func (_ Unimplemented) AdvanceTestClock(w http.ResponseWriter, r *http.Request, id string, params AdvanceTestClockParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11522,25 +11529,25 @@ func (_ Unimplemented) ListTestClockCustomers(w http.ResponseWriter, r *http.Req
 
 // Retry catchup on a clock parked in internal_failure
 // (POST /v1/test-clocks/{id}/retry-advance)
-func (_ Unimplemented) PostV1TestClocksIdRetryAdvance(w http.ResponseWriter, r *http.Request, id string, params PostV1TestClocksIdRetryAdvanceParams) {
+func (_ Unimplemented) RetryTestClockAdvance(w http.ResponseWriter, r *http.Request, id string, params RetryTestClockAdvanceParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // List subscriptions pinned to this clock
 // (GET /v1/test-clocks/{id}/subscriptions)
-func (_ Unimplemented) GetV1TestClocksIdSubscriptions(w http.ResponseWriter, r *http.Request, id string, params GetV1TestClocksIdSubscriptionsParams) {
+func (_ Unimplemented) ListTestClockSubscriptions(w http.ResponseWriter, r *http.Request, id string, params ListTestClockSubscriptionsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // List usage events
 // (GET /v1/usage-events)
-func (_ Unimplemented) GetV1UsageEvents(w http.ResponseWriter, r *http.Request, params GetV1UsageEventsParams) {
+func (_ Unimplemented) ListUsageEvents(w http.ResponseWriter, r *http.Request, params ListUsageEventsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Ingest usage event
 // (POST /v1/usage-events)
-func (_ Unimplemented) PostV1UsageEvents(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) CreateUsageEvent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11558,7 +11565,7 @@ func (_ Unimplemented) BackfillUsageEvent(w http.ResponseWriter, r *http.Request
 
 // Batch ingest usage events (max 1000, all-or-nothing)
 // (POST /v1/usage-events/batch)
-func (_ Unimplemented) PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) CreateUsageEventBatch(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11582,13 +11589,13 @@ func (_ Unimplemented) ReleaseHeldUsage(w http.ResponseWriter, r *http.Request) 
 
 // List webhook endpoints
 // (GET /v1/webhook-endpoints/endpoints)
-func (_ Unimplemented) GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request, params GetV1WebhookEndpointsEndpointsParams) {
+func (_ Unimplemented) ListWebhookEndpoints(w http.ResponseWriter, r *http.Request, params ListWebhookEndpointsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Create webhook endpoint
 // (POST /v1/webhook-endpoints/endpoints)
-func (_ Unimplemented) PostV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request, params PostV1WebhookEndpointsEndpointsParams) {
+func (_ Unimplemented) CreateWebhookEndpoint(w http.ResponseWriter, r *http.Request, params CreateWebhookEndpointParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11600,7 +11607,7 @@ func (_ Unimplemented) GetWebhookEndpointStats(w http.ResponseWriter, r *http.Re
 
 // Delete (disable) webhook endpoint
 // (DELETE /v1/webhook-endpoints/endpoints/{id})
-func (_ Unimplemented) DeleteV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) DeleteWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11612,7 +11619,7 @@ func (_ Unimplemented) GetWebhookEndpoint(w http.ResponseWriter, r *http.Request
 
 // Update webhook endpoint (no secret rotation)
 // (PATCH /v1/webhook-endpoints/endpoints/{id})
-func (_ Unimplemented) PatchV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request, id string, params PatchV1WebhookEndpointsEndpointsIdParams) {
+func (_ Unimplemented) UpdateWebhookEndpoint(w http.ResponseWriter, r *http.Request, id string, params UpdateWebhookEndpointParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11630,13 +11637,13 @@ func (_ Unimplemented) ReplayWebhookDelivery(w http.ResponseWriter, r *http.Requ
 
 // Rotate signing secret (72h dual-signing grace)
 // (POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret)
-func (_ Unimplemented) PostV1WebhookEndpointsEndpointsIdRotateSecret(w http.ResponseWriter, r *http.Request, id string, params PostV1WebhookEndpointsEndpointsIdRotateSecretParams) {
+func (_ Unimplemented) RotateWebhookEndpointSecret(w http.ResponseWriter, r *http.Request, id string, params RotateWebhookEndpointSecretParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // List outbound events, newest first
 // (GET /v1/webhook-endpoints/events)
-func (_ Unimplemented) GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request, params GetV1WebhookEndpointsEventsParams) {
+func (_ Unimplemented) ListWebhookEvents(w http.ResponseWriter, r *http.Request, params ListWebhookEventsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11672,7 +11679,7 @@ func (_ Unimplemented) ReceiveStripeWebhook(w http.ResponseWriter, r *http.Reque
 
 // Resolve the current credential to its tenant context
 // (GET /v1/whoami)
-func (_ Unimplemented) GetV1Whoami(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) GetWhoami(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -12278,11 +12285,11 @@ func (siw *ServerInterfaceWrapper) GetAuditLogFilters(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1AuthAcceptInvite operation middleware
-func (siw *ServerInterfaceWrapper) PostV1AuthAcceptInvite(w http.ResponseWriter, r *http.Request) {
+// AcceptInvitation operation middleware
+func (siw *ServerInterfaceWrapper) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1AuthAcceptInvite(w, r)
+		siw.Handler.AcceptInvitation(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12292,8 +12299,8 @@ func (siw *ServerInterfaceWrapper) PostV1AuthAcceptInvite(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1AuthInviteToken operation middleware
-func (siw *ServerInterfaceWrapper) GetV1AuthInviteToken(w http.ResponseWriter, r *http.Request) {
+// GetInvitation operation middleware
+func (siw *ServerInterfaceWrapper) GetInvitation(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -12308,7 +12315,7 @@ func (siw *ServerInterfaceWrapper) GetV1AuthInviteToken(w http.ResponseWriter, r
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1AuthInviteToken(w, r, token)
+		siw.Handler.GetInvitation(w, r, token)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12318,11 +12325,11 @@ func (siw *ServerInterfaceWrapper) GetV1AuthInviteToken(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1AuthLogin operation middleware
-func (siw *ServerInterfaceWrapper) PostV1AuthLogin(w http.ResponseWriter, r *http.Request) {
+// Login operation middleware
+func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1AuthLogin(w, r)
+		siw.Handler.Login(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12332,8 +12339,8 @@ func (siw *ServerInterfaceWrapper) PostV1AuthLogin(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1AuthLogout operation middleware
-func (siw *ServerInterfaceWrapper) PostV1AuthLogout(w http.ResponseWriter, r *http.Request) {
+// Logout operation middleware
+func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
@@ -12342,7 +12349,7 @@ func (siw *ServerInterfaceWrapper) PostV1AuthLogout(w http.ResponseWriter, r *ht
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1AuthLogout(w, r)
+		siw.Handler.Logout(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12352,8 +12359,8 @@ func (siw *ServerInterfaceWrapper) PostV1AuthLogout(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1AuthMode operation middleware
-func (siw *ServerInterfaceWrapper) PostV1AuthMode(w http.ResponseWriter, r *http.Request) {
+// SwitchSessionMode operation middleware
+func (siw *ServerInterfaceWrapper) SwitchSessionMode(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
@@ -12362,7 +12369,7 @@ func (siw *ServerInterfaceWrapper) PostV1AuthMode(w http.ResponseWriter, r *http
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1AuthMode(w, r)
+		siw.Handler.SwitchSessionMode(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12405,11 +12412,11 @@ func (siw *ServerInterfaceWrapper) CheckPasswordResetToken(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1AuthPasswordResetConfirm operation middleware
-func (siw *ServerInterfaceWrapper) PostV1AuthPasswordResetConfirm(w http.ResponseWriter, r *http.Request) {
+// ConfirmPasswordReset operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1AuthPasswordResetConfirm(w, r)
+		siw.Handler.ConfirmPasswordReset(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12419,11 +12426,11 @@ func (siw *ServerInterfaceWrapper) PostV1AuthPasswordResetConfirm(w http.Respons
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1AuthPasswordResetRequest operation middleware
-func (siw *ServerInterfaceWrapper) PostV1AuthPasswordResetRequest(w http.ResponseWriter, r *http.Request) {
+// RequestPasswordReset operation middleware
+func (siw *ServerInterfaceWrapper) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1AuthPasswordResetRequest(w, r)
+		siw.Handler.RequestPasswordReset(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12433,8 +12440,8 @@ func (siw *ServerInterfaceWrapper) PostV1AuthPasswordResetRequest(w http.Respons
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1BillingRun operation middleware
-func (siw *ServerInterfaceWrapper) PostV1BillingRun(w http.ResponseWriter, r *http.Request) {
+// RunBilling operation middleware
+func (siw *ServerInterfaceWrapper) RunBilling(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -12446,7 +12453,7 @@ func (siw *ServerInterfaceWrapper) PostV1BillingRun(w http.ResponseWriter, r *ht
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1BillingRunParams
+	var params RunBillingParams
 
 	headers := r.Header
 
@@ -12470,7 +12477,7 @@ func (siw *ServerInterfaceWrapper) PostV1BillingRun(w http.ResponseWriter, r *ht
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1BillingRun(w, r, params)
+		siw.Handler.RunBilling(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12624,8 +12631,8 @@ func (siw *ServerInterfaceWrapper) ListCreditNotes(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1CreditNotes operation middleware
-func (siw *ServerInterfaceWrapper) PostV1CreditNotes(w http.ResponseWriter, r *http.Request) {
+// CreateCreditNote operation middleware
+func (siw *ServerInterfaceWrapper) CreateCreditNote(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -12637,7 +12644,7 @@ func (siw *ServerInterfaceWrapper) PostV1CreditNotes(w http.ResponseWriter, r *h
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1CreditNotesParams
+	var params CreateCreditNoteParams
 
 	headers := r.Header
 
@@ -12661,7 +12668,7 @@ func (siw *ServerInterfaceWrapper) PostV1CreditNotes(w http.ResponseWriter, r *h
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1CreditNotes(w, r, params)
+		siw.Handler.CreateCreditNote(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12923,8 +12930,8 @@ func (siw *ServerInterfaceWrapper) RetryCreditNoteRefund(w http.ResponseWriter, 
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1CreditNotesIdSend operation middleware
-func (siw *ServerInterfaceWrapper) PostV1CreditNotesIdSend(w http.ResponseWriter, r *http.Request) {
+// SendCreditNote operation middleware
+func (siw *ServerInterfaceWrapper) SendCreditNote(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -12945,7 +12952,7 @@ func (siw *ServerInterfaceWrapper) PostV1CreditNotesIdSend(w http.ResponseWriter
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1CreditNotesIdSendParams
+	var params SendCreditNoteParams
 
 	headers := r.Header
 
@@ -12969,7 +12976,7 @@ func (siw *ServerInterfaceWrapper) PostV1CreditNotesIdSend(w http.ResponseWriter
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1CreditNotesIdSend(w, r, id, params)
+		siw.Handler.SendCreditNote(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13082,8 +13089,8 @@ func (siw *ServerInterfaceWrapper) AdjustCredits(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1CreditsBalanceCustomerId operation middleware
-func (siw *ServerInterfaceWrapper) GetV1CreditsBalanceCustomerId(w http.ResponseWriter, r *http.Request) {
+// GetCreditBalance operation middleware
+func (siw *ServerInterfaceWrapper) GetCreditBalance(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -13104,7 +13111,7 @@ func (siw *ServerInterfaceWrapper) GetV1CreditsBalanceCustomerId(w http.Response
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1CreditsBalanceCustomerId(w, r, customerId)
+		siw.Handler.GetCreditBalance(w, r, customerId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13114,8 +13121,8 @@ func (siw *ServerInterfaceWrapper) GetV1CreditsBalanceCustomerId(w http.Response
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1CreditsBalanceCustomerIdLive operation middleware
-func (siw *ServerInterfaceWrapper) GetV1CreditsBalanceCustomerIdLive(w http.ResponseWriter, r *http.Request) {
+// GetLiveCreditBalance operation middleware
+func (siw *ServerInterfaceWrapper) GetLiveCreditBalance(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -13136,7 +13143,7 @@ func (siw *ServerInterfaceWrapper) GetV1CreditsBalanceCustomerIdLive(w http.Resp
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1CreditsBalanceCustomerIdLive(w, r, customerId)
+		siw.Handler.GetLiveCreditBalance(w, r, customerId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13198,8 +13205,8 @@ func (siw *ServerInterfaceWrapper) ListCreditBalances(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1CreditsGrant operation middleware
-func (siw *ServerInterfaceWrapper) PostV1CreditsGrant(w http.ResponseWriter, r *http.Request) {
+// GrantCredits operation middleware
+func (siw *ServerInterfaceWrapper) GrantCredits(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -13211,7 +13218,7 @@ func (siw *ServerInterfaceWrapper) PostV1CreditsGrant(w http.ResponseWriter, r *
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1CreditsGrantParams
+	var params GrantCreditsParams
 
 	headers := r.Header
 
@@ -13235,7 +13242,7 @@ func (siw *ServerInterfaceWrapper) PostV1CreditsGrant(w http.ResponseWriter, r *
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1CreditsGrant(w, r, params)
+		siw.Handler.GrantCredits(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13245,8 +13252,8 @@ func (siw *ServerInterfaceWrapper) PostV1CreditsGrant(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1CreditsGrantsCustomerId operation middleware
-func (siw *ServerInterfaceWrapper) GetV1CreditsGrantsCustomerId(w http.ResponseWriter, r *http.Request) {
+// GetCreditGrants operation middleware
+func (siw *ServerInterfaceWrapper) GetCreditGrants(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -13267,7 +13274,7 @@ func (siw *ServerInterfaceWrapper) GetV1CreditsGrantsCustomerId(w http.ResponseW
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1CreditsGrantsCustomerIdParams
+	var params GetCreditGrantsParams
 
 	// ------------- Optional query parameter "include_exhausted" -------------
 
@@ -13283,7 +13290,7 @@ func (siw *ServerInterfaceWrapper) GetV1CreditsGrantsCustomerId(w http.ResponseW
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1CreditsGrantsCustomerId(w, r, customerId, params)
+		siw.Handler.GetCreditGrants(w, r, customerId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13393,8 +13400,8 @@ func (siw *ServerInterfaceWrapper) ListCreditLedgerEntries(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1Customers operation middleware
-func (siw *ServerInterfaceWrapper) GetV1Customers(w http.ResponseWriter, r *http.Request) {
+// ListCustomers operation middleware
+func (siw *ServerInterfaceWrapper) ListCustomers(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -13406,7 +13413,7 @@ func (siw *ServerInterfaceWrapper) GetV1Customers(w http.ResponseWriter, r *http
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1CustomersParams
+	var params ListCustomersParams
 
 	// ------------- Optional query parameter "status" -------------
 
@@ -13513,7 +13520,7 @@ func (siw *ServerInterfaceWrapper) GetV1Customers(w http.ResponseWriter, r *http
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Customers(w, r, params)
+		siw.Handler.ListCustomers(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13523,8 +13530,8 @@ func (siw *ServerInterfaceWrapper) GetV1Customers(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1Customers operation middleware
-func (siw *ServerInterfaceWrapper) PostV1Customers(w http.ResponseWriter, r *http.Request) {
+// CreateCustomer operation middleware
+func (siw *ServerInterfaceWrapper) CreateCustomer(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -13536,7 +13543,7 @@ func (siw *ServerInterfaceWrapper) PostV1Customers(w http.ResponseWriter, r *htt
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1CustomersParams
+	var params CreateCustomerParams
 
 	headers := r.Header
 
@@ -13560,7 +13567,7 @@ func (siw *ServerInterfaceWrapper) PostV1Customers(w http.ResponseWriter, r *htt
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1Customers(w, r, params)
+		siw.Handler.CreateCustomer(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -14057,8 +14064,8 @@ func (siw *ServerInterfaceWrapper) UpsertCustomerBillingProfile(w http.ResponseW
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1CustomersIdMargin operation middleware
-func (siw *ServerInterfaceWrapper) GetV1CustomersIdMargin(w http.ResponseWriter, r *http.Request) {
+// GetCustomerMargin operation middleware
+func (siw *ServerInterfaceWrapper) GetCustomerMargin(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -14079,7 +14086,7 @@ func (siw *ServerInterfaceWrapper) GetV1CustomersIdMargin(w http.ResponseWriter,
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1CustomersIdMarginParams
+	var params GetCustomerMarginParams
 
 	// ------------- Optional query parameter "from" -------------
 
@@ -14108,7 +14115,7 @@ func (siw *ServerInterfaceWrapper) GetV1CustomersIdMargin(w http.ResponseWriter,
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1CustomersIdMargin(w, r, id, params)
+		siw.Handler.GetCustomerMargin(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -14118,8 +14125,8 @@ func (siw *ServerInterfaceWrapper) GetV1CustomersIdMargin(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1CustomersIdRotateCostDashboardToken operation middleware
-func (siw *ServerInterfaceWrapper) PostV1CustomersIdRotateCostDashboardToken(w http.ResponseWriter, r *http.Request) {
+// RotateCustomerCostDashboardToken operation middleware
+func (siw *ServerInterfaceWrapper) RotateCustomerCostDashboardToken(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -14140,7 +14147,7 @@ func (siw *ServerInterfaceWrapper) PostV1CustomersIdRotateCostDashboardToken(w h
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1CustomersIdRotateCostDashboardTokenParams
+	var params RotateCustomerCostDashboardTokenParams
 
 	headers := r.Header
 
@@ -14164,7 +14171,7 @@ func (siw *ServerInterfaceWrapper) PostV1CustomersIdRotateCostDashboardToken(w h
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1CustomersIdRotateCostDashboardToken(w, r, id, params)
+		siw.Handler.RotateCustomerCostDashboardToken(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15167,8 +15174,8 @@ func (siw *ServerInterfaceWrapper) IngestLitellmSpend(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1Invoices operation middleware
-func (siw *ServerInterfaceWrapper) GetV1Invoices(w http.ResponseWriter, r *http.Request) {
+// ListInvoices operation middleware
+func (siw *ServerInterfaceWrapper) ListInvoices(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -15180,7 +15187,7 @@ func (siw *ServerInterfaceWrapper) GetV1Invoices(w http.ResponseWriter, r *http.
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1InvoicesParams
+	var params ListInvoicesParams
 
 	// ------------- Optional query parameter "customer_id" -------------
 
@@ -15352,7 +15359,7 @@ func (siw *ServerInterfaceWrapper) GetV1Invoices(w http.ResponseWriter, r *http.
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Invoices(w, r, params)
+		siw.Handler.ListInvoices(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15409,8 +15416,8 @@ func (siw *ServerInterfaceWrapper) CreateInvoice(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1InvoicesCreatePreview operation middleware
-func (siw *ServerInterfaceWrapper) PostV1InvoicesCreatePreview(w http.ResponseWriter, r *http.Request) {
+// CreateInvoicePreview operation middleware
+func (siw *ServerInterfaceWrapper) CreateInvoicePreview(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -15422,7 +15429,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesCreatePreview(w http.ResponseWr
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1InvoicesCreatePreviewParams
+	var params CreateInvoicePreviewParams
 
 	headers := r.Header
 
@@ -15446,7 +15453,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesCreatePreview(w http.ResponseWr
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1InvoicesCreatePreview(w, r, params)
+		siw.Handler.CreateInvoicePreview(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15605,8 +15612,8 @@ func (siw *ServerInterfaceWrapper) ListInvoiceDisputes(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1InvoicesIdFinalize operation middleware
-func (siw *ServerInterfaceWrapper) PostV1InvoicesIdFinalize(w http.ResponseWriter, r *http.Request) {
+// FinalizeInvoice operation middleware
+func (siw *ServerInterfaceWrapper) FinalizeInvoice(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -15627,7 +15634,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdFinalize(w http.ResponseWrite
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1InvoicesIdFinalizeParams
+	var params FinalizeInvoiceParams
 
 	headers := r.Header
 
@@ -15651,7 +15658,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdFinalize(w http.ResponseWrite
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1InvoicesIdFinalize(w, r, id, params)
+		siw.Handler.FinalizeInvoice(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15805,8 +15812,8 @@ func (siw *ServerInterfaceWrapper) GetInvoicePaymentTimeline(w http.ResponseWrit
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1InvoicesIdPdf operation middleware
-func (siw *ServerInterfaceWrapper) GetV1InvoicesIdPdf(w http.ResponseWriter, r *http.Request) {
+// GetInvoicePdf operation middleware
+func (siw *ServerInterfaceWrapper) GetInvoicePdf(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -15827,7 +15834,7 @@ func (siw *ServerInterfaceWrapper) GetV1InvoicesIdPdf(w http.ResponseWriter, r *
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1InvoicesIdPdf(w, r, id)
+		siw.Handler.GetInvoicePdf(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16005,8 +16012,8 @@ func (siw *ServerInterfaceWrapper) ResendInvoiceSetupLink(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1InvoicesIdRetryTax operation middleware
-func (siw *ServerInterfaceWrapper) PostV1InvoicesIdRetryTax(w http.ResponseWriter, r *http.Request) {
+// RetryInvoiceTax operation middleware
+func (siw *ServerInterfaceWrapper) RetryInvoiceTax(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -16027,7 +16034,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdRetryTax(w http.ResponseWrite
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1InvoicesIdRetryTaxParams
+	var params RetryInvoiceTaxParams
 
 	headers := r.Header
 
@@ -16051,7 +16058,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdRetryTax(w http.ResponseWrite
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1InvoicesIdRetryTax(w, r, id, params)
+		siw.Handler.RetryInvoiceTax(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16117,8 +16124,8 @@ func (siw *ServerInterfaceWrapper) RotateInvoicePublicToken(w http.ResponseWrite
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1InvoicesIdSend operation middleware
-func (siw *ServerInterfaceWrapper) PostV1InvoicesIdSend(w http.ResponseWriter, r *http.Request) {
+// SendInvoice operation middleware
+func (siw *ServerInterfaceWrapper) SendInvoice(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -16139,7 +16146,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdSend(w http.ResponseWriter, r
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1InvoicesIdSendParams
+	var params SendInvoiceParams
 
 	headers := r.Header
 
@@ -16163,7 +16170,7 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdSend(w http.ResponseWriter, r
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1InvoicesIdSend(w, r, id, params)
+		siw.Handler.SendInvoice(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16486,8 +16493,8 @@ func (siw *ServerInterfaceWrapper) RemoveMember(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1Meters operation middleware
-func (siw *ServerInterfaceWrapper) GetV1Meters(w http.ResponseWriter, r *http.Request) {
+// ListMeters operation middleware
+func (siw *ServerInterfaceWrapper) ListMeters(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -16499,7 +16506,7 @@ func (siw *ServerInterfaceWrapper) GetV1Meters(w http.ResponseWriter, r *http.Re
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1MetersParams
+	var params ListMetersParams
 
 	// ------------- Optional query parameter "limit" -------------
 
@@ -16528,7 +16535,7 @@ func (siw *ServerInterfaceWrapper) GetV1Meters(w http.ResponseWriter, r *http.Re
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Meters(w, r, params)
+		siw.Handler.ListMeters(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16538,8 +16545,8 @@ func (siw *ServerInterfaceWrapper) GetV1Meters(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1Meters operation middleware
-func (siw *ServerInterfaceWrapper) PostV1Meters(w http.ResponseWriter, r *http.Request) {
+// CreateMeter operation middleware
+func (siw *ServerInterfaceWrapper) CreateMeter(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -16551,7 +16558,7 @@ func (siw *ServerInterfaceWrapper) PostV1Meters(w http.ResponseWriter, r *http.R
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1MetersParams
+	var params CreateMeterParams
 
 	headers := r.Header
 
@@ -16575,7 +16582,7 @@ func (siw *ServerInterfaceWrapper) PostV1Meters(w http.ResponseWriter, r *http.R
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1Meters(w, r, params)
+		siw.Handler.CreateMeter(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16617,8 +16624,8 @@ func (siw *ServerInterfaceWrapper) GetMeter(w http.ResponseWriter, r *http.Reque
 	handler.ServeHTTP(w, r)
 }
 
-// PatchV1MetersId operation middleware
-func (siw *ServerInterfaceWrapper) PatchV1MetersId(w http.ResponseWriter, r *http.Request) {
+// UpdateMeter operation middleware
+func (siw *ServerInterfaceWrapper) UpdateMeter(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -16639,7 +16646,7 @@ func (siw *ServerInterfaceWrapper) PatchV1MetersId(w http.ResponseWriter, r *htt
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PatchV1MetersIdParams
+	var params UpdateMeterParams
 
 	headers := r.Header
 
@@ -16663,7 +16670,7 @@ func (siw *ServerInterfaceWrapper) PatchV1MetersId(w http.ResponseWriter, r *htt
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PatchV1MetersId(w, r, id, params)
+		siw.Handler.UpdateMeter(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16673,8 +16680,8 @@ func (siw *ServerInterfaceWrapper) PatchV1MetersId(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1Plans operation middleware
-func (siw *ServerInterfaceWrapper) GetV1Plans(w http.ResponseWriter, r *http.Request) {
+// ListPlans operation middleware
+func (siw *ServerInterfaceWrapper) ListPlans(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -16686,7 +16693,7 @@ func (siw *ServerInterfaceWrapper) GetV1Plans(w http.ResponseWriter, r *http.Req
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1PlansParams
+	var params ListPlansParams
 
 	// ------------- Optional query parameter "limit" -------------
 
@@ -16715,7 +16722,7 @@ func (siw *ServerInterfaceWrapper) GetV1Plans(w http.ResponseWriter, r *http.Req
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Plans(w, r, params)
+		siw.Handler.ListPlans(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16725,8 +16732,8 @@ func (siw *ServerInterfaceWrapper) GetV1Plans(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1Plans operation middleware
-func (siw *ServerInterfaceWrapper) PostV1Plans(w http.ResponseWriter, r *http.Request) {
+// CreatePlan operation middleware
+func (siw *ServerInterfaceWrapper) CreatePlan(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -16738,7 +16745,7 @@ func (siw *ServerInterfaceWrapper) PostV1Plans(w http.ResponseWriter, r *http.Re
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1PlansParams
+	var params CreatePlanParams
 
 	headers := r.Header
 
@@ -16762,7 +16769,7 @@ func (siw *ServerInterfaceWrapper) PostV1Plans(w http.ResponseWriter, r *http.Re
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1Plans(w, r, params)
+		siw.Handler.CreatePlan(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17240,8 +17247,8 @@ func (siw *ServerInterfaceWrapper) DeletePriceOverride(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1ProviderCosts operation middleware
-func (siw *ServerInterfaceWrapper) GetV1ProviderCosts(w http.ResponseWriter, r *http.Request) {
+// ListProviderCosts operation middleware
+func (siw *ServerInterfaceWrapper) ListProviderCosts(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -17253,7 +17260,7 @@ func (siw *ServerInterfaceWrapper) GetV1ProviderCosts(w http.ResponseWriter, r *
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1ProviderCostsParams
+	var params ListProviderCostsParams
 
 	// ------------- Optional query parameter "limit" -------------
 
@@ -17282,7 +17289,7 @@ func (siw *ServerInterfaceWrapper) GetV1ProviderCosts(w http.ResponseWriter, r *
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1ProviderCosts(w, r, params)
+		siw.Handler.ListProviderCosts(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17292,8 +17299,8 @@ func (siw *ServerInterfaceWrapper) GetV1ProviderCosts(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// PutV1ProviderCosts operation middleware
-func (siw *ServerInterfaceWrapper) PutV1ProviderCosts(w http.ResponseWriter, r *http.Request) {
+// UpsertProviderCost operation middleware
+func (siw *ServerInterfaceWrapper) UpsertProviderCost(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -17305,7 +17312,7 @@ func (siw *ServerInterfaceWrapper) PutV1ProviderCosts(w http.ResponseWriter, r *
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PutV1ProviderCostsParams
+	var params UpsertProviderCostParams
 
 	headers := r.Header
 
@@ -17329,7 +17336,7 @@ func (siw *ServerInterfaceWrapper) PutV1ProviderCosts(w http.ResponseWriter, r *
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PutV1ProviderCosts(w, r, params)
+		siw.Handler.UpsertProviderCost(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17339,8 +17346,8 @@ func (siw *ServerInterfaceWrapper) PutV1ProviderCosts(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// DeleteV1ProviderCostsId operation middleware
-func (siw *ServerInterfaceWrapper) DeleteV1ProviderCostsId(w http.ResponseWriter, r *http.Request) {
+// DeleteProviderCost operation middleware
+func (siw *ServerInterfaceWrapper) DeleteProviderCost(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -17361,7 +17368,7 @@ func (siw *ServerInterfaceWrapper) DeleteV1ProviderCostsId(w http.ResponseWriter
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteV1ProviderCostsId(w, r, id)
+		siw.Handler.DeleteProviderCost(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17371,8 +17378,8 @@ func (siw *ServerInterfaceWrapper) DeleteV1ProviderCostsId(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1PublicCostDashboardToken operation middleware
-func (siw *ServerInterfaceWrapper) GetV1PublicCostDashboardToken(w http.ResponseWriter, r *http.Request) {
+// GetPublicCostDashboard operation middleware
+func (siw *ServerInterfaceWrapper) GetPublicCostDashboard(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -17387,7 +17394,7 @@ func (siw *ServerInterfaceWrapper) GetV1PublicCostDashboardToken(w http.Response
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1PublicCostDashboardToken(w, r, token)
+		siw.Handler.GetPublicCostDashboard(w, r, token)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18064,8 +18071,8 @@ func (siw *ServerInterfaceWrapper) SetStripeWebhookSecret(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1Subscriptions operation middleware
-func (siw *ServerInterfaceWrapper) GetV1Subscriptions(w http.ResponseWriter, r *http.Request) {
+// ListSubscriptions operation middleware
+func (siw *ServerInterfaceWrapper) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -18077,7 +18084,7 @@ func (siw *ServerInterfaceWrapper) GetV1Subscriptions(w http.ResponseWriter, r *
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1SubscriptionsParams
+	var params ListSubscriptionsParams
 
 	// ------------- Optional query parameter "customer_id" -------------
 
@@ -18210,7 +18217,7 @@ func (siw *ServerInterfaceWrapper) GetV1Subscriptions(w http.ResponseWriter, r *
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Subscriptions(w, r, params)
+		siw.Handler.ListSubscriptions(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18220,8 +18227,8 @@ func (siw *ServerInterfaceWrapper) GetV1Subscriptions(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1Subscriptions operation middleware
-func (siw *ServerInterfaceWrapper) PostV1Subscriptions(w http.ResponseWriter, r *http.Request) {
+// CreateSubscription operation middleware
+func (siw *ServerInterfaceWrapper) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -18233,7 +18240,7 @@ func (siw *ServerInterfaceWrapper) PostV1Subscriptions(w http.ResponseWriter, r 
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1SubscriptionsParams
+	var params CreateSubscriptionParams
 
 	headers := r.Header
 
@@ -18257,7 +18264,7 @@ func (siw *ServerInterfaceWrapper) PostV1Subscriptions(w http.ResponseWriter, r 
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1Subscriptions(w, r, params)
+		siw.Handler.CreateSubscription(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18299,8 +18306,8 @@ func (siw *ServerInterfaceWrapper) GetSubscription(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1SubscriptionsIdActivate operation middleware
-func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdActivate(w http.ResponseWriter, r *http.Request) {
+// ActivateSubscription operation middleware
+func (siw *ServerInterfaceWrapper) ActivateSubscription(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -18321,7 +18328,7 @@ func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdActivate(w http.Response
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1SubscriptionsIdActivateParams
+	var params ActivateSubscriptionParams
 
 	headers := r.Header
 
@@ -18345,7 +18352,7 @@ func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdActivate(w http.Response
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1SubscriptionsIdActivate(w, r, id, params)
+		siw.Handler.ActivateSubscription(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18902,8 +18909,8 @@ func (siw *ServerInterfaceWrapper) PauseSubscriptionCollection(w http.ResponseWr
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1SubscriptionsIdRetryBilling operation middleware
-func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdRetryBilling(w http.ResponseWriter, r *http.Request) {
+// RetrySubscriptionBilling operation middleware
+func (siw *ServerInterfaceWrapper) RetrySubscriptionBilling(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -18924,7 +18931,7 @@ func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdRetryBilling(w http.Resp
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1SubscriptionsIdRetryBillingParams
+	var params RetrySubscriptionBillingParams
 
 	headers := r.Header
 
@@ -18948,7 +18955,7 @@ func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdRetryBilling(w http.Resp
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1SubscriptionsIdRetryBilling(w, r, id, params)
+		siw.Handler.RetrySubscriptionBilling(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19078,8 +19085,8 @@ func (siw *ServerInterfaceWrapper) GetSubscriptionTimeline(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1TestClocks operation middleware
-func (siw *ServerInterfaceWrapper) GetV1TestClocks(w http.ResponseWriter, r *http.Request) {
+// ListTestClocks operation middleware
+func (siw *ServerInterfaceWrapper) ListTestClocks(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19091,7 +19098,7 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocks(w http.ResponseWriter, r *htt
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1TestClocksParams
+	var params ListTestClocksParams
 
 	// ------------- Optional query parameter "limit" -------------
 
@@ -19120,7 +19127,7 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocks(w http.ResponseWriter, r *htt
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1TestClocks(w, r, params)
+		siw.Handler.ListTestClocks(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19130,8 +19137,8 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocks(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1TestClocks operation middleware
-func (siw *ServerInterfaceWrapper) PostV1TestClocks(w http.ResponseWriter, r *http.Request) {
+// CreateTestClock operation middleware
+func (siw *ServerInterfaceWrapper) CreateTestClock(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19143,7 +19150,7 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocks(w http.ResponseWriter, r *ht
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1TestClocksParams
+	var params CreateTestClockParams
 
 	headers := r.Header
 
@@ -19167,7 +19174,7 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocks(w http.ResponseWriter, r *ht
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1TestClocks(w, r, params)
+		siw.Handler.CreateTestClock(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19177,8 +19184,8 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocks(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
-// DeleteV1TestClocksId operation middleware
-func (siw *ServerInterfaceWrapper) DeleteV1TestClocksId(w http.ResponseWriter, r *http.Request) {
+// DeleteTestClock operation middleware
+func (siw *ServerInterfaceWrapper) DeleteTestClock(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19199,7 +19206,7 @@ func (siw *ServerInterfaceWrapper) DeleteV1TestClocksId(w http.ResponseWriter, r
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteV1TestClocksId(w, r, id)
+		siw.Handler.DeleteTestClock(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19209,8 +19216,8 @@ func (siw *ServerInterfaceWrapper) DeleteV1TestClocksId(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1TestClocksId operation middleware
-func (siw *ServerInterfaceWrapper) GetV1TestClocksId(w http.ResponseWriter, r *http.Request) {
+// GetTestClock operation middleware
+func (siw *ServerInterfaceWrapper) GetTestClock(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19231,7 +19238,7 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocksId(w http.ResponseWriter, r *h
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1TestClocksId(w, r, id)
+		siw.Handler.GetTestClock(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19241,8 +19248,8 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocksId(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1TestClocksIdAdvance operation middleware
-func (siw *ServerInterfaceWrapper) PostV1TestClocksIdAdvance(w http.ResponseWriter, r *http.Request) {
+// AdvanceTestClock operation middleware
+func (siw *ServerInterfaceWrapper) AdvanceTestClock(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19263,7 +19270,7 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocksIdAdvance(w http.ResponseWrit
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1TestClocksIdAdvanceParams
+	var params AdvanceTestClockParams
 
 	headers := r.Header
 
@@ -19287,7 +19294,7 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocksIdAdvance(w http.ResponseWrit
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1TestClocksIdAdvance(w, r, id, params)
+		siw.Handler.AdvanceTestClock(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19358,8 +19365,8 @@ func (siw *ServerInterfaceWrapper) ListTestClockCustomers(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1TestClocksIdRetryAdvance operation middleware
-func (siw *ServerInterfaceWrapper) PostV1TestClocksIdRetryAdvance(w http.ResponseWriter, r *http.Request) {
+// RetryTestClockAdvance operation middleware
+func (siw *ServerInterfaceWrapper) RetryTestClockAdvance(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19380,7 +19387,7 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocksIdRetryAdvance(w http.Respons
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1TestClocksIdRetryAdvanceParams
+	var params RetryTestClockAdvanceParams
 
 	headers := r.Header
 
@@ -19404,7 +19411,7 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocksIdRetryAdvance(w http.Respons
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1TestClocksIdRetryAdvance(w, r, id, params)
+		siw.Handler.RetryTestClockAdvance(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19414,8 +19421,8 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocksIdRetryAdvance(w http.Respons
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1TestClocksIdSubscriptions operation middleware
-func (siw *ServerInterfaceWrapper) GetV1TestClocksIdSubscriptions(w http.ResponseWriter, r *http.Request) {
+// ListTestClockSubscriptions operation middleware
+func (siw *ServerInterfaceWrapper) ListTestClockSubscriptions(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19436,7 +19443,7 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocksIdSubscriptions(w http.Respons
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1TestClocksIdSubscriptionsParams
+	var params ListTestClockSubscriptionsParams
 
 	// ------------- Optional query parameter "limit" -------------
 
@@ -19465,7 +19472,7 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocksIdSubscriptions(w http.Respons
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1TestClocksIdSubscriptions(w, r, id, params)
+		siw.Handler.ListTestClockSubscriptions(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19475,8 +19482,8 @@ func (siw *ServerInterfaceWrapper) GetV1TestClocksIdSubscriptions(w http.Respons
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1UsageEvents operation middleware
-func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *http.Request) {
+// ListUsageEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListUsageEvents(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19488,7 +19495,7 @@ func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *ht
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1UsageEventsParams
+	var params ListUsageEventsParams
 
 	// ------------- Optional query parameter "customer_id" -------------
 
@@ -19582,7 +19589,7 @@ func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *ht
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1UsageEvents(w, r, params)
+		siw.Handler.ListUsageEvents(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19592,8 +19599,8 @@ func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1UsageEvents operation middleware
-func (siw *ServerInterfaceWrapper) PostV1UsageEvents(w http.ResponseWriter, r *http.Request) {
+// CreateUsageEvent operation middleware
+func (siw *ServerInterfaceWrapper) CreateUsageEvent(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
@@ -19602,7 +19609,7 @@ func (siw *ServerInterfaceWrapper) PostV1UsageEvents(w http.ResponseWriter, r *h
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1UsageEvents(w, r)
+		siw.Handler.CreateUsageEvent(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19736,8 +19743,8 @@ func (siw *ServerInterfaceWrapper) BackfillUsageEvent(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1UsageEventsBatch operation middleware
-func (siw *ServerInterfaceWrapper) PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request) {
+// CreateUsageEventBatch operation middleware
+func (siw *ServerInterfaceWrapper) CreateUsageEventBatch(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
@@ -19746,7 +19753,7 @@ func (siw *ServerInterfaceWrapper) PostV1UsageEventsBatch(w http.ResponseWriter,
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1UsageEventsBatch(w, r)
+		siw.Handler.CreateUsageEventBatch(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19816,8 +19823,8 @@ func (siw *ServerInterfaceWrapper) ReleaseHeldUsage(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1WebhookEndpointsEndpoints operation middleware
-func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request) {
+// ListWebhookEndpoints operation middleware
+func (siw *ServerInterfaceWrapper) ListWebhookEndpoints(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19829,7 +19836,7 @@ func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEndpoints(w http.Respons
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1WebhookEndpointsEndpointsParams
+	var params ListWebhookEndpointsParams
 
 	// ------------- Optional query parameter "limit" -------------
 
@@ -19858,7 +19865,7 @@ func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEndpoints(w http.Respons
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1WebhookEndpointsEndpoints(w, r, params)
+		siw.Handler.ListWebhookEndpoints(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19868,8 +19875,8 @@ func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEndpoints(w http.Respons
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1WebhookEndpointsEndpoints operation middleware
-func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request) {
+// CreateWebhookEndpoint operation middleware
+func (siw *ServerInterfaceWrapper) CreateWebhookEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19881,7 +19888,7 @@ func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpoints(w http.Respon
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1WebhookEndpointsEndpointsParams
+	var params CreateWebhookEndpointParams
 
 	headers := r.Header
 
@@ -19905,7 +19912,7 @@ func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpoints(w http.Respon
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1WebhookEndpointsEndpoints(w, r, params)
+		siw.Handler.CreateWebhookEndpoint(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19967,8 +19974,8 @@ func (siw *ServerInterfaceWrapper) GetWebhookEndpointStats(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
-// DeleteV1WebhookEndpointsEndpointsId operation middleware
-func (siw *ServerInterfaceWrapper) DeleteV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request) {
+// DeleteWebhookEndpoint operation middleware
+func (siw *ServerInterfaceWrapper) DeleteWebhookEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -19989,7 +19996,7 @@ func (siw *ServerInterfaceWrapper) DeleteV1WebhookEndpointsEndpointsId(w http.Re
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteV1WebhookEndpointsEndpointsId(w, r, id)
+		siw.Handler.DeleteWebhookEndpoint(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20031,8 +20038,8 @@ func (siw *ServerInterfaceWrapper) GetWebhookEndpoint(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// PatchV1WebhookEndpointsEndpointsId operation middleware
-func (siw *ServerInterfaceWrapper) PatchV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request) {
+// UpdateWebhookEndpoint operation middleware
+func (siw *ServerInterfaceWrapper) UpdateWebhookEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -20053,7 +20060,7 @@ func (siw *ServerInterfaceWrapper) PatchV1WebhookEndpointsEndpointsId(w http.Res
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PatchV1WebhookEndpointsEndpointsIdParams
+	var params UpdateWebhookEndpointParams
 
 	headers := r.Header
 
@@ -20077,7 +20084,7 @@ func (siw *ServerInterfaceWrapper) PatchV1WebhookEndpointsEndpointsId(w http.Res
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PatchV1WebhookEndpointsEndpointsId(w, r, id, params)
+		siw.Handler.UpdateWebhookEndpoint(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20213,8 +20220,8 @@ func (siw *ServerInterfaceWrapper) ReplayWebhookDelivery(w http.ResponseWriter, 
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1WebhookEndpointsEndpointsIdRotateSecret operation middleware
-func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpointsIdRotateSecret(w http.ResponseWriter, r *http.Request) {
+// RotateWebhookEndpointSecret operation middleware
+func (siw *ServerInterfaceWrapper) RotateWebhookEndpointSecret(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -20235,7 +20242,7 @@ func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpointsIdRotateSecret
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1WebhookEndpointsEndpointsIdRotateSecretParams
+	var params RotateWebhookEndpointSecretParams
 
 	headers := r.Header
 
@@ -20259,7 +20266,7 @@ func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpointsIdRotateSecret
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1WebhookEndpointsEndpointsIdRotateSecret(w, r, id, params)
+		siw.Handler.RotateWebhookEndpointSecret(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20269,8 +20276,8 @@ func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpointsIdRotateSecret
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1WebhookEndpointsEvents operation middleware
-func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request) {
+// ListWebhookEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListWebhookEvents(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -20282,7 +20289,7 @@ func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEvents(w http.ResponseWr
 	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetV1WebhookEndpointsEventsParams
+	var params ListWebhookEventsParams
 
 	// ------------- Optional query parameter "limit" -------------
 
@@ -20311,7 +20318,7 @@ func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEvents(w http.ResponseWr
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1WebhookEndpointsEvents(w, r, params)
+		siw.Handler.ListWebhookEvents(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20503,8 +20510,8 @@ func (siw *ServerInterfaceWrapper) ReceiveStripeWebhook(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1Whoami operation middleware
-func (siw *ServerInterfaceWrapper) GetV1Whoami(w http.ResponseWriter, r *http.Request) {
+// GetWhoami operation middleware
+func (siw *ServerInterfaceWrapper) GetWhoami(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
@@ -20513,7 +20520,7 @@ func (siw *ServerInterfaceWrapper) GetV1Whoami(w http.ResponseWriter, r *http.Re
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Whoami(w, r)
+		siw.Handler.GetWhoami(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20676,31 +20683,31 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/audit-log/filters", wrapper.GetAuditLogFilters)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/auth/accept-invite", wrapper.PostV1AuthAcceptInvite)
+		r.Post(options.BaseURL+"/v1/auth/accept-invite", wrapper.AcceptInvitation)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/auth/invite/{token}", wrapper.GetV1AuthInviteToken)
+		r.Get(options.BaseURL+"/v1/auth/invite/{token}", wrapper.GetInvitation)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/auth/login", wrapper.PostV1AuthLogin)
+		r.Post(options.BaseURL+"/v1/auth/login", wrapper.Login)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/auth/logout", wrapper.PostV1AuthLogout)
+		r.Post(options.BaseURL+"/v1/auth/logout", wrapper.Logout)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/auth/mode", wrapper.PostV1AuthMode)
+		r.Post(options.BaseURL+"/v1/auth/mode", wrapper.SwitchSessionMode)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/auth/password-reset/check", wrapper.CheckPasswordResetToken)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/auth/password-reset/confirm", wrapper.PostV1AuthPasswordResetConfirm)
+		r.Post(options.BaseURL+"/v1/auth/password-reset/confirm", wrapper.ConfirmPasswordReset)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/auth/password-reset/request", wrapper.PostV1AuthPasswordResetRequest)
+		r.Post(options.BaseURL+"/v1/auth/password-reset/request", wrapper.RequestPasswordReset)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/billing/run", wrapper.PostV1BillingRun)
+		r.Post(options.BaseURL+"/v1/billing/run", wrapper.RunBilling)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/bootstrap", wrapper.Bootstrap)
@@ -20709,7 +20716,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/credit-notes", wrapper.ListCreditNotes)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/credit-notes", wrapper.PostV1CreditNotes)
+		r.Post(options.BaseURL+"/v1/credit-notes", wrapper.CreateCreditNote)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credit-notes/stats", wrapper.GetCreditNoteStats)
@@ -20730,7 +20737,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/credit-notes/{id}/retry-refund", wrapper.RetryCreditNoteRefund)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/credit-notes/{id}/send", wrapper.PostV1CreditNotesIdSend)
+		r.Post(options.BaseURL+"/v1/credit-notes/{id}/send", wrapper.SendCreditNote)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/credit-notes/{id}/void", wrapper.VoidCreditNote)
@@ -20739,28 +20746,28 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/credits/adjust", wrapper.AdjustCredits)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/credits/balance/{customer_id}", wrapper.GetV1CreditsBalanceCustomerId)
+		r.Get(options.BaseURL+"/v1/credits/balance/{customer_id}", wrapper.GetCreditBalance)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/credits/balance/{customer_id}/live", wrapper.GetV1CreditsBalanceCustomerIdLive)
+		r.Get(options.BaseURL+"/v1/credits/balance/{customer_id}/live", wrapper.GetLiveCreditBalance)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credits/balances", wrapper.ListCreditBalances)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/credits/grant", wrapper.PostV1CreditsGrant)
+		r.Post(options.BaseURL+"/v1/credits/grant", wrapper.GrantCredits)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/credits/grants/{customer_id}", wrapper.GetV1CreditsGrantsCustomerId)
+		r.Get(options.BaseURL+"/v1/credits/grants/{customer_id}", wrapper.GetCreditGrants)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credits/ledger/{customer_id}", wrapper.ListCreditLedgerEntries)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/customers", wrapper.GetV1Customers)
+		r.Get(options.BaseURL+"/v1/customers", wrapper.ListCustomers)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/customers", wrapper.PostV1Customers)
+		r.Post(options.BaseURL+"/v1/customers", wrapper.CreateCustomer)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/customers/{customer_id}/overview", wrapper.GetCustomerOverview)
@@ -20793,10 +20800,10 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Put(options.BaseURL+"/v1/customers/{id}/billing-profile", wrapper.UpsertCustomerBillingProfile)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/customers/{id}/margin", wrapper.GetV1CustomersIdMargin)
+		r.Get(options.BaseURL+"/v1/customers/{id}/margin", wrapper.GetCustomerMargin)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/customers/{id}/rotate-cost-dashboard-token", wrapper.PostV1CustomersIdRotateCostDashboardToken)
+		r.Post(options.BaseURL+"/v1/customers/{id}/rotate-cost-dashboard-token", wrapper.RotateCustomerCostDashboardToken)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/customers/{id}/sent-emails", wrapper.ListCustomerSentEmails)
@@ -20853,13 +20860,13 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/integrations/litellm/spend", wrapper.IngestLitellmSpend)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/invoices", wrapper.GetV1Invoices)
+		r.Get(options.BaseURL+"/v1/invoices", wrapper.ListInvoices)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices", wrapper.CreateInvoice)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/invoices/create_preview", wrapper.PostV1InvoicesCreatePreview)
+		r.Post(options.BaseURL+"/v1/invoices/create_preview", wrapper.CreateInvoicePreview)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/invoices/{id}", wrapper.GetInvoice)
@@ -20871,7 +20878,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/invoices/{id}/disputes", wrapper.ListInvoiceDisputes)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/invoices/{id}/finalize", wrapper.PostV1InvoicesIdFinalize)
+		r.Post(options.BaseURL+"/v1/invoices/{id}/finalize", wrapper.FinalizeInvoice)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices/{id}/line-items", wrapper.AddInvoiceLineItem)
@@ -20883,7 +20890,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/invoices/{id}/payment-timeline", wrapper.GetInvoicePaymentTimeline)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/invoices/{id}/pdf", wrapper.GetV1InvoicesIdPdf)
+		r.Get(options.BaseURL+"/v1/invoices/{id}/pdf", wrapper.GetInvoicePdf)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices/{id}/record-payment", wrapper.RecordInvoicePayment)
@@ -20895,13 +20902,13 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/invoices/{id}/resend-setup-link", wrapper.ResendInvoiceSetupLink)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/invoices/{id}/retry-tax", wrapper.PostV1InvoicesIdRetryTax)
+		r.Post(options.BaseURL+"/v1/invoices/{id}/retry-tax", wrapper.RetryInvoiceTax)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices/{id}/rotate-public-token", wrapper.RotateInvoicePublicToken)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/invoices/{id}/send", wrapper.PostV1InvoicesIdSend)
+		r.Post(options.BaseURL+"/v1/invoices/{id}/send", wrapper.SendInvoice)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/invoices/{id}/stripe-refunds", wrapper.ListInvoiceStripeRefunds)
@@ -20925,22 +20932,22 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Delete(options.BaseURL+"/v1/members/{userID}", wrapper.RemoveMember)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/meters", wrapper.GetV1Meters)
+		r.Get(options.BaseURL+"/v1/meters", wrapper.ListMeters)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/meters", wrapper.PostV1Meters)
+		r.Post(options.BaseURL+"/v1/meters", wrapper.CreateMeter)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/meters/{id}", wrapper.GetMeter)
 	})
 	r.Group(func(r chi.Router) {
-		r.Patch(options.BaseURL+"/v1/meters/{id}", wrapper.PatchV1MetersId)
+		r.Patch(options.BaseURL+"/v1/meters/{id}", wrapper.UpdateMeter)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/plans", wrapper.GetV1Plans)
+		r.Get(options.BaseURL+"/v1/plans", wrapper.ListPlans)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/plans", wrapper.PostV1Plans)
+		r.Post(options.BaseURL+"/v1/plans", wrapper.CreatePlan)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/plans/{id}", wrapper.GetPlan)
@@ -20970,16 +20977,16 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Delete(options.BaseURL+"/v1/price-overrides/{id}", wrapper.DeletePriceOverride)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/provider-costs", wrapper.GetV1ProviderCosts)
+		r.Get(options.BaseURL+"/v1/provider-costs", wrapper.ListProviderCosts)
 	})
 	r.Group(func(r chi.Router) {
-		r.Put(options.BaseURL+"/v1/provider-costs", wrapper.PutV1ProviderCosts)
+		r.Put(options.BaseURL+"/v1/provider-costs", wrapper.UpsertProviderCost)
 	})
 	r.Group(func(r chi.Router) {
-		r.Delete(options.BaseURL+"/v1/provider-costs/{id}", wrapper.DeleteV1ProviderCostsId)
+		r.Delete(options.BaseURL+"/v1/provider-costs/{id}", wrapper.DeleteProviderCost)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/public/cost-dashboard/{token}", wrapper.GetV1PublicCostDashboardToken)
+		r.Get(options.BaseURL+"/v1/public/cost-dashboard/{token}", wrapper.GetPublicCostDashboard)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/public/invoices/{token}", wrapper.GetHostedInvoice)
@@ -21036,16 +21043,16 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Patch(options.BaseURL+"/v1/settings/stripe/{mode}/webhook", wrapper.SetStripeWebhookSecret)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/subscriptions", wrapper.GetV1Subscriptions)
+		r.Get(options.BaseURL+"/v1/subscriptions", wrapper.ListSubscriptions)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/subscriptions", wrapper.PostV1Subscriptions)
+		r.Post(options.BaseURL+"/v1/subscriptions", wrapper.CreateSubscription)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/subscriptions/{id}", wrapper.GetSubscription)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/subscriptions/{id}/activate", wrapper.PostV1SubscriptionsIdActivate)
+		r.Post(options.BaseURL+"/v1/subscriptions/{id}/activate", wrapper.ActivateSubscription)
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/v1/subscriptions/{id}/billing-thresholds", wrapper.ClearSubscriptionBillingThresholds)
@@ -21081,7 +21088,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Put(options.BaseURL+"/v1/subscriptions/{id}/pause-collection", wrapper.PauseSubscriptionCollection)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/subscriptions/{id}/retry-billing", wrapper.PostV1SubscriptionsIdRetryBilling)
+		r.Post(options.BaseURL+"/v1/subscriptions/{id}/retry-billing", wrapper.RetrySubscriptionBilling)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/subscriptions/{id}/schedule-cancel", wrapper.ScheduleSubscriptionCancel)
@@ -21093,34 +21100,34 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/subscriptions/{id}/timeline", wrapper.GetSubscriptionTimeline)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/test-clocks", wrapper.GetV1TestClocks)
+		r.Get(options.BaseURL+"/v1/test-clocks", wrapper.ListTestClocks)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/test-clocks", wrapper.PostV1TestClocks)
+		r.Post(options.BaseURL+"/v1/test-clocks", wrapper.CreateTestClock)
 	})
 	r.Group(func(r chi.Router) {
-		r.Delete(options.BaseURL+"/v1/test-clocks/{id}", wrapper.DeleteV1TestClocksId)
+		r.Delete(options.BaseURL+"/v1/test-clocks/{id}", wrapper.DeleteTestClock)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/test-clocks/{id}", wrapper.GetV1TestClocksId)
+		r.Get(options.BaseURL+"/v1/test-clocks/{id}", wrapper.GetTestClock)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/test-clocks/{id}/advance", wrapper.PostV1TestClocksIdAdvance)
+		r.Post(options.BaseURL+"/v1/test-clocks/{id}/advance", wrapper.AdvanceTestClock)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/test-clocks/{id}/customers", wrapper.ListTestClockCustomers)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/test-clocks/{id}/retry-advance", wrapper.PostV1TestClocksIdRetryAdvance)
+		r.Post(options.BaseURL+"/v1/test-clocks/{id}/retry-advance", wrapper.RetryTestClockAdvance)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/test-clocks/{id}/subscriptions", wrapper.GetV1TestClocksIdSubscriptions)
+		r.Get(options.BaseURL+"/v1/test-clocks/{id}/subscriptions", wrapper.ListTestClockSubscriptions)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/usage-events", wrapper.GetV1UsageEvents)
+		r.Get(options.BaseURL+"/v1/usage-events", wrapper.ListUsageEvents)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/usage-events", wrapper.PostV1UsageEvents)
+		r.Post(options.BaseURL+"/v1/usage-events", wrapper.CreateUsageEvent)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/usage-events/aggregate", wrapper.AggregateUsageEvents)
@@ -21129,7 +21136,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/usage-events/backfill", wrapper.BackfillUsageEvent)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/usage-events/batch", wrapper.PostV1UsageEventsBatch)
+		r.Post(options.BaseURL+"/v1/usage-events/batch", wrapper.CreateUsageEventBatch)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/usage-events/held", wrapper.ListHeldUsage)
@@ -21141,22 +21148,22 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/usage-events/held/release", wrapper.ReleaseHeldUsage)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints", wrapper.GetV1WebhookEndpointsEndpoints)
+		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints", wrapper.ListWebhookEndpoints)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/webhook-endpoints/endpoints", wrapper.PostV1WebhookEndpointsEndpoints)
+		r.Post(options.BaseURL+"/v1/webhook-endpoints/endpoints", wrapper.CreateWebhookEndpoint)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints/stats", wrapper.GetWebhookEndpointStats)
 	})
 	r.Group(func(r chi.Router) {
-		r.Delete(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.DeleteV1WebhookEndpointsEndpointsId)
+		r.Delete(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.DeleteWebhookEndpoint)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.GetWebhookEndpoint)
 	})
 	r.Group(func(r chi.Router) {
-		r.Patch(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.PatchV1WebhookEndpointsEndpointsId)
+		r.Patch(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.UpdateWebhookEndpoint)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}/deliveries", wrapper.ListWebhookEndpointDeliveries)
@@ -21165,10 +21172,10 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay", wrapper.ReplayWebhookDelivery)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}/rotate-secret", wrapper.PostV1WebhookEndpointsEndpointsIdRotateSecret)
+		r.Post(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}/rotate-secret", wrapper.RotateWebhookEndpointSecret)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/webhook-endpoints/events", wrapper.GetV1WebhookEndpointsEvents)
+		r.Get(options.BaseURL+"/v1/webhook-endpoints/events", wrapper.ListWebhookEvents)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook_events/stream", wrapper.StreamWebhookEvents)
@@ -21186,7 +21193,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/webhooks/stripe/{endpoint_id}", wrapper.ReceiveStripeWebhook)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/whoami", wrapper.GetV1Whoami)
+		r.Get(options.BaseURL+"/v1/whoami", wrapper.GetWhoami)
 	})
 
 	return r

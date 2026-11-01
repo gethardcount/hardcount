@@ -2,8 +2,11 @@ openapi: 3.0.3
 info:
   title: Hardcount Billing API
   description: |
-    Open-source usage-based billing engine. Handles pricing, subscriptions,
-    usage metering, invoice generation, Stripe payments, dunning, and credits.
+    The HTTP API of Hardcount, the open-source usage-based billing engine.
+    Send an API key as `Authorization: Bearer <key>`. Bodies are JSON (a few
+    routes answer a PDF, CSV or event stream), and amounts are whole numbers
+    in the currency's minor unit (cents for USD). Routes tagged `Dashboard` or
+    `InboundWebhooks` are not for your code. More: docs/api-surface.md.
   version: "2026-04-07"
   license:
     name: MIT
@@ -13,8 +16,12 @@ info:
     url: https://github.com/gethardcount/hardcount
 
 servers:
-  - url: http://localhost:8080
-    description: Local development
+  - url: "{baseUrl}"
+    description: Your Hardcount address. The default is the address of a local install.
+    variables:
+      baseUrl:
+        default: http://localhost:8080
+        description: Your Hardcount server's address, with no trailing slash.
 
 security:
   - BearerAuth: []
@@ -39,11 +46,9 @@ tags:
   - name: Dunning
     description: Retrying failed payments. Policies and runs.
   - name: Webhooks
-    description: Outbound webhook endpoints, events and deliveries. Also the inbound webhooks Stripe and Postmark call.
+    description: Webhook endpoints that Hardcount sends events to, the events, and their deliveries.
   - name: Auth
-    description: Dashboard sign-in, password reset and API keys.
-  - name: Members
-    description: Workspace members and invitations. Dashboard session only.
+    description: API keys, and which account and mode a key belongs to.
   - name: ProviderCosts
     description: What upstream providers charge you, for margin reports.
   - name: TestClocks
@@ -53,7 +58,17 @@ tags:
   - name: Public
     description: Pages a customer opens with a token, without an API key.
   - name: System
-    description: Health, settings, the audit log and setup.
+    description: Health checks, Prometheus metrics and first-time setup.
+  - name: Dashboard
+    description: |
+      Routes the Hardcount dashboard uses: sign-in, team members, settings,
+      analytics, exports and the audit log. They are not part of the
+      integration API. Your code does not need them, and they can change
+      between releases.
+  - name: InboundWebhooks
+    description: |
+      Webhooks that Stripe and Postmark send to Hardcount. You give these
+      addresses to the provider; your code does not call them.
 
 components:
   securitySchemes:
@@ -61,11 +76,18 @@ components:
       type: http
       scheme: bearer
       description: |
-        API key authentication. Use `Authorization: Bearer hc_secret_...`
-        Key types: hc_secret_ (full access to one account), hc_ingest_
-        (sends usage events only: `POST /v1/usage-events`, its `/batch`,
-        and `POST /v1/integrations/litellm/spend`, plus `GET /v1/whoami`;
-        every other route answers it 403)
+        An API key, sent as `Authorization: Bearer <key>`. The header
+        `X-API-Key: <key>` works too. A key's prefix says its type and mode:
+
+        - `hc_secret_test_…` and `hc_secret_live_…`: a secret key. It has full
+          access to one account's test or live data. Keep it on your server.
+        - `hc_ingest_test_…` and `hc_ingest_live_…`: a usage-only key, for a
+          gateway such as LiteLLM. It can call `POST /v1/usage-events`,
+          `POST /v1/usage-events/batch`, `POST /v1/integrations/litellm/spend`
+          and `GET /v1/whoami`. Every other route answers it 403.
+
+        A missing, wrong, expired or revoked key gets 401. Create keys in the
+        dashboard or with `POST /v1/api-keys`. The full key is shown only once.
     SessionCookie:
       type: apiKey
       in: cookie
@@ -127,6 +149,29 @@ components:
         minimum: 0
         default: 0
 
+  headers:
+    RetryAfter:
+      description: Seconds to wait before the next request can pass.
+      schema:
+        type: integer
+        example: 12
+    RateLimitLimit:
+      description: How many requests the limit allows in its period.
+      schema:
+        type: integer
+        example: 1000
+    RateLimitRemaining:
+      description: How many requests are left in the current period.
+      schema:
+        type: integer
+        example: 0
+    RateLimitReset:
+      description: When the limit is full again, as Unix seconds.
+      schema:
+        type: integer
+        format: int64
+        example: 1793870460
+
   responses:
     InvalidPage:
       description: "`limit` or `offset` is out of range or not a whole number, or the request sends the removed `after` cursor (`param` names it)"
@@ -134,6 +179,67 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+          example:
+            error:
+              type: invalid_request_error
+              code: validation_error
+              message: limit must be a whole number from 1 to 100
+              request_id: req_d42h7q5kls1g00b3c4d0
+              param: limit
+    Unauthorized:
+      description: |
+        No valid credential: the API key or session is missing, wrong,
+        expired or revoked.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              type: authentication_error
+              code: unauthorized
+              message: invalid or expired API key
+              request_id: req_d42h7q5kls1g00b3c4d0
+    RateLimited:
+      description: |
+        Too many requests. Wait for the number of seconds in `Retry-After`,
+        then retry. The answers that pass the limit carry the
+        `X-RateLimit-*` headers too.
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+        X-RateLimit-Limit:
+          $ref: "#/components/headers/RateLimitLimit"
+        X-RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimitRemaining"
+        X-RateLimit-Reset:
+          $ref: "#/components/headers/RateLimitReset"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              type: rate_limit_error
+              code: rate_limited
+              message: too many requests — please retry after the rate limit resets
+              request_id: req_d42h7q5kls1g00b3c4d0
+    InvalidBody:
+      description: |
+        The body is not one valid JSON value, or a field has the wrong JSON
+        type (such as a string where a number belongs). On a route that
+        takes `Idempotency-Key`, a 400 is kept for the key: send the
+        corrected request with a new key.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              type: invalid_request_error
+              code: invalid_request
+              message: invalid JSON body
+              request_id: req_d42h7q5kls1g00b3c4d0
 
   schemas:
     ListTotal:
@@ -5518,6 +5624,7 @@ paths:
     get:
       tags: [System]
       summary: Health check
+      operationId: getHealth
       security: []
       responses:
         "200":
@@ -5590,6 +5697,7 @@ paths:
     post:
       tags: [Customers]
       summary: Create customer
+      operationId: createCustomer
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -5621,6 +5729,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Customer"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "409":
           description: Customer already exists
         "422":
@@ -5632,9 +5744,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
       tags: [Customers]
       summary: List customers
+      operationId: listCustomers
       parameters:
         - name: status
           in: query
@@ -5690,13 +5805,18 @@ paths:
                       $ref: "#/components/schemas/Customer"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/customers/{id}/rotate-cost-dashboard-token:
     post:
       tags: [Customers]
       summary: Rotate the public cost-dashboard token (ADR-032)
+      operationId: rotateCustomerCostDashboardToken
       description: |
         Mints a fresh `hc_pcd_…` token and writes it to the customer
         row. The previous token is invalidated immediately (read-only
@@ -5726,8 +5846,12 @@ paths:
                   public_url:
                     type: string
                     example: https://api.example.com/v1/public/cost-dashboard/hc_pcd_a3f9c4...
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Customer not found
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/customers/{id}:
     get:
@@ -5747,12 +5871,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Customer"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No customer with this ID in this tenant and mode.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     patch:
       tags: [Customers]
       summary: Update customer
@@ -5822,6 +5950,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Customer, or the named dunning policy, not found.
           content:
@@ -5840,6 +5970,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/customers/{id}/billing-profile:
     put:
@@ -5895,6 +6027,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Customer not found.
           content:
@@ -5917,6 +6051,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
       tags: [Customers]
       summary: Get the customer's billing profile
@@ -5934,6 +6070,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CustomerBillingProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: |
             The customer has no billing profile yet, or the customer does
@@ -5942,6 +6080,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/customers/{id}/sent-emails:
     get:
@@ -5977,6 +6117,8 @@ paths:
                       $ref: "#/components/schemas/SentEmail"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No customer with this ID in this tenant and mode.
           content:
@@ -5985,6 +6127,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/customers/{id}/usage:
     get:
@@ -6032,6 +6176,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CustomerUsage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Customer not found.
           content:
@@ -6044,6 +6190,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/customers/{customer_id}/overview:
     get:
@@ -6068,12 +6216,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CustomerOverview"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Customer not found.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/customers/{customer_id}/payment-methods:
     get:
@@ -6106,6 +6258,8 @@ paths:
                       $ref: "#/components/schemas/PaymentMethod"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Customer not found.
           content:
@@ -6114,6 +6268,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/customers/{customer_id}/payment-methods/send-setup-email:
     post:
@@ -6173,6 +6329,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Customer not found.
           content:
@@ -6279,6 +6437,10 @@ paths:
                   session_id:
                     type: string
                     description: Stripe Checkout Session ID.
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Customer not found.
           content:
@@ -6297,6 +6459,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/customers/{customer_id}/payment-methods/{pmID}:
     delete:
@@ -6328,12 +6492,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaymentMethod"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No such payment method for this customer.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/customers/{customer_id}/payment-methods/{pmID}/default:
     post:
@@ -6365,18 +6533,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaymentMethod"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No such active payment method for this customer.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/public/cost-dashboard/{token}:
     get:
       tags: [Public]
       security: []
       summary: Public cost-dashboard projection (ADR-032)
+      operationId: getPublicCostDashboard
       description: |
         Unauthenticated. The `hc_pcd_…` token in the URL is the sole
         credential — partners embed via iframe / fetch from their own
@@ -6750,6 +6923,7 @@ paths:
     post:
       tags: [Pricing]
       summary: Create meter
+      operationId: createMeter
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -6780,9 +6954,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Meter"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
       tags: [Pricing]
       summary: List meters
+      operationId: listMeters
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
@@ -6801,13 +6982,18 @@ paths:
                       $ref: "#/components/schemas/Meter"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/meters/{id}:
     patch:
       tags: [Pricing]
       summary: Update meter
+      operationId: updateMeter
       description: |
         Fields omitted are left unchanged. A meter only counts: its prices
         are on the plans (`/v1/plans/{id}/prices`).
@@ -6847,6 +7033,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Meter"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Meter not found
         "409":
@@ -6860,6 +7050,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: Validation failure (bad aggregation, an empty name, or an unknown field)
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
     get:
       tags: [Pricing]
@@ -6878,17 +7070,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Meter"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: "`not_found`: no meter with this id in this tenant and mode."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credit-notes:
     post:
       tags: [CreditNotes]
       summary: Create a credit note (line-based, or commit relief)
+      operationId: createCreditNote
       description: |
         Two shapes. LINE-BASED (regular invoices): lines[] +
         refund/credit/out_of_band allocation; capped by the invoice's
@@ -6991,10 +7188,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditNote"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "409":
           description: State gate (unpaid commit → void; fully-consumed commit; in-flight charge)
         "422":
           description: Validation (over-retire with live remaining; allocation mismatch; zero-cash slice), or an unknown field (`param` names it; the body must use only the fields listed here)
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
     get:
       tags: [CreditNotes]
@@ -7055,13 +7258,18 @@ paths:
                       $ref: "#/components/schemas/CreditNote"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credits/grants/{customer_id}:
     get:
       tags: [Credits]
       summary: Per-grant burndown + kind subtotals
+      operationId: getCreditGrants
       description: |
         The customer's credit blocks with drawdown state — granted /
         drawn / remaining per grant, expiry, and remaining per currency
@@ -7091,12 +7299,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditGrants"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No customer with this ID in this tenant and mode.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credits/adjust:
     post:
@@ -7150,6 +7362,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Customer not found.
           content:
@@ -7162,6 +7376,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credits/balances:
     get:
@@ -7192,8 +7408,12 @@ paths:
                       $ref: "#/components/schemas/CreditBalance"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credits/ledger/{customer_id}:
     get:
@@ -7243,6 +7463,8 @@ paths:
                       $ref: "#/components/schemas/CreditLedgerEntry"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No customer with this ID in this tenant and mode.
           content:
@@ -7251,11 +7473,14 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/webhook-endpoints/endpoints:
     post:
       tags: [Webhooks]
       summary: Create webhook endpoint
+      operationId: createWebhookEndpoint
       description: |
         Returns the endpoint plus its signing secret (shown once). Event
         names are validated against the emit catalog — subscribing to an
@@ -7287,11 +7512,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookEndpointCreated"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: Invalid URL or unknown event type
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
       tags: [Webhooks]
       summary: List webhook endpoints
+      operationId: listWebhookEndpoints
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
@@ -7310,8 +7542,12 @@ paths:
                       $ref: "#/components/schemas/WebhookEndpoint"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/webhook-endpoints/endpoints/{id}:
     get:
@@ -7332,15 +7568,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookEndpoint"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No such endpoint in the caller's mode
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     patch:
       tags: [Webhooks]
       summary: Update webhook endpoint (no secret rotation)
+      operationId: updateWebhookEndpoint
       description: |
         Mutates url / description / events / active WITHOUT rotating the
         signing secret — the receiver keeps verifying while the target or
@@ -7377,13 +7618,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookEndpoint"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Endpoint not found
         "422":
           description: Invalid URL or unknown event type
+        "429":
+          $ref: "#/components/responses/RateLimited"
     delete:
       tags: [Webhooks]
       summary: Delete (disable) webhook endpoint
+      operationId: deleteWebhookEndpoint
       parameters:
         - name: id
           in: path
@@ -7402,11 +7650,16 @@ paths:
                   status:
                     type: string
                     enum: [deleted]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/webhook-endpoints/endpoints/{id}/rotate-secret:
     post:
       tags: [Webhooks]
       summary: Rotate signing secret (72h dual-signing grace)
+      operationId: rotateWebhookEndpointSecret
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
@@ -7421,6 +7674,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookSecretRotation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/webhook-endpoints/endpoints/{id}/deliveries:
     get:
@@ -7454,6 +7711,8 @@ paths:
                       $ref: "#/components/schemas/WebhookEndpointDelivery"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No such endpoint, or it was deleted
           content:
@@ -7462,6 +7721,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay:
     post:
@@ -7497,6 +7758,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookDeliveryReplayResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No such delivery, the delivery belongs to another endpoint, or the endpoint was deleted
           content:
@@ -7509,6 +7772,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/webhook-endpoints/endpoints/stats:
     get:
@@ -7537,13 +7802,18 @@ paths:
                       $ref: "#/components/schemas/WebhookEndpointStats"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/webhook-endpoints/events:
     get:
       tags: [Webhooks]
       summary: List outbound events, newest first
+      operationId: listWebhookEvents
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
@@ -7562,8 +7832,12 @@ paths:
                       $ref: "#/components/schemas/WebhookEvent"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/webhook_events/{id}/deliveries:
     get:
@@ -7599,6 +7873,8 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/WebhookEventDeliveryAttempt"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Caller lacks the `apikey:read` permission
           content:
@@ -7611,6 +7887,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/webhook_events/{id}/replay:
     post:
@@ -7642,6 +7920,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookReplayResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Caller lacks the `apikey:read` permission
           content:
@@ -7654,6 +7934,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/webhook_events/stream:
     get:
@@ -7700,15 +7982,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/webhooks/stripe/{endpoint_id}:
     post:
-      tags: [Webhooks]
+      tags: [InboundWebhooks]
+      x-internal: true
       security: []
       summary: Receive a Stripe webhook
       operationId: receiveStripeWebhook
       description: |
-        Stripe calls this route; your code does not. Point a webhook in your
+        Stripe calls this route; your code does not. It is not part of the
+        integration API. Point a webhook in your
         Stripe dashboard at it for each connected mode. `endpoint_id` is the
         `id` of that mode's Stripe connection (`GET /v1/settings/stripe`).
         The request is checked against the `Stripe-Signature` header and
@@ -7778,13 +8064,15 @@ paths:
 
   /v1/webhooks/postmark:
     post:
-      tags: [Webhooks]
+      tags: [InboundWebhooks]
+      x-internal: true
       security:
         - PostmarkBasicAuth: []
       summary: Receive a Postmark delivery webhook
       operationId: receivePostmarkWebhook
       description: |
-        Postmark calls this route; your code does not. Hardcount reads
+        Postmark calls this route; your code does not. It is not part of the
+        integration API. Hardcount reads
         `Delivery`, `Bounce` and `SpamComplaint` records and ignores other
         record types and soft bounces. Without `POSTMARK_WEBHOOK_USER` and
         `POSTMARK_WEBHOOK_PASS` set, every request gets 401. See
@@ -7839,6 +8127,7 @@ paths:
     post:
       tags: [Pricing]
       summary: Create plan
+      operationId: createPlan
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -7895,6 +8184,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PlanDetail"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "409":
           description: |
             `price_exists`: two prices name the same meter and
@@ -7919,9 +8212,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
       tags: [Pricing]
       summary: List plans
+      operationId: listPlans
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
@@ -7940,8 +8236,12 @@ paths:
                       $ref: "#/components/schemas/Plan"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/plans/{id}:
     get:
@@ -7961,12 +8261,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PlanDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: "`not_found`: no plan with this id in this tenant and mode."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     patch:
       tags: [Pricing]
       summary: Update plan
@@ -8030,6 +8334,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: "`not_found`: no plan with this id in this tenant and mode."
           content:
@@ -8056,6 +8362,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           description: |
             `internal_error`. Nothing is changed.
@@ -8093,6 +8401,8 @@ paths:
                       $ref: "#/components/schemas/PlanPrice"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: "`not_found`: no plan with this id in this tenant and mode."
           content:
@@ -8101,6 +8411,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     post:
       tags: [Pricing]
       summary: Add a price to a plan
@@ -8142,6 +8454,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: "`not_found`: no plan with this id in this tenant and mode."
           content:
@@ -8172,6 +8486,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/plans/{id}/prices/{price_id}:
     patch:
@@ -8217,6 +8533,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: "`not_found`: no such plan, or no such price on it (a removed price included)."
           content:
@@ -8232,6 +8550,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     delete:
       tags: [Pricing]
       summary: Remove a price from a plan
@@ -8264,17 +8584,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PriceWrite"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: "`not_found`: no such plan, or no such price on it (a removed price included)."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions:
     post:
       tags: [Subscriptions]
       summary: Create subscription
+      operationId: createSubscription
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -8336,6 +8661,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Subscription"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: |
             A field failed validation (`param` names it), for example
@@ -8349,9 +8678,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
       tags: [Subscriptions]
       summary: List subscriptions
+      operationId: listSubscriptions
       parameters:
         - name: customer_id
           in: query
@@ -8428,13 +8760,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions/{id}/activate:
     post:
       tags: [Subscriptions]
       summary: Activate draft subscription
+      operationId: activateSubscription
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
@@ -8449,11 +8786,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Subscription"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions/{id}/retry-billing:
     post:
       tags: [Subscriptions]
       summary: Retry billing on a subscription whose billing is failing
+      operationId: retrySubscriptionBilling
       description: |
         Clears the subscription's `billing_failure` and bills it now, with
         the same attempt the billing run makes. Use it after fixing the
@@ -8520,6 +8862,8 @@ paths:
                       no `billing_failure` and is still due for billing.
                       The attempt did not complete and nothing was saved;
                       the next billing run attempts the subscription.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found.
         "409":
@@ -8528,6 +8872,8 @@ paths:
             subscription has no `billing_failure`, so there is nothing to
             retry. Code `invalid_state`: the subscription is attached to
             a test clock; use the clock's retry advance instead.
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions/{id}:
     get:
@@ -8548,12 +8894,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Subscription"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found (code `not_found`).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions/{id}/cancel:
     post:
@@ -8586,6 +8936,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Subscription"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found.
           content:
@@ -8601,6 +8953,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions/{id}/schedule-cancel:
     post:
@@ -8657,6 +9011,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found.
           content:
@@ -8683,6 +9039,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions/{id}/scheduled-cancel:
     delete:
@@ -8710,6 +9068,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Subscription"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found.
           content:
@@ -8725,6 +9085,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions/{id}/pause-collection:
     put:
@@ -8787,6 +9149,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found.
           content:
@@ -8811,6 +9175,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     delete:
       tags: [Subscriptions]
       summary: Resume collection
@@ -8836,6 +9202,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Subscription"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found.
           content:
@@ -8850,6 +9218,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions/{id}/end-trial:
     post:
@@ -8876,6 +9246,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Subscription"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found.
           content:
@@ -8890,6 +9262,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions/{id}/extend-trial:
     post:
@@ -8935,6 +9309,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found.
           content:
@@ -8958,6 +9334,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions/{id}/billing-thresholds:
     put:
@@ -9028,6 +9406,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found.
           content:
@@ -9052,6 +9432,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     delete:
       tags: [Subscriptions]
       summary: Clear billing thresholds
@@ -9072,12 +9454,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Subscription"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions/{id}/items:
     post:
@@ -9133,6 +9519,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found.
           content:
@@ -9165,6 +9553,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions/{id}/items/{itemID}:
     patch:
@@ -9243,6 +9633,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found, or the item is not on this subscription.
           content:
@@ -9279,6 +9671,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     delete:
       tags: [Subscriptions]
       summary: Remove subscription item
@@ -9307,6 +9701,8 @@ paths:
       responses:
         "204":
           description: Item removed.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found, or the item is not on this subscription.
           content:
@@ -9322,6 +9718,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions/{id}/items/{itemID}/pending-change:
     delete:
@@ -9353,6 +9751,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SubscriptionItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: The item is not found or is not on this subscription.
           content:
@@ -9368,6 +9768,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/subscriptions/{id}/timeline:
     get:
@@ -9403,17 +9805,22 @@ paths:
                   truncated:
                     type: boolean
                     description: True when the subscription has more than 100 audit entries, so the earliest events are missing.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Subscription not found.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/usage-events:
     post:
       tags: [Usage]
       summary: Ingest usage event
+      operationId: createUsageEvent
       description: |
         Needs the `usage:ingest` permission: an ingest key or a secret
         key.
@@ -9483,6 +9890,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UsageEvent"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: |
             Validation failed and nothing was stored. `param` names the
@@ -9492,6 +9903,8 @@ paths:
             unknown customer or meter, `timestamp` for a malformed one, and
             `properties` when it has a key (it was renamed `dimensions`;
             `null` or `{}` is ignored).
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "503":
           description: |
             `ingest_unavailable`: a customer or meter lookup, or the read of
@@ -9504,6 +9917,7 @@ paths:
     get:
       tags: [Usage]
       summary: List usage events
+      operationId: listUsageEvents
       parameters:
         - name: customer_id
           in: query
@@ -9551,17 +9965,22 @@ paths:
                       $ref: "#/components/schemas/UsageEvent"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: "`validation_error`: a malformed `dimensions` pair, a `from` or `to` that cannot be parsed, `to` before `from`, or a `limit` or `offset` out of range (param names the field)."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/usage-events/batch:
     post:
       tags: [Usage]
       summary: Batch ingest usage events (max 1000, all-or-nothing)
+      operationId: createUsageEventBatch
       description: |
         The batch is atomic: every event validates, then all of them
         commit in one transaction. On any validation failure nothing is
@@ -9629,6 +10048,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UsageEventBatchResult"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: |
             Batch rejected — one or more events failed validation and
@@ -9638,6 +10061,8 @@ paths:
             and retry the whole batch.
         "413":
           description: Request body over the 1MB cap — send smaller batches.
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "503":
           description: |
             `ingest_unavailable`: a customer or meter lookup, or the read of
@@ -9750,6 +10175,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: |
             `validation_error`: a missing, empty or whitespace-only
@@ -9765,6 +10192,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "503":
           description: |
             `ingest_unavailable`: the customer or meter lookup, or the read
@@ -9807,6 +10236,10 @@ paths:
                   total_rows:
                     type: integer
                     description: Rows held, including those not listed in `data`.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/usage-events/held/release:
     post:
@@ -9851,12 +10284,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HeldUsageReleaseResult"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: "`validation_error`: no customer has that external ID yet and no `customer_id` was given, or `customer_id` was not found."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/usage-events/held/discard:
     post:
@@ -9892,12 +10331,18 @@ paths:
                 properties:
                   discarded:
                     type: integer
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: "`validation_error`: `external_customer_id` is missing, or the body has an unknown field (`param` names it; the body must use only the fields listed here)."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/usage-events/aggregate:
     get:
@@ -9954,17 +10399,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UsageAggregate"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: "`validation_error`: a malformed `dimensions` pair, an unknown `tz`, a `from` or `to` that cannot be parsed, or `to` before `from`."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices:
     get:
       tags: [Invoices]
       summary: List invoices
+      operationId: listInvoices
       parameters:
         - name: customer_id
           in: query
@@ -10042,8 +10492,12 @@ paths:
                       $ref: "#/components/schemas/Invoice"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
     post:
       tags: [Invoices]
@@ -10092,6 +10546,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Customer or subscription not found (code `not_found`).
           content:
@@ -10118,6 +10574,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "503":
           description: |
             The customer's currency could not be read (code
@@ -10131,6 +10589,7 @@ paths:
     post:
       tags: [Invoices]
       summary: Preview the next invoice for a customer (Stripe-equivalent)
+      operationId: createInvoicePreview
       description: |
         Answers "what is my next bill going to look like?" from the usage
         recorded so far. Without `period`, the preview mirrors the cycle
@@ -10192,6 +10651,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Customer or subscription not found
           content:
@@ -10204,6 +10665,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}:
     get:
@@ -10223,17 +10686,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/InvoiceWithLineItems"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice not found.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/pdf:
     get:
       tags: [Invoices]
       summary: Download invoice PDF
+      operationId: getInvoicePdf
       parameters:
         - name: id
           in: path
@@ -10248,11 +10716,16 @@ paths:
               schema:
                 type: string
                 format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/send:
     post:
       tags: [Invoices]
       summary: Email the invoice (PDF attached) to a recipient
+      operationId: sendInvoice
       description: |
         Sends the invoice document email. The invoice must be issued:
         finalized, paid or uncollectible. A draft or voided invoice is
@@ -10297,6 +10770,10 @@ paths:
                   status:
                     type: string
                     enum: [sent]
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice not found
         "409":
@@ -10311,6 +10788,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: "`email` is missing or invalid, a CC entry is invalid, or the body has an unknown field (`param` names it)"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/line-items:
     post:
@@ -10347,6 +10826,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice not found.
           content:
@@ -10362,6 +10843,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/void:
     post:
@@ -10399,6 +10882,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Invoice"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice not found.
           content:
@@ -10416,6 +10901,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/resend-setup-link:
     post:
@@ -10450,6 +10937,8 @@ paths:
                   status:
                     type: string
                     enum: [sent]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice not found.
           content:
@@ -10467,6 +10956,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/mark-uncollectible:
     post:
@@ -10516,6 +11007,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Invoice"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice not found.
           content:
@@ -10531,6 +11024,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/record-payment:
     post:
@@ -10577,6 +11072,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice not found.
           content:
@@ -10592,6 +11089,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/rotate-public-token:
     post:
@@ -10616,6 +11115,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Invoice"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice not found.
           content:
@@ -10628,6 +11129,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/collect:
     post:
@@ -10663,6 +11166,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Invoice"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice not found.
           content:
@@ -10702,6 +11207,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "502":
           description: |
             Stripe declined or refused the charge (code `provider_error`),
@@ -10780,6 +11287,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice not found.
           content:
@@ -10805,6 +11314,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/payment-timeline:
     get:
@@ -10844,12 +11355,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/InvoicePaymentTimeline"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice not found.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/disputes:
     get:
@@ -10879,6 +11394,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/InvoiceDisputeList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice not found.
           content:
@@ -10887,6 +11404,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/stripe-refunds:
     get:
@@ -10915,6 +11434,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/InvoiceStripeRefundList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice not found.
           content:
@@ -10923,6 +11444,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss:
     post:
@@ -10965,6 +11488,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/InvoiceStripeRefund"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice or refund not found.
           content:
@@ -10983,6 +11510,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credit-notes/stats:
     get:
@@ -11000,11 +11529,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditNoteStats"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credit-notes/{id}/send:
     post:
       tags: [CreditNotes]
       summary: Email the credit-note document (PDF attached)
+      operationId: sendCreditNote
       description: |
         Sends the credit-note PDF to the customer (ADR-082 rider — CNs
         previously had no send surface at all). Issued credit notes
@@ -11047,6 +11581,10 @@ paths:
                   status:
                     type: string
                     enum: [sent]
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Credit note not found
         "409":
@@ -11059,6 +11597,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: "Not issued (draft/voided), `email` is missing or invalid, or the body has an unknown field (`param` names it)"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credit-notes/{id}:
     get:
@@ -11079,12 +11619,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditNote"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Credit note not found.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credit-notes/{id}/issue:
     post:
@@ -11123,6 +11667,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditNote"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Credit note not found.
           content:
@@ -11135,6 +11681,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credit-notes/{id}/attach-stripe-refund:
     post:
@@ -11176,6 +11724,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditNote"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Credit note not found.
           content:
@@ -11194,6 +11746,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credit-notes/{id}/retry-refund:
     post:
@@ -11223,6 +11777,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditNote"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Credit note not found.
           content:
@@ -11245,6 +11801,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "502":
           description: |
             Stripe refused the refund (code `provider_error`): the note's
@@ -11278,6 +11836,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditNote"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Credit note not found.
           content:
@@ -11292,6 +11852,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credit-notes/{id}/pdf:
     get:
@@ -11316,17 +11878,22 @@ paths:
               schema:
                 type: string
                 format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Credit note not found.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/finalize:
     post:
       tags: [Invoices]
       summary: Finalize draft invoice
+      operationId: finalizeInvoice
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
@@ -11341,11 +11908,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Invoice"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/invoices/{id}/retry-tax:
     post:
       tags: [Invoices]
       summary: Retry tax calculation on a deferred invoice
+      operationId: retryInvoiceTax
       description: |
         Re-runs tax calculation against a draft invoice whose
         `tax_status` is `pending`. Backs the operator-
@@ -11383,6 +11955,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Invoice"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Invoice not found.
         "409":
@@ -11391,13 +11965,19 @@ paths:
             tax_status is not pending). Also returned when the
             tax was saved but the invoice's state then stopped the
             finalize.
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/auth/login:
     post:
-      tags: [Auth]
+      tags: [Dashboard]
+      x-internal: true
       security: []
       summary: Sign in with email and password; mint an httpOnly session cookie
+      operationId: login
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Validates email + password, mints a server-side session row, and
         sets `Set-Cookie: hardcount_session=...; HttpOnly; SameSite=Lax; Path=/`.
         Subsequent dashboard requests authenticate via the cookie; sessions
@@ -11441,6 +12021,8 @@ paths:
                   expires_at:
                     type: string
                     format: date-time
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           description: Invalid email or password
           content:
@@ -11481,26 +12063,36 @@ paths:
 
   /v1/auth/logout:
     post:
-      tags: [Auth]
+      tags: [Dashboard]
+      x-internal: true
       security:
         - SessionCookie: []
         - {}
       summary: Revoke the current session and clear the cookie
+      operationId: logout
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Marks the session row as revoked server-side and clears the
         cookie on the response. Idempotent — a missing or stale cookie
         is treated as already-logged-out.
       responses:
         "204":
           description: Session revoked
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/auth/mode:
     post:
-      tags: [Auth]
+      tags: [Dashboard]
+      x-internal: true
       security:
         - SessionCookie: []
       summary: Switch the dashboard session between test and live mode
+      operationId: switchSessionMode
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Updates `dashboard_sessions.livemode` for the cookie session.
         All subsequent requests inherit the new mode via session middleware,
         so customers / invoices / subscriptions / API keys reads filter to
@@ -11527,19 +12119,27 @@ paths:
                 properties:
                   livemode:
                     type: boolean
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           description: Missing or expired session
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/auth/password-reset/request:
     post:
-      tags: [Auth]
+      tags: [Dashboard]
+      x-internal: true
       security: []
       summary: Request a password reset link
+      operationId: requestPasswordReset
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Always returns the same 200 body regardless of whether the email
         exists, to avoid account enumeration. If a user matches, a
         single-use 1-hour token is generated and the reset link is
@@ -11577,13 +12177,21 @@ paths:
                       Whether this deployment can deliver reset emails
                       (SMTP configured AND `DASHBOARD_BASE_URL` set).
                       Deployment posture, never account state.
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/auth/password-reset/confirm:
     post:
-      tags: [Auth]
+      tags: [Dashboard]
+      x-internal: true
       security: []
       summary: Set a new password using a reset token
+      operationId: confirmPasswordReset
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Consumes a single-use reset token and updates the user's password.
         The token is invalidated on use; reuse or expired tokens return 422.
       requestBody:
@@ -11611,19 +12219,26 @@ paths:
                   message:
                     type: string
                     example: password updated — sign in with your new password
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "422":
           description: Token invalid/expired or password does not meet policy
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/auth/password-reset/check:
     get:
-      tags: [Auth]
+      tags: [Dashboard]
+      x-internal: true
       summary: Check a password reset token
       operationId: checkPasswordResetToken
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Tells whether a reset token can still be used, without using it up.
         The reset-password page calls it on load, so it can show "this link
         is no longer valid" before the user types a new password. An
@@ -11664,10 +12279,14 @@ paths:
 
   /v1/auth/invite/{token}:
     get:
-      tags: [Members]
+      tags: [Dashboard]
+      x-internal: true
       security: []
       summary: Preview a team invitation (accept-page context)
+      operationId: getInvitation
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Unauthenticated — the token IS the credential (mirrors password
         reset). Returns the invited email, workspace name, and whether
         the invitee needs to create an account. Invalid, expired,
@@ -11707,13 +12326,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/auth/accept-invite:
     post:
-      tags: [Members]
+      tags: [Dashboard]
+      x-internal: true
       security: []
       summary: Accept a team invitation
+      operationId: acceptInvitation
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Consumes the single-use invite token (CAS — a replay or a race
         loses) and attaches the membership. If no account exists for the
         invited email, `password` is required (min 12 chars), the account
@@ -11758,21 +12383,28 @@ paths:
                   expires_at:
                     type: string
                     description: Session expiry (RFC 3339) when session_minted; empty string otherwise.
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "422":
           description: Token invalid/expired/revoked/used, or password does not meet policy
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/members:
     get:
-      tags: [Members]
+      tags: [Dashboard]
+      x-internal: true
       operationId: listMembers
       security:
         - SessionCookie: []
       summary: List workspace members and invitations
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Dashboard-session only (403 for API keys — membership is a human
         act with a human actor). Members are every user attached to the
         tenant; invitations carry a server-derived status
@@ -11806,21 +12438,28 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/MemberInvitation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Caller is not a dashboard session
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/members/invite:
     post:
-      tags: [Members]
+      tags: [Dashboard]
+      x-internal: true
       operationId: inviteMember
       security:
         - SessionCookie: []
       summary: Invite a teammate by email
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Creates a pending invitation (7-day expiry, one pending per
         email) and sends the accept link via the transactional email
         outbox. Requires `DASHBOARD_BASE_URL` — accept links are never
@@ -11846,6 +12485,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MemberInvitation"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "409":
           description: |
             No invitation was created when the code is
@@ -11863,15 +12506,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/members/invitations/{id}:
     delete:
-      tags: [Members]
+      tags: [Dashboard]
+      x-internal: true
       operationId: revokeMemberInvitation
       security:
         - SessionCookie: []
       summary: Revoke a pending invitation
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Stamps the invitation revoked; its accept link stops working
         immediately (revoke racing an accept: exactly one wins). Only
         pending invitations can be revoked — accepted/revoked ones 404.
@@ -11884,21 +12532,28 @@ paths:
       responses:
         "204":
           description: Invitation revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No pending invitation with this id (code `not_found`).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/members/{userID}:
     delete:
-      tags: [Members]
+      tags: [Dashboard]
+      x-internal: true
       operationId: removeMember
       security:
         - SessionCookie: []
       summary: Remove a member from the workspace
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Deletes the membership AND revokes all of the user's sessions
         (sessions pin the tenant — without revocation an active session
         would keep full access). Guards: self-removal is blocked
@@ -11913,6 +12568,8 @@ paths:
       responses:
         "204":
           description: Member removed and sessions revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: User is not a member of this workspace (code `not_found`).
           content:
@@ -11925,11 +12582,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/whoami:
     get:
       tags: [Auth]
       summary: Resolve the current credential to its tenant context
+      operationId: getWhoami
       description: |
         Returns the resolved auth context for whichever credential the
         request carries — `hardcount_session` cookie (dashboard) or
@@ -11984,11 +12644,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/billing/run:
     post:
       tags: [Billing]
       summary: Trigger billing cycle
+      operationId: runBilling
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       responses:
@@ -12031,11 +12694,16 @@ paths:
                     type: array
                     items:
                       type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/provider-costs:
     get:
       tags: [ProviderCosts]
       summary: List provider cost rates
+      operationId: listProviderCosts
       description: |
         The operator's COGS table (ADR-079): what THEY pay LLM providers per
         token, keyed by provider/model/token_type. Current-rate semantics —
@@ -12058,11 +12726,16 @@ paths:
                       $ref: "#/components/schemas/ProviderCostRate"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     put:
       tags: [ProviderCosts]
       summary: Create or update a provider cost rate
+      operationId: upsertProviderCost
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -12102,17 +12775,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderCostRate"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: "`validation_error`: a required field is missing, `unit_cost_cents` is not a number or is outside its limits, `currency` is not USD, or the body has an unknown field such as `cost_per_token` (`param` names the field; the body must use only the fields listed here)."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/provider-costs/{id}:
     delete:
       tags: [ProviderCosts]
       summary: Delete a provider cost rate
+      operationId: deleteProviderCost
       description: Stamped events keep their snapshot — deletion never rewrites history.
       parameters:
         - name: id
@@ -12123,11 +12803,16 @@ paths:
       responses:
         "204":
           description: Deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/customers/{id}/margin:
     get:
       tags: [ProviderCosts]
       summary: Per-customer margin report (operator only)
+      operationId: getCustomerMargin
       description: |
         Rated usage revenue vs stamped provider COGS for a window (ADR-079).
         A usage unit-economics view — base fees, credits, and taxes are not
@@ -12171,6 +12856,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Customer not found.
           content:
@@ -12183,11 +12870,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credits/grant:
     post:
       tags: [Credits]
       summary: Grant credits to customer
+      operationId: grantCredits
       description: |
         Adds a block of credit in `currency`. The credit pays only the
         customer's invoices in that currency; it is never converted. A
@@ -12242,6 +12932,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditLedgerEntry"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: |
             A field failed validation (a missing or unsupported `currency` has `param` `currency`), or the body has an unknown field (`param` names it; the body must use only the fields listed here).
@@ -12249,11 +12943,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credits/balance/{customer_id}:
     get:
       tags: [Credits]
       summary: Get customer credit balance
+      operationId: getCreditBalance
       description: |
         The customer's balances, one per currency the customer's credit
         ledger holds, ordered by currency. Empty when the customer has no
@@ -12277,17 +12974,22 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/CreditBalance"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No customer with this ID in this tenant and mode.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credits/balance/{customer_id}/live:
     get:
       tags: [Credits]
       summary: Get customer live credit balance
+      operationId: getLiveCreditBalance
       description: |
         How much credit the customer has left right now, per currency: the
         settled balance less the usage no invoice has billed yet in that
@@ -12316,13 +13018,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditLiveBalance"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Customer not found in this tenant and mode
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/test-clocks:
     get:
       tags: [TestClocks]
       summary: List test clocks for the active tenant
+      operationId: listTestClocks
       description: |
         Test mode only — returns 403 in live mode. Test clocks let
         operators simulate time-bound billing flows without waiting for
@@ -12345,6 +13052,8 @@ paths:
                       $ref: "#/components/schemas/TestClock"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Caller is in live mode
           content:
@@ -12353,9 +13062,12 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     post:
       tags: [TestClocks]
       summary: Create a test clock
+      operationId: createTestClock
       description: |
         Test mode only. The clock starts in `ready` state at
         `frozen_time`. Use `/advance` to move it forward.
@@ -12382,11 +13094,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TestClock"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/test-clocks/{id}:
     get:
       tags: [TestClocks]
       summary: Get a test clock by id
+      operationId: getTestClock
       parameters:
         - in: path
           name: id
@@ -12399,11 +13118,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TestClock"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Clock not found
+        "429":
+          $ref: "#/components/responses/RateLimited"
     delete:
       tags: [TestClocks]
       summary: Delete a test clock (cascades to pinned subscriptions)
+      operationId: deleteTestClock
       parameters:
         - in: path
           name: id
@@ -12421,11 +13145,16 @@ paths:
                   status:
                     type: string
                     enum: [deleted]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/test-clocks/{id}/subscriptions:
     get:
       tags: [TestClocks]
       summary: List subscriptions pinned to this clock
+      operationId: listTestClockSubscriptions
       parameters:
         - in: path
           name: id
@@ -12448,15 +13177,20 @@ paths:
                       $ref: "#/components/schemas/Subscription"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Clock not found
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/test-clocks/{id}/advance:
     post:
       tags: [TestClocks]
       summary: Advance the clock to a new frozen_time
+      operationId: advanceTestClock
       description: |
         Moves the clock forward and runs billing catchup asynchronously
         for every subscription pinned to this clock. The 200 returns as
@@ -12495,16 +13229,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TestClock"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "409":
           description: Clock is not in `ready` state
         "422":
           description: New frozen_time is not strictly after the current
             frozen_time, or is more than one year after it
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/test-clocks/{id}/retry-advance:
     post:
       tags: [TestClocks]
       summary: Retry catchup on a clock parked in internal_failure
+      operationId: retryTestClockAdvance
       description: |
         Resumes a clock parked in `internal_failure` after a prior
         catchup error. Catchup is idempotent (only subscriptions with
@@ -12527,10 +13268,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TestClock"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Clock not found
         "409":
           description: Clock is not in `internal_failure` state
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/test-clocks/{id}/customers:
     get:
@@ -12562,6 +13307,8 @@ paths:
                       $ref: "#/components/schemas/Customer"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Caller is in live mode, or the key lacks the `testclock:write` permission (needed even to read test clocks).
           content:
@@ -12576,6 +13323,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/recipes:
     get:
@@ -12606,8 +13355,12 @@ paths:
                       $ref: "#/components/schemas/RecipeListItem"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/recipes/instances:
     get:
@@ -12632,8 +13385,12 @@ paths:
                       $ref: "#/components/schemas/RecipeInstance"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/recipes/{key}:
     get:
@@ -12653,8 +13410,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RecipeDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Unknown recipe key
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/recipes/{key}/preview:
     post:
@@ -12687,10 +13448,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RecipePreviewResult"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Unknown recipe key
         "422":
           description: Overrides failed the recipe's overridable schema
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/recipes/{key}/instantiate:
     post:
@@ -12731,6 +13498,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RecipeInstance"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Unknown recipe key
         "409":
@@ -12741,12 +13512,17 @@ paths:
             meter, the plan code or this recipe's install first (retry).
         "422":
           description: Overrides failed the recipe's overridable schema
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/exports/customers.csv:
     get:
-      tags: [Customers]
+      tags: [Dashboard]
+      x-internal: true
       summary: Export customers as CSV
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Streams every customer, newest first, from one consistent
         snapshot. Columns: id, external_id, display_name, email, status,
         email_status, created_at, updated_at.
@@ -12776,12 +13552,16 @@ paths:
             text/csv:
               schema:
                 type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: "`from` or `to` is malformed, or `to` is before `from`."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           description: The export's audit row could not be written; nothing was sent.
           content:
@@ -12791,9 +13571,12 @@ paths:
 
   /v1/exports/invoices.csv:
     get:
-      tags: [Invoices]
+      tags: [Dashboard]
+      x-internal: true
       summary: Export invoices as CSV
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Streams every invoice, newest first, from one consistent
         snapshot. Amounts are in cents. Columns: id, invoice_number,
         customer_id, subscription_id, status, payment_status, currency,
@@ -12824,12 +13607,16 @@ paths:
             text/csv:
               schema:
                 type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: "`from` or `to` is malformed, or `to` is before `from`."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           description: The export's audit row could not be written; nothing was sent.
           content:
@@ -12839,9 +13626,12 @@ paths:
 
   /v1/exports/subscriptions.csv:
     get:
-      tags: [Subscriptions]
+      tags: [Dashboard]
+      x-internal: true
       summary: Export subscriptions as CSV
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Streams every subscription, newest first, from one consistent
         snapshot. Columns: id, code, display_name, customer_id, status,
         billing_time, trial_start_at, trial_end_at, started_at,
@@ -12870,12 +13660,16 @@ paths:
             text/csv:
               schema:
                 type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: "`from` or `to` is malformed, or `to` is before `from`."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           description: The export's audit row could not be written; nothing was sent.
           content:
@@ -12885,9 +13679,12 @@ paths:
 
   /v1/exports/usage-events.csv:
     get:
-      tags: [Usage]
+      tags: [Dashboard]
+      x-internal: true
       summary: Export usage events as CSV
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Streams usage events whose `timestamp` falls in the window,
         newest first, from one consistent snapshot. `from` and `to` are
         both required and may span at most 366 days. `customer_id`,
@@ -12940,12 +13737,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: "`from` or `to` is malformed, `to` is before `from`, or a `dimensions` pair is malformed."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           description: The export's audit row could not be written; nothing was sent.
           content:
@@ -12955,9 +13756,12 @@ paths:
 
   /v1/exports/audit-log.csv:
     get:
-      tags: [System]
+      tags: [Dashboard]
+      x-internal: true
       summary: Export the audit log as CSV
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Streams the audit log for the caller's mode (test or live), newest
         first, with no row limit. Settings changes are recorded in test
         mode, so they appear only in a test-mode export.
@@ -13024,12 +13828,16 @@ paths:
             text/csv:
               schema:
                 type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: A date filter is malformed, or an upper bound is before its lower bound.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           description: The export's audit row could not be written; nothing was sent.
           content:
@@ -13039,10 +13847,13 @@ paths:
 
   /v1/analytics/overview:
     get:
-      tags: [Billing]
+      tags: [Dashboard]
+      x-internal: true
       summary: Get headline billing metrics
       operationId: getAnalyticsOverview
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Returns the dashboard's headline metrics for a rolling window that
         ends now, with values for the window before it where a comparison
         makes sense.
@@ -13066,13 +13877,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AnalyticsOverview"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/analytics/revenue-chart:
     get:
-      tags: [Billing]
+      tags: [Dashboard]
+      x-internal: true
       summary: Get revenue over time
       operationId: getAnalyticsRevenueChart
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Returns paid-invoice revenue per day, or per month for `12m`.
         Only invoices in the tenant's default currency are counted; the
         currency is the `currency` of `GET /v1/analytics/overview`.
@@ -13099,13 +13917,20 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/AnalyticsRevenuePoint"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/analytics/mrr-movement:
     get:
-      tags: [Billing]
+      tags: [Dashboard]
+      x-internal: true
       summary: Get MRR movement over time
       operationId: getAnalyticsMrrMovement
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Returns how MRR (monthly recurring revenue from plan base fees)
         changed, per day, or per month for `12m`, with totals.
 
@@ -13142,13 +13967,20 @@ paths:
                       $ref: "#/components/schemas/AnalyticsMrrMovementPoint"
                   totals:
                     $ref: "#/components/schemas/AnalyticsMrrMovementTotals"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/analytics/usage:
     get:
-      tags: [Billing]
+      tags: [Dashboard]
+      x-internal: true
       summary: Get usage over time
       operationId: getAnalyticsUsage
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Returns usage-event counts and summed quantities per day, or per
         month for `12m`, the 10 meters with the most events, and totals.
         Buckets and meters with no events are left out. Data from
@@ -13189,6 +14021,10 @@ paths:
                       quantity:
                         type: string
                         description: Summed quantity, as a decimal string.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/dunning/runs:
     get:
@@ -13227,8 +14063,12 @@ paths:
                       $ref: "#/components/schemas/DunningRun"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/dunning/runs/{id}:
     get:
@@ -13248,12 +14088,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DunningRunDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Dunning run not found.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/dunning/runs/{id}/resolve:
     post:
@@ -13306,6 +14150,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Dunning run or invoice not found.
           content:
@@ -13328,6 +14174,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/dunning/stats:
     get:
@@ -13345,6 +14193,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DunningStats"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/dunning/policies:
     get:
@@ -13372,8 +14224,12 @@ paths:
                       $ref: "#/components/schemas/DunningPolicyListItem"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     post:
       tags: [Dunning]
       summary: Create dunning policy
@@ -13411,6 +14267,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: |
             `validation_error`: a replaced field was sent (`final_action`,
@@ -13421,6 +14279,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/dunning/policies/{id}:
     get:
@@ -13440,12 +14300,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DunningPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: "`not_found`: no policy with this id in this tenant and mode."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     patch:
       tags: [Dunning]
       summary: Replace dunning policy settings
@@ -13482,6 +14346,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: "`not_found`: no policy with this id in this tenant and mode."
           content:
@@ -13494,6 +14360,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     delete:
       tags: [Dunning]
       summary: Delete dunning policy
@@ -13519,6 +14387,8 @@ paths:
                   status:
                     type: string
                     enum: [deleted]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: "`not_found`: no policy with this id in this tenant and mode."
           content:
@@ -13534,6 +14404,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/dunning/policies/{id}/set-default:
     post:
@@ -13563,12 +14435,16 @@ paths:
                   status:
                     type: string
                     enum: [default_updated]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: "`not_found`: no policy with this id in this tenant and mode."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/price-overrides:
     post:
@@ -13666,6 +14542,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: "`not_found`: no customer with this id in this tenant and mode."
           content:
@@ -13693,6 +14571,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
       tags: [Pricing]
       summary: List active price overrides
@@ -13728,8 +14608,12 @@ paths:
                       $ref: "#/components/schemas/CustomerPriceOverride"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/price-overrides/{id}:
     delete:
@@ -13756,12 +14640,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CustomerPriceOverride"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: "`not_found`: no active override with this id (it may already be ended)."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/integrations/litellm/spend:
     post:
@@ -13833,6 +14721,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "503":
           description: |
             `ingest_unavailable`: the usage store could not be reached.
@@ -13890,6 +14782,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Caller lacks the `apikey:write` permission
           content:
@@ -13902,6 +14796,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
       tags: [Auth]
       summary: List API keys
@@ -13929,6 +14825,8 @@ paths:
                       $ref: "#/components/schemas/APIKey"
                   total:
                     $ref: "#/components/schemas/ListTotal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Caller lacks the `apikey:write` permission
           content:
@@ -13937,6 +14835,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/api-keys/{id}:
     delete:
@@ -13962,12 +14862,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIKey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No such key in this mode, or it is already revoked
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/api-keys/{id}/rotate:
     post:
@@ -14016,6 +14920,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: No such key in this mode
           content:
@@ -14040,13 +14946,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/settings:
     get:
-      tags: [System]
+      tags: [Dashboard]
+      x-internal: true
       summary: Get workspace settings
       operationId: getTenantSettings
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Returns the tenant's billing settings: currency, timezone, invoice
         numbering, payment terms, tax setup and the company details printed
         on invoices. Settings are shared by test and live mode. A tenant
@@ -14061,17 +14972,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TenantSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Caller lacks the `apikey:write` permission
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     put:
-      tags: [System]
+      tags: [Dashboard]
+      x-internal: true
       summary: Update workspace settings
       operationId: updateTenantSettings
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Merges the body into the current settings. A field you leave out
         keeps its stored value. A field you send is set, even to `""` or
         `0`. Send `credit_balance_low_threshold_cents: null` to turn
@@ -14109,6 +15027,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Caller lacks the `apikey:write` permission
           content:
@@ -14121,13 +15041,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/settings/email:
     get:
-      tags: [System]
+      tags: [Dashboard]
+      x-internal: true
       summary: Email setup status
       operationId: getEmailSettings
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Read-only. Email is configured in the server environment, not per
         workspace: `SMTP_HOST` and friends, plus the base URLs email links
         are built from. Never returns credentials.
@@ -14171,12 +15096,19 @@ paths:
                     type: boolean
                   can_send_invites:
                     type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/settings/email/test:
     post:
-      tags: [System]
+      tags: [Dashboard]
+      x-internal: true
       summary: Send a test email
       operationId: sendTestEmail
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Dashboard sessions only. Sends one plain-text email to the signed-in
         member's own address, directly over SMTP (not queued), and returns
         the server's answer. Writes an audit row on success.
@@ -14193,12 +15125,16 @@ paths:
                 properties:
                   sent_to:
                     type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "409":
           description: "`email_not_configured`: SMTP_HOST is not set."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "502":
           description: "`smtp_error`: the SMTP server refused the email or could not be reached. The message carries its answer."
           content:
@@ -14208,10 +15144,13 @@ paths:
 
   /v1/settings/stripe:
     post:
-      tags: [System]
+      tags: [Dashboard]
+      x-internal: true
       summary: Connect a Stripe account
       operationId: connectStripe
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Saves your own Stripe keys for one mode (`livemode` in the body
         picks the mode, not the caller's mode). Calling it again for the
         same mode replaces the keys. Key prefixes must match the mode:
@@ -14262,17 +15201,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "422":
           description: A key has the wrong prefix for the mode. `error.param` names the field.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
-      tags: [System]
+      tags: [Dashboard]
+      x-internal: true
       summary: List Stripe connections
       operationId: listStripeConnections
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Returns the tenant's Stripe connections for both modes in one list
         (at most two rows, live first), whatever the caller's mode. No
         secret values are returned, only prefixes and last four characters.
@@ -14290,13 +15236,20 @@ paths:
                     maxItems: 2
                     items:
                       $ref: "#/components/schemas/StripeConnection"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/settings/stripe/{mode}/webhook:
     patch:
-      tags: [System]
+      tags: [Dashboard]
+      x-internal: true
       summary: Set the Stripe webhook signing secret
       operationId: setStripeWebhookSecret
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Saves the `whsec_` signing secret for a mode that is already
         connected, without entering the API keys again. Hardcount does not call
         Stripe here; the secret is checked on each incoming webhook.
@@ -14333,6 +15286,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Stripe is not connected for this mode. Connect it first.
           content:
@@ -14345,13 +15300,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/settings/stripe/{mode}:
     delete:
-      tags: [System]
+      tags: [Dashboard]
+      x-internal: true
       summary: Disconnect Stripe for one mode
       operationId: disconnectStripe
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Deletes the saved Stripe keys for the mode. Hardcount cannot reach
         Stripe in that mode until you connect again. Writes an audit row.
       parameters:
@@ -14370,19 +15330,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Stripe is not connected for this mode
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/bootstrap:
     post:
       tags: [System]
+      x-internal: true
       summary: Set up a new installation
       operationId: bootstrap
       description: |
+        Run once, by hand, to create the first account on a new install; not part of the integration API.
+
         One-time setup for a new installation. It works only while no
         tenant exists and only when the server has `HARDCOUNT_BOOTSTRAP_TOKEN`
         set. Send that token as `token` in the body or as
@@ -14426,6 +15393,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BootstrapResult"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "403":
           description: Bootstrap is disabled (`HARDCOUNT_BOOTSTRAP_TOKEN` not set) or the token is wrong
           content:
@@ -14455,10 +15424,13 @@ paths:
 
   /v1/audit-log:
     get:
-      tags: [System]
+      tags: [Dashboard]
+      x-internal: true
       summary: List audit log entries
       operationId: listAuditLog
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Returns the tenant's audit entries in the caller's mode, newest
         first (by `created_at`, then `id`). All filters are exact matches
         and can be combined.
@@ -14543,6 +15515,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Caller lacks the `apikey:read` permission
           content:
@@ -14555,13 +15529,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/audit-log/filters:
     get:
-      tags: [System]
+      tags: [Dashboard]
+      x-internal: true
       summary: List audit log filter values
       operationId: getAuditLogFilters
       description: |
+        Used by the dashboard; not part of the integration API.
+
         Returns the distinct `action` and `resource_type` values recorded
         for the tenant in the caller's mode, plus the test clocks that
         appear in the log. Deleted test clocks are included, named from
@@ -14573,9 +15552,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditLogFilters"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Caller lacks the `apikey:read` permission
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
