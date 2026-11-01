@@ -226,6 +226,7 @@ Each sends a `Retry-After` header with the seconds to wait.
 | `idempotency_unavailable` | Hardcount could not record the `Idempotency-Key`, so it ran nothing | Retry with the same key after `Retry-After` (1 second) |
 | `ingest_unavailable` | The usage store did not answer. Nothing was recorded. | Send the same events again |
 | `currency_unavailable` | `POST /v1/invoices` could not read the customer's currency. No invoice was made. | Retry, with a new `Idempotency-Key` if you sent one |
+| `catchup_queue_full` | A test-clock advance or retry-advance found too many catch-ups waiting. Its catch-up did not start, and the clock is set to `internal_failure`. | Once the running catch-ups finish, send `POST /v1/test-clocks/{id}/retry-advance`. The same advance again answers `409`. |
 
 ### 504 Gateway Timeout
 
