@@ -143,6 +143,7 @@ decide.
 | `invoice_not_sendable` | Email a draft or voided invoice | Finalize it first, or do not send it |
 | `no_email_on_file` | Resend a payment link to a customer with no email | Add an email to the customer |
 | `invoice_changed`, `invoice_lines_changed` | The invoice changed while the request ran | Read it again, then retry |
+| `invoice_not_manual` | Add a line to a draft billing made for a subscription. It keeps billing's lines and tax. | Bill the charge on its own one-off invoice |
 | `credit_note_exceeds_invoice`, `invoice_not_open_receivable` | A credit note no longer fits the invoice, which changed while the request ran | Read the invoice, then retry with the right amount |
 | `customer_currency_conflict` | A one-off invoice's currency is not the customer's billing currency | Use the customer's currency |
 | `tax_calculation_expired` | Stripe Tax's calculation for the invoice is too old to finalize | Retry the tax, then finalize |

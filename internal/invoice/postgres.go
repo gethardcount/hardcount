@@ -2054,7 +2054,8 @@ func (s *PostgresStore) GetOutstandingBalance(ctx context.Context, tenantID, cus
 // AddLineItemAtomic inserts a line item and recomputes invoice totals in a
 // single transaction, locking the invoice row FOR UPDATE so concurrent
 // AddLineItem calls serialize on that row and subtotal reflects every
-// committed line item. Fails if the invoice isn't in draft status.
+// committed line item. Fails if the invoice isn't in draft status, or if billing
+// made it for a subscription (invoice_not_manual).
 func (s *PostgresStore) AddLineItemAtomic(
 	ctx context.Context, tenantID, invoiceID string, item domain.InvoiceLineItem,
 ) (domain.InvoiceLineItem, domain.Invoice, error) {
@@ -2096,6 +2097,17 @@ func (s *PostgresStore) AddLineItemAtomicAudited(
 	if status != domain.InvoiceDraft {
 		return domain.InvoiceLineItem{}, domain.Invoice{},
 			fmt.Errorf("can only add line items to draft invoices, current status: %s", status)
+	}
+	// Lines are added only to an invoice the operator made (POST
+	// /v1/invoices). A draft billing made for a subscription (a period
+	// closed while collection was paused, or while tax could not be worked
+	// out) keeps billing's lines: its finalize does not work the tax out
+	// again, so an added line went out untaxed, and a Stripe Tax calculation
+	// committed when the draft was built left it out of the tax reported.
+	// Checked under the row lock, against the stored reason. The engine
+	// writes its lines when it creates the invoice, never through here.
+	if reason := domain.InvoiceBillingReason(billingReason.String); reason != "" && reason != domain.BillingReasonManual {
+		return domain.InvoiceLineItem{}, domain.Invoice{}, errLinesOnBillingDraft()
 	}
 
 	// Invoice-level commit rules (ADR-078), enforced under the row lock so
@@ -2240,6 +2252,13 @@ func lineIDsMatchTx(ctx context.Context, tx *sql.Tx, invoiceID string, want []st
 // errLinesChanged: a line was added between reading an invoice and writing
 // its tax or finalizing it. Nothing was written; doing it again reads the
 // new line.
+// errLinesOnBillingDraft refuses a line added to a draft billing made for a
+// subscription (AddLineItemAtomicAudited).
+func errLinesOnBillingDraft() error {
+	return errs.InvalidState("Lines can be added only to an invoice you create. This draft was made by billing for a subscription, so it keeps billing's lines and tax. For a one-off charge, create a separate invoice.").
+		WithCode("invoice_not_manual")
+}
+
 func errLinesChanged() error {
 	return errs.InvalidState("a line was added to this invoice while its total was being calculated; try again").
 		WithCode("invoice_lines_changed")
