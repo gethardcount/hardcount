@@ -107,8 +107,10 @@ in up to the limit on each copy. More:
 
 ## Change a limit
 
-The person who runs the server sets these. Each must be a whole number of 1
-or more; any other value stops start-up.
+The person who runs the server sets these, as environment variables. On the
+Docker Compose stack, add them to `deploy/compose/.env`, then run
+`docker compose up -d`. Each must be a whole number of 1 or more; any other
+value stops start-up.
 
 | Setting | Default | Limit |
 |---|---|---|

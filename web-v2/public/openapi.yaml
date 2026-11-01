@@ -50,6 +50,11 @@ tags:
     description: Webhook endpoints that Hardcount sends events to, the events, and their deliveries.
   - name: Auth
     description: API keys, and which account and mode a key belongs to.
+  - name: Settings
+    description: |
+      The Stripe connection for each mode: its API keys and its webhook
+      signing secret. Settings → Payments in the dashboard uses the same
+      routes.
   - name: ProviderCosts
     description: What upstream providers charge you, for margin reports.
   - name: TestClocks
@@ -27832,13 +27837,10 @@ paths:
 
   /v1/settings/stripe:
     post:
-      tags: [Dashboard]
-      x-internal: true
+      tags: [Settings]
       summary: Connect a Stripe account
       operationId: connectStripe
       description: |
-        Used by the dashboard; not part of the integration API.
-
         Saves your own Stripe keys for one mode (`livemode` in the body
         picks the mode, not the caller's mode). Calling it again for the
         same mode replaces the keys; a webhook secret saved before is kept
@@ -27979,13 +27981,10 @@ paths:
 
   /v1/settings/stripe/{mode}/webhook:
     patch:
-      tags: [Dashboard]
-      x-internal: true
+      tags: [Settings]
       summary: Set the Stripe webhook signing secret
       operationId: setStripeWebhookSecret
       description: |
-        Used by the dashboard; not part of the integration API.
-
         Saves the `whsec_` signing secret for a mode that is already
         connected, without entering the API keys again. Hardcount does not call
         Stripe here; the secret is checked on each incoming webhook.

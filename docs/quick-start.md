@@ -4,18 +4,6 @@ This page starts Hardcount on your own computer and runs its demo. The demo bill
 one test customer for a month of AI token usage, so you can see the whole
 flow: usage in, invoice out.
 
-## Words on this page
-
-| Word | Meaning |
-|---|---|
-| Test mode | The side of Hardcount where nothing charges real money. The dashboard opens in it. |
-| Meter | A counter for one kind of usage, here AI tokens. |
-| Recipe | A ready-made pricing setup that Hardcount creates in one call. |
-| Usage event | One "this customer used this much" record that your app sends to Hardcount. |
-| Test clock | A pretend clock for test customers. Moving it forward makes a month pass in seconds. |
-| Provider cost | What your AI provider, such as Anthropic, charges you per token. |
-| Margin | What you billed a customer, minus what their usage cost you, as a percent of what you billed. |
-
 ## Before you start
 
 You need:
@@ -72,6 +60,18 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
    data. No real money moves." Its four cards show zero, because Hardcount has
    no data yet: MRR (monthly recurring revenue), Revenue, Customers and
    Failed payments.
+
+## Words on this page
+
+| Word | Meaning |
+|---|---|
+| Test mode | The side of Hardcount where nothing charges real money. The dashboard opens in it. |
+| Meter | A counter for one kind of usage, here AI tokens. |
+| Recipe | A ready-made pricing setup that Hardcount creates in one call. |
+| Usage event | One "this customer used this much" record that your app sends to Hardcount. |
+| Test clock | A pretend clock for test customers. Moving it forward makes a month pass in seconds. |
+| Provider cost | What your AI provider, such as Anthropic, charges you per token. |
+| Margin | What you billed a customer, minus what their usage cost you, as a percent of what you billed. |
 
 ## Part 2: Run the demo
 

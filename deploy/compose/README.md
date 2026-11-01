@@ -111,6 +111,15 @@ If the user does not exist at all, create it with the SQL in [Postgres requireme
 **The API exits with `migration … failed`, or names `goose_db_version`.**
 A database upgrade stopped. A failed migration leaves nothing to repair. Compose keeps starting the API again, and each start tries the upgrade again, so stop it first with `docker compose stop hardcount-api`. Fix the cause the error names, then start it with `docker compose up -d hardcount-api`. The cases are in [A database upgrade stopped](../../docs/ops/runbook/migration-failed-midway.md).
 
+**The API exits with `LOG_LEVEL=… is not a log level`.**
+Set `LOG_LEVEL` in `.env` to `debug`, `info`, `warn` or `error`, or delete the line for `info`. Then run `docker compose up -d` again.
+
+**The API exits with `SMTP_TLS=… is not a transport`.**
+Set `SMTP_TLS` in `.env` to `starttls` (port 587), `implicit` (port 465) or `none` (a local test inbox only), or delete the line for `starttls`. Then run `docker compose up -d` again. The values for each provider: [Set up email](../../docs/ops/email-setup.md#settings-for-each-provider).
+
+**`git checkout` of a release says `Your local changes to the following files would be overwritten by checkout`.**
+Git did not check out the release. You edited a file the release changes, often `docker-compose.yml`. Copy your edits into `docker-compose.override.yml` ([how](../../docs/settings.md#your-own-changes-the-override-file)). Then undo them with `git checkout -- <each file git named>`, run from the top of your checkout, and check out the release again.
+
 **`/health/ready` shows `scheduler: degraded`.**
 The API is up and still answers 200 here, but its background jobs have stopped running. Check the API logs, then see [A background job is stuck](../../docs/ops/runbook/background-job-stuck.md).
 

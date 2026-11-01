@@ -71,7 +71,7 @@ In every `APP_ENV`, Hardcount also refuses to start when the limited user can't 
 
 ### Settings Hardcount sets on each transaction
 
-Hardcount tells Postgres which account a transaction belongs to with two custom settings, `app.tenant_id` and `app.bypass_rls`. They need no setup on standard Postgres or on common managed Postgres. If your environment blocks custom settings, allow these two. Every account-scoped table uses `FORCE ROW LEVEL SECURITY`, so a hardened setup that requires it also works.
+Hardcount tells Postgres which account and mode (test or live) a transaction belongs to with three custom settings, `app.tenant_id`, `app.livemode` and `app.bypass_rls`. They need no setup on standard Postgres or on common managed Postgres. If your environment blocks custom settings, allow these three. Every account-scoped table uses `FORCE ROW LEVEL SECURITY`, so a hardened setup that requires it also works.
 
 ## Timeouts on the limited user
 
@@ -85,7 +85,7 @@ ALTER ROLE hardcount_app SET statement_timeout = '30s';
 **You see:** `ALTER ROLE` twice. They apply to new connections, so restart Hardcount afterwards.
 
 - **`idle_in_transaction_session_timeout` is required.** Closing a billing period locks the subscription's row until the invoice is saved. If a Hardcount process freezes in the middle (a paused VM, for example), that lock blocks every other change to the subscription. This timeout ends such a frozen session. The Compose stack sets it when it creates a new data volume. Hardcount itself neither sets it nor checks it at start-up.
-- **`statement_timeout` is optional.** Hardcount sets no time limit on most queries. `DB_QUERY_TIMEOUT_MS` (default 5 seconds) covers only a few. Set this if you want a hard limit on every query.
+- **`statement_timeout` is optional.** Hardcount sets no time limit on most queries. `DB_QUERY_TIMEOUT_MS` (default 5 seconds) covers only one account lookup. Set this if you want a hard limit on every query.
 
 To check, connect as `hardcount_app` and run `SHOW idle_in_transaction_session_timeout;`. On the Compose stack, from `deploy/compose`:
 

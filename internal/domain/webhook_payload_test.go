@@ -127,7 +127,7 @@ func goldenPaymentMethod() PaymentMethodView {
 
 func goldenDunningRun() InvoiceDunningRun {
 	return InvoiceDunningRun{
-		ID:               "hc_dr_golden",
+		ID:               "hc_drun_golden",
 		TenantID:         "hc_ten_golden",
 		InvoiceID:        "hc_inv_golden",
 		CustomerID:       "hc_cus_golden",

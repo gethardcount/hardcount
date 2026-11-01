@@ -61,12 +61,16 @@ curl -si -X POST "$HARDCOUNT/v1/customers" \
   -H "Authorization: Bearer $HARDCOUNT_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $IDEM_KEY" \
-  -d '{"external_id": "cust_123", "display_name": "Acme Inc"}'
+  -d '{"external_id": "cust_idem_1", "display_name": "Acme Inc"}'
 ```
 
 Send the same `curl` command again, with the same `$IDEM_KEY`. **You see:**
 the first answer again, with the header `Idempotent-Replayed: true`. No
 second customer is made.
+
+If a customer with that `external_id` already exists, the first call
+answers `409` `already_exists`. A `409` is not stored, so the second call
+runs again and gets `409` too. Use an `external_id` you have not used yet.
 
 - **Use a UUID,** or another unique string. Keep it to 255 characters or
   fewer: Hardcount does not check the length, but a very long key can fail
@@ -101,7 +105,7 @@ it on purpose: the first request may have charged a card or written data
 before it failed, and running it again could do that twice. After a `5xx`:
 
 1. Read the resource to see whether the change happened, for example with
-   `GET /v1/customers?external_id=cust_123`.
+   `GET /v1/customers?external_id=cust_idem_1`.
 2. If it did not happen, send the request again with a new key.
 
 **Some answers come before the key is checked and are never stored.** A

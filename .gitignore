@@ -7,6 +7,9 @@ tmp/
 .env.local
 # Written by deploy/compose/quickstart.sh; holds the install's API keys.
 deploy/compose/quickstart-credentials.json
+# An install's own Compose changes (docs/settings.md, "Compose only"). Kept
+# out of git so `git checkout <release>` never meets a local edit.
+deploy/compose/docker-compose.override.yml
 .DS_Store
 /hardcount
 /hardcount-bench-seed

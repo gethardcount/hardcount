@@ -40,7 +40,7 @@ Two causes are common:
 1. Is the client address right? Sign in, switch the dashboard to test mode
    and open the audit log. The newest `login` entry shows the address Hardcount
    saw. If it is your load balancer's or proxy's address, fix `TRUST_PROXY`
-   ([Settings](../../self-host.md#settings)).
+   ([Settings](../../settings.md#why-trust_proxy-matters)).
 2. Who is trying? Each wrong password logs `auth: failed login attempt` with
    `account` (the same 12 characters for every try on one email, from any
    address), `user_id` when the email has an account, and `ip`:

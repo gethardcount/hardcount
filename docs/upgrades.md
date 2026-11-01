@@ -53,6 +53,14 @@ release starts. This example moves to `v0.9.1`.
 
    **You see:** `HEAD is now at …` from git.
 
+   If git instead says `Your local changes to the following files would be
+   overwritten by checkout`, it did not check out the release. You edited a
+   file the release changes, often `docker-compose.yml`. Copy your edits into
+   `docker-compose.override.yml`
+   ([how](settings.md#your-own-changes-the-override-file)), undo them with
+   `git -C /opt/hardcount checkout -- <each file git named>`, and run this
+   step again.
+
 3. Pull the new images and see what the upgrade will change.
 
    ```bash

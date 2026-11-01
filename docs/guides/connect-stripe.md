@@ -67,32 +67,41 @@ Stripe's webhooks. Each connection has its own webhook address:
 step 1. **Settings → Payments** shows it under **Deliver Stripe events to
 Hardcount**.
 
-1. In Stripe, open **Developers → Webhooks** and add an endpoint with that
-   address. Pick these 12 events, the ones Hardcount lists under the
-   address:
+1. Send Stripe's events to that address.
 
-   - `payment_intent.succeeded`, `payment_intent.payment_failed`
-   - `checkout.session.completed`
-   - `setup_intent.succeeded`, `setup_intent.setup_failed`
-   - `charge.refund.updated`, `refund.created`, `refund.updated`,
-     `refund.failed`
-   - `charge.dispute.created`, `charge.dispute.updated`,
-     `charge.dispute.closed`
+   - **On a server Stripe can reach:** in Stripe, open
+     **Developers → Webhooks** and add an endpoint with that address. Pick
+     these 12 events, the ones Hardcount lists under the address:
 
-2. Stripe shows the endpoint's signing secret (`whsec_…`). Paste it into
-   Hardcount and click **Finish setup**. Or send it with
-   `PATCH /v1/settings/stripe/test/webhook` and `{"webhook_secret": "whsec_…"}`.
+     - `payment_intent.succeeded`, `payment_intent.payment_failed`
+     - `checkout.session.completed`
+     - `setup_intent.succeeded`, `setup_intent.setup_failed`
+     - `charge.refund.updated`, `refund.created`, `refund.updated`,
+       `refund.failed`
+     - `charge.dispute.created`, `charge.dispute.updated`,
+       `charge.dispute.closed`
+
+     **You see:** the endpoint's signing secret (`whsec_…`) in Stripe.
+
+   - **On your own computer:** Stripe cannot reach it, so skip the endpoint
+     in the Stripe Dashboard. With the
+     [Stripe CLI](https://docs.stripe.com/stripe-cli) signed in to your
+     Stripe account, run this and leave it running. It passes Stripe's
+     events on to Hardcount. **Settings → Payments** shows the command with
+     your own address.
+
+     ```bash
+     stripe listen --forward-to http://localhost:8080/v1/webhooks/stripe/hc_spc_…
+     ```
+
+     **You see:** the CLI prints a signing secret (`whsec_…`).
+
+2. Paste the signing secret into Hardcount and click **Finish setup**. Or
+   send it with `PATCH /v1/settings/stripe/test/webhook` and
+   `{"webhook_secret": "whsec_…"}`.
 
    **You see:** the card reads **Stripe test mode connected**, with a
    **Ready** badge.
-
-On your own computer, use the Stripe CLI instead of step 1:
-
-```bash
-stripe listen --forward-to http://localhost:8080/v1/webhooks/stripe/hc_spc_…
-```
-
-**You see:** the CLI prints a webhook secret (`whsec_…`). Use it in step 2.
 
 Until the secret is saved, Hardcount answers Stripe's webhooks with `404`.
 A customer then sees "card saved" on Stripe's page, but Hardcount does not

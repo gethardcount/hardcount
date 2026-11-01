@@ -17,6 +17,11 @@
 #   curl http://localhost/health
 #
 # Tear down (and wipe data): docker compose down -v
+#
+# Keep your own changes out of this file: put them in
+# docker-compose.override.yml next to it, which Compose merges in and git
+# ignores. An edit here makes `git checkout <release>` refuse to upgrade
+# (docs/settings.md, "Compose only").
 
 services:
   postgres:
@@ -90,7 +95,7 @@ services:
       MIGRATION_LOCK_TIMEOUT: ${MIGRATION_LOCK_TIMEOUT:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # How long after a billing period ends its invoice is built (0 to 72h).
-      # Delays every period-end invoice; see docs/self-host.md.
+      # Delays every period-end invoice; see docs/settings.md.
       INVOICE_GRACE_PERIOD: ${INVOICE_GRACE_PERIOD:-1h}
       # Database — admin/migration role
       DATABASE_URL: postgres://${POSTGRES_USER:-hardcount}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hardcount}?sslmode=disable
@@ -118,6 +123,15 @@ services:
       # Compose networks come from Docker's private pools; narrow this if
       # you pin a custom subnet.
       TRUST_PROXY: ${TRUST_PROXY:-172.16.0.0/12,192.168.0.0/16}
+      # Optional — request limits (empty = the defaults: 1000 a minute,
+      # 100 a minute, 1000 a second; see docs/api/rate-limits.md).
+      HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN: ${HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN:-}
+      HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN: ${HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN:-}
+      HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC: ${HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC:-}
+      # Optional — how long a stopping API keeps serving after /health/ready
+      # turns 503 (empty = 5s, or 0 with APP_ENV=local). Keep
+      # stop_grace_period above it plus 90s.
+      SHUTDOWN_DRAIN_DELAY: ${SHUTDOWN_DRAIN_DELAY:-}
       # Optional — outbound email (SMTP). Hardcount enqueues to email_outbox
       # regardless; sends DLQ when SMTP_HOST is unset.
       SMTP_HOST: ${SMTP_HOST:-}

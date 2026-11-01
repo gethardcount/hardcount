@@ -1,7 +1,10 @@
 # Card payment failure handling
 
-Hardcount charges cards with Stripe PaymentIntents. How it handles the usual
-payment failures, and the gaps still open.
+This is the operator's reference for each card payment failure case: what
+Hardcount does, and the gaps still open. How payments and retries work is
+in [Payments](concepts/payments.md).
+
+Hardcount charges cards with Stripe PaymentIntents.
 
 ## Rules
 

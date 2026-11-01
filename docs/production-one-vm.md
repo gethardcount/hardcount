@@ -87,7 +87,7 @@ A release is a tested version with a number, such as `v0.9.1`. Production runs a
 
    **You see:** perhaps a few `curl: (22) The requested URL returned error: 502` lines, then `{"checks":{"api":"ok","database":"ok","scheduler":"..."},"status":"ok"}`. If the command ends with no `"status":"ok"`, see the fixes linked below.
 
-If a step fails, [If something goes wrong](../deploy/compose/README.md#if-something-goes-wrong) lists each start-up error and its fix.
+If a step fails, [If something goes wrong](../deploy/compose/README.md#if-something-goes-wrong) lists the common start-up errors and their fixes.
 
 ## 2. Create your account and first login
 
