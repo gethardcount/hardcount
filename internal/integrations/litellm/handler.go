@@ -1,6 +1,7 @@
 package litellm
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -123,9 +124,12 @@ type SpendResponse struct {
 
 // SpendRowError carries the per-payload reason a particular row was
 // rejected. The adapter is intentionally permissive — one bad row
-// doesn't fail the whole batch. LiteLLM retries the whole batch on
-// 5xx, so a per-row errors[] entry inside a 200 avoids retry storms
-// when a single misconfigured call lacks `user`.
+// doesn't fail the whole batch. A per-row errors[] entry inside a 200
+// keeps the rest of the batch: LiteLLM reads any 2xx as delivered.
+// LiteLLM 1.83.9 never sends a batch again once Hardcount has answered;
+// 1.84.0 and later send it again, when max_retries is set, only after a
+// timeout, a connection error or a 5xx — never after a 4xx. A row-level verdict answered as a 4xx or
+// 5xx would therefore lose the whole batch or resend it to no end.
 type SpendRowError struct {
 	ID    string `json:"id"`
 	Error string `json:"error"`
@@ -169,7 +173,19 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 
 	body, err := decodeBody(r)
 	if err != nil {
-		respond.BadRequest(w, r, err.Error())
+		var tooBig *http.MaxBytesError
+		switch {
+		case errors.As(err, &tooBig):
+			// The cap fires mid-array on valid JSON, so this is "split
+			// the batch", not "malformed JSON" (the /v1/usage-events/batch
+			// answer for the same case). Nothing was saved.
+			respond.Error(w, r, http.StatusRequestEntityTooLarge, "invalid_request_error", "batch_too_large",
+				fmt.Sprintf("the request body is over the %d MB limit, so the batch was not saved — send fewer records per batch (LiteLLM: lower DEFAULT_BATCH_SIZE)", tooBig.Limit>>20))
+		case errors.Is(err, errEmptyBody):
+			respond.BadRequest(w, r, "empty body")
+		default:
+			respond.BadRequest(w, r, "invalid JSON body")
+		}
 		return
 	}
 
@@ -353,42 +369,127 @@ func callEvents(in []ExternalIngest) []usage.CallEvent {
 // client retries it; never returned to the caller as text.
 var errIngestUnavailable = errors.New("litellm: usage store unavailable")
 
+// MaxBodyBytes is the request-body cap for POST /v1/integrations/litellm/spend:
+// 32 MiB, where every other route gets 1 MB (api/router.go limitRequestBody).
+//
+// Why this route needs its own: LiteLLM's generic_api logger sends a JSON
+// array of up to DEFAULT_BATCH_SIZE records (512 in 1.83.9 and 1.84.0), or
+// what it queued in DEFAULT_FLUSH_INTERVAL_SECONDS (5). A 1.83.9 record is 7
+// to 9 KB even for a one-word prompt, and it carries the call's messages and
+// reply, so it grows with them. A full default batch is about 4 MB. LiteLLM
+// never resends a batch Hardcount answers with a 4xx, so the 1 MB cap lost
+// every whole batch from a proxy busier than about 25 to 30 calls a second.
+//
+// Why 32 MiB: it holds a full default batch whose records average 64 KB —
+// seven times the short-prompt record, room for long prompts — and it reads in
+// about 3 s at 100 Mbit/s, inside the server's 30 s ReadTimeout. Memory does
+// not grow with the cap: decodeBody streams the array one record at a time,
+// and a record keeps only the fields the adapter reads, so its messages and
+// response — the part that grows with the prompt — are never held. What a
+// request holds grows with its record count (about 5 KB a record, mostly
+// metadata), not with its bytes. Measured on a 4.3 MB batch of 512 records:
+// 2.7 MB held once decoded and 4.2 MB allocated, where reading the body
+// whole first allocated 14.2 MB.
+const MaxBodyBytes = 32 << 20
+
+// errEmptyBody is decodeBody's answer to a request with no body.
+var errEmptyBody = errors.New("empty body")
+
 // decodeBody normalizes the request body into a slice of payloads.
 // Accepts:
-//   - LiteLLM's default callback shape: single payload as the top-level object
+//   - Bare array: [payload, payload, ...] — what LiteLLM's generic_api
+//     logger sends (log_format json_array, its default)
+//   - LiteLLM's single-record shape: one payload as the top-level object
 //   - Batched shape: { "events": [...] } (used by some operator-side buffers)
-//   - Bare array: [payload, payload, ...] (defensive — some HTTP clients send this)
+//
+// The bare array is decoded one record at a time from the body stream, so
+// the request's bytes are never held whole (see MaxBodyBytes). An object is
+// one JSON value and is decoded as one. Any error leaves nothing decoded:
+// the handler saves no row from a body it could not read to the end, and a
+// body over the router's cap fails here with its *http.MaxBytesError.
 func decodeBody(r *http.Request) ([]StandardLoggingPayload, error) {
 	defer func() { _ = r.Body.Close() }()
 
-	raw, err := io.ReadAll(r.Body)
+	br := bufio.NewReader(r.Body)
+	first, err := firstNonSpace(br)
+	if errors.Is(err, io.EOF) {
+		return nil, errEmptyBody
+	}
 	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
+		return nil, err
 	}
-	if len(raw) == 0 {
-		return nil, fmt.Errorf("empty body")
-	}
-
-	// Bare array first — try [..] before the object shape.
-	if raw[0] == '[' {
-		var batch []StandardLoggingPayload
-		if err := json.Unmarshal(raw, &batch); err == nil {
-			return batch, nil
-		}
+	dec := json.NewDecoder(br)
+	if first == '[' {
+		return decodeArray(dec)
 	}
 
-	// { events: [...] } shape.
-	var withEvents struct {
+	// One object: a single payload, or { "events": [...] }. The two shapes
+	// share one decode; an "events" array that is present and not empty wins.
+	var obj struct {
+		StandardLoggingPayload
 		Events []StandardLoggingPayload `json:"events"`
 	}
-	if err := json.Unmarshal(raw, &withEvents); err == nil && len(withEvents.Events) > 0 {
-		return withEvents.Events, nil
+	if err := dec.Decode(&obj); err != nil {
+		return nil, err
 	}
+	if err := expectEnd(dec); err != nil {
+		return nil, err
+	}
+	if len(obj.Events) > 0 {
+		return obj.Events, nil
+	}
+	return []StandardLoggingPayload{obj.StandardLoggingPayload}, nil
+}
 
-	// Single payload.
-	var one StandardLoggingPayload
-	if err := json.Unmarshal(raw, &one); err != nil {
-		return nil, fmt.Errorf("invalid JSON body")
+// decodeArray reads a JSON array of payloads one element at a time. The
+// decoder's buffer holds about one record, not the whole array.
+func decodeArray(dec *json.Decoder) ([]StandardLoggingPayload, error) {
+	if _, err := dec.Token(); err != nil { // the opening [
+		return nil, err
 	}
-	return []StandardLoggingPayload{one}, nil
+	batch := []StandardLoggingPayload{}
+	for dec.More() {
+		var p StandardLoggingPayload
+		if err := dec.Decode(&p); err != nil {
+			return nil, err
+		}
+		batch = append(batch, p)
+	}
+	if _, err := dec.Token(); err != nil { // the closing ]
+		return nil, err
+	}
+	if err := expectEnd(dec); err != nil {
+		return nil, err
+	}
+	return batch, nil
+}
+
+// expectEnd refuses anything after the body's one JSON value, as
+// json.Unmarshal does.
+func expectEnd(dec *json.Decoder) error {
+	_, err := dec.Token()
+	switch {
+	case errors.Is(err, io.EOF):
+		return nil
+	case err == nil:
+		return errors.New("trailing data after the JSON value")
+	default:
+		return err
+	}
+}
+
+// firstNonSpace returns the body's first byte that is not JSON whitespace and
+// leaves it unread.
+func firstNonSpace(br *bufio.Reader) (byte, error) {
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+		switch b {
+		case ' ', '\t', '\n', '\r':
+			continue
+		}
+		return b, br.UnreadByte()
+	}
 }

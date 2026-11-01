@@ -1541,13 +1541,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	r.Use(requestLogger)
 	r.Use(mw.Recoverer)
 
-	// Limit request body to 1 MB to prevent DoS via oversized payloads.
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
-			next.ServeHTTP(w, r)
-		})
-	})
+	// Cap every request body (limitRequestBody): 1 MB, or the LiteLLM
+	// adapter's own larger cap.
+	r.Use(limitRequestBody)
 
 	r.Use(mw.SecurityHeaders(o.appEnv))
 
@@ -2091,6 +2087,29 @@ func loggablePath(r *http.Request) string {
 	return path
 }
 
+// maxRequestBodyBytes caps a request body on every route but the LiteLLM
+// adapter, against oversized payloads (DoS).
+const maxRequestBodyBytes = 1 << 20 // 1 MB
+
+// limitRequestBody caps the request body: 1 MB, except on the LiteLLM
+// adapter, whose batches of full call records run to several MB
+// (litellm.MaxBodyBytes says why and how much). It is the one place every
+// route's cap is set, so no route goes uncapped. The adapter is matched on
+// the path prefix it is mounted at, as isIngestPath matches it.
+func limitRequestBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		limit := int64(maxRequestBodyBytes)
+		if strings.HasPrefix(r.URL.Path, litellmPathPrefix) {
+			limit = litellm.MaxBodyBytes
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// litellmPathPrefix is where the LiteLLM adapter is mounted.
+const litellmPathPrefix = "/v1/integrations/litellm"
+
 // isIngestPath names the usage routes: the usage-events subtree (single,
 // batch, backfill, held release and discard; reads ride along harmlessly)
 // and the LiteLLM adapter. They ride the dedicated ingest rate-limit bucket
@@ -2099,7 +2118,7 @@ func loggablePath(r *http.Request) string {
 // event's idempotency_key, or the held row moving once, is their dedup.
 func isIngestPath(r *http.Request) bool {
 	return strings.HasPrefix(r.URL.Path, "/v1/usage-events") ||
-		strings.HasPrefix(r.URL.Path, "/v1/integrations/litellm")
+		strings.HasPrefix(r.URL.Path, litellmPathPrefix)
 }
 
 // routeMethods are the methods the Allow header can list, in its order.
