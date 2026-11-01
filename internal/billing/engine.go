@@ -1432,6 +1432,7 @@ func emitBaseSegmentLine(seg baseSegment, plan domain.Plan, periodStart time.Tim
 		AmountCents:        baseFee,
 		TotalAmountCents:   baseFee,
 		Currency:           currency,
+		TaxCode:            plan.TaxCode,
 		BillingPeriodStart: &segStart,
 		BillingPeriodEnd:   &segEnd,
 	})
