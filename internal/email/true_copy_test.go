@@ -9,6 +9,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 var (
@@ -67,8 +68,8 @@ func TestNoCardWarning_SaysNothingWasCharged(t *testing.T) {
 // charged nothing. It says the invoice is unpaid, in both parts, and points
 // at us, never "support" or "reach out" (F-13).
 func TestEscalation_SaysUnpaidNotThatAttemptsFailed(t *testing.T) {
-	_, rawHTML, _, _ := renderDunningEscalationHTML("Ada", "INV-0042", noOutcome, "https://pay.example.com/i/tok")
-	text := dunningEscalationTextBody("Ada", "INV-0042", noOutcome, "https://pay.example.com/i/tok")
+	_, rawHTML, _, _ := renderDunningEscalationHTML("Ada", "INV-0042", noOutcome, "https://pay.example.com/i/tok", true)
+	text := dunningEscalationTextBody("Ada", "INV-0042", noOutcome, "https://pay.example.com/i/tok", true)
 	for part, body := range map[string]string{"html": stdhtml.UnescapeString(rawHTML), "text": text} {
 		if !strings.Contains(body, "Invoice INV-0042 is still unpaid.") {
 			t.Errorf("%s part does not say the invoice is unpaid:\n%s", part, body)
@@ -80,7 +81,7 @@ func TestEscalation_SaysUnpaidNotThatAttemptsFailed(t *testing.T) {
 			}
 		}
 	}
-	_, rawOff, _, label := renderDunningEscalationHTML("Ada", "INV-0042", writtenOffOutcome, "https://pay.example.com/i/tok")
+	_, rawOff, _, label := renderDunningEscalationHTML("Ada", "INV-0042", writtenOffOutcome, "https://pay.example.com/i/tok", false)
 	if !strings.Contains(stdhtml.UnescapeString(rawOff), closedForOnlinePayment) || label != "View invoice" {
 		t.Errorf("written-off escalation: CTA %q, want View invoice and %q:\n%s", label, closedForOnlinePayment, rawOff)
 	}
@@ -92,9 +93,9 @@ func TestEscalation_SaysUnpaidNotThatAttemptsFailed(t *testing.T) {
 // payment and offers "View invoice", in both parts.
 func TestInvoiceEmail_WrittenOffOffersViewNotPay(t *testing.T) {
 	const hosted = "https://pay.example.com/i/tok"
-	subject, rawHTML, ctaURL, ctaLabel := renderInvoiceHTML("Ada", "INV-0042", "$60.00", hosted, false, true)
+	subject, rawHTML, ctaURL, ctaLabel := renderInvoiceHTML("Ada", "INV-0042", "$60.00", hosted, false, true, false)
 	html := stdhtml.UnescapeString(rawHTML)
-	text := invoiceTextBody("Ada", "INV-0042", "$60.00", "usd", hosted, false, true)
+	text := invoiceTextBody("Ada", "INV-0042", "$60.00", "usd", hosted, false, true, false)
 
 	if ctaURL != hosted || ctaLabel != "View invoice" {
 		t.Errorf("CTA %q %q, want View invoice on the hosted page", ctaLabel, ctaURL)
@@ -114,7 +115,7 @@ func TestInvoiceEmail_WrittenOffOffersViewNotPay(t *testing.T) {
 		}
 	}
 	// Control: an open invoice is still payable from the email.
-	if _, _, _, label := renderInvoiceHTML("Ada", "INV-0042", "$60.00", hosted, false, false); label != "View & pay invoice" {
+	if _, _, _, label := renderInvoiceHTML("Ada", "INV-0042", "$60.00", hosted, false, false, true); label != "View & pay invoice" {
 		t.Errorf("CONTROL: open invoice CTA %q, want View & pay invoice", label)
 	}
 }
@@ -125,6 +126,9 @@ func TestSendInvoice_WrittenOffHTMLPartOffersViewNotPay(t *testing.T) {
 	srv := newScriptedSMTP(t)
 	s := newCCTestSender(t, srv)
 	s.hostedInvoiceBaseURL = "https://pay.example.com"
+	// Stripe is connected: the open invoice's control arm offers to pay.
+	s.SetStripeReadiness(&stripeCheck{connected: true})
+	ctx := postgres.WithLivemode(context.Background(), false)
 	for _, tc := range []struct {
 		writtenOff bool
 		want, not  string
@@ -132,7 +136,7 @@ func TestSendInvoice_WrittenOffHTMLPartOffersViewNotPay(t *testing.T) {
 		{true, "View invoice", "View &amp; pay invoice"},
 		{false, "View &amp; pay invoice", closedForOnlinePayment},
 	} {
-		if err := s.SendInvoice(context.Background(), "t1", "ap@acme.test", nil, "Ada", "INV-0042", 6000, "usd", []byte("%PDF"), "tok_abc", tc.writtenOff); err != nil {
+		if err := s.SendInvoice(ctx, "t1", "ap@acme.test", nil, "Ada", "INV-0042", 6000, "usd", []byte("%PDF"), "tok_abc", tc.writtenOff); err != nil {
 			t.Fatalf("send: %v", err)
 		}
 		msg, err := mail.ReadMessage(strings.NewReader(srv.lastData()))

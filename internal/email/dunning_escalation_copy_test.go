@@ -17,7 +17,7 @@ func TestDunningEscalationCopy_PauseSaysNewInvoicesOnly(t *testing.T) {
 		{SubscriptionPaused: true},
 		{SubscriptionPaused: true, InvoiceWrittenOff: true},
 	} {
-		sentence, _ := dunningEscalationCopy(o)
+		sentence, _ := dunningEscalationCopy(o, true)
 		if strings.Contains(sentence, "collection on your account has been paused") {
 			t.Errorf("outcome %+v claims all collection stopped:\n%s", o, sentence)
 		}
