@@ -14,27 +14,55 @@ import type { ActivityLine } from './activityLine';
 import type { InvoiceTimelineEventSource } from './invoiceTimelineEventSource';
 import type { InvoiceTimelineEventStatus } from './invoiceTimelineEventStatus';
 
+/**
+ * One row of an invoice's activity timeline
+ * (`GET /v1/invoices/{id}/payment-timeline`). `line` is the row in the
+ * activity line's words; `description`, `detail`, `error`, `status`,
+ * `amount_cents` and `currency` repeat it for clients that read the
+ * older fields.
+ */
 export interface InvoiceTimelineEvent {
   /** Stable key for the row. */
   id: string;
+  /**
+     * When the event happened, to the second: on the invoice's
+     * calendar (the test clock's time for an invoice on a test clock),
+     * and at Stripe's own time for disputes and refunds made in Stripe.
+     */
   timestamp: string;
+  /**
+     * Where the row comes from: `lifecycle` (created, finalized, paid,
+     * voided, written off), `payment` (a charge attempt), `dunning` (a
+     * payment retry run), `email` (an email to the customer),
+     * `credit_note`, `dispute` or `stripe_refund` (a refund made in
+     * Stripe outside Hardcount).
+     */
   source: InvoiceTimelineEventSource;
+  /**
+     * Machine name of the event, for example `invoice.finalized`,
+     * `charge_attempt.failed`, `retry_attempted`, `credit_note.issued`
+     * or `payment.dispute_opened`.
+     */
   event_type: string;
   /** The line's tone in older words, read by the dashboard's dot. */
   status: InvoiceTimelineEventStatus;
   /** The line's title. */
   description: string;
-  /** The line's meta line as text, its actor last, for example "Visa •••• 4242 · After 2 retries". */
+  /** The line's meta line as text, its actor last, for example "Visa •••• 4242 · After 2 retries". Absent when empty. */
   detail?: string;
-  /** The line's problem. */
+  /** The line's problem. Absent when there is none. */
   error?: string;
+  /** The line's amount, in the currency's minor unit (cents for USD). Absent when the row has no amount. */
   amount_cents?: number;
+  /** The currency of `amount_cents`. Absent when the row has no amount. */
   currency?: string;
+  /** The Stripe PaymentIntent the row is about, on payment, dunning, dispute and refund rows that name one. Absent otherwise. */
   payment_intent_id?: string;
+  /** On dunning rows, the run's retry count at the event; on the paid row, the retries that ran before payment. Absent when 0. */
   attempt_count?: number;
-  /** True when `timestamp` is test-clock time. */
+  /** True when `timestamp` is test-clock time. Absent when false. */
   is_simulated?: boolean;
-  /** Real-world time of a row whose `timestamp` is test-clock time. */
+  /** Real-world time of a row whose `timestamp` is test-clock time. Absent otherwise. */
   recorded_at?: string;
   line: ActivityLine;
 }

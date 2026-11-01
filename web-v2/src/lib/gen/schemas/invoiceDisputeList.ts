@@ -13,7 +13,11 @@
 import type { InvoiceDispute } from './invoiceDispute';
 import type { ListTotal } from './listTotal';
 
+/**
+ * What `GET /v1/invoices/{id}/disputes` returns, one page of the invoice's disputes, oldest first.
+ */
 export interface InvoiceDisputeList {
+  /** The disputes on this page. An empty list when the invoice has none. */
   data: InvoiceDispute[];
   total: ListTotal;
 }

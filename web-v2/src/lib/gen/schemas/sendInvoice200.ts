@@ -13,5 +13,6 @@
 import type { SendInvoice200Status } from './sendInvoice200Status';
 
 export type SendInvoice200 = {
+  /** Always `sent`, meaning the email is queued. */
   status: SendInvoice200Status;
 };

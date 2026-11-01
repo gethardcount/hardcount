@@ -13,5 +13,6 @@
 import type { DeleteDunningPolicy200Status } from './deleteDunningPolicy200Status';
 
 export type DeleteDunningPolicy200 = {
+  /** Always `deleted`. */
   status: DeleteDunningPolicy200Status;
 };

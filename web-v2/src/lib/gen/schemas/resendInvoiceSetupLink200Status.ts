@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Always `sent`, meaning the email is queued.
+ */
 export type ResendInvoiceSetupLink200Status = typeof ResendInvoiceSetupLink200Status[keyof typeof ResendInvoiceSetupLink200Status];
 
 

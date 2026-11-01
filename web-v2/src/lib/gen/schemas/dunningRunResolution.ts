@@ -18,7 +18,7 @@
  * will be retried at `next_action_at`. `amount_below_minimum`: a
  * charge on the invoice was refused by Stripe because the amount is
  * below its minimum charge, so the run ended without its final
- * action.
+ * action. Absent while the run is active.
  */
 export type DunningRunResolution = typeof DunningRunResolution[keyof typeof DunningRunResolution];
 

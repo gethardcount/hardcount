@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The kind of actor.
+ */
 export type ActivityActorKind = typeof ActivityActorKind[keyof typeof ActivityActorKind];
 
 

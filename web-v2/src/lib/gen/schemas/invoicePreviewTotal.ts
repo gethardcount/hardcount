@@ -11,7 +11,12 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The total of an invoice preview's lines in one currency.
+ */
 export interface InvoicePreviewTotal {
+  /** The currency, uppercase. */
   currency: string;
+  /** The sum of the lines in this currency, in its minor unit (cents for USD), before tax. */
   amount_cents: number;
 }

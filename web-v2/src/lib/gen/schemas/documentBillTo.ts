@@ -12,24 +12,36 @@
  */
 
 /**
- * What an issued invoice or credit note prints about its buyer, copied
- * when the document was issued (ADR-109). The printed name is
- * `legal_name` when set, otherwise `display_name`.
+ * What an issued invoice or credit note prints about its buyer. It is
+ * copied from the customer and the billing profile when the document
+ * is issued, so a later edit to either does not change it. The printed
+ * name is `legal_name` when set, otherwise `display_name`.
  */
 export interface DocumentBillTo {
+  /** The customer's display name when the document was issued. */
   display_name: string;
+  /** The billing profile's legal name. Absent when none was set. */
   legal_name?: string;
+  /** The customer's email address. Absent when none was set. */
   email?: string;
+  /** First address line of the billing profile. Absent when none was set. */
   address_line1?: string;
+  /** Second address line of the billing profile. Absent when none was set. */
   address_line2?: string;
+  /** City of the billing profile. Absent when none was set. */
   city?: string;
+  /** State or region of the billing profile. Absent when none was set. */
   state?: string;
+  /** Postal code of the billing profile. Absent when none was set. */
   postal_code?: string;
+  /** Country of the billing profile, as a two-letter ISO 3166 code. Absent when none was set. */
   country?: string;
   /**
      * On an invoice, the tax ID its tax was calculated with when set,
-     * otherwise the billing profile's tax ID at issue.
+     * otherwise the billing profile's tax ID at issue. Absent when
+     * there is none.
      */
   tax_id?: string;
+  /** The kind of tax ID, as the billing profile stores it. Absent when none was set. */
   tax_id_type?: string;
 }

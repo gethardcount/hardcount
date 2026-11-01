@@ -12,17 +12,31 @@
  */
 import type { InvoiceLineItemInput } from './invoiceLineItemInput';
 
+/**
+ * The body of `POST /v1/invoices`, which creates a one-off draft invoice.
+ */
 export interface InvoiceCreateRequest {
+  /** The customer to bill. Must exist in this account and mode. */
   customer_id: string;
   /** Optional. Must belong to `customer_id`. Leave out for a one-off invoice. The subscription's own cycle invoices are still billed, also for the same period. */
   subscription_id?: string;
-  /** ISO 4217 code. Must be the customer's currency (see 409). Defaults to the billing-profile currency, then the live subscriptions' plan currency, then the tenant default. */
+  /**
+     * Uppercase or lowercase ISO 4217 code; it is stored uppercase. It
+     * must be the customer's currency (see the 409). Defaults to the
+     * billing profile's currency, then the plan currency of the
+     * customer's live subscriptions, then the account's default
+     * currency. Currencies with no minor unit (such as JPY) are
+     * refused.
+     */
   currency?: string;
+  /** Start of the period the invoice covers. Defaults to now. */
   billing_period_start?: string;
+  /** End of the period the invoice covers. Defaults to now. */
   billing_period_end?: string;
-  /** Days until the invoice is due. 0 means due on receipt. Defaults to the tenant's net payment terms. */
+  /** Days until the invoice is due. 0 means due on receipt. Defaults to the account's net payment terms. A negative value is stored as 0. */
   net_payment_term_days?: number;
+  /** A note printed on the invoice. Leading and trailing spaces are removed. */
   memo?: string;
-  /** Lines created in the same transaction as the invoice. */
+  /** Lines created in the same transaction as the invoice. Leave out to create an invoice with no lines and add them later. */
   line_items?: InvoiceLineItemInput[];
 }

@@ -12,11 +12,14 @@
  */
 import type { AttentionAction } from './attentionAction';
 
+/**
+ * One recommended next step on an `Attention` notice.
+ */
 export interface AttentionActionItem {
   code: AttentionAction;
   /**
-     * Default rendering label. UIs are free to substitute
-     * localized copy.
+     * A default button label. You can show your own, translated text
+     * instead. Absent when there is none.
      */
   label?: string;
 }

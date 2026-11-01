@@ -18,6 +18,7 @@ export type RefundInvoiceBody = {
      * @minimum 0
      */
   amount_cents?: number;
+  /** Why you are refunding, stored as the credit note's `reason`. */
   reason: RefundInvoiceBodyReason;
   /** Text for the credit note line. Defaults to "Refund: <reason>". */
   description?: string;

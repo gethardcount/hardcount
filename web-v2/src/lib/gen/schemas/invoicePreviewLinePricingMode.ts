@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * On a usage line, the shape of its price. Absent on base fee lines.
+ */
 export type InvoicePreviewLinePricingMode = typeof InvoicePreviewLinePricingMode[keyof typeof InvoicePreviewLinePricingMode];
 
 

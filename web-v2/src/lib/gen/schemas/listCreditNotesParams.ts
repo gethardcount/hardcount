@@ -17,11 +17,21 @@ import type { ListCreditNotesStatus } from './listCreditNotesStatus';
 import type { OffsetParameter } from './offsetParameter';
 
 export type ListCreditNotesParams = {
+/**
+ * Only notes against this invoice.
+ */
 invoice_id?: string;
+/**
+ * Only this customer's notes.
+ */
 customer_id?: string;
+/**
+ * Only notes in this status.
+ */
 status?: ListCreditNotesStatus;
 /**
- * `needs_attention` returns issued, non-test-clock notes whose
+ * Only notes whose refund is in this state. `needs_attention`
+ * returns issued, non-test-clock notes whose
  * refund failed or has an unknown result, has been pending more
  * than 72 hours, or has a refund amount still at `none` after 1
  * hour.
@@ -31,6 +41,9 @@ refund_status?: ListCreditNotesRefundStatus;
  * One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default).
  */
 sort?: string;
+/**
+ * Sort direction, `desc` (the default) or `asc`.
+ */
 dir?: ListCreditNotesDir;
 /**
  * Rows per page, from 1 to 100. Default 50. Any other value, or one

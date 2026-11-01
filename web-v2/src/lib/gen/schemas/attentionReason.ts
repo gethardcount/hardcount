@@ -12,61 +12,83 @@
  */
 
 /**
- * Closed, typed code naming why an invoice needs operator
- * attention. Stable public-API contract — codes are never
- * repurposed; deprecations keep the code reserved and add a
- * successor. See `Attention.code` for the open, provider-specific
- * sub-code. `payment_anomaly` (ADR-068) reports money that does
- * not reconcile — double charge, captured-vs-booked amount
- * mismatch, or a payment on a voided invoice — and is surfaced
- * even on paid/voided invoices. `dunning_exhausted` reports a
- * no-payment-method invoice whose automatic recovery has ended
- * without collecting (2026-07-22). `collection_paused` reports an
- * invoice that is queued for auto-charge but whose subscription
- * has `pause_collection` set, so the charge sweeps deliberately
- * skip it (2026-07-28). A dunning run already open on the invoice
- * keeps retrying it through the pause, and `message` then says so;
- * with no open run it is not charged automatically until
- * collection resumes. `commit_exposure` reports an
- * unpaid invoice that funded a prepaid commit whose credit is
- * already spendable (ADR-078 funds commits at issue, not at
- * payment) — note this reason is only returned when no other
- * reason applies; when one does, the exposure is folded into that
- * reason's `message` and its `actions` instead, so clients must
- * not treat the reason code as the presence test for exposure
- * (2026-08-04). `dispute_lost` reports a payment on the invoice that
- * the customer disputed with their bank and that the dispute took
- * back (the dispute closed as `lost`). Hardcount leaves the invoice paid
- * and moves no money; the operator records the loss. Surfaced on paid
- * invoices. On an invoice that bought prepaid credit, the message
- * also says how much of the credit is still spendable and names
- * commit relief, because an ordinary credit note is refused there.
- * When the invoice also has `payment_anomaly`, that reason stays and
- * its message asks the operator to check Stripe before any refund.
- * The disputes themselves are at `GET /v1/invoices/{id}/disputes`
- * (2026-10-19). `refunded_in_stripe` reports a refund of the invoice's
- * payment made in Stripe outside Hardcount that Hardcount did not record
- * as a credit note: the invoice was not paid yet, the currency
- * differs, the invoice bought prepaid credit, Hardcount first saw the
- * refund more than a day after it was made, or the refund is more than
- * the invoice had left to refund or credit. `code` is
- * `payment.refunded_in_stripe.` and that review reason. The operator
- * records it with a credit note that names the refund
- * (`stripe_refund_id` on `POST /v1/credit-notes`) or dismisses it
- * (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
- * Surfaced on paid invoices (2026-10-30). `amount_below_minimum` reports an invoice Stripe
- * refused to charge, or refused a payment page for, because the amount
- * is below Stripe's minimum charge. The minimum depends on the
- * currency the Stripe account settles in; Stripe's reply, in
- * `provider_response`, names it. Nothing was charged, the invoice
- * stays `finalized` with `payment_status` `pending`, it is not
- * charged again automatically, dunning does not start (a run already
- * open ends), and the customer is not emailed. The operator voids it
- * or records a payment; Collect payment applies the customer's credit
- * balance and pays it if that covers the amount, and otherwise asks
- * Stripe again. Stripe's answer can change (for a converted charge the
- * minimum is the settlement currency's), and a different answer ends
- * this reason (2026-10-23).
+ * Why an invoice needs your attention, as a closed code. A code is never
+ * reused for another meaning; a retired code stays reserved.
+ * `Attention.code` carries the open, provider-specific sub-code.
+ * - `tax_calculation_failed`: the tax provider could not calculate
+ *   tax. The cause is in `code`.
+ * - `tax_location_required`: the customer's billing address or tax ID
+ *   is missing or not valid for the tax provider. Edit the billing
+ *   profile.
+ * - `payment_failed`: the card was declined. The decline code is in
+ *   `code`.
+ * - `payment_unconfirmed`: a charge got an unclear answer from Stripe.
+ *   Hardcount asks Stripe what happened.
+ * - `payment_anomaly`: money does not reconcile: a double charge, a
+ *   captured amount that differs from the amount booked, or a payment
+ *   on a voided invoice. Shown even on paid and voided invoices.
+ * - `payment_processing`: Stripe is still processing a charge. It
+ *   settles on its own.
+ * - `payment_scheduled`: the invoice is queued, and the automatic
+ *   charge collects it on its next run.
+ * - `awaiting_payment`: the invoice is unpaid and not queued for an
+ *   automatic charge. Only invoices written by older releases reach
+ *   this state.
+ * - `no_payment_method`: the customer has no card on file. The invoice
+ *   stays queued, and the automatic charge collects it on its first
+ *   run after a card is added.
+ * - `dunning_exhausted`: the customer still has no card and automatic
+ *   recovery has ended without collecting; the policy's final action
+ *   ran. If that action paused collection on the subscription, resume
+ *   it too: the automatic charge skips a paused subscription even
+ *   after a card is added.
+ * - `collection_paused`: the invoice is queued for an automatic charge,
+ *   but its subscription has `pause_collection` set, so the automatic
+ *   charge skips it. A dunning run already open on the invoice keeps
+ *   retrying it through the pause, and `message` then says so. With no
+ *   open run it is not charged automatically until collection
+ *   resumes.
+ * - `commit_exposure`: the invoice funded a prepaid commit whose
+ *   credit is already spendable, and the invoice is unpaid. Prepaid
+ *   credit is granted when the invoice is issued, not when it is paid.
+ *   This reason is returned only when no other reason applies. When
+ *   one does, the exposure is folded into that reason's `message` and
+ *   `actions` instead, so do not treat this code as the only sign of
+ *   exposure.
+ * - `dispute_lost`: the customer disputed a payment on the invoice with
+ *   their bank, and the dispute closed as `lost`, so the bank took the
+ *   money back. Hardcount leaves the invoice paid and moves no money;
+ *   you record the loss. Shown on paid invoices. On an invoice that
+ *   bought prepaid credit, the message also says how much of the
+ *   credit is still spendable and names commit relief, because an
+ *   ordinary credit note is refused there. When the invoice also has
+ *   `payment_anomaly`, that reason stays and its message asks you to
+ *   check Stripe before any refund. The disputes are at
+ *   `GET /v1/invoices/{id}/disputes`.
+ * - `refunded_in_stripe`: a refund of the invoice's payment was made
+ *   in Stripe outside Hardcount, and Hardcount did not record it as a
+ *   credit note: the invoice was not paid yet, the currency differs,
+ *   the invoice bought prepaid credit, Hardcount first saw the refund
+ *   more than a day after it was made, or the refund is more than the
+ *   invoice had left to refund or credit. `code` is
+ *   `payment.refunded_in_stripe.` followed by that review reason.
+ *   Record it with a credit note that names the refund
+ *   (`stripe_refund_id` on `POST /v1/credit-notes`) or dismiss it
+ *   (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
+ *   Shown on paid invoices.
+ * - `amount_below_minimum`: Stripe refused to charge the invoice, or
+ *   refused a payment page for it, because the amount is below
+ *   Stripe's minimum charge. The minimum depends on the currency the
+ *   Stripe account settles in; Stripe's reply, in
+ *   `provider_response`, names it. Nothing was charged, the invoice
+ *   stays `finalized` with `payment_status` `pending`, it is not
+ *   charged again automatically, dunning does not start (a run already
+ *   open ends), and the customer is not emailed. Void it or record a
+ *   payment. `POST /v1/invoices/{id}/collect` applies the customer's
+ *   credit balance and marks the invoice paid if that covers it, and
+ *   otherwise asks Stripe again. Stripe's answer can change (for a
+ *   converted charge the minimum is the settlement currency's), and a
+ *   different answer ends this reason.
  */
 export type AttentionReason = typeof AttentionReason[keyof typeof AttentionReason];
 

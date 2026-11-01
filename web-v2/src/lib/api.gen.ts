@@ -474,8 +474,9 @@ export interface paths {
          * Data behind the hosted invoice page
          * @description Unauthenticated. The invoice's public token in the URL is the only
          *     credential. Paid and voided invoices stay viewable. A draft is
-         *     never shown: it returns 404 like an unknown token. Share the page
-         *     link with customers instead of calling this route.
+         *     never shown: it returns 404 like an unknown token, and so does a
+         *     token replaced by `POST /v1/invoices/{id}/rotate-public-token`.
+         *     Share the page link with customers instead of calling this route.
          */
         get: operations["getHostedInvoice"];
         put?: never;
@@ -519,11 +520,13 @@ export interface paths {
         put?: never;
         /**
          * Start paying the invoice in Stripe Checkout
-         * @description The hosted page's Pay button. Returns a Stripe Checkout URL for the
-         *     amount due. Hardcount has already worked out the tax, so Stripe adds
-         *     none. After paying, Stripe sends the customer back to the hosted
-         *     page with `?paid=1`. The Stripe webhook, not this redirect, marks
-         *     the invoice paid.
+         * @description The hosted page's Pay button. Unauthenticated, like the hosted
+         *     invoice page. Returns a Stripe Checkout URL for the amount due.
+         *     Hardcount has already worked out the tax, so Stripe adds none.
+         *     Calling it again while the page is still open returns the same page,
+         *     unless the amount due changed. After paying, Stripe sends the
+         *     customer back to the hosted page with `?paid=1`. The Stripe webhook,
+         *     not this redirect, marks the invoice paid. The route takes no body.
          */
         post: operations["createHostedInvoiceCheckout"];
         delete?: never;
@@ -654,24 +657,46 @@ export interface paths {
         };
         /**
          * List credit notes
-         * @description Lists credit notes, newest first by default. The response has no
-         *     `total`; page with `limit` and `offset` until a page comes back
-         *     shorter than `limit`.
+         * @description Lists credit notes in this account and mode, newest first by
+         *     default. Filters are optional and combine. `total` counts every note
+         *     that matches the filters.
          */
         get: operations["listCreditNotes"];
         put?: never;
         /**
-         * Create a credit note (line-based, or commit relief)
-         * @description Two shapes. LINE-BASED (regular invoices): lines[] +
-         *     refund/credit/out_of_band allocation; capped by the invoice's
-         *     remaining creditable gross. COMMIT RELIEF (ADR-080, paid commit
-         *     invoices only): pass commit_relief and NO lines — the server
-         *     retires commit credits and derives the refundable cash from the
-         *     telescoping price-ratio anchor (discounted commits refund at the
-         *     purchase rate, never at face). The relief credit note is created
-         *     AND issued in one transaction; the credit-balance channel is
-         *     forbidden on relief. Unpaid commit invoices: void the invoice
-         *     instead.
+         * Create a credit note
+         * @description Creates a credit note against a `finalized` or `paid` invoice. A
+         *     credit note is a document that reduces what the customer owes, or
+         *     gives money back after payment. There are two shapes.
+         *
+         *     Lines, for most invoices. Send `lines`; their amounts include tax,
+         *     and the note's tax is its share of the invoice's tax.
+         *     - On an unpaid invoice, leave the three `*_amount_cents` fields out:
+         *       the note lowers the amount due when it is issued. It can be at
+         *       most the amount due plus the customer credit applied.
+         *     - On a paid invoice, split the note's total across
+         *       `refund_amount_cents` (back to the card), `credit_amount_cents` (to
+         *       the customer's credit balance) and `out_of_band_amount_cents` (paid
+         *       back outside Hardcount). The three must add up to the total. With
+         *       all three 0, the whole note goes to the credit balance, or to the
+         *       channel `refund_type` names. The refund part can be at most what
+         *       was paid by card less the refunds on earlier notes.
+         *     - All notes on an invoice together can be at most its total.
+         *     - The note is a `draft` until you issue it, unless `auto_issue` is
+         *       true. Issuing applies it (see `POST /v1/credit-notes/{id}/issue`).
+         *
+         *     Commit relief, for paid invoices that bought prepaid credit only.
+         *     Send `commit_relief` and no `lines`. Hardcount retires that many
+         *     credits from the commit and works out the cash to give back at the
+         *     price the customer paid per credit, so a discounted commit is
+         *     refunded at the discounted rate, never at face value. The note is
+         *     created and issued in one step. Its cash goes to the card or out of
+         *     band, never to the credit balance. To cancel the commit on an unpaid
+         *     invoice, void the invoice instead.
+         *
+         *     A note with `stripe_refund_id` records a refund already made in
+         *     Stripe; see that field. Nothing is emailed; send the note with
+         *     `POST /v1/credit-notes/{id}/send`.
          */
         post: operations["createCreditNote"];
         delete?: never;
@@ -1957,7 +1982,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List invoices */
+        /**
+         * List invoices
+         * @description Lists invoices in this account and mode, newest first by default.
+         *     Every filter is optional, and filters combine. Each invoice carries
+         *     its `attention`, if any. `total` counts every invoice that matches
+         *     the filters.
+         *
+         *     A `from` or `to` that is not a date answers 422 with `param` naming
+         *     it, and so does a `to` before `from`.
+         */
         get: operations["listInvoices"];
         put?: never;
         /**
@@ -1965,7 +1999,8 @@ export interface paths {
          * @description Creates a one-off invoice in `draft` status with billing reason
          *     `manual`. Send `line_items` to create the invoice and its lines in
          *     one transaction, or omit them and add lines later with
-         *     `POST /v1/invoices/{id}/line-items`.
+         *     `POST /v1/invoices/{id}/line-items`. Nothing is charged or emailed
+         *     until you finalize it with `POST /v1/invoices/{id}/finalize`.
          *
          *     A manual invoice uses the customer's currency. A `currency` that
          *     differs from the customer's billing-profile currency, or from the
@@ -1975,14 +2010,16 @@ export interface paths {
          *
          *     Defaults when a field is left out:
          *     - `currency`: the customer's billing-profile currency, then the plan
-         *       currency of the customer's live subscriptions, then the tenant
-         *       default.
-         *     - `net_payment_term_days`: the tenant's net payment terms. A
+         *       currency of the customer's live subscriptions, then the account's
+         *       default currency.
+         *     - `net_payment_term_days`: the account's net payment terms. A
          *       negative value is stored as 0 (due on receipt).
          *     - `billing_period_start` / `billing_period_end`: now.
          *
-         *     Tax is not calculated here. It is calculated when the invoice is
-         *     finalized, so totals equal the subtotal until then.
+         *     The invoice gets its number (`invoice_number`) now, and an issue and
+         *     due date that finalize moves to the moment of finalizing. Tax is not
+         *     calculated here. It is calculated when the invoice is finalized, so
+         *     totals equal the subtotal until then.
          */
         post: operations["createInvoice"];
         delete?: never;
@@ -2001,21 +2038,24 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Preview the next invoice for a customer (Stripe-equivalent)
+         * Preview a customer's next invoice
          * @description Answers "what is my next bill going to look like?" from the usage
-         *     recorded so far. Without `period`, the preview mirrors the cycle
-         *     close for the subscription's current period: base fees prorate for
-         *     a short first period and per segment after a mid-period item add,
-         *     quantity change, plan swap or removal, and each meter's usage counts
-         *     only while a plan carrying it was on the subscription. For a
-         *     trialing subscription it is the first invoice after the trial: the
-         *     trial-end invoice when a plan bills in advance, otherwise the close
-         *     of the first paid period, prorated the same way. With an
-         *     explicit `period`, it is a flat estimate over that window and warns
-         *     when a mid-period change makes the invoice differ. Composes across customer / subscription / pricing;
-         *     registered as a sibling of `/v1/invoices` (chi picks the more
-         *     specific pattern, otherwise `/{id}` would capture
-         *     `create_preview` as an invoice ID).
+         *     recorded so far. Nothing is saved, charged or sent, and tax is not
+         *     included.
+         *
+         *     Without `period`, the preview mirrors the invoice the subscription's
+         *     current period will close with: base fees prorate for a short first
+         *     period and per segment after a mid-period item add, quantity change,
+         *     plan swap or removal, and each meter's usage counts only while a
+         *     plan carrying it was on the subscription. For a trialing
+         *     subscription it is the first invoice after the trial: the trial-end
+         *     invoice when a plan bills in advance, otherwise the close of the
+         *     first paid period, prorated the same way. With an explicit `period`,
+         *     it is a flat estimate over that window, at today's prices, and warns
+         *     when a mid-period change makes the invoice differ.
+         *
+         *     Without `subscription_id`, Hardcount uses the customer's active or
+         *     trialing subscription whose current period started last.
          */
         post: operations["createInvoicePreview"];
         delete?: never;
@@ -2031,7 +2071,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get invoice with line items */
+        /**
+         * Get an invoice with its line items
+         * @description Returns the invoice and its lines as two keys, `invoice` and
+         *     `line_items`. The invoice carries its `attention`, if any.
+         */
         get: operations["getInvoice"];
         put?: never;
         post?: never;
@@ -2048,7 +2092,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download invoice PDF */
+        /**
+         * Download an invoice PDF
+         * @description Returns the invoice as a PDF, shown inline and named after the
+         *     invoice number (`HC-000042.pdf`). An issued invoice prints the
+         *     customer and company details it was issued with, and every issued
+         *     credit note on it. A draft prints the current details.
+         */
         get: operations["getInvoicePdf"];
         put?: never;
         post?: never;
@@ -2068,15 +2118,23 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Email the invoice (PDF attached) to a recipient
-         * @description Sends the invoice document email. The invoice must be issued:
-         *     finalized, paid or uncollectible. A draft or voided invoice is
-         *     refused with 409. `additional_emails` is
-         *     tri-state (ADR-082): absent → the customer's stored
-         *     additional_emails are CC'd (so legacy `{email}`-only bodies now
-         *     CC by default); explicit `[]` → primary only for this send;
-         *     explicit list → validated exact override (same rules as the
-         *     customer field — normalize, dedupe, not-the-recipient, cap 10).
+         * Email an invoice to the customer
+         * @description Queues the invoice email: the invoice PDF attached, the amount due
+         *     and a link to the hosted invoice page, where the customer can pay.
+         *     The invoice must be issued: `finalized`, `paid` or `uncollectible`.
+         *     A draft or voided invoice is refused with 409, and so is an invoice
+         *     whose charge is still unresolved.
+         *
+         *     `email` is the recipient. `additional_emails` sets who is copied:
+         *     - absent: the customer's stored `additional_emails` are copied,
+         *       leaving out any that equals `email`;
+         *     - `[]`: nobody is copied on this send;
+         *     - a list: exactly these addresses are copied, after the same checks
+         *       as the customer field: each must be one plain address, they are
+         *       lowercased and duplicates dropped, the recipient's own address is
+         *       refused, and at most 10 are allowed.
+         *
+         *     This email does not set the invoice's `invoice_emailed_at`.
          */
         post: operations["sendInvoice"];
         delete?: never;
@@ -2096,9 +2154,10 @@ export interface paths {
         put?: never;
         /**
          * Add a line item to a draft invoice
-         * @description Adds one line to a `draft` invoice and recomputes its totals.
-         *     `amount_cents` is `quantity × unit_amount_cents`. Only draft invoices
-         *     accept new lines.
+         * @description Adds one line to a `draft` invoice and recomputes its subtotal,
+         *     total and amount due. `amount_cents` is `quantity` ×
+         *     `unit_amount_cents`, and the line takes the invoice's currency. Only
+         *     draft invoices accept new lines. Tax is calculated at finalize.
          */
         post: operations["addInvoiceLineItem"];
         delete?: never;
@@ -2120,12 +2179,15 @@ export interface paths {
          * Void an invoice
          * @description Cancels a `draft`, `finalized` or `uncollectible` invoice. Voiding
          *     is final. In the same transaction, credits that were applied to the
-         *     invoice go back to the customer's credit balance.
+         *     invoice go back to the customer's credit balance, and if the
+         *     invoice bought a prepaid commit, the unspent part of that credit is
+         *     retired.
          *
          *     After the void, Hardcount stops collection at Stripe (expires open
          *     Checkout sessions and cancels the PaymentIntent where Stripe allows
-         *     it) and resolves any active dunning run with `invoice_voided`.
-         *     Fires the `invoice.voided` webhook event.
+         *     it), sends the `invoice.voided` webhook event, reverses the tax with
+         *     the tax provider, and resolves any active dunning run with
+         *     `invoice_voided`.
          *
          *     A spend-threshold invoice (`billing_reason = threshold`) that is
          *     voided before its period's invoice is built gives its charges back:
@@ -2133,7 +2195,8 @@ export interface paths {
          *     billed on no invoice; bill them with a one-off invoice if they
          *     should be charged.
          *
-         *     A paid invoice cannot be voided: issue a credit note instead.
+         *     A paid invoice cannot be voided: issue a credit note instead. The
+         *     route takes no body.
          */
         post: operations["voidInvoice"];
         delete?: never;
@@ -2155,12 +2218,14 @@ export interface paths {
          * Resend the payment-method setup link
          * @description Emails the customer the link to add a payment method again. It is
          *     the same email Hardcount sends when an invoice is finalized and the
-         *     customer has no card on file. Once a card is added, Hardcount charges
-         *     the invoice automatically.
+         *     customer has no card on file: a single-use link to the
+         *     payment-update page (`PAYMENT_UPDATE_URL`), sent to the customer's
+         *     email address only, with no copies. Once a card is added, the
+         *     automatic charge collects the invoice.
          *
          *     Works on unpaid invoices that are `finalized` or `uncollectible`.
          *     This is different from `POST /v1/invoices/{id}/send`, which emails
-         *     the invoice itself with a link to pay it.
+         *     the invoice itself with a link to pay it. The route takes no body.
          */
         post: operations["resendInvoiceSetupLink"];
         delete?: never;
@@ -2181,8 +2246,10 @@ export interface paths {
         /**
          * Write off an invoice as uncollectible
          * @description Moves a `finalized` invoice to `uncollectible` (a bad-debt write-off).
-         *     The invoice can still be paid later, for example with
-         *     `POST /v1/invoices/{id}/record-payment`. Tax is not reversed.
+         *     Hardcount stops collecting it: the automatic charge and dunning
+         *     leave it alone. The invoice can still be paid later, for example
+         *     with `POST /v1/invoices/{id}/record-payment`. Tax is not reversed.
+         *     The route takes no body.
          *
          *     Resolves any active dunning run with `invoice_not_collectible`, so
          *     payment retries stop. Fires the `invoice.marked_uncollectible`
@@ -2208,6 +2275,11 @@ export interface paths {
          *     confirmed with Stripe and it bills nothing else. A written-off invoice from an earlier period, or one not
          *     tied to a subscription's period, does not affect subscription
          *     changes.
+         *
+         *     An invoice whose last charge got an unclear answer from Stripe with
+         *     no payment named (payment status `unknown`, no
+         *     `stripe_payment_intent_id`) can be written off; if the charge did
+         *     succeed, the invoice is still marked paid when Stripe shows it.
          */
         post: operations["markInvoiceUncollectible"];
         delete?: never;
@@ -2231,11 +2303,17 @@ export interface paths {
          *     received another way, such as a bank transfer, cheque or cash. The
          *     full amount due is recorded; partial payments are not supported.
          *     The invoice gets `paid_out_of_band: true` and no
-         *     `stripe_payment_intent_id`.
+         *     `stripe_payment_intent_id`, so there is no card to refund later.
          *
-         *     Resolves any active dunning run with `payment_recovered`. Fires the
-         *     `invoice.payment_recorded` webhook event. The optional `note` is
-         *     stored in the audit log, cut to 500 characters.
+         *     Resolves any active dunning run with `payment_recovered`. Sends the
+         *     `invoice.paid` and `invoice.payment_recorded` webhook events; the
+         *     second carries `recovered_from`, the status the invoice was paid
+         *     from. The optional `note` is stored in the audit log, cut to 500
+         *     characters.
+         *
+         *     On a written-off invoice, read its `recovery_warning` first: it says
+         *     when the payment will not reconcile on its own. The payment is still
+         *     recorded.
          */
         post: operations["recordInvoicePayment"];
         delete?: never;
@@ -2256,8 +2334,10 @@ export interface paths {
         /**
          * Replace the hosted invoice link
          * @description Creates a new `public_token` for the hosted invoice page. The old
-         *     link stops working at once. Use it when a link was shared with the
-         *     wrong people. Draft invoices have no public link.
+         *     link, and the PDF link under it, stop working at once. Use it when a
+         *     link was shared with the wrong people. Nothing is emailed: send the
+         *     new link yourself, or use `POST /v1/invoices/{id}/send`. Draft
+         *     invoices have no public link. The route takes no body.
          */
         post: operations["rotateInvoicePublicToken"];
         delete?: never;
@@ -2278,19 +2358,24 @@ export interface paths {
         /**
          * Charge a finalized invoice now
          * @description Collects a `finalized`, unpaid invoice right away instead of waiting
-         *     for the automatic charge.
+         *     for the automatic charge, which runs on a schedule (hourly by
+         *     default).
          *
          *     1. The customer's credit balance is applied first. If it covers the
          *        whole amount, the invoice is marked paid and no card is charged.
          *     2. Otherwise Hardcount charges the remaining amount to the customer's
          *        saved payment method with a Stripe PaymentIntent.
          *
-         *     After a successful card charge, any active dunning run is resolved
-         *     with `payment_recovered`. Check `payment_status` on the returned
-         *     invoice.
+         *     A paid invoice sends the `invoice.paid` webhook event (and
+         *     `payment.succeeded` for a card payment), and any active dunning run
+         *     is resolved with `payment_recovered`. A declined card answers 502;
+         *     the invoice's `payment_status` becomes `failed`, and dunning starts
+         *     when the customer's policy is enabled. Check
+         *     `payment_status` on the returned invoice.
          *
          *     A written-off (`uncollectible`) invoice cannot be charged here.
-         *     Record an offline payment or issue a new invoice instead.
+         *     Record an offline payment or issue a new invoice instead. The route
+         *     takes no body.
          */
         post: operations["collectInvoicePayment"];
         delete?: never;
@@ -2327,7 +2412,10 @@ export interface paths {
          *
          *     Only invoices paid by card through Stripe can be refunded here. For
          *     an invoice paid outside Stripe, create a credit note with
-         *     `out_of_band_amount_cents`.
+         *     `out_of_band_amount_cents`. For an invoice that bought prepaid
+         *     credit, use commit relief (`commit_relief` on
+         *     `POST /v1/credit-notes`). Nothing is emailed; send the credit note
+         *     with `POST /v1/credit-notes/{id}/send`.
          */
         post: operations["refundInvoice"];
         delete?: never;
@@ -2358,9 +2446,11 @@ export interface paths {
          *     row, titled "Refunded in Stripe".
          *     A draft invoice returns an empty list.
          *
-         *     Each row carries `line`, the row in the activity line standard's
-         *     words (ADR-128). `description`, `detail`, `error`, `status` and
+         *     Each row carries `line`, the row with every word written by the
+         *     server: a title, an amount, a problem line, the meta line and who
+         *     did it. `description`, `detail`, `error`, `status` and
          *     `amount_cents` repeat it for clients that read the older fields.
+         *     Rows for the same instant are ordered cause before effect.
          *
          *     If one source cannot be read, the rest is still returned and the
          *     source is named in `degraded`.
@@ -2438,9 +2528,10 @@ export interface paths {
          * Dismiss a refund made in Stripe
          * @description Records that a refund made in Stripe, which Hardcount flagged on the
          *     invoice (`outcome` `needs_review`), was handled outside Hardcount.
-         *     The `refunded_in_stripe` notice clears. Nothing else changes: no
-         *     credit note, no money, no email. The note is kept on the refund and
-         *     in the audit log.
+         *     The refund's `outcome` becomes `dismissed` and the
+         *     `refunded_in_stripe` notice clears. Nothing else changes: no credit
+         *     note, no money, no email. The note is kept on the refund and in the
+         *     audit log.
          */
         post: operations["dismissInvoiceStripeRefund"];
         delete?: never;
@@ -2481,13 +2572,14 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Email the credit-note document (PDF attached)
-         * @description Sends the credit-note PDF to the customer (ADR-082 rider — CNs
-         *     previously had no send surface at all). Issued credit notes
-         *     only: drafts and voided CNs return 422. Recipient contract
-         *     matches the invoice send (`email` + tri-state
-         *     `additional_emails`). The send is recorded on the applied
-         *     invoice's timeline and the customer's Sent-emails section.
+         * Email a credit note to the customer
+         * @description Queues an email with the credit note's PDF attached. Only issued
+         *     credit notes can be sent: a draft or voided note answers 422. The
+         *     recipients work as for `POST /v1/invoices/{id}/send`: `email` is the
+         *     recipient, and `additional_emails` absent copies the customer's
+         *     stored list, `[]` copies nobody, and a list copies exactly those
+         *     addresses. The send shows on the invoice's activity timeline and in
+         *     the customer's sent emails.
          */
         post: operations["sendCreditNote"];
         delete?: never;
@@ -2527,12 +2619,19 @@ export interface paths {
         put?: never;
         /**
          * Issue a draft credit note
-         * @description Moves a `draft` credit note to `issued` and applies it.
-         *     - Unpaid invoice: the invoice's amount due goes down. If nothing is
-         *       left due, the invoice is marked `paid` and `invoice.paid` is sent,
-         *       unless a charge is running on it.
-         *     - Paid invoice: the refund part is sent to Stripe, and the credit
-         *       part is added to the customer's credit balance.
+         * @description Moves a `draft` credit note to `issued` and applies it. The route
+         *     takes no body.
+         *     - Unpaid invoice (`finalized` or `uncollectible`): the invoice's
+         *       amount due goes down, and customer credit the note displaces goes
+         *       back to the customer's balance. If nothing is left due, the
+         *       invoice is marked `paid`, `invoice.paid` is sent and its dunning
+         *       run closes.
+         *     - Paid invoice: the refund part is sent to Stripe, the credit part is
+         *       added to the customer's credit balance, and the out-of-band part
+         *       is recorded. A note created while the invoice was unpaid, with no
+         *       split, puts its whole total in the credit balance.
+         *     - Either way, the note's share of the tax is reversed with the tax
+         *       provider when the provider recorded the invoice's tax.
          *
          *     Check the returned `status` and `refund_status`:
          *     - A refund Stripe refused still returns 200, with `refund_status`
@@ -2542,8 +2641,8 @@ export interface paths {
          *     - If the invoice's charge is still running, or the invoice is still
          *       a draft, nothing changes and the note stays `draft`. Hardcount issues
          *       it later.
-         *     - If the invoice was voided or written off, the draft is voided
-         *       instead and returned with `status` `voided`.
+         *     - If the invoice was voided, the draft is voided instead and
+         *       returned with `status` `voided`.
          */
         post: operations["issueCreditNote"];
         delete?: never;
@@ -2562,7 +2661,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Attach a refund made in Stripe to a credit note whose refund failed
+         * Attach a refund made in Stripe to a credit note
          * @description Makes a refund made in Stripe outside Hardcount the card refund of an
          *     `issued` credit note whose own refund `failed`: use it when you
          *     refunded in the Stripe dashboard what the note's refund was for.
@@ -2599,7 +2698,9 @@ export interface paths {
          *     `none`, Hardcount then resends the earlier request whose result it
          *     never recorded, with the same idempotency key. While Stripe keeps
          *     that key (at least 24 hours), Stripe returns the earlier request's
-         *     result instead of making a second refund.
+         *     result instead of making a second refund. A `pending` refund whose
+         *     Stripe refund is still processing is not resent. The route takes no
+         *     body.
          */
         post: operations["retryCreditNoteRefund"];
         delete?: never;
@@ -2619,8 +2720,9 @@ export interface paths {
         put?: never;
         /**
          * Void a draft credit note
-         * @description Cancels a `draft` credit note. Issued credit notes are final and
-         *     cannot be voided.
+         * @description Cancels a `draft` credit note. Nothing is applied or refunded. Issued
+         *     credit notes are final and cannot be voided. The route takes no
+         *     body.
          */
         post: operations["voidCreditNote"];
         delete?: never;
@@ -2639,8 +2741,9 @@ export interface paths {
         /**
          * Download credit note PDF
          * @description Returns the credit note as a PDF, shown inline and named after the
-         *     credit note number. An issued note prints the customer and company
-         *     details it was issued with.
+         *     credit note number (`CN-000003.pdf`). An issued note prints the
+         *     customer and company details it was issued with; a draft prints the
+         *     current ones.
          */
         get: operations["getCreditNotePdf"];
         put?: never;
@@ -2660,7 +2763,52 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Finalize draft invoice */
+        /**
+         * Finalize a draft invoice
+         * @description Issues a `draft` invoice and then collects it at once. The route
+         *     takes no body.
+         *
+         *     Finalizing:
+         *     - On an invoice you created with `POST /v1/invoices`, calculates tax
+         *       with the account's tax provider, and sets `issued_at` to now and
+         *       `due_at` to `net_payment_term_days` later. An invoice the billing
+         *       engine made keeps the tax and dates it was built with.
+         *     - Refuses with 409 while tax cannot be calculated (`tax_status`
+         *       `pending`): the invoice stays a draft. See
+         *       `POST /v1/invoices/{id}/retry-tax`.
+         *     - Moves the invoice to `finalized`, copies the customer and company
+         *       details onto it (`bill_to_snapshot`, `supplier_snapshot`,
+         *       `footer`), grants the credit of a prepaid commit line, issues any
+         *       credit note held on the draft, creates the
+         *       hosted-page `public_token`, and records the tax with Stripe Tax
+         *       when that is the provider.
+         *     - Sends the `invoice.finalized` webhook event. Its
+         *       `amount_due_cents` is before customer credit is applied.
+         *
+         *     Collecting, right after, in the same request (the same steps as the
+         *     automatic charge):
+         *     1. The customer's credit balance is applied. If it covers the amount
+         *        due, the invoice is marked paid and no card is charged.
+         *     2. Otherwise the saved card is charged with a Stripe PaymentIntent.
+         *        A successful charge marks the invoice paid, sends `invoice.paid`
+         *        and `payment.succeeded`, and queues a receipt email to the
+         *        customer when they have an email address. A declined charge sets `payment_status` to `failed`,
+         *        sends `payment.failed`, and starts dunning when the customer's
+         *        policy is enabled.
+         *     3. With no card on file, the customer is emailed a link to add one,
+         *        once (`no_pm_notified_at`), and dunning starts when the policy is
+         *        enabled.
+         *     4. When Stripe is not connected for the invoice's mode, the customer
+         *        is emailed the invoice itself, once (`invoice_emailed_at`), and
+         *        dunning starts when the policy is enabled.
+         *
+         *     The response is the invoice after collection: paid, failed, or still
+         *     queued. A collection step that does not finish is not an error
+         *     here; the automatic charge, which runs on a schedule (hourly by
+         *     default), picks up an invoice that is still queued. Finalizing does
+         *     not otherwise email the invoice; send it with
+         *     `POST /v1/invoices/{id}/send`.
+         */
         post: operations["finalizeInvoice"];
         delete?: never;
         options?: never;
@@ -2678,29 +2826,25 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Retry tax calculation on a deferred invoice
-         * @description Re-runs tax calculation against a draft invoice whose
-         *     `tax_status` is `pending`. Backs the operator-
-         *     facing "Retry tax" action surfaced by the unified
-         *     `Attention` shape.
+         * Retry tax calculation on a draft invoice
+         * @description Calculates tax again on a draft invoice whose `tax_status` is
+         *     `pending`, after you fixed the cause (for example the customer's
+         *     address). It also refreshes a draft whose Stripe Tax calculation is
+         *     more than 24 hours old and was never recorded, which finalize
+         *     refuses. The route takes no body.
          *
-         *     Idempotent: each call increments `tax_retry_count` and
-         *     rewrites the per-line and invoice-level tax fields. A retry
-         *     that succeeds clears `tax_pending_reason` / `tax_error_code`
-         *     and unblocks finalize. A retry that still fails writes the
-         *     new typed code so the dashboard banner refreshes — operators
-         *     get an immediate signal of whether their fix worked.
+         *     Each call adds one to `tax_retry_count` and rewrites the tax on the
+         *     lines and the invoice. A retry that succeeds clears
+         *     `tax_pending_reason` and `tax_error_code`. A retry that still fails
+         *     records the new error code and answers 200 with the updated
+         *     invoice, so check its `attention`.
          *
-         *     Returns the updated invoice (carrying the re-derived
-         *     `attention`) on success or post-retry failure. A retry that
-         *     is still failing is **not** an HTTP error — the caller
-         *     renders the new attention.
-         *
-         *     When the tax resolves on an invoice the billing engine made,
-         *     the call also finalizes it, unless collection is paused on its
-         *     subscription. If that finalize fails, the call returns 500 or
-         *     409 and the invoice stays a draft with its tax saved: finalize
-         *     it.
+         *     When the tax resolves on an invoice the billing engine made, the
+         *     call also finalizes it, unless collection is paused on its
+         *     subscription. The automatic charge then collects it on its next run.
+         *     An invoice you created stays a draft for you to finalize. If the
+         *     finalize fails, the call returns 500 or 409 and the invoice stays a
+         *     draft with its tax saved: finalize it.
          */
         post: operations["retryInvoiceTax"];
         delete?: never;
@@ -3849,7 +3993,8 @@ export interface paths {
          * List dunning runs
          * @description Dunning is the process of retrying a failed invoice payment on a
          *     schedule. A dunning run tracks those retries for one invoice. Runs
-         *     are listed newest first.
+         *     are listed newest first, each with its invoice's number, amount due
+         *     and currency, and its policy's retry count.
          */
         get: operations["listDunningRuns"];
         put?: never;
@@ -3867,7 +4012,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get a dunning run with its events */
+        /**
+         * Get a dunning run with its events
+         * @description Returns the run and its history, oldest first. Each event carries
+         *     `line`, the event in the words the invoice's activity timeline uses.
+         *     A source that cannot be read is named in `degraded` instead of
+         *     failing the call.
+         */
         get: operations["getDunningRun"];
         put?: never;
         post?: never;
@@ -3900,6 +4051,8 @@ export interface paths {
          *     If the invoice step fails, the run stays open and the error is
          *     returned. If the invoice is already in the requested state, that
          *     step is skipped. Fires the `dunning.resolved` webhook event once.
+         *     The other two resolutions, `retries_exhausted` and
+         *     `action_failed`, are set only by Hardcount.
          */
         post: operations["resolveDunningRun"];
         delete?: never;
@@ -3918,8 +4071,9 @@ export interface paths {
         /**
          * Get dunning totals
          * @description Counts of dunning runs by state, and the amount still due on active
-         *     and escalated runs. The amount covers only invoices in the tenant's
-         *     default currency, named in `currency`.
+         *     and escalated runs whose invoice is still open. `at_risk_cents`
+         *     covers only invoices in the account's default currency, named in
+         *     `currency`; `at_risk_by_currency` has every currency.
          */
         get: operations["getDunningStats"];
         put?: never;
@@ -3939,24 +4093,29 @@ export interface paths {
         };
         /**
          * List dunning policies
-         * @description Every dunning policy in this tenant and mode, the default first, then
-         *     oldest first. Each one carries how many customers are assigned to it.
+         * @description Every dunning policy in this account and mode, the default first,
+         *     then oldest first. Each one carries how many customers are assigned
+         *     to it.
          */
         get: operations["listDunningPolicies"];
         put?: never;
         /**
-         * Create dunning policy
+         * Create a dunning policy
          * @description A dunning policy decides how failed payments are retried and what
          *     happens when the retries run out. Every account starts with one
          *     policy per mode, "Default retries", as the default. The first
          *     enabled policy you create in a mode takes the default from it,
          *     unless you have edited it or made it the default yourself; later
          *     ones do not (use set-default). Customers without an assigned policy
-         *     use the default, so check `is_default` in the response.
+         *     use the default, so check `is_default` in the response. Assign a
+         *     policy to a customer with `dunning_policy_id` on
+         *     `PATCH /v1/customers/{id}`.
          *
          *     `enabled` defaults to false. A disabled policy starts no dunning, so
          *     send `enabled: true` for the policy to take effect. A policy created
-         *     disabled never takes the default from "Default retries".
+         *     disabled never takes the default from "Default retries". A run that
+         *     has started keeps following its policy as it is when each retry
+         *     runs.
          */
         post: operations["createDunningPolicy"];
         delete?: never;
@@ -3972,25 +4131,30 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get dunning policy */
+        /** Get a dunning policy */
         get: operations["getDunningPolicy"];
         put?: never;
         post?: never;
         /**
-         * Delete dunning policy
-         * @description Deletes the policy. Refused for the default policy and for a policy
-         *     that customers are still assigned to.
+         * Delete a dunning policy
+         * @description Deletes the policy. Refused for the default policy, for a policy
+         *     that customers are still assigned to, and for a policy that has run
+         *     payment retries (their history refers to it). The route takes no
+         *     body.
          */
         delete: operations["deleteDunningPolicy"];
         options?: never;
         head?: never;
         /**
-         * Replace dunning policy settings
+         * Replace a dunning policy's settings
          * @description Replaces every setting of the policy with the body. This is not a
          *     partial update: an omitted field takes its default (`enabled`
          *     false, `name` empty, pause the subscription, leave the invoice
          *     open), and `retry_days` is required. Send the full policy.
-         *     `is_default` cannot be changed here; use set-default.
+         *     `is_default` cannot be changed here; use set-default. Editing the
+         *     "Default retries" policy the account started with sets its
+         *     `seeded` to false. Runs already started follow the new settings
+         *     from their next step.
          */
         patch: operations["updateDunningPolicy"];
         trace?: never;
@@ -4008,7 +4172,8 @@ export interface paths {
          * Make a dunning policy the default
          * @description Makes this policy the default and the previous default a normal
          *     policy, in one step. Customers without an assigned policy use the
-         *     new default for dunning started from now on.
+         *     new default for dunning started from now on. A policy made default
+         *     this way is no longer `seeded`. The route takes no body.
          */
         post: operations["setDefaultDunningPolicy"];
         delete?: never;
@@ -5537,241 +5702,363 @@ export interface components {
             billing_status?: components["schemas"]["UsageBillingStatus"];
         };
         /**
-         * @description What an issued invoice or credit note prints about its buyer, copied
-         *     when the document was issued (ADR-109). The printed name is
-         *     `legal_name` when set, otherwise `display_name`.
+         * @description What an issued invoice or credit note prints about its buyer. It is
+         *     copied from the customer and the billing profile when the document
+         *     is issued, so a later edit to either does not change it. The printed
+         *     name is `legal_name` when set, otherwise `display_name`.
+         * @example {
+         *       "display_name": "Acme Inc",
+         *       "legal_name": "Acme Incorporated",
+         *       "email": "billing@acme.example",
+         *       "address_line1": "100 Market Street",
+         *       "city": "San Francisco",
+         *       "state": "CA",
+         *       "postal_code": "94105",
+         *       "country": "US"
+         *     }
          */
         DocumentBillTo: {
+            /** @description The customer's display name when the document was issued. */
             display_name: string;
+            /** @description The billing profile's legal name. Absent when none was set. */
             legal_name?: string;
+            /** @description The customer's email address. Absent when none was set. */
             email?: string;
+            /** @description First address line of the billing profile. Absent when none was set. */
             address_line1?: string;
+            /** @description Second address line of the billing profile. Absent when none was set. */
             address_line2?: string;
+            /** @description City of the billing profile. Absent when none was set. */
             city?: string;
+            /** @description State or region of the billing profile. Absent when none was set. */
             state?: string;
+            /** @description Postal code of the billing profile. Absent when none was set. */
             postal_code?: string;
+            /** @description Country of the billing profile, as a two-letter ISO 3166 code. Absent when none was set. */
             country?: string;
             /**
              * @description On an invoice, the tax ID its tax was calculated with when set,
-             *     otherwise the billing profile's tax ID at issue.
+             *     otherwise the billing profile's tax ID at issue. Absent when
+             *     there is none.
              */
             tax_id?: string;
+            /** @description The kind of tax ID, as the billing profile stores it. Absent when none was set. */
             tax_id_type?: string;
         };
         /**
-         * @description What an issued invoice or credit note prints about its seller (the
-         *     tenant's company), copied when the document was issued (ADR-109).
+         * @description What an issued invoice or credit note prints about its seller: your
+         *     company details from the account settings, copied when the document
+         *     was issued. A later change to the settings does not change it.
+         *     Every field is absent when the setting was empty.
+         * @example {
+         *       "name": "Example Labs Inc",
+         *       "email": "billing@examplelabs.example",
+         *       "address_line1": "1 Congress Avenue",
+         *       "city": "Austin",
+         *       "state": "TX",
+         *       "postal_code": "78701",
+         *       "country": "US"
+         *     }
          */
         DocumentSupplier: {
+            /** @description Your company name. */
             name?: string;
+            /** @description Your company's contact email. */
             email?: string;
+            /** @description Your company's phone number. */
             phone?: string;
+            /** @description First line of your company address. */
             address_line1?: string;
+            /** @description Second line of your company address. */
             address_line2?: string;
+            /** @description City of your company address. */
             city?: string;
+            /** @description State or region of your company address. */
             state?: string;
+            /** @description Postal code of your company address. */
             postal_code?: string;
+            /** @description Country of your company address. */
             country?: string;
+            /** @description Your company's tax ID. */
             tax_id?: string;
         };
         /**
-         * @description Lifecycle state of the invoice. `uncollectible` marks an invoice
-         *     a dunning policy has given up collecting (no further retries) while
-         *     keeping it on the books — distinct from `voided` (cancelled, owes
-         *     nothing).
+         * @description Where the invoice is in its life.
+         *     - `draft`: not issued yet. Lines can still be added, and nothing is
+         *       charged.
+         *     - `finalized`: issued and owed. Hardcount collects it.
+         *     - `paid`: settled, by card, credit, an offline payment or a credit
+         *       note that left nothing due.
+         *     - `voided`: cancelled. Nothing is owed. Voiding is final.
+         *     - `uncollectible`: written off as bad debt, by you
+         *       (`POST /v1/invoices/{id}/mark-uncollectible`) or by a dunning
+         *       policy's final action. Hardcount stops collecting it, but it stays
+         *       on the books and can still be paid.
          * @enum {string}
          */
         InvoiceStatus: "draft" | "finalized" | "paid" | "voided" | "uncollectible";
         /**
-         * @description Payment-attempt status. `unknown` marks a Stripe charge attempt that
-         *     returned an ambiguous error (5xx, timeout, connection reset) where
-         *     we cannot tell whether Stripe processed the charge. With a payment
-         *     intent recorded, Hardcount asks Stripe for it after a short wait. With
-         *     none (a parked invoice), Hardcount lists the customer's payments at
-         *     Stripe every billing tick: it records a payment for the invoice that
-         *     appears, and if none has appeared 24 hours after the attempt the
-         *     invoice goes back to `pending` (`failed` after a dunning retry) and
-         *     is charged again as usual.
+         * @description The state of the invoice's payment.
+         *     - `pending`: nothing has been charged yet, or a charge is about to
+         *       be sent.
+         *     - `processing`: Stripe is still working on a charge.
+         *     - `succeeded`: the invoice is paid.
+         *     - `failed`: the last charge was declined or refused. Dunning, when
+         *       a policy is on, retries it.
+         *     - `unknown`: a Stripe charge got an unclear answer (a 5xx, a timeout
+         *       or a dropped connection), so Hardcount cannot tell whether Stripe
+         *       took the money. With a payment intent recorded, Hardcount asks
+         *       Stripe for it after a short wait. With none (a parked invoice),
+         *       Hardcount lists the customer's payments at Stripe on every billing
+         *       tick: it records a payment for the invoice that appears, and if
+         *       none has appeared 24 hours after the attempt the invoice goes back
+         *       to `pending` (`failed` after a dunning retry) and is charged again
+         *       as usual.
          * @enum {string}
          */
         InvoicePaymentStatus: "pending" | "processing" | "succeeded" | "failed" | "unknown";
         /**
-         * @description Whether tax has been calculated. `ok`: it has. `pending`: the
-         *     calculation failed, and `tax_error_code` says why and whether
-         *     Hardcount retries it. A pending invoice cannot be finalized, so a wrong
-         *     tax amount is never sent.
+         * @description Whether tax has been calculated. `ok`: it has (a zero tax counts).
+         *     `pending`: the calculation failed, and `tax_error_code` says why and
+         *     whether Hardcount retries it. A pending invoice stays a draft and
+         *     cannot be finalized, so a wrong tax amount is never sent.
          * @enum {string}
          */
         InvoiceTaxStatus: "ok" | "pending";
         /**
-         * @description Urgency of an Attention surface. Operators sort/filter on this
-         *     and the dashboard renders one colour per level. Priority
-         *     descending: Critical > Warning > Info.
+         * @description How urgent an `Attention` notice is, most urgent first: `critical`,
+         *     `warning`, `info`. Sort or filter on it; the dashboard shows one
+         *     colour per level.
          * @enum {string}
          */
         AttentionSeverity: "info" | "warning" | "critical";
         /**
-         * @description Closed, typed code naming why an invoice needs operator
-         *     attention. Stable public-API contract — codes are never
-         *     repurposed; deprecations keep the code reserved and add a
-         *     successor. See `Attention.code` for the open, provider-specific
-         *     sub-code. `payment_anomaly` (ADR-068) reports money that does
-         *     not reconcile — double charge, captured-vs-booked amount
-         *     mismatch, or a payment on a voided invoice — and is surfaced
-         *     even on paid/voided invoices. `dunning_exhausted` reports a
-         *     no-payment-method invoice whose automatic recovery has ended
-         *     without collecting (2026-07-22). `collection_paused` reports an
-         *     invoice that is queued for auto-charge but whose subscription
-         *     has `pause_collection` set, so the charge sweeps deliberately
-         *     skip it (2026-07-28). A dunning run already open on the invoice
-         *     keeps retrying it through the pause, and `message` then says so;
-         *     with no open run it is not charged automatically until
-         *     collection resumes. `commit_exposure` reports an
-         *     unpaid invoice that funded a prepaid commit whose credit is
-         *     already spendable (ADR-078 funds commits at issue, not at
-         *     payment) — note this reason is only returned when no other
-         *     reason applies; when one does, the exposure is folded into that
-         *     reason's `message` and its `actions` instead, so clients must
-         *     not treat the reason code as the presence test for exposure
-         *     (2026-08-04). `dispute_lost` reports a payment on the invoice that
-         *     the customer disputed with their bank and that the dispute took
-         *     back (the dispute closed as `lost`). Hardcount leaves the invoice paid
-         *     and moves no money; the operator records the loss. Surfaced on paid
-         *     invoices. On an invoice that bought prepaid credit, the message
-         *     also says how much of the credit is still spendable and names
-         *     commit relief, because an ordinary credit note is refused there.
-         *     When the invoice also has `payment_anomaly`, that reason stays and
-         *     its message asks the operator to check Stripe before any refund.
-         *     The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-         *     (2026-10-19). `refunded_in_stripe` reports a refund of the invoice's
-         *     payment made in Stripe outside Hardcount that Hardcount did not record
-         *     as a credit note: the invoice was not paid yet, the currency
-         *     differs, the invoice bought prepaid credit, Hardcount first saw the
-         *     refund more than a day after it was made, or the refund is more than
-         *     the invoice had left to refund or credit. `code` is
-         *     `payment.refunded_in_stripe.` and that review reason. The operator
-         *     records it with a credit note that names the refund
-         *     (`stripe_refund_id` on `POST /v1/credit-notes`) or dismisses it
-         *     (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
-         *     Surfaced on paid invoices (2026-10-30). `amount_below_minimum` reports an invoice Stripe
-         *     refused to charge, or refused a payment page for, because the amount
-         *     is below Stripe's minimum charge. The minimum depends on the
-         *     currency the Stripe account settles in; Stripe's reply, in
-         *     `provider_response`, names it. Nothing was charged, the invoice
-         *     stays `finalized` with `payment_status` `pending`, it is not
-         *     charged again automatically, dunning does not start (a run already
-         *     open ends), and the customer is not emailed. The operator voids it
-         *     or records a payment; Collect payment applies the customer's credit
-         *     balance and pays it if that covers the amount, and otherwise asks
-         *     Stripe again. Stripe's answer can change (for a converted charge the
-         *     minimum is the settlement currency's), and a different answer ends
-         *     this reason (2026-10-23).
+         * @description Why an invoice needs your attention, as a closed code. A code is never
+         *     reused for another meaning; a retired code stays reserved.
+         *     `Attention.code` carries the open, provider-specific sub-code.
+         *     - `tax_calculation_failed`: the tax provider could not calculate
+         *       tax. The cause is in `code`.
+         *     - `tax_location_required`: the customer's billing address or tax ID
+         *       is missing or not valid for the tax provider. Edit the billing
+         *       profile.
+         *     - `payment_failed`: the card was declined. The decline code is in
+         *       `code`.
+         *     - `payment_unconfirmed`: a charge got an unclear answer from Stripe.
+         *       Hardcount asks Stripe what happened.
+         *     - `payment_anomaly`: money does not reconcile: a double charge, a
+         *       captured amount that differs from the amount booked, or a payment
+         *       on a voided invoice. Shown even on paid and voided invoices.
+         *     - `payment_processing`: Stripe is still processing a charge. It
+         *       settles on its own.
+         *     - `payment_scheduled`: the invoice is queued, and the automatic
+         *       charge collects it on its next run.
+         *     - `awaiting_payment`: the invoice is unpaid and not queued for an
+         *       automatic charge. Only invoices written by older releases reach
+         *       this state.
+         *     - `no_payment_method`: the customer has no card on file. The invoice
+         *       stays queued, and the automatic charge collects it on its first
+         *       run after a card is added.
+         *     - `dunning_exhausted`: the customer still has no card and automatic
+         *       recovery has ended without collecting; the policy's final action
+         *       ran. If that action paused collection on the subscription, resume
+         *       it too: the automatic charge skips a paused subscription even
+         *       after a card is added.
+         *     - `collection_paused`: the invoice is queued for an automatic charge,
+         *       but its subscription has `pause_collection` set, so the automatic
+         *       charge skips it. A dunning run already open on the invoice keeps
+         *       retrying it through the pause, and `message` then says so. With no
+         *       open run it is not charged automatically until collection
+         *       resumes.
+         *     - `commit_exposure`: the invoice funded a prepaid commit whose
+         *       credit is already spendable, and the invoice is unpaid. Prepaid
+         *       credit is granted when the invoice is issued, not when it is paid.
+         *       This reason is returned only when no other reason applies. When
+         *       one does, the exposure is folded into that reason's `message` and
+         *       `actions` instead, so do not treat this code as the only sign of
+         *       exposure.
+         *     - `dispute_lost`: the customer disputed a payment on the invoice with
+         *       their bank, and the dispute closed as `lost`, so the bank took the
+         *       money back. Hardcount leaves the invoice paid and moves no money;
+         *       you record the loss. Shown on paid invoices. On an invoice that
+         *       bought prepaid credit, the message also says how much of the
+         *       credit is still spendable and names commit relief, because an
+         *       ordinary credit note is refused there. When the invoice also has
+         *       `payment_anomaly`, that reason stays and its message asks you to
+         *       check Stripe before any refund. The disputes are at
+         *       `GET /v1/invoices/{id}/disputes`.
+         *     - `refunded_in_stripe`: a refund of the invoice's payment was made
+         *       in Stripe outside Hardcount, and Hardcount did not record it as a
+         *       credit note: the invoice was not paid yet, the currency differs,
+         *       the invoice bought prepaid credit, Hardcount first saw the refund
+         *       more than a day after it was made, or the refund is more than the
+         *       invoice had left to refund or credit. `code` is
+         *       `payment.refunded_in_stripe.` followed by that review reason.
+         *       Record it with a credit note that names the refund
+         *       (`stripe_refund_id` on `POST /v1/credit-notes`) or dismiss it
+         *       (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
+         *       Shown on paid invoices.
+         *     - `amount_below_minimum`: Stripe refused to charge the invoice, or
+         *       refused a payment page for it, because the amount is below
+         *       Stripe's minimum charge. The minimum depends on the currency the
+         *       Stripe account settles in; Stripe's reply, in
+         *       `provider_response`, names it. Nothing was charged, the invoice
+         *       stays `finalized` with `payment_status` `pending`, it is not
+         *       charged again automatically, dunning does not start (a run already
+         *       open ends), and the customer is not emailed. Void it or record a
+         *       payment. `POST /v1/invoices/{id}/collect` applies the customer's
+         *       credit balance and marks the invoice paid if that covers it, and
+         *       otherwise asks Stripe again. Stripe's answer can change (for a
+         *       converted charge the minimum is the settlement currency's), and a
+         *       different answer ends this reason.
          * @enum {string}
          */
         AttentionReason: "tax_calculation_failed" | "tax_location_required" | "payment_failed" | "payment_unconfirmed" | "payment_anomaly" | "payment_processing" | "payment_scheduled" | "awaiting_payment" | "no_payment_method" | "dunning_exhausted" | "collection_paused" | "commit_exposure" | "dispute_lost" | "refunded_in_stripe" | "amount_below_minimum";
         /**
-         * @description What an operator must know BEFORE recording an OFFLINE payment on a
-         *     written-off invoice (`status = uncollectible`) — a consequence that
-         *     will go unreconciled, never a refusal. The money already arrived, and
-         *     refusing to record it would only make the books wrong too.
-         *
-         *     A written-off invoice is settled by RECORDING writers only — an
-         *     offline payment, or Hardcount recording a card charge that Stripe shows
-         *     succeeded (its webhook, or the check of an unresolved charge).
-         *     Nothing initiates a card
-         *     charge against one (ADR-113): recovery of a returned customer runs on
-         *     normal rails via a fresh recovery invoice.
-         *
-         *     `tax_reversed_unrecoverable` — the invoice's tax was reversed with the
-         *     tax provider and cannot be re-reported automatically; the recorded
-         *     payment collects tax already reported as not collected.
-         *     `relief_not_reissued` — a credit the invoice was owed was never
-         *     applied, so `amount_due_cents` is higher than what is owed and the
-         *     customer may have overpaid.
+         * @description What you should know before you record an offline payment on a
+         *     written-off invoice (`status` `uncollectible`): a consequence that
+         *     will not reconcile on its own. It never refuses the payment, because
+         *     the money already arrived. A written-off invoice is never charged by
+         *     card. It is settled only by recording a payment: an offline payment,
+         *     or a card payment Stripe shows succeeded.
+         * @example {
+         *       "blocked": false,
+         *       "code": "relief_not_reissued",
+         *       "message": "This invoice is owed a credit that was never applied, so the amount shown is higher than what the customer actually owed. If they paid this amount they have overpaid — issue the credit so it is returned or offset against their next invoice."
+         *     }
          */
         RecoveryWarning: {
-            /** @description Always false — this shape only ever warns. */
+            /** @description Always false. This object only warns; it never refuses. */
             blocked: boolean;
-            /** @enum {string} */
+            /**
+             * @description What will not reconcile.
+             *     `tax_reversed_unrecoverable`: the invoice's Stripe Tax
+             *     transaction was reversed, and recording the payment does not
+             *     report it again, so the tax collected will not appear in your
+             *     tax provider's records.
+             *     `relief_not_reissued`: a credit the invoice was owed was never
+             *     applied, so `amount_due_cents` is higher than what is owed and the
+             *     customer may have overpaid.
+             * @enum {string}
+             */
             code?: "tax_reversed_unrecoverable" | "relief_not_reissued";
-            /** @description Operator-facing sentence naming the consequence that will go unreconciled if the payment is recorded. */
+            /**
+             * @description One sentence for the operator naming the consequence and what to
+             *     do about it.
+             */
             message?: string;
         };
         /**
-         * @description Operator's recommended next step. Closed enum because every
-         *     code maps to a concrete server endpoint or frontend route,
-         *     and audit logs key off the code. `reconcile_payment` opens the
-         *     payment in Stripe; it is offered on `payment_anomaly`, where the
-         *     refund or correction is made there. `mark_uncollectible` opens
-         *     the write-off and is offered only on a parked invoice (payment
-         *     status unknown with no payment intent recorded), for a customer
-         *     who paid another way: Hardcount records a payment that Stripe shows,
-         *     and charges the invoice again if none appears within 24 hours.
-         *     Dashboards render it as a secondary action. `void_invoice` is offered
-         *     on prepaid-commit exposure, only while some of the granted
-         *     credit is still unspent: voiding retires the unspent balance
-         *     (ADR-078) and is the sole recovery for an unpaid invoice whose
-         *     credit is already live. Credit the customer has already spent
-         *     is never clawed back (2026-08-04). It is also offered on
-         *     `amount_below_minimum`, an amount Stripe will not charge
-         *     (2026-10-23).
+         * @description A recommended next step, as a closed code. Each code maps to an API
+         *     route or a dashboard page.
+         *     - `edit_billing_profile`: fix the customer's billing address or tax
+         *       ID.
+         *     - `retry_tax`: `POST /v1/invoices/{id}/retry-tax`.
+         *     - `retry_payment` and `charge_now`: `POST /v1/invoices/{id}/collect`.
+         *     - `wait_provider`: nothing to do; the provider is expected to answer.
+         *     - `rotate_api_key`: replace the Stripe key under Settings.
+         *     - `reconcile_payment`: open the payment in Stripe and refund or
+         *       correct it there. Offered on `payment_anomaly`.
+         *     - `review_registration`: check your tax registrations with the tax
+         *       provider.
+         *     - `send_reminder`: email the customer. On `no_payment_method` and
+         *       `dunning_exhausted` that is the setup link
+         *       (`POST /v1/invoices/{id}/resend-setup-link`); otherwise it is the
+         *       invoice with its payment link (`POST /v1/invoices/{id}/send`).
+         *     - `add_payment_method`: add a card for the customer.
+         *     - `update_payment_method`: send the customer a link to replace a
+         *       card that was declined.
+         *     - `connect_tax_provider`: connect the tax provider under Settings.
+         *     - `void_invoice`: `POST /v1/invoices/{id}/void`. Offered on
+         *       prepaid-commit exposure while some granted credit is unspent:
+         *       voiding retires the unspent balance, and credit already spent is
+         *       not taken back. Also offered on `amount_below_minimum`.
+         *     - `mark_uncollectible`:
+         *       `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
+         *       parked invoice (payment status `unknown` with no payment intent
+         *       recorded), for a customer who paid another way. Hardcount still
+         *       records a payment that Stripe shows, and charges the invoice again
+         *       if none appears within 24 hours. The dashboard shows it as a
+         *       secondary action.
          * @enum {string}
          */
         AttentionAction: "edit_billing_profile" | "retry_tax" | "retry_payment" | "wait_provider" | "rotate_api_key" | "reconcile_payment" | "review_registration" | "charge_now" | "send_reminder" | "add_payment_method" | "update_payment_method" | "connect_tax_provider" | "void_invoice" | "mark_uncollectible";
+        /**
+         * @description One recommended next step on an `Attention` notice.
+         * @example {
+         *       "code": "update_payment_method",
+         *       "label": "Update payment method"
+         *     }
+         */
         AttentionActionItem: {
             code: components["schemas"]["AttentionAction"];
             /**
-             * @description Default rendering label. UIs are free to substitute
-             *     localized copy.
+             * @description A default button label. You can show your own, translated text
+             *     instead. Absent when there is none.
              */
             label?: string;
         };
         /**
-         * @description Unified "this invoice needs operator attention" surface.
-         *     Computed server-side from durable invoice fields
-         *     (`tax_status`, `tax_error_code`, `payment_status`,
-         *     `last_payment_error`). Never persisted —
-         *     always derived. Omitted entirely when the invoice is healthy
-         *     (matches Stripe's `last_finalization_error: null` ergonomic).
-         *     See ADR-009.
+         * @description Why an invoice needs your attention now, and what to do about it.
+         *     Hardcount works it out each time the invoice is read, from the
+         *     invoice's tax and payment state; it is never stored. The invoice
+         *     leaves it out when nothing needs attention. `GET /v1/invoices`,
+         *     `GET /v1/invoices/{id}` and the finalize, retry-tax and
+         *     rotate-public-token responses carry it; the other invoice responses
+         *     and the webhook events do not.
+         * @example {
+         *       "severity": "critical",
+         *       "reason": "payment_failed",
+         *       "message": "The customer's card was declined.",
+         *       "actions": [
+         *         {
+         *           "code": "update_payment_method",
+         *           "label": "Update payment method"
+         *         },
+         *         {
+         *           "code": "retry_payment",
+         *           "label": "Retry payment"
+         *         }
+         *       ],
+         *       "code": "payment.declined",
+         *       "provider_response": "Your card has insufficient funds.",
+         *       "since": "2026-11-01T00:05:03Z"
+         *     }
          */
         Attention: {
             severity: components["schemas"]["AttentionSeverity"];
             reason: components["schemas"]["AttentionReason"];
             /**
-             * @description Human-readable copy, safe to render verbatim: one plain
-             *     sentence saying what happens and what to do. Facts that must
-             *     show up front follow on more lines, separated by a newline
-             *     (`\n`), one sentence each and up to three lines in all: the
-             *     setup-link email on `no_payment_method` (and on
-             *     `dunning_exhausted` when no link can be emailed), and the
-             *     prepaid credit at risk on an unpaid commit invoice. A no-card
-             *     commit invoice carries all three. Wording may change between
-             *     releases; switch on `reason` and `code`, not on this text.
+             * @description Text that is safe to show as it is: one plain sentence saying
+             *     what happens and what to do. Facts that must show up front
+             *     follow on more lines, separated by a newline (`\n`), one sentence
+             *     each and up to three lines in all: the setup-link email on
+             *     `no_payment_method` (and on `dunning_exhausted` when no link can
+             *     be emailed), and the prepaid credit at risk on an unpaid commit
+             *     invoice. A no-card commit invoice carries all three. The wording
+             *     can change between releases; switch on `reason` and `code`, not
+             *     on this text.
              */
             message: string;
             /**
-             * @description Prescribed next steps. First item is the primary CTA; the
-             *     rest are secondary.
+             * @description Recommended next steps. The first is the main one; the rest are
+             *     secondary. Absent when there is nothing to do but wait.
              */
             actions?: components["schemas"]["AttentionActionItem"][];
             /**
-             * @description Open, dotted, provider-specific code (e.g.
-             *     `tax.customer_data_invalid`, `payment.declined`).
-             *     New codes ship without a contract
-             *     bump. Stripe parity.
+             * @description Open, dotted code naming the exact cause, for example
+             *     `tax.customer_data_invalid` or `payment.declined`. New codes can
+             *     appear in any release, as with Stripe's error codes.
              */
             code?: string;
             /**
-             * @description Deep link to operator-facing documentation for this
-             *     reason. Stripe parity.
+             * @description A link to documentation about this reason. Absent when there is
+             *     no page for it.
              */
             doc_url?: string;
             /**
-             * @description Dotted-path pointer at the entity field the operator must
-             *     edit to resolve the issue (e.g.
-             *     `customer.address.postal_code`). Stripe parity. Empty
-             *     when the resolution isn't field-scoped.
+             * @description Dotted path to the field you need to edit to fix the cause, for
+             *     example `customer.address.postal_code`. Absent when the fix is not
+             *     one field.
              */
             param?: string;
             /**
@@ -5779,21 +6066,23 @@ export interface components {
              *     holds, what Hardcount does on its own, and ids support may ask
              *     for (for example the payment intent ids of a payment
              *     anomaly). Plain text; may contain blank-line paragraph
-             *     breaks. Never a provider payload — that is
+             *     breaks. Never a provider payload: that is
              *     `provider_response`.
              */
             detail?: string;
             /**
-             * @description The provider's own response (Stripe Tax error envelope,
-             *     Stripe's last payment error), exactly as received. Present
-             *     only when Hardcount called the provider.
+             * @description The provider's own response (a Stripe Tax error, or Stripe's last
+             *     payment error), exactly as received. Present only when Hardcount
+             *     called the provider.
              */
             provider_response?: string;
             /**
              * Format: date-time
-             * @description When the attention condition started — operators triage
-             *     by age. tax_deferred_at for tax reasons; due_at for
-             *     overdue; updated_at as a proxy for payment failures.
+             * @description When the condition started, so you can sort by age. For a tax
+             *     reason it is when tax was deferred, and for
+             *     `amount_below_minimum` when Stripe refused the amount. Otherwise
+             *     it is when the invoice last changed; on a test clock, when it was
+             *     issued or its last charge failed. Absent when it is not known.
              */
             since?: string;
             /**
@@ -5805,18 +6094,36 @@ export interface components {
             /**
              * Format: date-time
              * @description The invoice's payment deadline (its `due_at`). Hardcount does not
-             *     act on this date; it is shown so the operator knows it.
-             *     Absent when the invoice has no due date.
+             *     act on this date; it is shown so you know it. Absent when the
+             *     reason does not show a deadline or the invoice has none.
              */
             due_by?: string;
         };
         /**
-         * @description Mirrors Stripe's `invoice.billing_reason`. Classifies the trigger
-         *     that produced the invoice. Stamped at create time and never mutated.
+         * @description Why the invoice was made, like Stripe's `invoice.billing_reason`.
+         *     Set when the invoice is created and never changed.
+         *     - `subscription_cycle`: the invoice for a subscription period that
+         *       ended (a renewal).
+         *     - `subscription_create`: the first invoice when a subscription
+         *       starts.
+         *     - `subscription_cancel`: the final invoice when a subscription is
+         *       canceled at once in the middle of a period.
+         *     - `subscription_update`: the invoice for a change in the middle of a
+         *       period, such as a plan upgrade, a quantity increase or an added
+         *       item.
+         *     - `manual`: an invoice you created with `POST /v1/invoices`.
+         *     - `threshold`: an early invoice because a spend threshold was
+         *       crossed.
          * @enum {string}
          */
         InvoiceBillingReason: "subscription_cycle" | "subscription_create" | "subscription_cancel" | "subscription_update" | "manual" | "threshold";
-        /** @enum {string} */
+        /**
+         * @description What an invoice line charges for. `base_fee`: a plan's flat fee for
+         *     the period. `usage`: metered usage, priced by a plan price.
+         *     `add_on`: any other charge, such as a line you add to a draft (the
+         *     default for those).
+         * @enum {string}
+         */
         InvoiceLineType: "base_fee" | "usage" | "add_on";
         /**
          * @description The kind of subscription item change that produced a proration:
@@ -5827,65 +6134,173 @@ export interface components {
          */
         ItemChangeType: "plan" | "quantity" | "add" | "remove";
         /**
-         * @description A Hardcount invoice. Returned from create, finalize, void, list, get,
-         *     rotate-public-token, and collect-payment endpoints.
+         * @description A bill for one customer, in one currency. The billing engine creates
+         *     one at the end of each subscription period (and for a subscription's
+         *     start, a change, a cancel or a spend threshold); you can also create
+         *     one-off invoices with `POST /v1/invoices`. An invoice starts as a
+         *     `draft`, is `finalized` when issued, and ends `paid`, `voided` or
+         *     `uncollectible`. Every amount is a whole number in the currency's
+         *     minor unit (cents for USD). The invoice routes and the `invoice.*`
+         *     and `payment.*` webhook events return it.
+         * @example {
+         *       "id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+         *       "invoice_number": "HC-000042",
+         *       "status": "paid",
+         *       "payment_status": "succeeded",
+         *       "currency": "USD",
+         *       "subtotal_cents": 8650,
+         *       "discount_cents": 0,
+         *       "tax_amount_cents": 0,
+         *       "tax_rate": 0,
+         *       "tax_provider": "manual",
+         *       "tax_status": "ok",
+         *       "payment_card_brand": "visa",
+         *       "payment_card_last4": "4242",
+         *       "total_amount_cents": 8650,
+         *       "amount_due_cents": 0,
+         *       "amount_paid_cents": 8650,
+         *       "credits_applied_cents": 0,
+         *       "billing_period_start": "2026-10-01T00:00:00Z",
+         *       "billing_period_end": "2026-11-01T00:00:00Z",
+         *       "billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+         *       "billing_timezone": "UTC",
+         *       "bill_to_snapshot": {
+         *         "display_name": "Acme Inc",
+         *         "legal_name": "Acme Incorporated",
+         *         "email": "billing@acme.example",
+         *         "address_line1": "100 Market Street",
+         *         "city": "San Francisco",
+         *         "state": "CA",
+         *         "postal_code": "94105",
+         *         "country": "US"
+         *       },
+         *       "supplier_snapshot": {
+         *         "name": "Example Labs Inc",
+         *         "email": "billing@examplelabs.example",
+         *         "address_line1": "1 Congress Avenue",
+         *         "city": "Austin",
+         *         "state": "TX",
+         *         "postal_code": "78701",
+         *         "country": "US"
+         *       },
+         *       "issued_at": "2026-11-01T00:05:00Z",
+         *       "due_at": "2026-12-01T00:05:00Z",
+         *       "paid_at": "2026-11-01T00:05:03Z",
+         *       "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *       "paid_out_of_band": false,
+         *       "public_token": "hc_pinv_9f2c4e1a7b3d5f6081a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f701",
+         *       "net_payment_term_days": 30,
+         *       "created_at": "2026-11-01T00:05:00Z",
+         *       "updated_at": "2026-11-01T00:05:03Z",
+         *       "billing_reason": "subscription_cycle",
+         *       "is_simulated": false
+         *     }
          */
         Invoice: {
-            /** @example hc_inv_42014438d82ddf33 */
+            /**
+             * @description Unique identifier of the invoice, starting `hc_inv_`.
+             * @example hc_inv_dbj84b2q3gpgqfoq5c40
+             */
             id: string;
             /**
-             * @description Owning tenant. Returned for diagnostic clarity but redundant
-             *     with the API key (which already determines the tenant).
-             *     Omitted when empty.
+             * @description The account the invoice belongs to. Your API key already decides
+             *     the account, so you rarely need it.
              */
             tenant_id?: string;
+            /** @description The customer the invoice bills. */
             customer_id: string;
-            /** @description Empty for one-off invoices not tied to a subscription. */
+            /** @description The subscription the invoice bills. An empty string for a one-off invoice. */
             subscription_id: string;
-            /** @description Set when the invoice is created, including drafts. */
+            /**
+             * @description The number printed on the invoice: the account's invoice prefix
+             *     (default `HC`), a hyphen and a sequence padded to six digits, for
+             *     example `HC-000042`. Test mode and live mode count separately.
+             *     Set when the invoice is created, drafts included.
+             */
             invoice_number: string;
             status: components["schemas"]["InvoiceStatus"];
             payment_status: components["schemas"]["InvoicePaymentStatus"];
-            /** @example USD */
+            /**
+             * @description The invoice's currency, as an uppercase ISO 4217 code. Every
+             *     amount on the invoice and its lines is in this currency's minor
+             *     unit.
+             * @example USD
+             */
             currency: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The sum of the line amounts, before discount and tax, in the
+             *     currency's minor unit (cents for USD). With tax-inclusive
+             *     prices, it is the net amount after the tax is taken out.
+             */
             subtotal_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Discount taken off the subtotal, in the currency's minor unit (cents for USD). 0 when there is none.
+             */
             discount_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Tax on the invoice, in the currency's minor unit (cents for USD).
+             *     On an invoice you create with `POST /v1/invoices`, it is 0 until
+             *     finalize calculates the tax.
+             */
             tax_amount_cents: number;
             /**
              * Format: double
-             * @description Tax rate as a percent (18.50 = 18.50%), up to 4-decimal precision. ADR-042/043.
+             * @description Tax rate as a percent, up to four decimal places (18.5 means 18.5%).
              */
             tax_rate: number;
+            /** @description The tax's label, such as `VAT` or `Sales Tax`. Absent when there is none. */
             tax_name?: string;
+            /** @description The country the tax was calculated for. Absent when none was recorded. */
             tax_country?: string;
+            /** @description The customer's tax ID the tax was calculated with. Absent when there was none. */
             tax_id?: string;
             /**
-             * @description Durable audit snapshot of the upstream tax engine that ran the
-             *     calculation (e.g. `stripe`, `none`, `manual`).
+             * @description The tax engine that calculated the tax: `stripe_tax`, `manual` (a
+             *     flat rate from the account settings) or `none`. Kept for the
+             *     record and never changed afterwards. Absent until tax is
+             *     calculated.
              */
             tax_provider?: string;
             /**
-             * @description Provider-side calculation reference captured at build time.
-             *     For Stripe Tax this expires after 24 h; persisted so finalized
-             *     invoices remain reconstructable past expiry.
+             * @description The tax provider's calculation reference (Stripe Tax only). A
+             *     Stripe Tax calculation expires after 24 hours; Hardcount keeps
+             *     the reference so a finalized invoice can still be traced.
+             *     Absent for the manual and none providers.
              */
             tax_calculation_id?: string;
             /**
-             * @description Provider-side committed transaction reference, captured at
-             *     finalize. For Stripe Tax this is `tx_xxx` and is the handle
-             *     the provider needs for a later reversal when a credit note is
-             *     issued.
+             * @description The tax provider's committed transaction (Stripe Tax only),
+             *     recorded at finalize. Hardcount reverses it when the invoice is
+             *     voided or a credit note is issued. Absent until committed, and
+             *     for providers that keep no record.
              */
             tax_transaction_id?: string;
+            /**
+             * @description True when reverse charge applies: no tax is charged and the
+             *     customer accounts for it. Absent when false.
+             */
             tax_reverse_charge?: boolean;
+            /** @description Why the customer is exempt from tax, as recorded on the customer. Absent when they are not exempt. */
             tax_exempt_reason?: string;
             tax_status?: components["schemas"]["InvoiceTaxStatus"];
-            /** Format: date-time */
-            tax_deferred_at?: string | null;
+            /**
+             * Format: date-time
+             * @description When the tax calculation failed and the invoice was held as a draft. Absent unless tax is or was deferred.
+             */
+            tax_deferred_at?: string;
+            /**
+             * @description How many times tax was calculated again after the first try:
+             *     each `POST /v1/invoices/{id}/retry-tax` and each automatic retry.
+             *     Absent when 0.
+             */
             tax_retry_count?: number;
+            /** @description The provider's explanation of why tax could not be calculated, while `tax_status` is `pending`. Absent otherwise. */
             tax_pending_reason?: string;
             /**
              * @description Why tax could not be calculated, as a code. Set while
@@ -5902,9 +6317,9 @@ export interface components {
             tax_next_retry_at?: string;
             /**
              * Format: date-time
-             * @description When the provider's tax transaction was reversed after a void or
-             *     write-off, or found to need no reversal. Absent while the
-             *     reversal is not confirmed.
+             * @description When the provider's tax transaction was reversed after a void,
+             *     or found to need no reversal. Absent while the reversal is not
+             *     confirmed.
              */
             tax_reversed_at?: string;
             /**
@@ -5912,73 +6327,124 @@ export interface components {
              *     webhook event name of the cause: `payment.duplicate_charge`,
              *     `payment.amount_mismatch`, `payment.currency_mismatch` or
              *     `payment.received_on_voided_invoice`.
-             *     Only the latest one is kept.
+             *     Only the latest one is kept. Absent when there is none.
              */
             payment_anomaly_kind?: string;
-            /** @description The Stripe PaymentIntent of that unexpected payment. */
+            /** @description The Stripe PaymentIntent of that unexpected payment. Absent when there is none. */
             payment_anomaly_payment_intent_id?: string;
             /**
              * Format: int64
-             * @description The amount Stripe took in that unexpected payment.
+             * @description The amount Stripe took in that unexpected payment, in the currency's minor unit (cents for USD). Absent when there is none.
              */
             payment_anomaly_captured_cents?: number;
-            /** @description Brand of the saved card that paid the invoice. Absent when the card is unknown. */
+            /** @description Brand of the saved card that paid the invoice, as Stripe names it (for example `visa`). Absent when the card is unknown. */
             payment_card_brand?: string;
-            /** @description Last four digits of the saved card that paid the invoice. */
+            /** @description Last four digits of the saved card that paid the invoice. Absent when the card is unknown. */
             payment_card_last4?: string;
             attention?: components["schemas"]["Attention"];
             /**
-             * @description What an operator must know BEFORE recording an OFFLINE payment on a
-             *     written-off invoice — a consequence that will go unreconciled, NOT
-             *     a refusal. Absent when there is nothing to say.
+             * @description What you should know before you record an offline payment on a
+             *     written-off invoice: a consequence that will not reconcile on
+             *     its own, never a refusal. Sent only on `uncollectible` invoices,
+             *     by the same responses that carry `attention`. Absent when there
+             *     is nothing to say.
              */
             recovery_warning?: components["schemas"]["RecoveryWarning"];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The invoice total: `subtotal_cents` minus `discount_cents` plus
+             *     `tax_amount_cents`, in the currency's minor unit (cents for USD).
+             *     It is what the invoice charges before credit and payments, and it
+             *     does not change when the invoice is paid.
+             */
             total_amount_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description What the customer still owes, in the currency's minor unit (cents
+             *     for USD): the total, less customer credit applied
+             *     (`credits_applied_cents`), credit notes issued before payment,
+             *     and payments. It becomes 0 when the invoice is paid. A voided or
+             *     written-off invoice keeps the amount that was due.
+             */
             amount_due_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description What was paid by card or recorded as an offline payment, in the
+             *     currency's minor unit (cents for USD). Set when the invoice is
+             *     paid, to the amount that was due then; 0 before. Credit applied
+             *     is counted in `credits_applied_cents`, not here.
+             */
             amount_paid_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description How much of the customer's credit balance paid this invoice, in
+             *     the currency's minor unit (cents for USD). Credit is applied when
+             *     the invoice is collected (after finalize, or by
+             *     `POST /v1/invoices/{id}/collect`). A void gives it back to the
+             *     customer's balance.
+             */
             credits_applied_cents: number;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Start of the period the invoice bills (included). On a one-off
+             *     invoice created without a period, the time it was created.
+             */
             billing_period_start: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description End of the period the invoice bills (not included): the next
+             *     period's start. On a one-off invoice created without a period,
+             *     the time it was created.
+             */
             billing_period_end: string;
-            /** @description Human period string with the inclusive last covered day ("Jun 1, 2028 – Jun 30, 2028"), date-only in the invoice's billing timezone (ADR-058 / ADR-077). Computed on read; the raw billing_period_start/end stay half-open. Empty/omitted for one-off invoices with no period. */
+            /** @description The period as people read it, with its last day included, in `billing_timezone`: for example "Oct 1, 2026 – Oct 31, 2026". `billing_period_start` and `billing_period_end` stay the exact boundaries. Worked out when the invoice is read, so it comes with the same responses as `attention`. Absent when the period starts and ends at the same instant. */
             billing_period_display?: string;
-            /** @description IANA timezone the period boundaries are anchored in — the org billing timezone resolved and denormalized onto the invoice at issue (ADR-077). billing_period_display is rendered in this zone, so an issued invoice's dates stay fixed even if the org later changes its timezone. Empty only on legacy invoices created before the zone was stamped (cycle invoices before migration 0134, manual invoices before 2026-10-16). */
+            /** @description The IANA time zone the period boundaries are in: the account's billing time zone, copied onto the invoice when it was created. `billing_period_display`, the PDF and the hosted page show dates in it, so an issued invoice's dates stay the same if the account later changes its time zone. Absent only on invoices created before releases recorded it. */
             billing_timezone?: string;
             /**
-             * @description The buyer details this invoice was issued with (ADR-109), copied
-             *     when it left draft. The PDF, the hosted page and the dashboard
-             *     render an issued invoice from this copy, so a later edit to the
-             *     customer or billing profile does not change it. Absent on drafts
-             *     and on invoices issued before this field existed; those render
-             *     from the current customer details.
+             * @description The buyer details this invoice was issued with, copied when it
+             *     left draft. The PDF, the hosted page and the dashboard show an
+             *     issued invoice from this copy, so a later edit to the customer
+             *     or billing profile does not change it. Absent on drafts and on
+             *     invoices issued before this field existed; those show the
+             *     current customer details.
              */
             bill_to_snapshot?: components["schemas"]["DocumentBillTo"];
             /**
-             * @description The seller (company) details this invoice was issued with
-             *     (ADR-109), copied when it left draft. Absent on drafts and on
-             *     invoices issued before this field existed. Branding (logo, brand
-             *     color) is not part of it.
+             * @description Your company details this invoice was issued with, copied when it
+             *     left draft. Absent on drafts and on invoices issued before this
+             *     field existed. Branding (logo, brand color) is not part of it.
              */
             supplier_snapshot?: components["schemas"]["DocumentSupplier"];
             /**
              * Format: date-time
-             * @description Set when the invoice transitions out of draft.
+             * @description When the invoice was issued. Every invoice gets one when it is
+             *     created, drafts included. An invoice you create with
+             *     `POST /v1/invoices` gets a new one when it is finalized.
              */
-            issued_at?: string | null;
-            /** Format: date-time */
-            due_at?: string | null;
-            /** Format: date-time */
-            paid_at?: string | null;
-            /** Format: date-time */
-            voided_at?: string | null;
+            issued_at?: string;
             /**
              * Format: date-time
-             * @description When the invoice was marked uncollectible.
+             * @description When payment is due: `issued_at` plus `net_payment_term_days`
+             *     calendar days, counted in `billing_timezone`. Set with
+             *     `issued_at`. Hardcount does not charge on this date: it collects
+             *     right after finalize and retries on the dunning schedule. The
+             *     `overdue` filter of `GET /v1/invoices` uses it.
+             */
+            due_at?: string;
+            /**
+             * Format: date-time
+             * @description When the invoice was paid. Absent until it is paid.
+             */
+            paid_at?: string;
+            /**
+             * Format: date-time
+             * @description When the invoice was voided. Absent unless it is voided.
+             */
+            voided_at?: string;
+            /**
+             * Format: date-time
+             * @description When the invoice was written off as uncollectible. Absent unless it was.
              */
             uncollectible_at?: string;
             /**
@@ -5993,12 +6459,20 @@ export interface components {
             /**
              * @description True when the payment was recorded as made outside Hardcount, such as
              *     a bank transfer or cheque (`POST /v1/invoices/{id}/record-payment`,
-             *     or a payment recovery run resolved as `payment_recovered`). Such
+             *     or a dunning run resolved as `payment_recovered`). Such
              *     an invoice has no `stripe_payment_intent_id`, so there is no card
              *     to refund.
              */
             paid_out_of_band: boolean;
+            /**
+             * @description Stripe's message for the last failed charge, word for word (it is
+             *     written for the cardholder). Absent when no charge has failed.
+             */
             last_payment_error?: string;
+            /**
+             * @description True while the invoice is queued for the automatic charge, which
+             *     applies credit and charges the saved card. Absent when false.
+             */
             auto_charge_pending?: boolean;
             /**
              * Format: date-time
@@ -6018,52 +6492,68 @@ export interface components {
              * @description Stripe's PaymentIntent status the last time Hardcount checked it,
              *     word for word. For information only: `payment_status` is the
              *     invoice's payment state. Absent until Hardcount has checked. An
-             *     invoice checked by the Stripe Search sweep of releases before
-             *     this one may still show `search_not_found`,
-             *     `search_terminal_only` or `search_error`.
+             *     invoice checked by the Stripe Search sweep of earlier releases
+             *     may still show `search_not_found`, `search_terminal_only` or
+             *     `search_error`.
              */
             provider_payment_status?: string;
             /**
              * Format: date-time
              * @description When Hardcount last asked Stripe about this invoice's payment, whether
              *     or not Stripe answered: a read of `provider_payment_status`, or a
-             *     check of a charge whose result was lost.
+             *     check of a charge whose result was lost. Absent until then.
              */
             provider_synced_at?: string;
             /**
-             * @description Hosted-invoice-URL credential (Stripe-parity
-             *     `hosted_invoice_url`). Generated at finalize; drafts have an
-             *     empty token. Rotatable via `POST
-             *     /v1/invoices/{id}/rotate-public-token`.
+             * @description The token in the hosted invoice page's link, like Stripe's
+             *     `hosted_invoice_url`; `GET /v1/public/invoices/{token}` serves
+             *     the page's data. Anyone with it can view and pay the invoice, so
+             *     share it only with the customer. Created at finalize; absent on
+             *     drafts. Replace it with
+             *     `POST /v1/invoices/{id}/rotate-public-token`.
              */
             public_token?: string;
+            /** @description Days from `issued_at` to `due_at`. 0 means due on receipt. */
             net_payment_term_days: number;
+            /** @description A note you set when creating the invoice, printed on the PDF and the hosted page. Absent when empty. */
             memo?: string;
             /**
-             * @description The tenant's `invoice_footer` as it was when this invoice was
-             *     issued. Printed on the PDF and the hosted invoice page. Empty on
-             *     a draft.
+             * @description The account's invoice footer as it was when this invoice was
+             *     issued. Printed on the PDF and the hosted invoice page. Absent on
+             *     a draft and when no footer was set.
              */
             footer?: string;
+            /** @description Extra key-value data stored with the invoice. No API request sets it; it is absent when empty. */
             metadata?: {
                 [key: string]: unknown;
             };
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the invoice was created. For a customer on a test clock, the clock's time.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the invoice last changed.
+             */
             updated_at: string;
-            /** Format: date-time */
-            source_plan_changed_at?: string | null;
+            /**
+             * Format: date-time
+             * @description On an invoice for a change in the middle of a period
+             *     (`billing_reason` `subscription_update`), when the change took
+             *     effect. Absent on other invoices.
+             */
+            source_plan_changed_at?: string;
+            /** @description On an invoice for a change in the middle of a period, the subscription item that changed. Absent on other invoices. */
             source_subscription_item_id?: string;
             source_change_type?: components["schemas"]["ItemChangeType"];
             billing_reason?: components["schemas"]["InvoiceBillingReason"];
             /**
-             * @description Whether this invoice's domain timestamps (created/issued/due/paid)
-             *     were stamped on a test clock's simulated time rather than
-             *     wall-clock. Captured at write time (engine: the subscription is
-             *     clock-pinned; manual composer: the customer is clock-pinned). The
-             *     dashboard renders a "simulated" badge from this authoritative flag
-             *     instead of inferring it. Always false in live mode.
+             * @description True when the invoice's dates (created, issued, due, paid) are
+             *     on a test clock's time instead of the real time. Recorded when
+             *     the invoice is written: for a cycle invoice, its subscription is
+             *     on a test clock; for one you create, its customer is. Always
+             *     false in live mode.
              */
             is_simulated: boolean;
             /**
@@ -6075,44 +6565,93 @@ export interface components {
              */
             test_clock_id?: string;
         };
-        /** @description A single line on an invoice. */
+        /**
+         * @description One line on an invoice: a base fee, a usage charge or another
+         *     charge. Amounts are whole numbers in the currency's minor unit
+         *     (cents for USD). `GET /v1/invoices/{id}` returns the lines, and
+         *     `POST /v1/invoices/{id}/line-items` returns the line it added.
+         * @example {
+         *       "id": "hc_ili_dbj84baq3gpgqfoq5c4g",
+         *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "line_type": "usage",
+         *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *       "meter_unit": "tokens",
+         *       "description": "Tokens (tokens)",
+         *       "quantity": "12500000",
+         *       "unit_amount_decimal": "0.0003",
+         *       "amount_cents": 3750,
+         *       "tax_rate": 0,
+         *       "tax_amount_cents": 0,
+         *       "total_amount_cents": 3750,
+         *       "currency": "USD",
+         *       "pricing_mode": "per_unit",
+         *       "price_id": "hc_prc_dajr672q3gpgqfoq5c20",
+         *       "billing_period_start": "2026-10-01T00:00:00Z",
+         *       "billing_period_end": "2026-11-01T00:00:00Z",
+         *       "created_at": "2026-11-01T00:05:00Z"
+         *     }
+         */
         InvoiceLineItem: {
+            /** @description Unique identifier of the line, starting `hc_ili_`. */
             id: string;
+            /** @description The invoice the line is on. */
             invoice_id: string;
-            /** @description Owning tenant. Omitted when empty. */
+            /** @description The account the line belongs to. Absent when empty. */
             tenant_id?: string;
             line_type: components["schemas"]["InvoiceLineType"];
+            /** @description On a usage line, the meter that measured the usage. Absent on other lines. */
             meter_id?: string;
-            /** @description The meter's unit ("tokens", "seconds", …), stamped on usage lines at write time so invoice surfaces can apply the display-scale convention (token rates read "$3.00 / 1M tokens"). Empty on non-usage lines and on lines written before the 0173 backfill. */
+            /** @description On a usage line, the meter's unit ("tokens", "seconds", …), as it was when the line was written, so prices can be shown per unit the way the pricing pages show them (token rates read "$3.00 / 1M tokens"). Absent on other lines, and on usage lines written before releases recorded it. */
             meter_unit?: string;
+            /**
+             * @description The line's text as printed on the invoice. A base fee reads like
+             *     "Pro - base fee (qty 1)"; a usage line names the meter and its
+             *     unit, or the labels its price takes, like "Tokens (tokens)".
+             */
             description: string;
             /** @description The line's exact quantity as a decimal string, for example "3" or "1.5". Line amounts stay whole cents. */
             quantity: string;
-            /** @description The unit price in cents at full precision, for example "0.3" for $0.003. On a usage line priced `per_unit` it is that rate; on any other line it is amount_cents ÷ quantity. Line amounts and totals stay whole cents. */
+            /** @description The unit price, a decimal string of cents at full precision, for example "0.3" for $0.003. On a usage line priced `per_unit` it is that rate; on any other line it is `amount_cents` ÷ `quantity`. Line amounts and totals stay whole cents. */
             unit_amount_decimal: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The line's amount before tax, in the currency's minor unit (cents
+             *     for USD). With tax-inclusive prices, it is the net amount after
+             *     the tax is taken out.
+             */
             amount_cents: number;
             /**
              * Format: double
-             * @description Tax rate as a percent (18.50 = 18.50%), up to 4-decimal precision. ADR-042/043.
+             * @description Tax rate on the line as a percent, up to four decimal places (18.5 means 18.5%).
              */
             tax_rate: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Tax on the line, in the currency's minor unit (cents for USD).
+             */
             tax_amount_cents: number;
+            /** @description The tax jurisdiction the provider named for the line. Absent when none was given. */
             tax_jurisdiction?: string;
+            /** @description The product tax code the line was taxed under (for Stripe Tax, a `txcd_…` code). Absent when none was used. */
             tax_code?: string;
             /**
-             * @description Stripe-canonical structured `taxability_reason`
+             * @description Why the line was taxed as it was, in Stripe Tax's words
              *     (`standard_rated`, `reverse_charge`, `not_collecting`,
-             *     `customer_exempt`, `product_exempt`, `zero_rated`, etc.).
+             *     `customer_exempt`, `product_exempt`, `zero_rated` and others).
              *     `prepaid_credit_purchase` is Hardcount's own value, on a prepaid
              *     commit purchase line under the manual or Stripe Tax provider:
              *     the line is not taxed, and the usage the credit pays for is
-             *     taxed when invoiced. Otherwise empty for non-Stripe providers.
+             *     taxed when invoiced. Otherwise absent for providers other than
+             *     Stripe Tax.
              */
             tax_reason?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The line's amount plus its tax, in the currency's minor unit (cents for USD).
+             */
             total_amount_cents: number;
+            /** @description The line's currency, the same as the invoice's. */
             currency: string;
             /** @description On a usage line, the shape of its price: `per_unit`, `graduated` or `package`. Absent on other lines. */
             pricing_mode?: string;
@@ -6122,33 +6661,44 @@ export interface components {
             dimension_match?: {
                 [key: string]: string;
             };
-            /** Format: date-time */
-            billing_period_start?: string | null;
-            /** Format: date-time */
-            billing_period_end?: string | null;
+            /**
+             * Format: date-time
+             * @description Start of the time the line bills for (included). Absent on lines with no period of their own, such as lines you add to a draft.
+             */
+            billing_period_start?: string;
+            /**
+             * Format: date-time
+             * @description End of the time the line bills for (not included). Absent on lines with no period of their own.
+             */
+            billing_period_end?: string;
+            /** @description Extra key-value data stored with the line. No API request sets it; it is absent when empty. */
             metadata?: {
                 [key: string]: unknown;
             };
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the line was written.
+             */
             created_at: string;
             /**
              * Format: int64
-             * @description Marks the line as a prepaid-commit purchase (ADR-078): when the
-             *     invoice finalizes, a credit block of this many cents is granted
-             *     to the customer. May differ from the line price — discounted
-             *     commits sell $10k of credits for $9k. add_on lines on manual
-             *     invoices only, at most one per invoice. Absent on normal lines.
+             * @description Marks the line as a prepaid commit purchase: when the invoice is
+             *     finalized, the customer is granted a block of credit of this
+             *     many cents (in the invoice's currency). It may differ from the
+             *     line's price: a discounted commit sells $10,000 of credit for
+             *     $9,000. Only on `add_on` lines of invoices you create, at most
+             *     one per invoice. Absent on other lines.
              */
-            commit_granted_cents?: number | null;
+            commit_granted_cents?: number;
             /**
              * Format: date-time
-             * @description Expiry of the granted commit block. The credit can be drawn up
-             *     to and including this instant; a period invoice draws it when
-             *     its period ends at or before it. The dashboard sends the local
-             *     midnight after the picked day. Absent/null = the credits never
-             *     expire (the default).
+             * @description When the granted credit expires. The credit can be drawn up to
+             *     and including this instant; a period invoice draws it when its
+             *     period ends at or before it. The dashboard sends the local
+             *     midnight after the picked day. Absent when the credit never
+             *     expires (the default).
              */
-            commit_expires_at?: string | null;
+            commit_expires_at?: string;
         };
         /**
          * @description What you pay an upstream AI provider per token, for one provider,
@@ -6344,13 +6894,110 @@ export interface components {
             cost_rates_configured: boolean;
         };
         /**
-         * @description Response shape for `GET /v1/invoices/{id}`. The handler returns the
-         *     invoice and its line items as separate top-level keys (rather than
-         *     nesting `line_items` inside the invoice) so the client can render
-         *     the two arrays independently.
+         * @description What `GET /v1/invoices/{id}` returns: the invoice and its lines, as
+         *     two keys side by side.
+         * @example {
+         *       "invoice": {
+         *         "id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *         "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *         "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+         *         "invoice_number": "HC-000042",
+         *         "status": "paid",
+         *         "payment_status": "succeeded",
+         *         "currency": "USD",
+         *         "subtotal_cents": 8650,
+         *         "discount_cents": 0,
+         *         "tax_amount_cents": 0,
+         *         "tax_rate": 0,
+         *         "tax_provider": "manual",
+         *         "tax_status": "ok",
+         *         "payment_card_brand": "visa",
+         *         "payment_card_last4": "4242",
+         *         "total_amount_cents": 8650,
+         *         "amount_due_cents": 0,
+         *         "amount_paid_cents": 8650,
+         *         "credits_applied_cents": 0,
+         *         "billing_period_start": "2026-10-01T00:00:00Z",
+         *         "billing_period_end": "2026-11-01T00:00:00Z",
+         *         "billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+         *         "billing_timezone": "UTC",
+         *         "bill_to_snapshot": {
+         *           "display_name": "Acme Inc",
+         *           "legal_name": "Acme Incorporated",
+         *           "email": "billing@acme.example",
+         *           "address_line1": "100 Market Street",
+         *           "city": "San Francisco",
+         *           "state": "CA",
+         *           "postal_code": "94105",
+         *           "country": "US"
+         *         },
+         *         "supplier_snapshot": {
+         *           "name": "Example Labs Inc",
+         *           "email": "billing@examplelabs.example",
+         *           "address_line1": "1 Congress Avenue",
+         *           "city": "Austin",
+         *           "state": "TX",
+         *           "postal_code": "78701",
+         *           "country": "US"
+         *         },
+         *         "issued_at": "2026-11-01T00:05:00Z",
+         *         "due_at": "2026-12-01T00:05:00Z",
+         *         "paid_at": "2026-11-01T00:05:03Z",
+         *         "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *         "paid_out_of_band": false,
+         *         "public_token": "hc_pinv_9f2c4e1a7b3d5f6081a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f701",
+         *         "net_payment_term_days": 30,
+         *         "created_at": "2026-11-01T00:05:00Z",
+         *         "updated_at": "2026-11-01T00:05:03Z",
+         *         "billing_reason": "subscription_cycle",
+         *         "is_simulated": false
+         *       },
+         *       "line_items": [
+         *         {
+         *           "id": "hc_ili_dbj84baq3gpgqfoq5c51",
+         *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *           "line_type": "base_fee",
+         *           "description": "Pro - base fee (qty 1)",
+         *           "quantity": "1",
+         *           "unit_amount_decimal": "4900",
+         *           "amount_cents": 4900,
+         *           "tax_rate": 0,
+         *           "tax_amount_cents": 0,
+         *           "total_amount_cents": 4900,
+         *           "currency": "USD",
+         *           "billing_period_start": "2026-10-01T00:00:00Z",
+         *           "billing_period_end": "2026-11-01T00:00:00Z",
+         *           "created_at": "2026-11-01T00:05:00Z"
+         *         },
+         *         {
+         *           "id": "hc_ili_dbj84baq3gpgqfoq5c4g",
+         *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *           "line_type": "usage",
+         *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *           "meter_unit": "tokens",
+         *           "description": "Tokens (tokens)",
+         *           "quantity": "12500000",
+         *           "unit_amount_decimal": "0.0003",
+         *           "amount_cents": 3750,
+         *           "tax_rate": 0,
+         *           "tax_amount_cents": 0,
+         *           "total_amount_cents": 3750,
+         *           "currency": "USD",
+         *           "pricing_mode": "per_unit",
+         *           "price_id": "hc_prc_dajr672q3gpgqfoq5c20",
+         *           "billing_period_start": "2026-10-01T00:00:00Z",
+         *           "billing_period_end": "2026-11-01T00:00:00Z",
+         *           "created_at": "2026-11-01T00:05:00Z"
+         *         }
+         *       ]
+         *     }
          */
         InvoiceWithLineItems: {
             invoice: components["schemas"]["Invoice"];
+            /** @description The invoice's lines. An empty list when it has none. */
             line_items: components["schemas"]["InvoiceLineItem"][];
         };
         /**
@@ -8598,23 +9245,44 @@ export interface components {
             dunning_recovery_rate: number;
             mrr_movement: components["schemas"]["AnalyticsMrrMovementTotals"];
         };
-        /** @description A line to add to a draft invoice. */
+        /**
+         * @description A line to add to a draft invoice, with `POST /v1/invoices` or
+         *     `POST /v1/invoices/{id}/line-items`. Its amount is `quantity` ×
+         *     `unit_amount_cents`.
+         * @example {
+         *       "description": "Onboarding and setup",
+         *       "line_type": "add_on",
+         *       "quantity": 1,
+         *       "unit_amount_cents": 25000
+         *     }
+         */
         InvoiceLineItemInput: {
+            /** @description The text printed on the line. Must not be blank. */
             description: string;
             /**
-             * @description Defaults to `add_on`.
+             * @description What the line charges for. Defaults to `add_on`.
              * @enum {string}
              */
             line_type?: "base_fee" | "usage" | "add_on";
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description How many units, a whole number of 1 or more.
+             */
             quantity: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Price of one unit in the currency's minor unit (cents for USD),
+             *     a whole number of 1 or more. The line's amount is `quantity` ×
+             *     `unit_amount_cents`; a product too large for 64-bit cents is
+             *     refused.
+             */
             unit_amount_cents: number;
             /**
              * Format: int64
              * @description Makes this line a prepaid commit purchase: when the invoice is
              *     finalized, the customer gets this many cents of credit. Only on
-             *     `add_on` lines of manual invoices, at most one per invoice.
+             *     `add_on` lines of invoices you create, at most one per invoice.
+             *     At most 100,000,000 ($1,000,000).
              */
             commit_granted_cents?: number;
             /**
@@ -8627,34 +9295,91 @@ export interface components {
              */
             commit_expires_at?: string;
         };
+        /**
+         * @description The body of `POST /v1/invoices`, which creates a one-off draft invoice.
+         * @example {
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "currency": "USD",
+         *       "net_payment_term_days": 30,
+         *       "memo": "Onboarding for the Acme rollout",
+         *       "line_items": [
+         *         {
+         *           "description": "Onboarding and setup",
+         *           "line_type": "add_on",
+         *           "quantity": 1,
+         *           "unit_amount_cents": 25000
+         *         }
+         *       ]
+         *     }
+         */
         InvoiceCreateRequest: {
+            /** @description The customer to bill. Must exist in this account and mode. */
             customer_id: string;
             /** @description Optional. Must belong to `customer_id`. Leave out for a one-off invoice. The subscription's own cycle invoices are still billed, also for the same period. */
             subscription_id?: string;
             /**
-             * @description ISO 4217 code. Must be the customer's currency (see 409). Defaults to the billing-profile currency, then the live subscriptions' plan currency, then the tenant default.
+             * @description Uppercase or lowercase ISO 4217 code; it is stored uppercase. It
+             *     must be the customer's currency (see the 409). Defaults to the
+             *     billing profile's currency, then the plan currency of the
+             *     customer's live subscriptions, then the account's default
+             *     currency. Currencies with no minor unit (such as JPY) are
+             *     refused.
              * @example USD
              */
             currency?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Start of the period the invoice covers. Defaults to now.
+             */
             billing_period_start?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description End of the period the invoice covers. Defaults to now.
+             */
             billing_period_end?: string;
-            /** @description Days until the invoice is due. 0 means due on receipt. Defaults to the tenant's net payment terms. */
+            /** @description Days until the invoice is due. 0 means due on receipt. Defaults to the account's net payment terms. A negative value is stored as 0. */
             net_payment_term_days?: number;
+            /** @description A note printed on the invoice. Leading and trailing spaces are removed. */
             memo?: string;
-            /** @description Lines created in the same transaction as the invoice. */
+            /** @description Lines created in the same transaction as the invoice. Leave out to create an invoice with no lines and add them later. */
             line_items?: components["schemas"]["InvoiceLineItemInput"][];
         };
+        /**
+         * @description What `GET /v1/credit-notes/stats` returns: how many credit notes
+         *     there are in each status, and the money on the issued ones, per
+         *     currency. It covers every note in this mode.
+         * @example {
+         *       "draft_count": 1,
+         *       "issued_count": 3,
+         *       "voided_count": 0,
+         *       "by_currency": [
+         *         {
+         *           "currency": "USD",
+         *           "total_cents": 12500,
+         *           "refunded_cents": 3750,
+         *           "refund_pending_cents": 0,
+         *           "refund_failed_cents": 0,
+         *           "credited_cents": 8750,
+         *           "out_of_band_cents": 0
+         *         }
+         *       ]
+         *     }
+         */
         CreditNoteStats: {
+            /** @description Credit notes in `draft`. */
             draft_count: number;
+            /** @description Credit notes in `issued`. */
             issued_count: number;
+            /** @description Credit notes in `voided`. */
             voided_count: number;
             /**
-             * @description Money on issued notes, one entry per currency, the tenant's
-             *     default currency first. Empty when no note is issued.
+             * @description Money on issued notes, one entry per currency, the account's
+             *     default currency first. Empty when no note is issued. Amounts are
+             *     in the currency's minor unit (cents for USD) and never added
+             *     across currencies.
              */
             by_currency: {
+                /** @description The currency of this entry, uppercase. */
                 currency: string;
                 /**
                  * Format: int64
@@ -8690,44 +9415,150 @@ export interface components {
         };
         /**
          * @description A credit note reduces what a customer owes on an invoice, or gives
-         *     money back after it was paid. Its total is split three ways: refund
-         *     to the card (`refund_amount_cents`), credit to the customer's
+         *     money back after it was paid. On an unpaid invoice it lowers
+         *     `amount_due_cents`. On a paid invoice its total is split three ways:
+         *     refund to the card (`refund_amount_cents`), credit to the customer's
          *     balance (`credit_amount_cents`), and money returned outside Hardcount
-         *     (`out_of_band_amount_cents`).
+         *     (`out_of_band_amount_cents`). Amounts are whole numbers in the
+         *     currency's minor unit (cents for USD). The credit note routes and
+         *     `POST /v1/invoices/{id}/refund` return it.
+         * @example {
+         *       "id": "hc_cn_dbkrtc2q3gpgqfoq5c5g",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "credit_note_number": "CN-000003",
+         *       "status": "issued",
+         *       "reason": "requested_by_customer",
+         *       "subtotal_cents": 3750,
+         *       "tax_amount_cents": 0,
+         *       "total_cents": 3750,
+         *       "refund_amount_cents": 3750,
+         *       "credit_amount_cents": 0,
+         *       "out_of_band_amount_cents": 0,
+         *       "currency": "USD",
+         *       "issued_at": "2026-11-03T10:15:00Z",
+         *       "refund_status": "succeeded",
+         *       "stripe_refund_id": "re_3QHk2fLkdIwHu7ix1b2c3d4e",
+         *       "recorded_from_stripe": false,
+         *       "bill_to_snapshot": {
+         *         "display_name": "Acme Inc",
+         *         "legal_name": "Acme Incorporated",
+         *         "email": "billing@acme.example",
+         *         "address_line1": "100 Market Street",
+         *         "city": "San Francisco",
+         *         "state": "CA",
+         *         "postal_code": "94105",
+         *         "country": "US"
+         *       },
+         *       "supplier_snapshot": {
+         *         "name": "Example Labs Inc",
+         *         "email": "billing@examplelabs.example",
+         *         "address_line1": "1 Congress Avenue",
+         *         "city": "Austin",
+         *         "state": "TX",
+         *         "postal_code": "78701",
+         *         "country": "US"
+         *       },
+         *       "is_simulated": false,
+         *       "issue_pending": false,
+         *       "tax_reversal_pending": false,
+         *       "created_at": "2026-11-03T10:15:00Z",
+         *       "recorded_at": "2026-11-03T10:15:00Z",
+         *       "updated_at": "2026-11-03T10:15:02Z"
+         *     }
          */
         CreditNote: {
+            /** @description Unique identifier of the credit note, starting `hc_cn_`. */
             id: string;
+            /** @description The account the credit note belongs to. Absent when empty. */
             tenant_id?: string;
+            /** @description The invoice the note credits. */
             invoice_id: string;
+            /** @description The invoice's customer. */
             customer_id: string;
+            /**
+             * @description The number printed on the note: the account's credit note prefix
+             *     (default `CN`), a hyphen and a sequence padded to six digits, for
+             *     example `CN-000003`. Test mode and live mode count separately.
+             *     Set when the note is created, drafts included.
+             */
             credit_note_number: string;
-            /** @enum {string} */
+            /**
+             * @description `draft`: created but not applied; it can be issued or voided.
+             *     `issued`: applied to the invoice and final. `voided`: cancelled
+             *     before it was issued.
+             * @enum {string}
+             */
             status: "draft" | "issued" | "voided";
+            /**
+             * @description Why the note was made, as given when it was created. A refund
+             *     made with `POST /v1/invoices/{id}/refund` carries its refund
+             *     reason (`duplicate`, `fraudulent`, `requested_by_customer` or
+             *     `other`).
+             */
             reason: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The credited amount without its tax, in the currency's minor unit (cents for USD).
+             */
             subtotal_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The tax part of the credited amount, in the currency's minor
+             *     unit (cents for USD). It is the invoice's own tax share of the
+             *     note, so crediting half of an invoice reverses half of its tax.
+             */
             tax_amount_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The credited amount with tax, in the currency's minor unit (cents
+             *     for USD): the sum of the note's lines.
+             */
             total_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Part of the total refunded to the card that paid the invoice, in
+             *     the currency's minor unit (cents for USD). 0 on a note against an
+             *     unpaid invoice.
+             */
             refund_amount_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Part of the total added to the customer's credit balance, in the
+             *     currency's minor unit (cents for USD). 0 on a note against an
+             *     unpaid invoice.
+             */
             credit_amount_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Part of the total paid back outside Hardcount (a bank transfer,
+             *     cash), recorded for the books, in the currency's minor unit
+             *     (cents for USD). 0 on a note against an unpaid invoice.
+             */
             out_of_band_amount_cents: number;
             /**
              * Format: int64
-             * @description Prepaid commit credits this note retired. Absent on other notes.
+             * @description Prepaid commit credits this note retired, in the currency's minor unit (cents for USD). Absent on other notes.
              */
             commit_retired_cents?: number;
+            /** @description The invoice's currency, uppercase. */
             currency: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the note was issued. Absent until it is issued.
+             */
             issued_at?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the note was voided. Absent unless it is voided.
+             */
             voided_at?: string;
             /**
-             * @description The refund part's state at Stripe. `unknown`: Stripe gave no
+             * @description The refund part's state at Stripe. `none`: no refund was sent
+             *     (no refund part, or the note is not issued yet). `pending`:
+             *     Stripe has not finished it. `succeeded` and `failed`: Stripe's
+             *     answer. `unknown`: Stripe gave no
              *     clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
              *     a 429), so the customer may already be refunded. Don't refund it
              *     again in the Stripe Dashboard. Retry it with
@@ -8737,6 +9568,7 @@ export interface components {
              * @enum {string}
              */
             refund_status: "none" | "pending" | "succeeded" | "failed" | "unknown";
+            /** @description The Stripe refund (`re_…`) of the refund part. Absent until Stripe made one. */
             stripe_refund_id?: string;
             /**
              * @description True when the card refund is a refund made in Stripe outside
@@ -8747,34 +9579,66 @@ export interface components {
             recorded_from_stripe: boolean;
             bill_to_snapshot?: components["schemas"]["DocumentBillTo"];
             supplier_snapshot?: components["schemas"]["DocumentSupplier"];
-            /** @description Tax provider's reversal transaction, set when the note is issued. */
+            /**
+             * @description The tax provider's reversal transaction, set when the note is
+             *     issued against an invoice whose tax the provider recorded.
+             *     Absent otherwise.
+             */
             tax_transaction_id?: string;
-            /** @description True when `issued_at` is test-clock time. */
+            /** @description True when the note's dates are test-clock time (its invoice's customer is on a test clock). */
             is_simulated: boolean;
-            /** @description True on a draft that Hardcount will issue automatically. */
+            /** @description True on a draft that Hardcount will issue automatically, such as the credit for unused time after a plan downgrade. */
             issue_pending: boolean;
             /** @description True when the tax reversal failed and will be retried. */
             tax_reversal_pending: boolean;
+            /** @description Extra key-value data stored with the note. No API request sets it; it is absent when empty. */
             metadata?: {
                 [key: string]: unknown;
             };
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the note was created. For an invoice on a test clock, the clock's time.
+             */
             created_at: string;
             /**
              * Format: date-time
-             * @description Real-world time the row was written, when `created_at` is test-clock time.
+             * @description The real-world time the note was created. It differs from
+             *     `created_at` only when the invoice is on a test clock. Absent on
+             *     notes created before releases recorded it.
              */
             recorded_at?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the note last changed.
+             */
             updated_at: string;
         };
         /**
-         * @description One activity row in the words of the activity line standard
-         *     (ADR-128): a title with no values, the amount when the event moves
-         *     money, asks for it or cancels money owed, a problem line on failure
-         *     and warning rows, the meta line's parts and the actor, a tone, and
-         *     the event's time on the entity's calendar. `recorded_at` is the
-         *     real-world time, set only for an entity on a test clock.
+         * @description One activity row, with every word written by the server: a title
+         *     with no values, the amount when the event moves money, asks for it
+         *     or cancels money owed, a problem line on failure and warning rows,
+         *     the meta line's parts and the actor, a tone, and the event's time on
+         *     the entity's calendar. `recorded_at` is the real-world time, set
+         *     only for an entity on a test clock. The invoice payment timeline and
+         *     dunning run events carry it.
+         * @example {
+         *       "id": "lifecycle:paid:hc_inv_dbj84b2q3gpgqfoq5c40",
+         *       "kind": "invoice.paid",
+         *       "title": "Invoice paid",
+         *       "amount": {
+         *         "cents": 8650,
+         *         "currency": "USD"
+         *       },
+         *       "detail": [
+         *         [
+         *           {
+         *             "text": "Visa •••• 4242"
+         *           }
+         *         ]
+         *       ],
+         *       "tone": "success",
+         *       "occurred_at": "2026-11-01T00:05:03Z"
+         *     }
          */
         ActivityLine: {
             /**
@@ -8790,15 +9654,22 @@ export interface components {
              * @example invoice.voided
              */
             kind: string;
-            /** @example Payment failed */
+            /**
+             * @description What happened, in plain words with no values, for example "Payment failed".
+             * @example Payment failed
+             */
             title: string;
             amount?: components["schemas"]["ActivityMoney"];
-            /** @example Card declined: insufficient funds */
+            /**
+             * @description What went wrong or what it means, on failure and warning rows whose title does not say it all. Absent otherwise.
+             * @example Card declined: insufficient funds
+             */
             problem?: string;
             /**
              * @description The meta line before the actor. Each item is one segment, shown
              *     joined by " · "; a segment's parts read as one phrase, for
              *     example a money part followed by the text " refunded to card".
+             *     An empty list when there is nothing to add.
              */
             detail: components["schemas"]["ActivityPart"][][];
             actor?: components["schemas"]["ActivityActor"];
@@ -8809,30 +9680,70 @@ export interface components {
              * @enum {string}
              */
             tone: "neutral" | "success" | "warning" | "failure";
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the event happened, on the entity's calendar (the test clock's time for an entity on a test clock).
+             */
             occurred_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description The real-world time of the event. Set only for an entity on a test clock, when it is known.
+             */
             recorded_at?: string;
         };
+        /**
+         * @description An amount on an activity row. The dashboard formats it, for example as `$86.50`.
+         * @example {
+         *       "cents": 8650,
+         *       "currency": "USD"
+         *     }
+         */
         ActivityMoney: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The amount in the currency's minor unit (cents for USD).
+             */
             cents: number;
-            /** @example USD */
+            /**
+             * @description The currency, as an uppercase ISO 4217 code.
+             * @example USD
+             */
             currency: string;
         };
-        /** @description One piece of a meta segment. Exactly one field is set. */
+        /**
+         * @description One piece of a meta segment. Exactly one field is set.
+         * @example {
+         *       "text": "After 2 retries"
+         *     }
+         */
         ActivityPart: {
+            /** @description Plain words to show as they are. */
             text?: string;
             money?: components["schemas"]["ActivityMoney"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description A time to format for the reader, such as a retry date.
+             */
             time?: string;
             link?: components["schemas"]["ActivityLink"];
         };
-        /** @description An object the row's own data names, which still exists. */
+        /**
+         * @description An object the row's own data names, which still exists.
+         * @example {
+         *       "kind": "credit_note",
+         *       "id": "hc_cn_dbkrtc2q3gpgqfoq5c5g",
+         *       "label": "CN-000003"
+         *     }
+         */
         ActivityLink: {
-            /** @enum {string} */
+            /**
+             * @description The kind of object.
+             * @enum {string}
+             */
             kind: "invoice" | "credit_note" | "subscription";
+            /** @description The object's id, to fetch or link to it. */
             id: string;
+            /** @description The text to show for the link, such as a credit note number or a subscription's name. */
             label: string;
         };
         /**
@@ -8840,22 +9751,86 @@ export interface components {
          *     when they have no name), `customer` says where through `via`, and
          *     `automatic` is anything Hardcount did on its own. Absent when no fact
          *     written with the row names one.
+         * @example {
+         *       "kind": "person",
+         *       "name": "ops@examplelabs.example"
+         *     }
          */
         ActivityActor: {
-            /** @enum {string} */
+            /**
+             * @description The kind of actor.
+             * @enum {string}
+             */
             kind: "person" | "api_key" | "customer" | "automatic";
+            /** @description The person's name or email, the API key's name, or the customer's display name. Absent for `automatic` and when no name is known. */
             name?: string;
-            /** @enum {string} */
+            /**
+             * @description Where the customer acted. Set only for `customer`.
+             * @enum {string}
+             */
             via?: "payment_page" | "portal";
         };
+        /**
+         * @description One row of an invoice's activity timeline
+         *     (`GET /v1/invoices/{id}/payment-timeline`). `line` is the row in the
+         *     activity line's words; `description`, `detail`, `error`, `status`,
+         *     `amount_cents` and `currency` repeat it for clients that read the
+         *     older fields.
+         * @example {
+         *       "id": "lifecycle:paid:hc_inv_dbj84b2q3gpgqfoq5c40",
+         *       "timestamp": "2026-11-01T00:05:03Z",
+         *       "source": "lifecycle",
+         *       "event_type": "invoice.paid",
+         *       "status": "succeeded",
+         *       "description": "Invoice paid",
+         *       "detail": "Visa •••• 4242",
+         *       "amount_cents": 8650,
+         *       "currency": "USD",
+         *       "line": {
+         *         "id": "lifecycle:paid:hc_inv_dbj84b2q3gpgqfoq5c40",
+         *         "kind": "invoice.paid",
+         *         "title": "Invoice paid",
+         *         "amount": {
+         *           "cents": 8650,
+         *           "currency": "USD"
+         *         },
+         *         "detail": [
+         *           [
+         *             {
+         *               "text": "Visa •••• 4242"
+         *             }
+         *           ]
+         *         ],
+         *         "tone": "success",
+         *         "occurred_at": "2026-11-01T00:05:03Z"
+         *       }
+         *     }
+         */
         InvoiceTimelineEvent: {
             /** @description Stable key for the row. */
             id: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the event happened, to the second: on the invoice's
+             *     calendar (the test clock's time for an invoice on a test clock),
+             *     and at Stripe's own time for disputes and refunds made in Stripe.
+             */
             timestamp: string;
-            /** @enum {string} */
+            /**
+             * @description Where the row comes from: `lifecycle` (created, finalized, paid,
+             *     voided, written off), `payment` (a charge attempt), `dunning` (a
+             *     payment retry run), `email` (an email to the customer),
+             *     `credit_note`, `dispute` or `stripe_refund` (a refund made in
+             *     Stripe outside Hardcount).
+             * @enum {string}
+             */
             source: "lifecycle" | "payment" | "dunning" | "email" | "credit_note" | "dispute" | "stripe_refund";
-            /** @example invoice.finalized */
+            /**
+             * @description Machine name of the event, for example `invoice.finalized`,
+             *     `charge_attempt.failed`, `retry_attempted`, `credit_note.issued`
+             *     or `payment.dispute_opened`.
+             * @example invoice.finalized
+             */
             event_type: string;
             /**
              * @description The line's tone in older words, read by the dashboard's dot.
@@ -8864,20 +9839,26 @@ export interface components {
             status: "neutral" | "succeeded" | "warning" | "failed";
             /** @description The line's title. */
             description: string;
-            /** @description The line's meta line as text, its actor last, for example "Visa •••• 4242 · After 2 retries". */
+            /** @description The line's meta line as text, its actor last, for example "Visa •••• 4242 · After 2 retries". Absent when empty. */
             detail?: string;
-            /** @description The line's problem. */
+            /** @description The line's problem. Absent when there is none. */
             error?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The line's amount, in the currency's minor unit (cents for USD). Absent when the row has no amount.
+             */
             amount_cents?: number;
+            /** @description The currency of `amount_cents`. Absent when the row has no amount. */
             currency?: string;
+            /** @description The Stripe PaymentIntent the row is about, on payment, dunning, dispute and refund rows that name one. Absent otherwise. */
             payment_intent_id?: string;
+            /** @description On dunning rows, the run's retry count at the event; on the paid row, the retries that ran before payment. Absent when 0. */
             attempt_count?: number;
-            /** @description True when `timestamp` is test-clock time. */
+            /** @description True when `timestamp` is test-clock time. Absent when false. */
             is_simulated?: boolean;
             /**
              * Format: date-time
-             * @description Real-world time of a row whose `timestamp` is test-clock time.
+             * @description Real-world time of a row whose `timestamp` is test-clock time. Absent otherwise.
              */
             recorded_at?: string;
             line: components["schemas"]["ActivityLine"];
@@ -8889,13 +9870,37 @@ export interface components {
          *     newest of those events showed it, whatever order they arrived in.
          *     Hardcount records and reports a dispute, and nothing else: the invoice
          *     stays paid and no money moves.
+         * @example {
+         *       "id": "hc_dsp_6f1c0a7e9b2d4c8e1a3b5d7f",
+         *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *       "stripe_dispute_id": "du_1QHk2fLkdIwHu7ix2c3d4e5f",
+         *       "stripe_charge_id": "ch_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *       "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *       "status": "needs_response",
+         *       "reason": "fraudulent",
+         *       "amount_cents": 8650,
+         *       "currency": "USD",
+         *       "evidence_due_by": "2026-11-25T23:59:59Z",
+         *       "opened_at": "2026-11-10T08:30:00Z",
+         *       "livemode": false,
+         *       "created_at": "2026-11-10T08:30:04Z",
+         *       "updated_at": "2026-11-10T08:30:04Z"
+         *     }
          */
         InvoiceDispute: {
-            /** @example hc_dsp_6f1c0a7e9b2d4c8e1a3b5d7f */
+            /**
+             * @description Unique identifier of the dispute record, `hc_dsp_` and 24 hex characters.
+             * @example hc_dsp_6f1c0a7e9b2d4c8e1a3b5d7f
+             */
             id: string;
+            /** @description The invoice whose payment is disputed. */
             invoice_id: string;
-            /** @example du_1MtJUT2eZvKYlo2CNaw2HvEv */
+            /**
+             * @description Stripe's dispute id (`du_…`).
+             * @example du_1MtJUT2eZvKYlo2CNaw2HvEv
+             */
             stripe_dispute_id: string;
+            /** @description The disputed Stripe charge (`ch_…`). Absent when Stripe did not send it. */
             stripe_charge_id?: string;
             /** @description The disputed payment. */
             stripe_payment_intent_id: string;
@@ -8907,14 +9912,17 @@ export interface components {
              * @enum {string}
              */
             status: "warning_needs_response" | "warning_under_review" | "warning_closed" | "needs_response" | "under_review" | "won" | "lost" | "prevented";
-            /** @description The reason the cardholder gave, for example `fraudulent`. */
+            /** @description The reason the cardholder gave, for example `fraudulent`. Absent when Stripe gave none. */
             reason?: string;
             /**
              * Format: int64
-             * @description The disputed amount. It can differ from the payment.
+             * @description The disputed amount, in the currency's minor unit (cents for USD). It can differ from the payment.
              */
             amount_cents: number;
-            /** @example USD */
+            /**
+             * @description The dispute's currency, uppercase.
+             * @example USD
+             */
             currency: string;
             /**
              * Format: date-time
@@ -8931,13 +9939,45 @@ export interface components {
              * @description When Stripe closed it. Absent while it is open.
              */
             closed_at?: string;
+            /** @description True for a live-mode payment, false for test mode. */
             livemode: boolean;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When Hardcount first recorded the dispute.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When Hardcount last updated the record from a Stripe event.
+             */
             updated_at: string;
         };
+        /**
+         * @description What `GET /v1/invoices/{id}/disputes` returns, one page of the invoice's disputes, oldest first.
+         * @example {
+         *       "data": [
+         *         {
+         *           "id": "hc_dsp_6f1c0a7e9b2d4c8e1a3b5d7f",
+         *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *           "stripe_dispute_id": "du_1QHk2fLkdIwHu7ix2c3d4e5f",
+         *           "stripe_charge_id": "ch_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *           "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *           "status": "needs_response",
+         *           "reason": "fraudulent",
+         *           "amount_cents": 8650,
+         *           "currency": "USD",
+         *           "evidence_due_by": "2026-11-25T23:59:59Z",
+         *           "opened_at": "2026-11-10T08:30:00Z",
+         *           "livemode": false,
+         *           "created_at": "2026-11-10T08:30:04Z",
+         *           "updated_at": "2026-11-10T08:30:04Z"
+         *         }
+         *       ],
+         *       "total": 1
+         *     }
+         */
         InvoiceDisputeList: {
+            /** @description The disputes on this page. An empty list when the invoice has none. */
             data: components["schemas"]["InvoiceDispute"][];
             total: components["schemas"]["ListTotal"];
         };
@@ -8950,26 +9990,57 @@ export interface components {
          *     refunds are never listed here. `outcome` is what Hardcount did when
          *     it first saw the refund, and only the operator changes it after
          *     that.
+         * @example {
+         *       "id": "hc_srf_6f1c0a7e9b2d4c8e1a3b5d7f",
+         *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *       "stripe_refund_id": "re_3QHk2fLkdIwHu7ix3d4e5f6a",
+         *       "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *       "stripe_charge_id": "ch_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *       "amount_cents": 2000,
+         *       "currency": "USD",
+         *       "status": "succeeded",
+         *       "reason": "requested_by_customer",
+         *       "outcome": "needs_review",
+         *       "review_reason": "seen_late",
+         *       "refund_created_at": "2026-11-05T16:20:00Z",
+         *       "livemode": false,
+         *       "created_at": "2026-11-07T09:00:12Z",
+         *       "updated_at": "2026-11-07T09:00:12Z"
+         *     }
          */
         InvoiceStripeRefund: {
-            /** @example hc_srf_6f1c0a7e9b2d4c8e1a3b5d7f */
+            /**
+             * @description Unique identifier of the refund record, `hc_srf_` and 24 hex characters.
+             * @example hc_srf_6f1c0a7e9b2d4c8e1a3b5d7f
+             */
             id: string;
+            /** @description The invoice whose payment was refunded. */
             invoice_id: string;
-            /** @example re_3MtJUT2eZvKYlo2C1Fq6Lk8M */
+            /**
+             * @description Stripe's refund id (`re_…`).
+             * @example re_3MtJUT2eZvKYlo2C1Fq6Lk8M
+             */
             stripe_refund_id: string;
             /** @description The refunded payment. */
             stripe_payment_intent_id: string;
+            /** @description The refunded Stripe charge (`ch_…`). Absent when Stripe did not send it. */
             stripe_charge_id?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The refunded amount, in the currency's minor unit (cents for USD).
+             */
             amount_cents: number;
-            /** @example USD */
+            /**
+             * @description The refund's currency, uppercase.
+             * @example USD
+             */
             currency: string;
             /**
              * @description Stripe's refund status, as Stripe sends it.
              * @enum {string}
              */
             status: "pending" | "requires_action" | "succeeded" | "failed" | "canceled";
-            /** @description Stripe's refund reason, for example `requested_by_customer`. Absent when none was given. */
+            /** @description Stripe's refund reason (`duplicate`, `fraudulent` or `requested_by_customer`). Absent when none was given. */
             reason?: string;
             /** @description Why Stripe could not make the refund, once it failed. */
             failure_reason?: string;
@@ -9001,32 +10072,146 @@ export interface components {
             review_reason?: "invoice_not_paid" | "currency_mismatch" | "prepaid_commit" | "seen_late" | "credit_note_refund_failed" | "exceeds_card_refundable" | "exceeds_creditable";
             /** @description The credit note that records the refund, when `outcome` is `credit_note`. */
             credit_note_id?: string;
+            /** @description The note given when the refund was dismissed. Absent unless `outcome` is `dismissed`. */
             dismissed_note?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the refund was dismissed. Absent unless `outcome` is `dismissed`.
+             */
             dismissed_at?: string;
             /**
              * Format: date-time
              * @description When Stripe made the refund.
              */
             refund_created_at: string;
+            /** @description True for a live-mode payment, false for test mode. */
             livemode: boolean;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When Hardcount first recorded the refund.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When Hardcount last updated the record.
+             */
             updated_at: string;
         };
+        /**
+         * @description What `GET /v1/invoices/{id}/stripe-refunds` returns, one page of the refunds made in Stripe on the invoice's payments, oldest first.
+         * @example {
+         *       "data": [
+         *         {
+         *           "id": "hc_srf_6f1c0a7e9b2d4c8e1a3b5d7f",
+         *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *           "stripe_refund_id": "re_3QHk2fLkdIwHu7ix3d4e5f6a",
+         *           "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *           "stripe_charge_id": "ch_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *           "amount_cents": 2000,
+         *           "currency": "USD",
+         *           "status": "succeeded",
+         *           "reason": "requested_by_customer",
+         *           "outcome": "needs_review",
+         *           "review_reason": "seen_late",
+         *           "refund_created_at": "2026-11-05T16:20:00Z",
+         *           "livemode": false,
+         *           "created_at": "2026-11-07T09:00:12Z",
+         *           "updated_at": "2026-11-07T09:00:12Z"
+         *         }
+         *       ],
+         *       "total": 1
+         *     }
+         */
         InvoiceStripeRefundList: {
+            /** @description The refunds on this page. An empty list when the invoice has none. */
             data: components["schemas"]["InvoiceStripeRefund"][];
             total: components["schemas"]["ListTotal"];
         };
         /**
          * @description The `data` of the outbound webhook event `payment.refunded_in_stripe`
-         *     (docs/webhooks.md): the invoice the refunded payment belongs to, as
-         *     it stood (a refund never changes it), and the refund as the API
-         *     returns it. Sent once per refund, when its outcome is decided: when
-         *     Hardcount first sees it, or, for a refund first seen in flight, when
-         *     it succeeds, fails or is canceled. Saved in the same transaction that
-         *     records it. A later change to the refund sends nothing more.
+         *     (docs/api/webhook-events.md): the invoice the refunded payment
+         *     belongs to, as it stood (a refund never changes it), and the refund
+         *     as the API returns it. The invoice leaves out `attention`,
+         *     `recovery_warning`, `billing_period_display` and `test_clock_id`,
+         *     which are worked out per read. Sent once per refund, when its
+         *     outcome is decided: when Hardcount first sees it, or, for a refund
+         *     first seen in flight, when it succeeds, fails or is canceled. Saved
+         *     in the same transaction that records it. A later change to the
+         *     refund sends nothing more.
+         * @example {
+         *       "invoice": {
+         *         "id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *         "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *         "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+         *         "invoice_number": "HC-000042",
+         *         "status": "paid",
+         *         "payment_status": "succeeded",
+         *         "currency": "USD",
+         *         "subtotal_cents": 8650,
+         *         "discount_cents": 0,
+         *         "tax_amount_cents": 0,
+         *         "tax_rate": 0,
+         *         "tax_provider": "manual",
+         *         "tax_status": "ok",
+         *         "payment_card_brand": "visa",
+         *         "payment_card_last4": "4242",
+         *         "total_amount_cents": 8650,
+         *         "amount_due_cents": 0,
+         *         "amount_paid_cents": 8650,
+         *         "credits_applied_cents": 0,
+         *         "billing_period_start": "2026-10-01T00:00:00Z",
+         *         "billing_period_end": "2026-11-01T00:00:00Z",
+         *         "billing_timezone": "UTC",
+         *         "bill_to_snapshot": {
+         *           "display_name": "Acme Inc",
+         *           "legal_name": "Acme Incorporated",
+         *           "email": "billing@acme.example",
+         *           "address_line1": "100 Market Street",
+         *           "city": "San Francisco",
+         *           "state": "CA",
+         *           "postal_code": "94105",
+         *           "country": "US"
+         *         },
+         *         "supplier_snapshot": {
+         *           "name": "Example Labs Inc",
+         *           "email": "billing@examplelabs.example",
+         *           "address_line1": "1 Congress Avenue",
+         *           "city": "Austin",
+         *           "state": "TX",
+         *           "postal_code": "78701",
+         *           "country": "US"
+         *         },
+         *         "issued_at": "2026-11-01T00:05:00Z",
+         *         "due_at": "2026-12-01T00:05:00Z",
+         *         "paid_at": "2026-11-01T00:05:03Z",
+         *         "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *         "paid_out_of_band": false,
+         *         "public_token": "hc_pinv_9f2c4e1a7b3d5f6081a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f701",
+         *         "net_payment_term_days": 30,
+         *         "created_at": "2026-11-01T00:05:00Z",
+         *         "updated_at": "2026-11-01T00:05:03Z",
+         *         "billing_reason": "subscription_cycle",
+         *         "is_simulated": false
+         *       },
+         *       "refund": {
+         *         "id": "hc_srf_6f1c0a7e9b2d4c8e1a3b5d7f",
+         *         "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *         "stripe_refund_id": "re_3QHk2fLkdIwHu7ix3d4e5f6a",
+         *         "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *         "stripe_charge_id": "ch_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *         "amount_cents": 2000,
+         *         "currency": "USD",
+         *         "status": "succeeded",
+         *         "reason": "requested_by_customer",
+         *         "outcome": "needs_review",
+         *         "review_reason": "seen_late",
+         *         "refund_created_at": "2026-11-05T16:20:00Z",
+         *         "livemode": false,
+         *         "created_at": "2026-11-07T09:00:12Z",
+         *         "updated_at": "2026-11-07T09:00:12Z"
+         *       }
+         *     }
          */
         StripeRefundWebhookEventData: {
             invoice: components["schemas"]["Invoice"];
@@ -9034,34 +10219,237 @@ export interface components {
         };
         /**
          * @description The `data` of the outbound webhook events `payment.dispute_opened`
-         *     and `payment.dispute_closed` (docs/webhooks.md): the invoice the
-         *     disputed payment paid and the dispute, each as the API returns it.
-         *     Both are saved in the same transaction that records the dispute, so
-         *     a crash cannot drop them. `payment.dispute_opened` is sent once per
-         *     dispute, when Hardcount first records it; if the first event Hardcount
-         *     receives is already the close, both are sent, and both carry the
-         *     closed status and `closed_at`. Their delivery order is not
-         *     guaranteed. `payment.dispute_closed` is sent when the dispute
-         *     reaches a closed status it did not have: `won`, `lost`,
+         *     and `payment.dispute_closed` (docs/api/webhook-events.md): the
+         *     invoice the disputed payment paid and the dispute, each as the API
+         *     returns it. The invoice leaves out `attention`, `recovery_warning`,
+         *     `billing_period_display` and `test_clock_id`, which are worked out
+         *     per read. Both events are saved in the same transaction that records
+         *     the dispute, so a crash cannot drop them. `payment.dispute_opened`
+         *     is sent once per dispute, when Hardcount first records it; if the
+         *     first event Hardcount receives is already the close, both are sent,
+         *     and both carry the closed status and `closed_at`. Their delivery
+         *     order is not guaranteed. `payment.dispute_closed` is sent when the
+         *     dispute reaches a closed status it did not have: `won`, `lost`,
          *     `warning_closed` or `prevented`. A lost dispute that Stripe later
          *     marks won sends it again.
+         * @example {
+         *       "invoice": {
+         *         "id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *         "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *         "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+         *         "invoice_number": "HC-000042",
+         *         "status": "paid",
+         *         "payment_status": "succeeded",
+         *         "currency": "USD",
+         *         "subtotal_cents": 8650,
+         *         "discount_cents": 0,
+         *         "tax_amount_cents": 0,
+         *         "tax_rate": 0,
+         *         "tax_provider": "manual",
+         *         "tax_status": "ok",
+         *         "payment_card_brand": "visa",
+         *         "payment_card_last4": "4242",
+         *         "total_amount_cents": 8650,
+         *         "amount_due_cents": 0,
+         *         "amount_paid_cents": 8650,
+         *         "credits_applied_cents": 0,
+         *         "billing_period_start": "2026-10-01T00:00:00Z",
+         *         "billing_period_end": "2026-11-01T00:00:00Z",
+         *         "billing_timezone": "UTC",
+         *         "bill_to_snapshot": {
+         *           "display_name": "Acme Inc",
+         *           "legal_name": "Acme Incorporated",
+         *           "email": "billing@acme.example",
+         *           "address_line1": "100 Market Street",
+         *           "city": "San Francisco",
+         *           "state": "CA",
+         *           "postal_code": "94105",
+         *           "country": "US"
+         *         },
+         *         "supplier_snapshot": {
+         *           "name": "Example Labs Inc",
+         *           "email": "billing@examplelabs.example",
+         *           "address_line1": "1 Congress Avenue",
+         *           "city": "Austin",
+         *           "state": "TX",
+         *           "postal_code": "78701",
+         *           "country": "US"
+         *         },
+         *         "issued_at": "2026-11-01T00:05:00Z",
+         *         "due_at": "2026-12-01T00:05:00Z",
+         *         "paid_at": "2026-11-01T00:05:03Z",
+         *         "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *         "paid_out_of_band": false,
+         *         "public_token": "hc_pinv_9f2c4e1a7b3d5f6081a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f701",
+         *         "net_payment_term_days": 30,
+         *         "created_at": "2026-11-01T00:05:00Z",
+         *         "updated_at": "2026-11-01T00:05:03Z",
+         *         "billing_reason": "subscription_cycle",
+         *         "is_simulated": false
+         *       },
+         *       "dispute": {
+         *         "id": "hc_dsp_6f1c0a7e9b2d4c8e1a3b5d7f",
+         *         "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *         "stripe_dispute_id": "du_1QHk2fLkdIwHu7ix2c3d4e5f",
+         *         "stripe_charge_id": "ch_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *         "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+         *         "status": "needs_response",
+         *         "reason": "fraudulent",
+         *         "amount_cents": 8650,
+         *         "currency": "USD",
+         *         "evidence_due_by": "2026-11-25T23:59:59Z",
+         *         "opened_at": "2026-11-10T08:30:00Z",
+         *         "livemode": false,
+         *         "created_at": "2026-11-10T08:30:04Z",
+         *         "updated_at": "2026-11-10T08:30:04Z"
+         *       }
+         *     }
          */
         DisputeWebhookEventData: {
             invoice: components["schemas"]["Invoice"];
             dispute: components["schemas"]["InvoiceDispute"];
         };
+        /**
+         * @description What `GET /v1/invoices/{id}/payment-timeline` returns: the invoice's
+         *     activity, oldest first, and which sources could not be read.
+         * @example {
+         *       "events": [
+         *         {
+         *           "id": "lifecycle:created:hc_inv_dbj84b2q3gpgqfoq5c40",
+         *           "timestamp": "2026-11-01T00:05:00Z",
+         *           "source": "lifecycle",
+         *           "event_type": "invoice.created",
+         *           "status": "neutral",
+         *           "description": "Invoice created",
+         *           "detail": "Renewal for Oct 1, 2026 – Oct 31, 2026 · Acme Pro",
+         *           "line": {
+         *             "id": "lifecycle:created:hc_inv_dbj84b2q3gpgqfoq5c40",
+         *             "kind": "invoice.created",
+         *             "title": "Invoice created",
+         *             "detail": [
+         *               [
+         *                 {
+         *                   "text": "Renewal for Oct 1, 2026 – Oct 31, 2026"
+         *                 }
+         *               ],
+         *               [
+         *                 {
+         *                   "link": {
+         *                     "kind": "subscription",
+         *                     "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+         *                     "label": "Acme Pro"
+         *                   }
+         *                 }
+         *               ]
+         *             ],
+         *             "tone": "neutral",
+         *             "occurred_at": "2026-11-01T00:05:00Z"
+         *           }
+         *         },
+         *         {
+         *           "id": "lifecycle:finalized:hc_inv_dbj84b2q3gpgqfoq5c40",
+         *           "timestamp": "2026-11-01T00:05:00Z",
+         *           "source": "lifecycle",
+         *           "event_type": "invoice.finalized",
+         *           "status": "neutral",
+         *           "description": "Invoice finalized",
+         *           "detail": "Automatic",
+         *           "amount_cents": 8650,
+         *           "currency": "USD",
+         *           "line": {
+         *             "id": "lifecycle:finalized:hc_inv_dbj84b2q3gpgqfoq5c40",
+         *             "kind": "invoice.finalized",
+         *             "title": "Invoice finalized",
+         *             "amount": {
+         *               "cents": 8650,
+         *               "currency": "USD"
+         *             },
+         *             "detail": [],
+         *             "actor": {
+         *               "kind": "automatic"
+         *             },
+         *             "tone": "neutral",
+         *             "occurred_at": "2026-11-01T00:05:00Z"
+         *           }
+         *         },
+         *         {
+         *           "id": "lifecycle:paid:hc_inv_dbj84b2q3gpgqfoq5c40",
+         *           "timestamp": "2026-11-01T00:05:03Z",
+         *           "source": "lifecycle",
+         *           "event_type": "invoice.paid",
+         *           "status": "succeeded",
+         *           "description": "Invoice paid",
+         *           "detail": "Visa •••• 4242",
+         *           "amount_cents": 8650,
+         *           "currency": "USD",
+         *           "line": {
+         *             "id": "lifecycle:paid:hc_inv_dbj84b2q3gpgqfoq5c40",
+         *             "kind": "invoice.paid",
+         *             "title": "Invoice paid",
+         *             "amount": {
+         *               "cents": 8650,
+         *               "currency": "USD"
+         *             },
+         *             "detail": [
+         *               [
+         *                 {
+         *                   "text": "Visa •••• 4242"
+         *                 }
+         *               ]
+         *             ],
+         *             "tone": "success",
+         *             "occurred_at": "2026-11-01T00:05:03Z"
+         *           }
+         *         }
+         *       ],
+         *       "degraded": [],
+         *       "truncated": false
+         *     }
+         */
         InvoicePaymentTimeline: {
+            /** @description The rows, oldest first. An empty list for a draft. */
             events: components["schemas"]["InvoiceTimelineEvent"][];
             /** @description Sources that could not be read, so their rows are missing. */
             degraded: ("audit" | "credit_notes" | "emails" | "dunning" | "charge_attempts" | "disputes" | "stripe_refunds")[];
             /** @description True when the credit-note source hit its limit of 100 rows. */
             truncated: boolean;
         };
+        /**
+         * @description A dunning run: the payment retries for one unpaid invoice. Dunning
+         *     is retrying a failed or missing payment on a schedule (the
+         *     invoice's dunning policy), and running the policy's final action
+         *     when the retries run out. Each invoice has at most one run.
+         * @example {
+         *       "id": "hc_drun_dc7m3m2q3gpgqfoq5c70",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "policy_id": "hc_dpol_dajqj1aq3gpgqfoq5c6g",
+         *       "state": "active",
+         *       "reason": "payment_failed",
+         *       "attempt_count": 1,
+         *       "last_attempt_at": "2026-11-04T00:05:03Z",
+         *       "next_action_at": "2026-11-08T00:05:03Z",
+         *       "paused": false,
+         *       "created_at": "2026-11-01T00:05:03Z",
+         *       "updated_at": "2026-11-04T00:05:04Z",
+         *       "invoice_number": "HC-000042",
+         *       "invoice_amount_due_cents": 8650,
+         *       "invoice_currency": "USD",
+         *       "max_retry_attempts": 3
+         *     }
+         */
         DunningRun: {
+            /** @description Unique identifier of the run, starting `hc_drun_`. */
             id: string;
+            /** @description The account the run belongs to. Absent when empty. */
             tenant_id?: string;
+            /** @description The invoice the run collects. */
             invoice_id: string;
+            /** @description The invoice's customer. Absent when not recorded. */
             customer_id?: string;
+            /** @description The dunning policy whose schedule and final action the run follows. */
             policy_id: string;
             /**
              * @description `active`: retries are running. `escalated`: retries ran out
@@ -9070,14 +10458,31 @@ export interface components {
              * @enum {string}
              */
             state: "active" | "escalated" | "resolved";
+            /**
+             * @description Why the run started: `payment_failed` (a charge was declined or
+             *     refused) or `no_payment_method` (the customer had no card, so
+             *     nothing was charged). Absent when not recorded.
+             */
             reason?: string;
+            /** @description How many retries have run so far. */
             attempt_count: number;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the last retry ran. Absent before the first retry.
+             */
             last_attempt_at?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the run acts next: the next retry, or the final action once
+             *     the retries are used. Absent when the run has ended.
+             */
             next_action_at?: string;
+            /** @description True while the run is paused, so its retries are skipped. No API route pauses a run. */
             paused: boolean;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the run ended, resolved or escalated. Absent while it is active.
+             */
             resolved_at?: string;
             /**
              * @description How the run ended, set when it is resolved. Exception:
@@ -9086,29 +10491,36 @@ export interface components {
              *     will be retried at `next_action_at`. `amount_below_minimum`: a
              *     charge on the invoice was refused by Stripe because the amount is
              *     below its minimum charge, so the run ended without its final
-             *     action.
+             *     action. Absent while the run is active.
              * @enum {string}
              */
             resolution?: "payment_recovered" | "invoice_voided" | "invoice_not_collectible" | "retries_exhausted" | "action_failed" | "amount_below_minimum";
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the run started: when the payment failed or the collection
+             *     found no card. For an invoice on a test clock, the clock's time.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the run last changed.
+             */
             updated_at: string;
-            /** @description Filled in on list responses. */
+            /** @description The invoice's number. Filled in on list responses. */
             invoice_number?: string;
             /**
              * Format: int64
-             * @description Filled in on list responses.
+             * @description What the invoice still owes, in the currency's minor unit (cents for USD). Filled in on list responses; absent when 0.
              */
             invoice_amount_due_cents?: number;
-            /** @description Filled in on list responses. */
+            /** @description The invoice's currency. Filled in on list responses. */
             invoice_currency?: string;
             /**
              * Format: date-time
              * @description The test clock's current time, when the customer is on a test clock. Filled in on list responses.
              */
             effective_now?: string;
-            /** @description Filled in on list responses. */
+            /** @description The customer's test clock, when they are on one. Filled in on list responses. */
             test_clock_id?: string;
             /**
              * @description How many retries the run's policy makes: the length of its
@@ -9119,34 +10531,179 @@ export interface components {
              */
             max_retry_attempts?: number;
         };
+        /**
+         * @description One step in a dunning run's history, as `GET /v1/dunning/runs/{id}` returns it, oldest first.
+         * @example {
+         *       "id": "hc_devt_dc7m3maq3gpgqfoq5c7g",
+         *       "run_id": "hc_drun_dc7m3m2q3gpgqfoq5c70",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *       "event_type": "retry_attempted",
+         *       "state": "active",
+         *       "reason": "payment failed: Your card has insufficient funds.",
+         *       "attempt_count": 1,
+         *       "metadata": {
+         *         "payment_intent_id": "pi_3QHk2fLkdIwHu7ix4e5f6a7b"
+         *       },
+         *       "created_at": "2026-11-04T00:05:03Z",
+         *       "recorded_at": "2026-11-04T00:05:03Z",
+         *       "line": {
+         *         "id": "dunning:hc_devt_dc7m3maq3gpgqfoq5c7g",
+         *         "kind": "payment_recovery.retry_failed",
+         *         "title": "Payment retry 1 failed",
+         *         "amount": {
+         *           "cents": 8650,
+         *           "currency": "USD"
+         *         },
+         *         "problem": "Card declined: insufficient funds",
+         *         "detail": [],
+         *         "actor": {
+         *           "kind": "automatic"
+         *         },
+         *         "tone": "failure",
+         *         "occurred_at": "2026-11-04T00:05:03Z"
+         *       }
+         *     }
+         */
         DunningRunEvent: {
+            /** @description Unique identifier of the event, starting `hc_devt_`. */
             id: string;
+            /** @description The run the event belongs to. */
             run_id: string;
+            /** @description The account the event belongs to. Absent when empty. */
             tenant_id?: string;
+            /** @description The run's invoice. */
             invoice_id: string;
-            /** @enum {string} */
+            /**
+             * @description `dunning_started`: the run began. `retry_attempted`: a retry ran
+             *     (or was skipped; see `reason`). `escalated`: the retries ran out
+             *     and the final action ran. `resolved`: the run ended.
+             * @enum {string}
+             */
             event_type: "dunning_started" | "retry_attempted" | "escalated" | "resolved";
-            /** @enum {string} */
+            /**
+             * @description The run's state after this event.
+             * @enum {string}
+             */
             state: "active" | "escalated" | "resolved";
+            /**
+             * @description Detail that depends on the event. On `dunning_started`, why the
+             *     run started (`payment_failed` or `no_payment_method`). On
+             *     `retry_attempted`, the outcome: `succeeded`, the decline text
+             *     (for example `payment failed: Your card has insufficient
+             *     funds.`), or a reason nothing was charged (`no_payment_method`,
+             *     `card_refused`, `needs_confirmation`, `amount_below_minimum`,
+             *     `payment_processing`). On `escalated`, what the final action did,
+             *     joined with `+` (`subscription_paused`, `subscription_canceled`,
+             *     `invoice_marked_uncollectible`), empty when it changed nothing. On
+             *     `resolved`, what ended the run, such as `payment_recovered` or
+             *     `invoice_voided`. Absent when empty.
+             */
             reason?: string;
+            /** @description The run's retry count at this event. */
             attempt_count: number;
+            /** @description Extra facts about the event, such as `payment_intent_id` on a retry that charged. Absent when empty. */
             metadata?: {
                 [key: string]: unknown;
             };
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the event happened. For an invoice on a test clock, the clock's time.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description The real-world time the event was written. Absent on events written before releases recorded it.
+             */
             recorded_at?: string;
             /**
-             * @description The event in the words of the activity line standard (ADR-128):
-             *     the line the invoice's payment timeline shows for the same
-             *     event, without that timeline's folds. Absent when the run's
-             *     invoice could not be read (`degraded` names `invoice`).
+             * @description The event in the words of the activity line: the line the
+             *     invoice's payment timeline shows for the same event, without
+             *     that timeline's folds. Absent when the run's invoice could not
+             *     be read (`degraded` names `invoice`).
              */
             line?: components["schemas"]["ActivityLine"];
         };
+        /**
+         * @description What `GET /v1/dunning/runs/{id}` returns, the run and its event history.
+         * @example {
+         *       "run": {
+         *         "id": "hc_drun_dc7m3m2q3gpgqfoq5c70",
+         *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *         "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *         "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *         "policy_id": "hc_dpol_dajqj1aq3gpgqfoq5c6g",
+         *         "state": "active",
+         *         "reason": "payment_failed",
+         *         "attempt_count": 1,
+         *         "last_attempt_at": "2026-11-04T00:05:03Z",
+         *         "next_action_at": "2026-11-08T00:05:03Z",
+         *         "paused": false,
+         *         "created_at": "2026-11-01T00:05:03Z",
+         *         "updated_at": "2026-11-04T00:05:04Z"
+         *       },
+         *       "events": [
+         *         {
+         *           "id": "hc_devt_dc7m3maq3gpgqfoq5c6v",
+         *           "run_id": "hc_drun_dc7m3m2q3gpgqfoq5c70",
+         *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *           "event_type": "dunning_started",
+         *           "state": "active",
+         *           "reason": "payment_failed",
+         *           "attempt_count": 0,
+         *           "created_at": "2026-11-01T00:05:03Z",
+         *           "recorded_at": "2026-11-01T00:05:03Z",
+         *           "line": {
+         *             "id": "dunning:hc_devt_dc7m3maq3gpgqfoq5c6v",
+         *             "kind": "payment_recovery.started",
+         *             "title": "Payment recovery started",
+         *             "detail": [],
+         *             "actor": {
+         *               "kind": "automatic"
+         *             },
+         *             "tone": "neutral",
+         *             "occurred_at": "2026-11-01T00:05:03Z"
+         *           }
+         *         },
+         *         {
+         *           "id": "hc_devt_dc7m3maq3gpgqfoq5c7g",
+         *           "run_id": "hc_drun_dc7m3m2q3gpgqfoq5c70",
+         *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *           "event_type": "retry_attempted",
+         *           "state": "active",
+         *           "reason": "payment failed: Your card has insufficient funds.",
+         *           "attempt_count": 1,
+         *           "metadata": {
+         *             "payment_intent_id": "pi_3QHk2fLkdIwHu7ix4e5f6a7b"
+         *           },
+         *           "created_at": "2026-11-04T00:05:03Z",
+         *           "recorded_at": "2026-11-04T00:05:03Z",
+         *           "line": {
+         *             "id": "dunning:hc_devt_dc7m3maq3gpgqfoq5c7g",
+         *             "kind": "payment_recovery.retry_failed",
+         *             "title": "Payment retry 1 failed",
+         *             "amount": {
+         *               "cents": 8650,
+         *               "currency": "USD"
+         *             },
+         *             "problem": "Card declined: insufficient funds",
+         *             "detail": [],
+         *             "actor": {
+         *               "kind": "automatic"
+         *             },
+         *             "tone": "failure",
+         *             "occurred_at": "2026-11-04T00:05:03Z"
+         *           }
+         *         }
+         *       ],
+         *       "degraded": []
+         *     }
+         */
         DunningRunDetail: {
             run: components["schemas"]["DunningRun"];
+            /** @description The run's events, oldest first. Empty when the history could not be read (`degraded` names `events`). */
             events: components["schemas"]["DunningRunEvent"][];
             /**
              * @description Sources that could not be read. `events`: the event history, so
@@ -9158,8 +10715,29 @@ export interface components {
              */
             degraded: ("events" | "invoice" | "emails" | "charge_attempts" | "audit")[];
         };
+        /**
+         * @description What `GET /v1/dunning/stats` returns: dunning runs counted by state,
+         *     and the amount still due on the open ones. It covers every run in
+         *     this mode. Amounts are in the currency's minor unit (cents for USD).
+         * @example {
+         *       "active_count": 2,
+         *       "escalated_count": 1,
+         *       "resolved_count": 14,
+         *       "recovered_count": 11,
+         *       "at_risk_cents": 25950,
+         *       "currency": "USD",
+         *       "at_risk_by_currency": [
+         *         {
+         *           "currency": "USD",
+         *           "amount_cents": 25950
+         *         }
+         *       ]
+         *     }
+         */
         DunningStats: {
+            /** @description Runs in `active`, still retrying. */
             active_count: number;
+            /** @description Runs in `escalated`, whose retries ran out. */
             escalated_count: number;
             /** @description Resolved runs, whatever closed them (a payment, a void or a write-off). */
             resolved_count: number;
@@ -9167,10 +10745,10 @@ export interface components {
             recovered_count: number;
             /**
              * Format: int64
-             * @description Amount due on active and escalated runs whose invoice is still open, in `currency` only. A voided or written-off invoice is not at risk.
+             * @description Amount due on active and escalated runs whose invoice is still open, in `currency` only, in its minor unit (cents for USD). A voided or written-off invoice is not at risk.
              */
             at_risk_cents: number;
-            /** @description The tenant's default currency. */
+            /** @description The account's default currency, the one `at_risk_cents` counts. */
             currency: string;
             /**
              * @description Amount due on active and escalated runs whose invoice is still
@@ -9178,8 +10756,12 @@ export interface components {
              *     largest amount. Empty when no run is at risk.
              */
             at_risk_by_currency: {
+                /** @description The currency of this entry, uppercase. */
                 currency: string;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description The amount at risk in this currency, in its minor unit (cents for USD).
+                 */
                 amount_cents: number;
             }[];
         };
@@ -9266,7 +10848,26 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * @description The body of `POST /v1/dunning/policies` and
+         *     `PATCH /v1/dunning/policies/{id}`. A PATCH replaces every setting,
+         *     so send the full policy. `id`, `tenant_id`, `is_default`, `seeded`,
+         *     `created_at` and `updated_at` are set by the server; sending one is
+         *     refused with 422.
+         * @example {
+         *       "name": "Strict retries",
+         *       "enabled": true,
+         *       "retry_days": [
+         *         2,
+         *         3,
+         *         5
+         *       ],
+         *       "final_subscription_action": "cancel",
+         *       "final_invoice_action": "mark_uncollectible"
+         *     }
+         */
         DunningPolicyInput: {
+            /** @description A name for the policy, up to 255 characters. Defaults to empty. */
             name?: string;
             /**
              * @description A disabled policy starts no dunning.
@@ -9275,11 +10876,12 @@ export interface components {
             enabled: boolean;
             /**
              * @description Days to wait before each retry. The first counts from the failed
-             *     payment, or, with no card on file, from the collection that found
-             *     none. Each later one counts from the retry before it: `[3, 4, 7]`
-             *     retries on day 3, 7 and 14. The number of retries is the length
-             *     of the list. A day is 24 hours. `retry_schedule`,
-             *     `max_retry_attempts` and `grace_period_days` are refused.
+             *     payment or the collection that found no card. Each later one
+             *     counts from the retry before it: `[3, 4, 7]` retries on day 3, 7
+             *     and 14. The number of retries is the length of the list, 1 to
+             *     15, and each wait is a whole number of days from 1 to 30. A day
+             *     is 24 hours. `retry_schedule`, `max_retry_attempts`,
+             *     `grace_period_days` and `final_action` are refused.
              * @example [
              *       3,
              *       4,
@@ -9296,23 +10898,56 @@ export interface components {
              *     `subscription.canceled` with `canceled_by: dunning`. It does
              *     nothing if the subscription is already canceled. If a scheduled
              *     cancel was already due, that cancel happens instead, and its
-             *     event says `canceled_by: schedule`.
+             *     event says `canceled_by: schedule`. `none` leaves it alone. An
+             *     invoice with no subscription is not affected.
              * @default pause
              * @enum {string}
              */
             final_subscription_action: "none" | "pause" | "cancel";
             /**
              * @description What happens to the invoice when retries run out.
+             *     `mark_uncollectible` writes it off as bad debt; `none` leaves it
+             *     open and due.
              * @default none
              * @enum {string}
              */
             final_invoice_action: "none" | "mark_uncollectible";
         };
+        /**
+         * @description A dunning policy: how failed or missing payments are retried, and
+         *     what happens when the retries run out. Every account starts with one
+         *     policy per mode, "Default retries" (retries on day 3, 7 and 14, then
+         *     no final action), as the default. Customers without an assigned
+         *     policy use the default.
+         * @example {
+         *       "id": "hc_dpol_dajqj1aq3gpgqfoq5c6g",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "name": "Default retries",
+         *       "enabled": true,
+         *       "is_default": true,
+         *       "seeded": true,
+         *       "retry_days": [
+         *         3,
+         *         4,
+         *         7
+         *       ],
+         *       "final_subscription_action": "none",
+         *       "final_invoice_action": "none",
+         *       "created_at": "2026-09-15T12:00:00Z",
+         *       "updated_at": "2026-09-15T12:00:00Z"
+         *     }
+         */
         DunningPolicy: {
-            /** @example hc_dpol_1a2b3c4d5e6f7890 */
+            /**
+             * @description Unique identifier of the policy, starting `hc_dpol_`.
+             * @example hc_dpol_dajqj1aq3gpgqfoq5c6g
+             */
             id: string;
+            /** @description The account the policy belongs to. Absent when empty. */
             tenant_id?: string;
+            /** @description The policy's name. Can be empty. */
             name: string;
+            /** @description Whether the policy starts dunning. A disabled policy starts no runs. */
             enabled: boolean;
             /** @description Customers without an assigned policy use the default. */
             is_default: boolean;
@@ -9333,15 +10968,48 @@ export interface components {
              *     ]
              */
             retry_days: number[];
-            /** @enum {string} */
+            /**
+             * @description What happens to the subscription when retries run out.
+             * @enum {string}
+             */
             final_subscription_action: "none" | "pause" | "cancel";
-            /** @enum {string} */
+            /**
+             * @description What happens to the invoice when retries run out.
+             * @enum {string}
+             */
             final_invoice_action: "none" | "mark_uncollectible";
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the policy was created.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the policy last changed.
+             */
             updated_at: string;
         };
+        /**
+         * @description A dunning policy as `GET /v1/dunning/policies` lists it, with how many customers are assigned to it.
+         * @example {
+         *       "id": "hc_dpol_dajqj1aq3gpgqfoq5c6g",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "name": "Default retries",
+         *       "enabled": true,
+         *       "is_default": true,
+         *       "seeded": true,
+         *       "retry_days": [
+         *         3,
+         *         4,
+         *         7
+         *       ],
+         *       "final_subscription_action": "none",
+         *       "final_invoice_action": "none",
+         *       "created_at": "2026-09-15T12:00:00Z",
+         *       "updated_at": "2026-09-15T12:00:00Z",
+         *       "assigned_customers": 0
+         *     }
+         */
         DunningPolicyListItem: components["schemas"]["DunningPolicy"] & {
             /** @description Customers explicitly assigned to this policy. Customers using it only as the default are not counted. */
             assigned_customers: number;
@@ -10193,89 +11861,229 @@ export interface components {
             replay_of_event_id: string | null;
         };
         /**
-         * @description What the hosted invoice page shows. It leaves out internal ids and
+         * @description What the hosted invoice page shows, from
+         *     `GET /v1/public/invoices/{token}`. It leaves out internal ids and
          *     Stripe details. `bill_to` and the company details in `branding`
-         *     come from the same place as the invoice PDF's.
+         *     come from the same place as the invoice PDF's: an issued invoice
+         *     shows the details it was issued with. Amounts are whole numbers in
+         *     the currency's minor unit (cents for USD).
+         * @example {
+         *       "invoice": {
+         *         "invoice_number": "HC-000042",
+         *         "status": "finalized",
+         *         "payment_status": "pending",
+         *         "currency": "USD",
+         *         "subtotal_cents": 8650,
+         *         "discount_cents": 0,
+         *         "tax_amount_cents": 0,
+         *         "tax_rate": 0,
+         *         "total_amount_cents": 8650,
+         *         "amount_due_cents": 8650,
+         *         "amount_paid_cents": 0,
+         *         "credits_applied_cents": 0,
+         *         "issued_at": "2026-11-01T00:05:00Z",
+         *         "due_at": "2026-12-01T00:05:00Z",
+         *         "billing_timezone": "UTC"
+         *       },
+         *       "line_items": [
+         *         {
+         *           "description": "Pro - base fee (qty 1)",
+         *           "quantity": "1",
+         *           "unit_amount_decimal": "4900",
+         *           "amount_cents": 4900,
+         *           "total_amount_cents": 4900,
+         *           "currency": "USD"
+         *         },
+         *         {
+         *           "description": "Tokens (tokens)",
+         *           "quantity": "12500000",
+         *           "unit_amount_decimal": "0.0003",
+         *           "meter_unit": "tokens",
+         *           "amount_cents": 3750,
+         *           "total_amount_cents": 3750,
+         *           "currency": "USD"
+         *         }
+         *       ],
+         *       "bill_to": {
+         *         "name": "Acme Incorporated",
+         *         "email": "billing@acme.example",
+         *         "address_line1": "100 Market Street",
+         *         "city": "San Francisco",
+         *         "state": "CA",
+         *         "postal_code": "94105",
+         *         "country": "US"
+         *       },
+         *       "branding": {
+         *         "company_name": "Example Labs Inc",
+         *         "company_email": "billing@examplelabs.example",
+         *         "company_address_line1": "1 Congress Avenue",
+         *         "company_city": "Austin",
+         *         "company_state": "TX",
+         *         "company_postal_code": "78701",
+         *         "company_country": "US",
+         *         "logo_url": "https://examplelabs.example/logo.png",
+         *         "brand_color": "#4F46E5",
+         *         "support_url": "https://examplelabs.example/support"
+         *       },
+         *       "credit_notes": [],
+         *       "pay_enabled": true,
+         *       "livemode": false
+         *     }
          */
         HostedInvoice: {
+            /** @description The invoice's number, status, totals and dates. */
             invoice: {
+                /** @description The number printed on the invoice, for example `HC-000042`. */
                 invoice_number: string;
                 status: components["schemas"]["InvoiceStatus"];
                 payment_status: components["schemas"]["InvoicePaymentStatus"];
+                /** @description The invoice's currency, as an uppercase ISO 4217 code. */
                 currency: string;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description The sum of the line amounts before discount and tax, in the currency's minor unit (cents for USD).
+                 */
                 subtotal_cents: number;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description Discount taken off the subtotal, in the currency's minor unit (cents for USD).
+                 */
                 discount_cents: number;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description Tax on the invoice, in the currency's minor unit (cents for USD).
+                 */
                 tax_amount_cents: number;
                 /** @description Tax rate in percent, for example `18` for 18%. */
                 tax_rate: number;
+                /** @description The tax's label, such as `VAT`. Absent when there is none. */
                 tax_name?: string;
+                /** @description True when reverse charge applies and the customer accounts for the tax. Absent when false. */
                 tax_reverse_charge?: boolean;
+                /** @description Why the customer is exempt from tax. Absent when they are not. */
                 tax_exempt_reason?: string;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description The invoice total with tax, in the currency's minor unit (cents for USD).
+                 */
                 total_amount_cents: number;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description What is still owed, in the currency's minor unit (cents for USD). 0 once paid.
+                 */
                 amount_due_cents: number;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description What was paid, in the currency's minor unit (cents for USD).
+                 */
                 amount_paid_cents: number;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description Customer credit used to pay the invoice, in the currency's minor unit (cents for USD).
+                 */
                 credits_applied_cents: number;
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description When the invoice was issued.
+                 */
                 issued_at?: string;
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description When payment is due.
+                 */
                 due_at?: string;
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description When the invoice was paid. Absent until it is paid.
+                 */
                 paid_at?: string;
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description When the invoice was voided. Absent unless it is voided.
+                 */
                 voided_at?: string;
                 /**
                  * @description The time zone to show the dates in, so they match the PDF.
                  * @example Asia/Kolkata
                  */
                 billing_timezone?: string;
+                /** @description The invoice's note. Absent when empty. */
                 memo?: string;
-                /** @description The footer this invoice was issued with. */
+                /** @description The footer this invoice was issued with. Absent when there is none. */
                 footer?: string;
             };
+            /** @description The invoice's lines. */
             line_items: {
+                /** @description The line's text. */
                 description: string;
                 /** @description The exact quantity as a decimal string, for example `3` or `1.5`. */
                 quantity: string;
-                /** @description The unit price in cents at full precision, for example `0.3` for $0.003. */
+                /** @description The unit price, a decimal string of cents at full precision, for example `0.3` for $0.003. */
                 unit_amount_decimal: string;
+                /** @description On a usage line, the meter's unit, such as `tokens`. Absent on other lines. */
                 meter_unit?: string;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description The line's amount before tax, in the currency's minor unit (cents for USD).
+                 */
                 amount_cents: number;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description Tax on the line, in the currency's minor unit (cents for USD). Absent when 0.
+                 */
                 tax_amount_cents?: number;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description The line's amount plus its tax, in the currency's minor unit (cents for USD).
+                 */
                 total_amount_cents: number;
+                /** @description The line's currency. */
                 currency: string;
             }[];
+            /** @description The buyer as the PDF prints it. Each field is absent when empty. */
             bill_to: {
+                /** @description The billing profile's legal name, or the customer's display name when it has none. */
                 name?: string;
+                /** @description The customer's email address. */
                 email?: string;
+                /** @description First address line. */
                 address_line1?: string;
+                /** @description Second address line. */
                 address_line2?: string;
+                /** @description City. */
                 city?: string;
+                /** @description State or region. */
                 state?: string;
+                /** @description Postal code. */
                 postal_code?: string;
+                /** @description Country, as a two-letter code. */
                 country?: string;
             };
+            /** @description The seller's company details and branding. Each field is absent when empty. */
             branding: {
+                /** @description The seller's company name. */
                 company_name?: string;
+                /** @description The seller's contact email. */
                 company_email?: string;
+                /** @description The seller's phone number. */
                 company_phone?: string;
+                /** @description First line of the seller's address. */
                 company_address_line1?: string;
+                /** @description Second line of the seller's address. */
                 company_address_line2?: string;
+                /** @description City of the seller's address. */
                 company_city?: string;
+                /** @description State or region of the seller's address. */
                 company_state?: string;
+                /** @description Postal code of the seller's address. */
                 company_postal_code?: string;
+                /** @description Country of the seller's address. */
                 company_country?: string;
+                /** @description The seller's logo, from the current account settings. */
                 logo_url?: string;
+                /** @description The seller's brand color, as the account settings store it (for example `#4F46E5`). */
                 brand_color?: string;
+                /** @description Where the customer can get help, from the current account settings. */
                 support_url?: string;
             };
             /**
@@ -10288,15 +12096,29 @@ export interface components {
              *     an amount settled another way. Empty when there are none.
              */
             credit_notes: {
+                /** @description The credit note's number, for example `CN-000003`. */
                 number: string;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description The credit note's total, in the currency's minor unit (cents for USD).
+                 */
                 amount_cents: number;
+                /** @description True when the note was issued before payment and lowered what is owed. */
                 before_payment: boolean;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description For a note after payment, the card refund once Stripe confirmed it. Absent when 0.
+                 */
                 refunded_cents?: number;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description For a note after payment, the credit added to the customer's balance. Absent when 0.
+                 */
                 credited_cents?: number;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description For a note after payment, the amount paid back another way. Absent when 0.
+                 */
                 settled_outside_cents?: number;
             }[];
             /**
@@ -10687,31 +12509,103 @@ export interface components {
             had_errors: boolean;
         };
         /**
-         * @description A dry-run invoice built from the usage recorded so far. Nothing is
-         *     saved.
+         * @description A dry-run invoice built from the usage recorded so far, from
+         *     `POST /v1/invoices/create_preview`. Nothing is saved. Amounts are
+         *     whole numbers in the currency's minor unit (cents for USD), and
+         *     tax is not included.
+         * @example {
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+         *       "plan_name": "Pro",
+         *       "billing_period_start": "2026-10-01T00:00:00Z",
+         *       "billing_period_end": "2026-11-01T00:00:00Z",
+         *       "lines": [
+         *         {
+         *           "line_type": "base_fee",
+         *           "description": "Pro - base fee (qty 1)",
+         *           "currency": "USD",
+         *           "quantity": "1",
+         *           "unit_amount_cents": 4900,
+         *           "amount_cents": 4900
+         *         },
+         *         {
+         *           "line_type": "usage",
+         *           "description": "Tokens (tokens)",
+         *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *           "meter_unit": "tokens",
+         *           "price_id": "hc_prc_dajr672q3gpgqfoq5c20",
+         *           "currency": "USD",
+         *           "quantity": "12500000",
+         *           "unit_amount_cents": 0,
+         *           "amount_cents": 3750,
+         *           "pricing_mode": "per_unit"
+         *         }
+         *       ],
+         *       "totals": [
+         *         {
+         *           "currency": "USD",
+         *           "amount_cents": 8650
+         *         }
+         *       ],
+         *       "warnings": [],
+         *       "generated_at": "2026-10-31T18:00:00Z"
+         *     }
          */
         InvoicePreview: {
+            /** @description The customer the preview is for. */
             customer_id: string;
+            /** @description The subscription the preview bills. */
             subscription_id: string;
             /** @description The names of the subscription's plans, comma-separated. */
             plan_name: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Start of the window the preview covers (included).
+             */
             billing_period_start: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description End of the window the preview covers (not included).
+             */
             billing_period_end: string;
+            /** @description The lines the invoice would have. An empty list when nothing would be billed. */
             lines: components["schemas"]["InvoicePreviewLine"][];
             /** @description One total per currency on the lines. */
             totals: components["schemas"]["InvoicePreviewTotal"][];
-            /** @description Ways the real invoice can differ from this preview. */
+            /** @description Ways the real invoice can differ from this preview, in plain words. An empty list when there are none. */
             warnings: string[];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the preview was built. For a customer on a test clock, the clock's time.
+             */
             generated_at: string;
         };
+        /**
+         * @description One line of an invoice preview.
+         * @example {
+         *       "line_type": "usage",
+         *       "description": "Tokens (tokens)",
+         *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *       "meter_unit": "tokens",
+         *       "price_id": "hc_prc_dajr672q3gpgqfoq5c20",
+         *       "currency": "USD",
+         *       "quantity": "12500000",
+         *       "unit_amount_cents": 0,
+         *       "amount_cents": 3750,
+         *       "pricing_mode": "per_unit"
+         *     }
+         */
         InvoicePreviewLine: {
-            /** @enum {string} */
+            /**
+             * @description `base_fee`: a plan's flat fee. `usage`: metered usage priced by a plan price.
+             * @enum {string}
+             */
             line_type: "base_fee" | "usage";
+            /** @description The text the invoice line would carry. */
             description: string;
+            /** @description On a usage line, the meter that measured the usage. Absent on base fee lines. */
             meter_id?: string;
+            /** @description On a usage line, the meter's unit, such as `tokens`. Absent on base fee lines. */
             meter_unit?: string;
             /** @description On a usage line, the plan price that priced it. */
             price_id?: string;
@@ -10719,19 +12613,43 @@ export interface components {
             dimension_match?: {
                 [key: string]: string;
             };
+            /** @description The line's currency, the plan's. */
             currency: string;
             /** @description Exact quantity as a decimal string. */
             quantity: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Unit price in whole cents of the currency's minor unit. On a base
+             *     fee line it is the plan's base fee per unit; on a usage line it is
+             *     `amount_cents` ÷ `quantity` rounded to a whole cent, so a sub-cent
+             *     rate shows 0.
+             */
             unit_amount_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The line's amount, in the currency's minor unit (cents for USD).
+             */
             amount_cents: number;
-            /** @enum {string} */
+            /**
+             * @description On a usage line, the shape of its price. Absent on base fee lines.
+             * @enum {string}
+             */
             pricing_mode?: "per_unit" | "graduated" | "package";
         };
+        /**
+         * @description The total of an invoice preview's lines in one currency.
+         * @example {
+         *       "currency": "USD",
+         *       "amount_cents": 8650
+         *     }
+         */
         InvoicePreviewTotal: {
+            /** @description The currency, uppercase. */
             currency: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The sum of the lines in this currency, in its minor unit (cents for USD), before tax.
+             */
             amount_cents: number;
         };
     };
@@ -12981,6 +14899,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The invoice's public token (`hc_pinv_…`), from the hosted invoice link. */
                 token: string;
             };
             cookie?: never;
@@ -12993,6 +14912,70 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "invoice": {
+                     *         "invoice_number": "HC-000042",
+                     *         "status": "finalized",
+                     *         "payment_status": "pending",
+                     *         "currency": "USD",
+                     *         "subtotal_cents": 8650,
+                     *         "discount_cents": 0,
+                     *         "tax_amount_cents": 0,
+                     *         "tax_rate": 0,
+                     *         "total_amount_cents": 8650,
+                     *         "amount_due_cents": 8650,
+                     *         "amount_paid_cents": 0,
+                     *         "credits_applied_cents": 0,
+                     *         "issued_at": "2026-11-01T00:05:00Z",
+                     *         "due_at": "2026-12-01T00:05:00Z",
+                     *         "billing_timezone": "UTC"
+                     *       },
+                     *       "line_items": [
+                     *         {
+                     *           "description": "Pro - base fee (qty 1)",
+                     *           "quantity": "1",
+                     *           "unit_amount_decimal": "4900",
+                     *           "amount_cents": 4900,
+                     *           "total_amount_cents": 4900,
+                     *           "currency": "USD"
+                     *         },
+                     *         {
+                     *           "description": "Tokens (tokens)",
+                     *           "quantity": "12500000",
+                     *           "unit_amount_decimal": "0.0003",
+                     *           "meter_unit": "tokens",
+                     *           "amount_cents": 3750,
+                     *           "total_amount_cents": 3750,
+                     *           "currency": "USD"
+                     *         }
+                     *       ],
+                     *       "bill_to": {
+                     *         "name": "Acme Incorporated",
+                     *         "email": "billing@acme.example",
+                     *         "address_line1": "100 Market Street",
+                     *         "city": "San Francisco",
+                     *         "state": "CA",
+                     *         "postal_code": "94105",
+                     *         "country": "US"
+                     *       },
+                     *       "branding": {
+                     *         "company_name": "Example Labs Inc",
+                     *         "company_email": "billing@examplelabs.example",
+                     *         "company_address_line1": "1 Congress Avenue",
+                     *         "company_city": "Austin",
+                     *         "company_state": "TX",
+                     *         "company_postal_code": "78701",
+                     *         "company_country": "US",
+                     *         "logo_url": "https://examplelabs.example/logo.png",
+                     *         "brand_color": "#4F46E5",
+                     *         "support_url": "https://examplelabs.example/support"
+                     *       },
+                     *       "credit_notes": [],
+                     *       "pay_enabled": true,
+                     *       "livemode": false
+                     *     }
+                     */
                     "application/json": components["schemas"]["HostedInvoice"];
                 };
             };
@@ -13002,15 +14985,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Rate limited (60/min/IP) */
+            /** @description Too many requests from this IP address. The public invoice routes allow 60 a minute per IP. Wait for the seconds in `Retry-After`. */
             429: {
                 headers: {
+                    "Retry-After": components["headers"]["RetryAfter"];
+                    "X-RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "X-RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "X-RateLimit-Reset": components["headers"]["RateLimitReset"];
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "rate_limit_error",
+                     *         "code": "rate_limited",
+                     *         "message": "too many requests — please retry after the rate limit resets",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
         };
     };
@@ -13019,6 +15028,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The invoice's public token (`hc_pinv_…`), from the hosted invoice link. */
                 token: string;
             };
             cookie?: never;
@@ -13040,15 +15050,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Rate limited (60/min/IP) */
+            /** @description Too many requests from this IP address. The public invoice routes allow 60 a minute per IP. Wait for the seconds in `Retry-After`. */
             429: {
                 headers: {
+                    "Retry-After": components["headers"]["RetryAfter"];
+                    "X-RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "X-RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "X-RateLimit-Reset": components["headers"]["RateLimitReset"];
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "rate_limit_error",
+                     *         "code": "rate_limited",
+                     *         "message": "too many requests — please retry after the rate limit resets",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
         };
     };
@@ -13057,6 +15093,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The invoice's public token (`hc_pinv_…`), from the hosted invoice link. */
                 token: string;
             };
             cookie?: never;
@@ -13069,6 +15106,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "url": "https://checkout.stripe.com/c/pay/cs_test_a1B2c3D4e5F6g7H8i9J0kLmNoPqRsTuVwXyZ"
+                     *     }
+                     */
                     "application/json": {
                         /** @description Stripe Checkout URL. */
                         url: string;
@@ -13081,6 +15123,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -13099,31 +15151,78 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_payable",
+                     *         "message": "invoice is not in a payable state",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Rate limited (60/min/IP) */
-            429: {
+            /** @description The request has a body with a field. This route takes no body (`param` names the field). */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"amount_cents\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "amount_cents"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
-            /** @description Stripe could not create the session. Code `stripe_error`. */
+            /** @description Too many requests from this IP address. The public invoice routes allow 60 a minute per IP. Wait for the seconds in `Retry-After`. */
+            429: {
+                headers: {
+                    "Retry-After": components["headers"]["RetryAfter"];
+                    "X-RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "X-RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "X-RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "rate_limit_error",
+                     *         "code": "rate_limited",
+                     *         "message": "too many requests — please retry after the rate limit resets",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Stripe could not create the session, or the previous payment page could not be closed. Code `stripe_error`; the customer can try again. */
             502: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description The server runs without a Stripe adapter. Code `stripe_unavailable`. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "stripe_error",
+                     *         "message": "failed to create checkout session",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -13708,11 +15807,15 @@ export interface operations {
     listCreditNotes: {
         parameters: {
             query?: {
+                /** @description Only notes against this invoice. */
                 invoice_id?: string;
+                /** @description Only this customer's notes. */
                 customer_id?: string;
+                /** @description Only notes in this status. */
                 status?: "draft" | "issued" | "voided";
                 /**
-                 * @description `needs_attention` returns issued, non-test-clock notes whose
+                 * @description Only notes whose refund is in this state. `needs_attention`
+                 *     returns issued, non-test-clock notes whose
                  *     refund failed or has an unknown result, has been pending more
                  *     than 72 hours, or has a refund amount still at `none` after 1
                  *     hour.
@@ -13720,6 +15823,7 @@ export interface operations {
                 refund_status?: "none" | "pending" | "succeeded" | "failed" | "unknown" | "needs_attention";
                 /** @description One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default). */
                 sort?: string;
+                /** @description Sort direction, `desc` (the default) or `asc`. */
                 dir?: "asc" | "desc";
                 /**
                  * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
@@ -13744,6 +15848,58 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_cn_dbkrtc2q3gpgqfoq5c5g",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "credit_note_number": "CN-000003",
+                     *           "status": "issued",
+                     *           "reason": "requested_by_customer",
+                     *           "subtotal_cents": 3750,
+                     *           "tax_amount_cents": 0,
+                     *           "total_cents": 3750,
+                     *           "refund_amount_cents": 3750,
+                     *           "credit_amount_cents": 0,
+                     *           "out_of_band_amount_cents": 0,
+                     *           "currency": "USD",
+                     *           "issued_at": "2026-11-03T10:15:00Z",
+                     *           "refund_status": "succeeded",
+                     *           "stripe_refund_id": "re_3QHk2fLkdIwHu7ix1b2c3d4e",
+                     *           "recorded_from_stripe": false,
+                     *           "bill_to_snapshot": {
+                     *             "display_name": "Acme Inc",
+                     *             "legal_name": "Acme Incorporated",
+                     *             "email": "billing@acme.example",
+                     *             "address_line1": "100 Market Street",
+                     *             "city": "San Francisco",
+                     *             "state": "CA",
+                     *             "postal_code": "94105",
+                     *             "country": "US"
+                     *           },
+                     *           "supplier_snapshot": {
+                     *             "name": "Example Labs Inc",
+                     *             "email": "billing@examplelabs.example",
+                     *             "address_line1": "1 Congress Avenue",
+                     *             "city": "Austin",
+                     *             "state": "TX",
+                     *             "postal_code": "78701",
+                     *             "country": "US"
+                     *           },
+                     *           "is_simulated": false,
+                     *           "issue_pending": false,
+                     *           "tax_reversal_pending": false,
+                     *           "created_at": "2026-11-03T10:15:00Z",
+                     *           "recorded_at": "2026-11-03T10:15:00Z",
+                     *           "updated_at": "2026-11-03T10:15:02Z"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["CreditNote"][];
                         total: components["schemas"]["ListTotal"];
@@ -13774,20 +15930,41 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                 *       "reason": "Service outage on Oct 14",
+                 *       "lines": [
+                 *         {
+                 *           "description": "Credit for the Oct 14 outage",
+                 *           "quantity": 1,
+                 *           "unit_amount_cents": 1000
+                 *         }
+                 *       ],
+                 *       "credit_amount_cents": 1000
+                 *     }
+                 */
                 "application/json": {
+                    /** @description The invoice to credit. It must be `finalized` or `paid`. */
                     invoice_id: string;
+                    /** @description Why you are crediting, printed on the note. Required for a line-based note; a relief takes it from `commit_relief.reason` when this is empty. */
                     reason?: string;
+                    /** @description The credited amounts, tax included. At least one line for a line-based note; none with `commit_relief`. */
                     lines?: {
-                        /** @description Optional. The invoice line this credit line reverses. */
+                        /** @description Optional. The invoice line this credit line reverses. It must be a line of this invoice. */
                         invoice_line_item_id?: string;
+                        /** @description The text printed on the line. */
                         description?: string;
+                        /** @description How many units, 1 or more. */
                         quantity?: number;
+                        /** @description Credit per unit, tax included, in the currency's minor unit (cents for USD). 1 or more. */
                         unit_amount_cents?: number;
                     }[];
-                    /** @description Not with commit_relief; put the relief's split inside commit_relief. */
+                    /** @description Part of the total refunded to the card, in the currency's minor unit (cents for USD). Paid invoices only. Not with commit_relief; put the relief's split inside commit_relief. */
                     refund_amount_cents?: number;
+                    /** @description Part of the total added to the customer's credit balance, in the currency's minor unit (cents for USD). Paid invoices only. Not with commit_relief. */
                     credit_amount_cents?: number;
-                    /** @description Not with commit_relief; put the relief's split inside commit_relief. */
+                    /** @description Part of the total paid back outside Hardcount, in the currency's minor unit (cents for USD). Paid invoices only. Not with commit_relief; put the relief's split inside commit_relief. */
                     out_of_band_amount_cents?: number;
                     /**
                      * @description Older single-channel form. On a paid invoice whose three
@@ -13796,13 +15973,19 @@ export interface operations {
                      * @enum {string}
                      */
                     refund_type?: "refund" | "credit";
+                    /**
+                     * @description True issues the note in the same call. If the issue fails,
+                     *     the draft is voided and the error is returned. Defaults to
+                     *     false (the note stays a draft).
+                     */
                     auto_issue?: boolean;
                     /**
                      * @description Links a refund made in Stripe outside Hardcount as this
-                     *     note's card refund, Stripe's `refunds[]` shape: Hardcount
+                     *     note's card refund, like Stripe's `refunds[]`: Hardcount
                      *     reads the refund from Stripe and calls nothing else
                      *     there for it. The refund must be of the payment that paid
-                     *     this invoice, not made by Hardcount, and succeeded; `refund_amount_cents` must be its amount,
+                     *     this invoice, not made by Hardcount, and succeeded;
+                     *     `refund_amount_cents` must be its amount,
                      *     `credit_amount_cents` 0, and `auto_issue` true (the
                      *     note is issued at once). The caps on the invoice still
                      *     apply. A refund Hardcount flagged on the invoice
@@ -13815,49 +15998,136 @@ export interface operations {
                      *     relief's split goes in here, not at the top level: a top-level
                      *     `refund_amount_cents`, `out_of_band_amount_cents` or
                      *     `refund_type` is a 422. Example after a lost dispute:
-                     *     `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
+                     *     `{"invoice_id": "hc_inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
                      */
                     commit_relief?: {
                         /** @description Optional. Defaults to the top-level invoice_id. */
                         invoice_id?: string;
                         /** @description Optional. Defaults to the top-level reason. */
                         reason?: string;
-                        /** @description Commit credits to retire (1..remaining). */
+                        /** @description Commit credits to retire, from 1 to what is left of the commit. */
                         retire_cents?: number;
-                        /** @description Retire the LIVE remaining (absorbs racing drawdowns). */
+                        /** @description Retire all the commit credit left at the moment the relief runs, so credit the customer spends meanwhile is not counted. `retire_cents` is then ignored. */
                         retire_all?: boolean;
-                        /** @description Optional allocation; must sum with out_of_band to the derived cash. */
+                        /** @description Optional. Part of the cash refunded to the card. With `out_of_band_amount_cents` it must add up to the cash Hardcount works out. When both are left out, the cash goes to the card if the invoice was paid by card, otherwise out of band. */
                         refund_amount_cents?: number;
+                        /** @description Optional. Part of the cash paid back outside Hardcount. */
                         out_of_band_amount_cents?: number;
                     };
                 };
             };
         };
         responses: {
-            /** @description Credit note (issued immediately for commit relief) */
+            /** @description The credit note, a draft unless `auto_issue` was true or it is a commit relief. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_cn_dbkrtc2q3gpgqfoq5c5h",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "credit_note_number": "CN-000004",
+                     *       "status": "draft",
+                     *       "reason": "Service outage on Oct 14",
+                     *       "subtotal_cents": 1000,
+                     *       "tax_amount_cents": 0,
+                     *       "total_cents": 1000,
+                     *       "refund_amount_cents": 0,
+                     *       "credit_amount_cents": 1000,
+                     *       "out_of_band_amount_cents": 0,
+                     *       "currency": "USD",
+                     *       "refund_status": "none",
+                     *       "recorded_from_stripe": false,
+                     *       "is_simulated": false,
+                     *       "issue_pending": false,
+                     *       "tax_reversal_pending": false,
+                     *       "created_at": "2026-11-04T08:00:00Z",
+                     *       "recorded_at": "2026-11-04T08:00:00Z",
+                     *       "updated_at": "2026-11-04T08:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description State gate (unpaid commit → void; fully-consumed commit; in-flight charge) */
+            /** @description No invoice with this `invoice_id` in this account and mode. The message says `credit_note not found`. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "credit_note not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The invoice's state refuses the note. Code `invalid_state`: the
+             *     invoice is a draft, voided or written off, already fully
+             *     credited, or bought prepaid credit (use commit relief when it is
+             *     paid, void it when it is unpaid); a relief on an unpaid,
+             *     mixed-line, zero-total or fully used commit; or Stripe is not
+             *     connected for a `stripe_refund_id`. Codes `payment_in_flight` and
+             *     `payment_unidentifiable`: a charge on the invoice is unresolved.
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "cannot create credit notes for voided invoices",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
-            /** @description Validation (over-retire with live remaining; allocation mismatch; zero-cash slice), or an unknown field (`param` names it; the body must use only the fields listed here) */
+            /**
+             * @description Code `validation_error`, with `param` naming the field: a missing
+             *     `reason` or `lines`; a line with a quantity or amount below 1, or
+             *     naming another invoice's line; a note above what the invoice can
+             *     still be credited; amounts that do not add up to the total; a
+             *     refund above what was paid by card; a `stripe_refund_id` that
+             *     does not qualify; an over-sized or zero-cash relief; or an
+             *     unknown field (the body must use only the fields listed here).
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "refund_amount_cents (10.00) + credit_amount_cents (0.00) + out_of_band_amount_cents (0.00) = 10.00, must equal credit note total 12.50",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "allocation"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -19625,9 +21895,20 @@ export interface operations {
     listInvoices: {
         parameters: {
             query?: {
+                /** @description Only this customer's invoices. */
                 customer_id?: string;
+                /** @description Only invoices that bill this subscription. */
                 subscription_id?: string;
+                /**
+                 * @description Only invoices in this status: `draft`, `finalized`, `paid`,
+                 *     `voided` or `uncollectible`. Another value matches nothing.
+                 */
                 status?: string;
+                /**
+                 * @description Only invoices with this payment status: `pending`, `processing`,
+                 *     `succeeded`, `failed` or `unknown`. Another value matches
+                 *     nothing.
+                 */
                 payment_status?: string;
                 /** @description Case-insensitive substring match on the invoice number or the customer's name or email. */
                 search?: string;
@@ -19642,16 +21923,17 @@ export interface operations {
                  */
                 to?: string;
                 /**
-                 * @description When true, restrict to open invoices past their due date
-                 *     that haven't settled (finalized + due_at < now +
-                 *     payment_status not succeeded/processing). Backs the
-                 *     dashboard's "Past due" segment.
+                 * @description `true` keeps only open invoices past their due date: `finalized`,
+                 *     `due_at` before the current real time, and `payment_status` not
+                 *     `succeeded`, `processing` or `unknown`. Any other value applies
+                 *     no filter. The dashboard's Past due view uses it.
                  */
                 overdue?: boolean;
                 /** @description Comma-separated invoice IDs to fetch exactly. */
                 ids?: string;
-                /** @description One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps. */
+                /** @description One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps. An unknown key sorts by created_at. */
                 sort?: string;
+                /** @description Sort direction, `desc` (the default) or `asc`. */
                 dir?: "asc" | "desc";
                 /**
                  * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
@@ -19676,6 +21958,69 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "invoice_number": "HC-000042",
+                     *           "status": "paid",
+                     *           "payment_status": "succeeded",
+                     *           "currency": "USD",
+                     *           "subtotal_cents": 8650,
+                     *           "discount_cents": 0,
+                     *           "tax_amount_cents": 0,
+                     *           "tax_rate": 0,
+                     *           "tax_provider": "manual",
+                     *           "tax_status": "ok",
+                     *           "payment_card_brand": "visa",
+                     *           "payment_card_last4": "4242",
+                     *           "total_amount_cents": 8650,
+                     *           "amount_due_cents": 0,
+                     *           "amount_paid_cents": 8650,
+                     *           "credits_applied_cents": 0,
+                     *           "billing_period_start": "2026-10-01T00:00:00Z",
+                     *           "billing_period_end": "2026-11-01T00:00:00Z",
+                     *           "billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+                     *           "billing_timezone": "UTC",
+                     *           "bill_to_snapshot": {
+                     *             "display_name": "Acme Inc",
+                     *             "legal_name": "Acme Incorporated",
+                     *             "email": "billing@acme.example",
+                     *             "address_line1": "100 Market Street",
+                     *             "city": "San Francisco",
+                     *             "state": "CA",
+                     *             "postal_code": "94105",
+                     *             "country": "US"
+                     *           },
+                     *           "supplier_snapshot": {
+                     *             "name": "Example Labs Inc",
+                     *             "email": "billing@examplelabs.example",
+                     *             "address_line1": "1 Congress Avenue",
+                     *             "city": "Austin",
+                     *             "state": "TX",
+                     *             "postal_code": "78701",
+                     *             "country": "US"
+                     *           },
+                     *           "issued_at": "2026-11-01T00:05:00Z",
+                     *           "due_at": "2026-12-01T00:05:00Z",
+                     *           "paid_at": "2026-11-01T00:05:03Z",
+                     *           "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+                     *           "paid_out_of_band": false,
+                     *           "public_token": "hc_pinv_9f2c4e1a7b3d5f6081a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f701",
+                     *           "net_payment_term_days": 30,
+                     *           "created_at": "2026-11-01T00:05:00Z",
+                     *           "updated_at": "2026-11-01T00:05:03Z",
+                     *           "billing_reason": "subscription_cycle",
+                     *           "is_simulated": false
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["Invoice"][];
                         total: components["schemas"]["ListTotal"];
@@ -19706,6 +22051,22 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                 *       "currency": "USD",
+                 *       "net_payment_term_days": 30,
+                 *       "memo": "Onboarding for the Acme rollout",
+                 *       "line_items": [
+                 *         {
+                 *           "description": "Onboarding and setup",
+                 *           "line_type": "add_on",
+                 *           "quantity": 1,
+                 *           "unit_amount_cents": 25000
+                 *         }
+                 *       ]
+                 *     }
+                 */
                 "application/json": components["schemas"]["InvoiceCreateRequest"];
             };
         };
@@ -19716,25 +22077,60 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_inv_dbj84b2q3gpgqfoq5c41",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "subscription_id": "",
+                     *       "invoice_number": "HC-000043",
+                     *       "status": "draft",
+                     *       "payment_status": "pending",
+                     *       "currency": "USD",
+                     *       "subtotal_cents": 25000,
+                     *       "discount_cents": 0,
+                     *       "tax_amount_cents": 0,
+                     *       "tax_rate": 0,
+                     *       "tax_status": "ok",
+                     *       "total_amount_cents": 25000,
+                     *       "amount_due_cents": 25000,
+                     *       "amount_paid_cents": 0,
+                     *       "credits_applied_cents": 0,
+                     *       "billing_period_start": "2026-11-02T15:30:00Z",
+                     *       "billing_period_end": "2026-11-02T15:30:00Z",
+                     *       "billing_timezone": "UTC",
+                     *       "issued_at": "2026-11-02T15:30:00Z",
+                     *       "due_at": "2026-12-02T15:30:00Z",
+                     *       "paid_out_of_band": false,
+                     *       "net_payment_term_days": 30,
+                     *       "memo": "Onboarding for the Acme rollout",
+                     *       "created_at": "2026-11-02T15:30:00Z",
+                     *       "updated_at": "2026-11-02T15:30:00Z",
+                     *       "billing_reason": "manual",
+                     *       "is_simulated": false
+                     *     }
+                     */
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
-            /** @description Body is not valid JSON. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Customer or subscription not found (code `not_found`). */
+            /** @description No customer, or no subscription, with this id in this account and mode (code `not_found`). */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -19748,21 +22144,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "customer_currency_conflict",
+                     *         "message": "this customer is billed in EUR (billing profile); a manual invoice uses the customer's currency, so it cannot be in USD",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
-             * @description Validation error: missing `customer_id`, unsupported currency,
-             *     an invalid line item (the message names the line number), line
-             *     items whose total does not fit 64-bit cents (`param` is
-             *     `line_items`), or an unknown field (`param` names it; the body
-             *     must use only the fields listed here).
+             * @description Validation error: missing `customer_id`, an unsupported currency,
+             *     a subscription of another customer, an invalid line item (the
+             *     message names the line number, `param` the field), a commit
+             *     expiry in the past, more than one commit line, line items whose
+             *     total does not fit 64-bit cents (`param` is `line_items`), or an
+             *     unknown field (`param` names it; the body must use only the
+             *     fields listed here).
              */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "line item 1: must be greater than 0",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "quantity"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -19776,6 +22195,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "currency_unavailable",
+                     *         "message": "could not load the customer's billing currency — please retry",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -19800,24 +22229,36 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                 *       "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g"
+                 *     }
+                 */
                 "application/json": {
                     /** @description Customer to preview the invoice for. */
                     customer_id: string;
                     /**
-                     * @description Optional. Defaults to the customer's primary active
-                     *     subscription if not supplied.
+                     * @description Optional. The subscription to preview; it must belong to
+                     *     `customer_id`. Defaults to the customer's active or
+                     *     trialing subscription whose current period started last.
                      */
                     subscription_id?: string;
                     /**
-                     * @description Optional explicit window. Both bounds must be
-                     *     supplied together; partial windows are rejected.
-                     *     Defaults to the resolved subscription's current
-                     *     cycle.
+                     * @description Optional explicit window, `from` before `to`. Both bounds
+                     *     must be supplied together; partial windows are rejected.
+                     *     Defaults to the subscription's current period.
                      */
                     period?: {
-                        /** Format: date-time */
+                        /**
+                         * Format: date-time
+                         * @description Start of the window (included), RFC 3339.
+                         */
                         from: string;
-                        /** Format: date-time */
+                        /**
+                         * Format: date-time
+                         * @description End of the window (not included), RFC 3339.
+                         */
                         to: string;
                     };
                 };
@@ -19830,34 +22271,95 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "plan_name": "Pro",
+                     *       "billing_period_start": "2026-10-01T00:00:00Z",
+                     *       "billing_period_end": "2026-11-01T00:00:00Z",
+                     *       "lines": [
+                     *         {
+                     *           "line_type": "base_fee",
+                     *           "description": "Pro - base fee (qty 1)",
+                     *           "currency": "USD",
+                     *           "quantity": "1",
+                     *           "unit_amount_cents": 4900,
+                     *           "amount_cents": 4900
+                     *         },
+                     *         {
+                     *           "line_type": "usage",
+                     *           "description": "Tokens (tokens)",
+                     *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *           "meter_unit": "tokens",
+                     *           "price_id": "hc_prc_dajr672q3gpgqfoq5c20",
+                     *           "currency": "USD",
+                     *           "quantity": "12500000",
+                     *           "unit_amount_cents": 0,
+                     *           "amount_cents": 3750,
+                     *           "pricing_mode": "per_unit"
+                     *         }
+                     *       ],
+                     *       "totals": [
+                     *         {
+                     *           "currency": "USD",
+                     *           "amount_cents": 8650
+                     *         }
+                     *       ],
+                     *       "warnings": [],
+                     *       "generated_at": "2026-10-31T18:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["InvoicePreview"];
                 };
             };
-            /** @description Invalid request body */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Customer or subscription not found */
+            /** @description No customer, or no subscription, with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer or subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Validation error (missing customer_id, partial period, no active sub, ...) */
+            /**
+             * @description Validation error. Missing `customer_id`; a subscription of
+             *     another customer (`param` `subscription_id`); a `period` with one
+             *     bound, `from` not before `to`, or a bound that is not RFC 3339
+             *     (`param` `period`, `period.from` or `period.to`); or an unknown
+             *     field. Code `customer_has_no_subscription`: no `subscription_id`
+             *     was given and the customer has no active or trialing
+             *     subscription. Code `subscription_has_no_cycle`: the subscription
+             *     has no current period, so pass `period`.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "customer_has_no_subscription",
+                     *         "message": "customer has no active or trialing subscription; pass subscription_id explicitly to preview a non-active sub",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "customer_id"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -19869,6 +22371,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The invoice id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
@@ -19881,16 +22384,126 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "invoice": {
+                     *         "id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *         "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *         "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *         "invoice_number": "HC-000042",
+                     *         "status": "paid",
+                     *         "payment_status": "succeeded",
+                     *         "currency": "USD",
+                     *         "subtotal_cents": 8650,
+                     *         "discount_cents": 0,
+                     *         "tax_amount_cents": 0,
+                     *         "tax_rate": 0,
+                     *         "tax_provider": "manual",
+                     *         "tax_status": "ok",
+                     *         "payment_card_brand": "visa",
+                     *         "payment_card_last4": "4242",
+                     *         "total_amount_cents": 8650,
+                     *         "amount_due_cents": 0,
+                     *         "amount_paid_cents": 8650,
+                     *         "credits_applied_cents": 0,
+                     *         "billing_period_start": "2026-10-01T00:00:00Z",
+                     *         "billing_period_end": "2026-11-01T00:00:00Z",
+                     *         "billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+                     *         "billing_timezone": "UTC",
+                     *         "bill_to_snapshot": {
+                     *           "display_name": "Acme Inc",
+                     *           "legal_name": "Acme Incorporated",
+                     *           "email": "billing@acme.example",
+                     *           "address_line1": "100 Market Street",
+                     *           "city": "San Francisco",
+                     *           "state": "CA",
+                     *           "postal_code": "94105",
+                     *           "country": "US"
+                     *         },
+                     *         "supplier_snapshot": {
+                     *           "name": "Example Labs Inc",
+                     *           "email": "billing@examplelabs.example",
+                     *           "address_line1": "1 Congress Avenue",
+                     *           "city": "Austin",
+                     *           "state": "TX",
+                     *           "postal_code": "78701",
+                     *           "country": "US"
+                     *         },
+                     *         "issued_at": "2026-11-01T00:05:00Z",
+                     *         "due_at": "2026-12-01T00:05:00Z",
+                     *         "paid_at": "2026-11-01T00:05:03Z",
+                     *         "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+                     *         "paid_out_of_band": false,
+                     *         "public_token": "hc_pinv_9f2c4e1a7b3d5f6081a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f701",
+                     *         "net_payment_term_days": 30,
+                     *         "created_at": "2026-11-01T00:05:00Z",
+                     *         "updated_at": "2026-11-01T00:05:03Z",
+                     *         "billing_reason": "subscription_cycle",
+                     *         "is_simulated": false
+                     *       },
+                     *       "line_items": [
+                     *         {
+                     *           "id": "hc_ili_dbj84baq3gpgqfoq5c51",
+                     *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "line_type": "base_fee",
+                     *           "description": "Pro - base fee (qty 1)",
+                     *           "quantity": "1",
+                     *           "unit_amount_decimal": "4900",
+                     *           "amount_cents": 4900,
+                     *           "tax_rate": 0,
+                     *           "tax_amount_cents": 0,
+                     *           "total_amount_cents": 4900,
+                     *           "currency": "USD",
+                     *           "billing_period_start": "2026-10-01T00:00:00Z",
+                     *           "billing_period_end": "2026-11-01T00:00:00Z",
+                     *           "created_at": "2026-11-01T00:05:00Z"
+                     *         },
+                     *         {
+                     *           "id": "hc_ili_dbj84baq3gpgqfoq5c4g",
+                     *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "line_type": "usage",
+                     *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *           "meter_unit": "tokens",
+                     *           "description": "Tokens (tokens)",
+                     *           "quantity": "12500000",
+                     *           "unit_amount_decimal": "0.0003",
+                     *           "amount_cents": 3750,
+                     *           "tax_rate": 0,
+                     *           "tax_amount_cents": 0,
+                     *           "total_amount_cents": 3750,
+                     *           "currency": "USD",
+                     *           "pricing_mode": "per_unit",
+                     *           "price_id": "hc_prc_dajr672q3gpgqfoq5c20",
+                     *           "billing_period_start": "2026-10-01T00:00:00Z",
+                     *           "billing_period_end": "2026-11-01T00:00:00Z",
+                     *           "created_at": "2026-11-01T00:05:00Z"
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": components["schemas"]["InvoiceWithLineItems"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice not found. */
+            /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -19902,6 +22515,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The invoice id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
@@ -19918,6 +22532,25 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description No invoice with this id in this account and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -19936,40 +22569,73 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The invoice id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "email": "billing@acme.example",
+                 *       "additional_emails": [
+                 *         "finance@acme.example"
+                 *       ]
+                 *     }
+                 */
                 "application/json": {
-                    /** Format: email */
+                    /**
+                     * Format: email
+                     * @description The recipient, one plain address such as `billing@acme.example`, with no display name.
+                     */
                     email: string;
+                    /** @description Addresses to copy on this send. See the description for absent, empty and a list. */
                     additional_emails?: string[];
                 };
             };
         };
         responses: {
-            /** @description Email enqueued */
+            /** @description Email queued. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "status": "sent"
+                     *     }
+                     */
                     "application/json": {
-                        /** @enum {string} */
+                        /**
+                         * @description Always `sent`, meaning the email is queued.
+                         * @enum {string}
+                         */
                         status: "sent";
                     };
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice not found */
+            /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             /**
              * @description Nothing was sent. Codes: `invoice_not_sendable` (the invoice
@@ -19982,15 +22648,38 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invoice_not_sendable",
+                     *         "message": "a draft invoice can't be emailed because it isn't issued yet. Finalize it first, then email it",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `email` is missing or invalid, a CC entry is invalid, or the body has an unknown field (`param` names it) */
+            /** @description `email` is missing or invalid, a copied address is invalid (`param` `additional_emails`), or the body has an unknown field (`param` names it). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "email is required",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "email"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -20010,12 +22699,21 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The draft invoice's id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "description": "Onboarding and setup",
+                 *       "line_type": "add_on",
+                 *       "quantity": 1,
+                 *       "unit_amount_cents": 25000
+                 *     }
+                 */
                 "application/json": components["schemas"]["InvoiceLineItemInput"];
             };
         };
@@ -20026,38 +22724,69 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_ili_dbj84baq3gpgqfoq5c52",
+                     *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c41",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "line_type": "add_on",
+                     *       "description": "Onboarding and setup",
+                     *       "quantity": "1",
+                     *       "unit_amount_decimal": "25000",
+                     *       "amount_cents": 25000,
+                     *       "tax_rate": 0,
+                     *       "tax_amount_cents": 0,
+                     *       "total_amount_cents": 25000,
+                     *       "currency": "USD",
+                     *       "created_at": "2026-11-02T15:30:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["InvoiceLineItem"];
                 };
             };
-            /** @description Body is not valid JSON. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice not found. */
+            /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
              * @description Validation error: the invoice is not a draft, a line field is
-             *     invalid (for example a quantity of 0, or a second commit line), or
-             *     the body has an unknown field (`param` names it; the body must use only the fields listed here).
+             *     invalid (for example a quantity of 0, `param` names the field),
+             *     a commit line on an invoice the billing engine made, a second
+             *     commit line, or the body has an unknown field (`param` names it;
+             *     the body must use only the fields listed here).
              */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "can only add line items to draft invoices, current status: finalized",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20079,6 +22808,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The invoice id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
@@ -20091,23 +22821,89 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_inv_dbj84b2q3gpgqfoq5c41",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "subscription_id": "",
+                     *       "invoice_number": "HC-000043",
+                     *       "status": "voided",
+                     *       "payment_status": "pending",
+                     *       "currency": "USD",
+                     *       "subtotal_cents": 25000,
+                     *       "discount_cents": 0,
+                     *       "tax_amount_cents": 0,
+                     *       "tax_rate": 0,
+                     *       "tax_provider": "manual",
+                     *       "tax_status": "ok",
+                     *       "total_amount_cents": 25000,
+                     *       "amount_due_cents": 25000,
+                     *       "amount_paid_cents": 0,
+                     *       "credits_applied_cents": 0,
+                     *       "billing_period_start": "2026-11-02T15:30:00Z",
+                     *       "billing_period_end": "2026-11-02T15:30:00Z",
+                     *       "billing_timezone": "UTC",
+                     *       "bill_to_snapshot": {
+                     *         "display_name": "Acme Inc",
+                     *         "legal_name": "Acme Incorporated",
+                     *         "email": "billing@acme.example",
+                     *         "address_line1": "100 Market Street",
+                     *         "city": "San Francisco",
+                     *         "state": "CA",
+                     *         "postal_code": "94105",
+                     *         "country": "US"
+                     *       },
+                     *       "supplier_snapshot": {
+                     *         "name": "Example Labs Inc",
+                     *         "email": "billing@examplelabs.example",
+                     *         "address_line1": "1 Congress Avenue",
+                     *         "city": "Austin",
+                     *         "state": "TX",
+                     *         "postal_code": "78701",
+                     *         "country": "US"
+                     *       },
+                     *       "issued_at": "2026-11-02T16:00:00Z",
+                     *       "due_at": "2026-12-02T16:00:00Z",
+                     *       "voided_at": "2026-11-05T09:12:00Z",
+                     *       "paid_out_of_band": false,
+                     *       "public_token": "hc_pinv_3b8e1d0c9f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c",
+                     *       "net_payment_term_days": 30,
+                     *       "memo": "Onboarding for the Acme rollout",
+                     *       "created_at": "2026-11-02T15:30:00Z",
+                     *       "updated_at": "2026-11-05T09:12:00Z",
+                     *       "billing_reason": "manual",
+                     *       "is_simulated": false
+                     *     }
+                     */
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice not found. */
+            /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
              * @description The invoice cannot be voided in its current state. Codes:
              *     `invalid_state` (already paid or already voided),
-             *     `payment_in_flight` (a charge is still running), or
+             *     `payment_in_flight` (a charge is still running or being
+             *     confirmed with Stripe), or
              *     `payment_unidentifiable` (Stripe's answer to a charge was unclear
              *     and named no payment; Hardcount finds out from Stripe within a day).
              */
@@ -20116,6 +22912,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "cannot void a paid invoice — issue a credit note instead",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The request has a body with a field. This route takes no body (`param` names the field). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"reason\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "reason"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20137,6 +22963,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The invoice id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
@@ -20149,19 +22976,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "status": "sent"
+                     *     }
+                     */
                     "application/json": {
-                        /** @enum {string} */
+                        /**
+                         * @description Always `sent`, meaning the email is queued.
+                         * @enum {string}
+                         */
                         status: "sent";
                     };
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice not found. */
+            /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20177,6 +23022,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "no_email_on_file",
+                     *         "message": "customer has no email on file — add one on the customer record, or copy the setup link from the customer page and share it directly",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The request has a body with a field. This route takes no body (`param` names the field). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"email\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "email"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20198,6 +23073,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The invoice id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
@@ -20210,16 +23086,83 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_inv_dbj84b2q3gpgqfoq5c41",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "subscription_id": "",
+                     *       "invoice_number": "HC-000043",
+                     *       "status": "uncollectible",
+                     *       "payment_status": "failed",
+                     *       "currency": "USD",
+                     *       "subtotal_cents": 25000,
+                     *       "discount_cents": 0,
+                     *       "tax_amount_cents": 0,
+                     *       "tax_rate": 0,
+                     *       "tax_provider": "manual",
+                     *       "tax_status": "ok",
+                     *       "total_amount_cents": 25000,
+                     *       "amount_due_cents": 25000,
+                     *       "amount_paid_cents": 0,
+                     *       "credits_applied_cents": 0,
+                     *       "billing_period_start": "2026-11-02T15:30:00Z",
+                     *       "billing_period_end": "2026-11-02T15:30:00Z",
+                     *       "billing_timezone": "UTC",
+                     *       "bill_to_snapshot": {
+                     *         "display_name": "Acme Inc",
+                     *         "legal_name": "Acme Incorporated",
+                     *         "email": "billing@acme.example",
+                     *         "address_line1": "100 Market Street",
+                     *         "city": "San Francisco",
+                     *         "state": "CA",
+                     *         "postal_code": "94105",
+                     *         "country": "US"
+                     *       },
+                     *       "supplier_snapshot": {
+                     *         "name": "Example Labs Inc",
+                     *         "email": "billing@examplelabs.example",
+                     *         "address_line1": "1 Congress Avenue",
+                     *         "city": "Austin",
+                     *         "state": "TX",
+                     *         "postal_code": "78701",
+                     *         "country": "US"
+                     *       },
+                     *       "issued_at": "2026-11-02T16:00:00Z",
+                     *       "due_at": "2026-12-02T16:00:00Z",
+                     *       "uncollectible_at": "2026-12-20T10:00:00Z",
+                     *       "stripe_payment_intent_id": "pi_3QHk9aLkdIwHu7ix5f6a7b8c",
+                     *       "paid_out_of_band": false,
+                     *       "last_payment_error": "Your card has insufficient funds.",
+                     *       "public_token": "hc_pinv_3b8e1d0c9f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c",
+                     *       "net_payment_term_days": 30,
+                     *       "memo": "Onboarding for the Acme rollout",
+                     *       "created_at": "2026-11-02T15:30:00Z",
+                     *       "updated_at": "2026-12-20T10:00:00Z",
+                     *       "billing_reason": "manual",
+                     *       "is_simulated": false
+                     *     }
+                     */
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice not found. */
+            /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20233,6 +23176,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "cannot mark paid invoice uncollectible — issue a credit note instead",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The request has a body with a field. This route takes no body (`param` names the field). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"reason\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "reason"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20254,12 +23227,18 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The invoice id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody?: {
             content: {
+                /**
+                 * @example {
+                 *       "note": "Bank transfer received Nov 20, ref 88-3141"
+                 *     }
+                 */
                 "application/json": {
                     /** @description Free text, for example "Cheque 1234". Do not put personal data here: the audit log cannot be edited. */
                     note?: string;
@@ -20273,25 +23252,82 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_inv_dbj84b2q3gpgqfoq5c41",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "subscription_id": "",
+                     *       "invoice_number": "HC-000043",
+                     *       "status": "paid",
+                     *       "payment_status": "succeeded",
+                     *       "currency": "USD",
+                     *       "subtotal_cents": 25000,
+                     *       "discount_cents": 0,
+                     *       "tax_amount_cents": 0,
+                     *       "tax_rate": 0,
+                     *       "tax_provider": "manual",
+                     *       "tax_status": "ok",
+                     *       "total_amount_cents": 25000,
+                     *       "amount_due_cents": 0,
+                     *       "amount_paid_cents": 25000,
+                     *       "credits_applied_cents": 0,
+                     *       "billing_period_start": "2026-11-02T15:30:00Z",
+                     *       "billing_period_end": "2026-11-02T15:30:00Z",
+                     *       "billing_timezone": "UTC",
+                     *       "bill_to_snapshot": {
+                     *         "display_name": "Acme Inc",
+                     *         "legal_name": "Acme Incorporated",
+                     *         "email": "billing@acme.example",
+                     *         "address_line1": "100 Market Street",
+                     *         "city": "San Francisco",
+                     *         "state": "CA",
+                     *         "postal_code": "94105",
+                     *         "country": "US"
+                     *       },
+                     *       "supplier_snapshot": {
+                     *         "name": "Example Labs Inc",
+                     *         "email": "billing@examplelabs.example",
+                     *         "address_line1": "1 Congress Avenue",
+                     *         "city": "Austin",
+                     *         "state": "TX",
+                     *         "postal_code": "78701",
+                     *         "country": "US"
+                     *       },
+                     *       "issued_at": "2026-11-02T16:00:00Z",
+                     *       "due_at": "2026-12-02T16:00:00Z",
+                     *       "paid_at": "2026-11-20T11:00:00Z",
+                     *       "paid_out_of_band": true,
+                     *       "public_token": "hc_pinv_3b8e1d0c9f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c",
+                     *       "net_payment_term_days": 30,
+                     *       "memo": "Onboarding for the Acme rollout",
+                     *       "created_at": "2026-11-02T15:30:00Z",
+                     *       "updated_at": "2026-11-20T11:00:00Z",
+                     *       "billing_reason": "manual",
+                     *       "is_simulated": false
+                     *     }
+                     */
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
-            /** @description Body is not valid JSON. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice not found. */
+            /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20305,6 +23341,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "invoice is already paid",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The body has a field other than `note` (`param` names it). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"amount_cents\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "amount_cents"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20326,6 +23392,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The invoice id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
@@ -20338,25 +23405,107 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "invoice_number": "HC-000042",
+                     *       "status": "paid",
+                     *       "payment_status": "succeeded",
+                     *       "currency": "USD",
+                     *       "subtotal_cents": 8650,
+                     *       "discount_cents": 0,
+                     *       "tax_amount_cents": 0,
+                     *       "tax_rate": 0,
+                     *       "tax_provider": "manual",
+                     *       "tax_status": "ok",
+                     *       "payment_card_brand": "visa",
+                     *       "payment_card_last4": "4242",
+                     *       "total_amount_cents": 8650,
+                     *       "amount_due_cents": 0,
+                     *       "amount_paid_cents": 8650,
+                     *       "credits_applied_cents": 0,
+                     *       "billing_period_start": "2026-10-01T00:00:00Z",
+                     *       "billing_period_end": "2026-11-01T00:00:00Z",
+                     *       "billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+                     *       "billing_timezone": "UTC",
+                     *       "bill_to_snapshot": {
+                     *         "display_name": "Acme Inc",
+                     *         "legal_name": "Acme Incorporated",
+                     *         "email": "billing@acme.example",
+                     *         "address_line1": "100 Market Street",
+                     *         "city": "San Francisco",
+                     *         "state": "CA",
+                     *         "postal_code": "94105",
+                     *         "country": "US"
+                     *       },
+                     *       "supplier_snapshot": {
+                     *         "name": "Example Labs Inc",
+                     *         "email": "billing@examplelabs.example",
+                     *         "address_line1": "1 Congress Avenue",
+                     *         "city": "Austin",
+                     *         "state": "TX",
+                     *         "postal_code": "78701",
+                     *         "country": "US"
+                     *       },
+                     *       "issued_at": "2026-11-01T00:05:00Z",
+                     *       "due_at": "2026-12-01T00:05:00Z",
+                     *       "paid_at": "2026-11-01T00:05:03Z",
+                     *       "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+                     *       "paid_out_of_band": false,
+                     *       "public_token": "hc_pinv_c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7019f2c4e1a7b3d5f6081a2b3",
+                     *       "net_payment_term_days": 30,
+                     *       "created_at": "2026-11-01T00:05:00Z",
+                     *       "updated_at": "2026-11-06T14:00:00Z",
+                     *       "billing_reason": "subscription_cycle",
+                     *       "is_simulated": false
+                     *     }
+                     */
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice not found. */
+            /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The invoice is a draft (code `invalid_state`). Finalize it first. */
+            /**
+             * @description The invoice is a draft (code `invalid_state`); finalize it first.
+             *     Or the request has a body with a field: this route takes no body
+             *     (code `validation_error`, `param` names the field).
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "draft invoices do not have a public token — finalize first",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20378,6 +23527,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The invoice id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
@@ -20390,16 +23540,84 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_inv_dbj84b2q3gpgqfoq5c41",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "subscription_id": "",
+                     *       "invoice_number": "HC-000043",
+                     *       "status": "paid",
+                     *       "payment_status": "succeeded",
+                     *       "currency": "USD",
+                     *       "subtotal_cents": 25000,
+                     *       "discount_cents": 0,
+                     *       "tax_amount_cents": 0,
+                     *       "tax_rate": 0,
+                     *       "tax_provider": "manual",
+                     *       "tax_status": "ok",
+                     *       "payment_card_brand": "visa",
+                     *       "payment_card_last4": "4242",
+                     *       "total_amount_cents": 25000,
+                     *       "amount_due_cents": 0,
+                     *       "amount_paid_cents": 25000,
+                     *       "credits_applied_cents": 0,
+                     *       "billing_period_start": "2026-11-02T15:30:00Z",
+                     *       "billing_period_end": "2026-11-02T15:30:00Z",
+                     *       "billing_timezone": "UTC",
+                     *       "bill_to_snapshot": {
+                     *         "display_name": "Acme Inc",
+                     *         "legal_name": "Acme Incorporated",
+                     *         "email": "billing@acme.example",
+                     *         "address_line1": "100 Market Street",
+                     *         "city": "San Francisco",
+                     *         "state": "CA",
+                     *         "postal_code": "94105",
+                     *         "country": "US"
+                     *       },
+                     *       "supplier_snapshot": {
+                     *         "name": "Example Labs Inc",
+                     *         "email": "billing@examplelabs.example",
+                     *         "address_line1": "1 Congress Avenue",
+                     *         "city": "Austin",
+                     *         "state": "TX",
+                     *         "postal_code": "78701",
+                     *         "country": "US"
+                     *       },
+                     *       "issued_at": "2026-11-02T16:00:00Z",
+                     *       "due_at": "2026-12-02T16:00:00Z",
+                     *       "paid_at": "2026-11-03T10:00:02Z",
+                     *       "stripe_payment_intent_id": "pi_3QHk9aLkdIwHu7ix5f6a7b8c",
+                     *       "paid_out_of_band": false,
+                     *       "public_token": "hc_pinv_3b8e1d0c9f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c",
+                     *       "net_payment_term_days": 30,
+                     *       "memo": "Onboarding for the Acme rollout",
+                     *       "created_at": "2026-11-02T15:30:00Z",
+                     *       "updated_at": "2026-11-03T10:00:02Z",
+                     *       "billing_reason": "manual",
+                     *       "is_simulated": false
+                     *     }
+                     */
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice not found. */
+            /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20427,20 +23645,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "payment_in_flight",
+                     *         "message": "A charge on this invoice is being confirmed with Stripe. Try again in a few minutes; an interrupted charge is confirmed within about an hour.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
              * @description Code `validation_error`. The invoice is not finalized, is already
              *     paid, or has no amount due; the customer is paying on the hosted
-             *     page; payments are not configured; or the customer has no payment
-             *     method set up.
+             *     page; payments are not configured; the customer has no payment
+             *     method set up; or the request has a body with a field (this
+             *     route takes no body, and `param` names the field).
              */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "customer has no payment method set up",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20460,6 +23699,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "provider_error",
+                     *         "message": "Card was declined: Insufficient funds.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20480,19 +23729,30 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The paid invoice's id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "amount_cents": 3750,
+                 *       "reason": "requested_by_customer",
+                 *       "description": "Refund of October token usage"
+                 *     }
+                 */
                 "application/json": {
                     /**
                      * Format: int64
                      * @description Amount to refund. 0 or absent refunds what was paid by card less the refunds on the invoice's credit notes that are not voided, up to what is left of the invoice total.
                      */
                     amount_cents?: number;
-                    /** @enum {string} */
+                    /**
+                     * @description Why you are refunding, stored as the credit note's `reason`.
+                     * @enum {string}
+                     */
                     reason: "duplicate" | "fraudulent" | "requested_by_customer" | "other";
                     /** @description Text for the credit note line. Defaults to "Refund: <reason>". */
                     description?: string;
@@ -20506,37 +23766,97 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_cn_dbkrtc2q3gpgqfoq5c5g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "credit_note_number": "CN-000003",
+                     *       "status": "issued",
+                     *       "reason": "requested_by_customer",
+                     *       "subtotal_cents": 3750,
+                     *       "tax_amount_cents": 0,
+                     *       "total_cents": 3750,
+                     *       "refund_amount_cents": 3750,
+                     *       "credit_amount_cents": 0,
+                     *       "out_of_band_amount_cents": 0,
+                     *       "currency": "USD",
+                     *       "issued_at": "2026-11-03T10:15:00Z",
+                     *       "refund_status": "succeeded",
+                     *       "stripe_refund_id": "re_3QHk2fLkdIwHu7ix1b2c3d4e",
+                     *       "recorded_from_stripe": false,
+                     *       "bill_to_snapshot": {
+                     *         "display_name": "Acme Inc",
+                     *         "legal_name": "Acme Incorporated",
+                     *         "email": "billing@acme.example",
+                     *         "address_line1": "100 Market Street",
+                     *         "city": "San Francisco",
+                     *         "state": "CA",
+                     *         "postal_code": "94105",
+                     *         "country": "US"
+                     *       },
+                     *       "supplier_snapshot": {
+                     *         "name": "Example Labs Inc",
+                     *         "email": "billing@examplelabs.example",
+                     *         "address_line1": "1 Congress Avenue",
+                     *         "city": "Austin",
+                     *         "state": "TX",
+                     *         "postal_code": "78701",
+                     *         "country": "US"
+                     *       },
+                     *       "is_simulated": false,
+                     *       "issue_pending": false,
+                     *       "tax_reversal_pending": false,
+                     *       "created_at": "2026-11-03T10:15:00Z",
+                     *       "recorded_at": "2026-11-03T10:15:00Z",
+                     *       "updated_at": "2026-11-03T10:15:02Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
-            /** @description Body is not valid JSON. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice not found. */
+            /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
              * @description Code `invalid_state`. The invoice is not paid, was paid outside
-             *     Stripe, has no payment to refund, or is already fully refunded.
+             *     Stripe, has no payment to refund, is already fully refunded or
+             *     credited, or bought prepaid credit (use commit relief).
              */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "can only refund paid invoices",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20552,6 +23872,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "reason must be one of: duplicate, fraudulent, requested_by_customer, other",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20563,6 +23893,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The invoice id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
@@ -20575,16 +23906,121 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "events": [
+                     *         {
+                     *           "id": "lifecycle:created:hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *           "timestamp": "2026-11-01T00:05:00Z",
+                     *           "source": "lifecycle",
+                     *           "event_type": "invoice.created",
+                     *           "status": "neutral",
+                     *           "description": "Invoice created",
+                     *           "detail": "Renewal for Oct 1, 2026 – Oct 31, 2026 · Acme Pro",
+                     *           "line": {
+                     *             "id": "lifecycle:created:hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *             "kind": "invoice.created",
+                     *             "title": "Invoice created",
+                     *             "detail": [
+                     *               [
+                     *                 {
+                     *                   "text": "Renewal for Oct 1, 2026 – Oct 31, 2026"
+                     *                 }
+                     *               ],
+                     *               [
+                     *                 {
+                     *                   "link": {
+                     *                     "kind": "subscription",
+                     *                     "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *                     "label": "Acme Pro"
+                     *                   }
+                     *                 }
+                     *               ]
+                     *             ],
+                     *             "tone": "neutral",
+                     *             "occurred_at": "2026-11-01T00:05:00Z"
+                     *           }
+                     *         },
+                     *         {
+                     *           "id": "lifecycle:finalized:hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *           "timestamp": "2026-11-01T00:05:00Z",
+                     *           "source": "lifecycle",
+                     *           "event_type": "invoice.finalized",
+                     *           "status": "neutral",
+                     *           "description": "Invoice finalized",
+                     *           "detail": "Automatic",
+                     *           "amount_cents": 8650,
+                     *           "currency": "USD",
+                     *           "line": {
+                     *             "id": "lifecycle:finalized:hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *             "kind": "invoice.finalized",
+                     *             "title": "Invoice finalized",
+                     *             "amount": {
+                     *               "cents": 8650,
+                     *               "currency": "USD"
+                     *             },
+                     *             "detail": [],
+                     *             "actor": {
+                     *               "kind": "automatic"
+                     *             },
+                     *             "tone": "neutral",
+                     *             "occurred_at": "2026-11-01T00:05:00Z"
+                     *           }
+                     *         },
+                     *         {
+                     *           "id": "lifecycle:paid:hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *           "timestamp": "2026-11-01T00:05:03Z",
+                     *           "source": "lifecycle",
+                     *           "event_type": "invoice.paid",
+                     *           "status": "succeeded",
+                     *           "description": "Invoice paid",
+                     *           "detail": "Visa •••• 4242",
+                     *           "amount_cents": 8650,
+                     *           "currency": "USD",
+                     *           "line": {
+                     *             "id": "lifecycle:paid:hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *             "kind": "invoice.paid",
+                     *             "title": "Invoice paid",
+                     *             "amount": {
+                     *               "cents": 8650,
+                     *               "currency": "USD"
+                     *             },
+                     *             "detail": [
+                     *               [
+                     *                 {
+                     *                   "text": "Visa •••• 4242"
+                     *                 }
+                     *               ]
+                     *             ],
+                     *             "tone": "success",
+                     *             "occurred_at": "2026-11-01T00:05:03Z"
+                     *           }
+                     *         }
+                     *       ],
+                     *       "degraded": [],
+                     *       "truncated": false
+                     *     }
+                     */
                     "application/json": components["schemas"]["InvoicePaymentTimeline"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice not found. */
+            /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20607,6 +24043,7 @@ export interface operations {
             };
             header?: never;
             path: {
+                /** @description The invoice id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
@@ -20619,16 +24056,49 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_dsp_6f1c0a7e9b2d4c8e1a3b5d7f",
+                     *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *           "stripe_dispute_id": "du_1QHk2fLkdIwHu7ix2c3d4e5f",
+                     *           "stripe_charge_id": "ch_3QHk2fLkdIwHu7ix0a1b2c3d",
+                     *           "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+                     *           "status": "needs_response",
+                     *           "reason": "fraudulent",
+                     *           "amount_cents": 8650,
+                     *           "currency": "USD",
+                     *           "evidence_due_by": "2026-11-25T23:59:59Z",
+                     *           "opened_at": "2026-11-10T08:30:00Z",
+                     *           "livemode": false,
+                     *           "created_at": "2026-11-10T08:30:04Z",
+                     *           "updated_at": "2026-11-10T08:30:04Z"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": components["schemas"]["InvoiceDisputeList"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice not found. */
+            /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20652,6 +24122,7 @@ export interface operations {
             };
             header?: never;
             path: {
+                /** @description The invoice id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
@@ -20664,16 +24135,50 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_srf_6f1c0a7e9b2d4c8e1a3b5d7f",
+                     *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *           "stripe_refund_id": "re_3QHk2fLkdIwHu7ix3d4e5f6a",
+                     *           "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+                     *           "stripe_charge_id": "ch_3QHk2fLkdIwHu7ix0a1b2c3d",
+                     *           "amount_cents": 2000,
+                     *           "currency": "USD",
+                     *           "status": "succeeded",
+                     *           "reason": "requested_by_customer",
+                     *           "outcome": "needs_review",
+                     *           "review_reason": "seen_late",
+                     *           "refund_created_at": "2026-11-05T16:20:00Z",
+                     *           "livemode": false,
+                     *           "created_at": "2026-11-07T09:00:12Z",
+                     *           "updated_at": "2026-11-07T09:00:12Z"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": components["schemas"]["InvoiceStripeRefundList"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice not found. */
+            /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20696,15 +24201,22 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The invoice id (`hc_inv_…`). */
                 id: string;
+                /** @description Stripe's id of the refund (`re_…`), as in the refund's `stripe_refund_id`. */
                 stripe_refund_id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "note": "Refunded as a goodwill gesture; booked in Xero."
+                 *     }
+                 */
                 "application/json": {
-                    /** @description How the refund was handled. 1 to 1000 characters. */
+                    /** @description How the refund was handled. 1 to 1000 characters; leading and trailing spaces are removed. */
                     note: string;
                 };
             };
@@ -20716,35 +24228,87 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_srf_6f1c0a7e9b2d4c8e1a3b5d7f",
+                     *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *       "stripe_refund_id": "re_3QHk2fLkdIwHu7ix3d4e5f6a",
+                     *       "stripe_payment_intent_id": "pi_3QHk2fLkdIwHu7ix0a1b2c3d",
+                     *       "stripe_charge_id": "ch_3QHk2fLkdIwHu7ix0a1b2c3d",
+                     *       "amount_cents": 2000,
+                     *       "currency": "USD",
+                     *       "status": "succeeded",
+                     *       "reason": "requested_by_customer",
+                     *       "outcome": "dismissed",
+                     *       "review_reason": "seen_late",
+                     *       "dismissed_note": "Refunded as a goodwill gesture; booked in Xero.",
+                     *       "dismissed_at": "2026-11-07T10:00:00Z",
+                     *       "refund_created_at": "2026-11-05T16:20:00Z",
+                     *       "livemode": false,
+                     *       "created_at": "2026-11-07T09:00:12Z",
+                     *       "updated_at": "2026-11-07T10:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["InvoiceStripeRefund"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice or refund not found. */
+            /** @description No invoice with this id in this account and mode, or no refund with this Stripe id on it. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "stripe_refund not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The refund does not need review (it is recorded, dismissed or not a refund of the invoice's payment). */
+            /** @description The refund does not need review (it is recorded, dismissed or not a refund of the invoice's payment). Code `invalid_state`. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "only a refund that needs review can be dismissed",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Missing or too long `note`, or an unknown field. */
+            /** @description Missing or too long `note` (`param` `note`), or an unknown field. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "note is required",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "note"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20766,6 +24330,24 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "draft_count": 1,
+                     *       "issued_count": 3,
+                     *       "voided_count": 0,
+                     *       "by_currency": [
+                     *         {
+                     *           "currency": "USD",
+                     *           "total_cents": 12500,
+                     *           "refunded_cents": 3750,
+                     *           "refund_pending_cents": 0,
+                     *           "refund_failed_cents": 0,
+                     *           "credited_cents": 8750,
+                     *           "out_of_band_cents": 0
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": components["schemas"]["CreditNoteStats"];
                 };
             };
@@ -20788,40 +24370,70 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The credit note id (`hc_cn_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "email": "billing@acme.example"
+                 *     }
+                 */
                 "application/json": {
-                    /** Format: email */
+                    /**
+                     * Format: email
+                     * @description The recipient, one plain address such as `billing@acme.example`, with no display name.
+                     */
                     email: string;
+                    /** @description Addresses to copy on this send. Absent copies the customer's stored list; `[]` copies nobody. */
                     additional_emails?: string[];
                 };
             };
         };
         responses: {
-            /** @description Email enqueued */
+            /** @description Email queued. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "status": "sent"
+                     *     }
+                     */
                     "application/json": {
-                        /** @enum {string} */
+                        /**
+                         * @description Always `sent`, meaning the email is queued.
+                         * @enum {string}
+                         */
                         status: "sent";
                     };
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Credit note not found */
+            /** @description No credit note with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "credit note not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             /**
              * @description Nothing was sent. `email_not_configured`: this server has no
@@ -20832,15 +24444,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "email_not_configured",
+                     *         "message": "Email isn't set up on this server, so nothing was sent.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Not issued (draft/voided), `email` is missing or invalid, or the body has an unknown field (`param` names it) */
+            /** @description The note is not issued (draft or voided), `email` is missing or invalid, a copied address is invalid (`param` `additional_emails`), or the body has an unknown field (`param` names it). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "issue the credit note before sending — drafts are not final documents",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -20850,6 +24484,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The credit note id (`hc_cn_…`). */
                 id: string;
             };
             cookie?: never;
@@ -20862,16 +24497,73 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_cn_dbkrtc2q3gpgqfoq5c5g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "credit_note_number": "CN-000003",
+                     *       "status": "issued",
+                     *       "reason": "requested_by_customer",
+                     *       "subtotal_cents": 3750,
+                     *       "tax_amount_cents": 0,
+                     *       "total_cents": 3750,
+                     *       "refund_amount_cents": 3750,
+                     *       "credit_amount_cents": 0,
+                     *       "out_of_band_amount_cents": 0,
+                     *       "currency": "USD",
+                     *       "issued_at": "2026-11-03T10:15:00Z",
+                     *       "refund_status": "succeeded",
+                     *       "stripe_refund_id": "re_3QHk2fLkdIwHu7ix1b2c3d4e",
+                     *       "recorded_from_stripe": false,
+                     *       "bill_to_snapshot": {
+                     *         "display_name": "Acme Inc",
+                     *         "legal_name": "Acme Incorporated",
+                     *         "email": "billing@acme.example",
+                     *         "address_line1": "100 Market Street",
+                     *         "city": "San Francisco",
+                     *         "state": "CA",
+                     *         "postal_code": "94105",
+                     *         "country": "US"
+                     *       },
+                     *       "supplier_snapshot": {
+                     *         "name": "Example Labs Inc",
+                     *         "email": "billing@examplelabs.example",
+                     *         "address_line1": "1 Congress Avenue",
+                     *         "city": "Austin",
+                     *         "state": "TX",
+                     *         "postal_code": "78701",
+                     *         "country": "US"
+                     *       },
+                     *       "is_simulated": false,
+                     *       "issue_pending": false,
+                     *       "tax_reversal_pending": false,
+                     *       "created_at": "2026-11-03T10:15:00Z",
+                     *       "recorded_at": "2026-11-03T10:15:00Z",
+                     *       "updated_at": "2026-11-03T10:15:02Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Credit note not found. */
+            /** @description No credit note with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "credit note not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20893,6 +24585,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The draft credit note's id (`hc_cn_…`). */
                 id: string;
             };
             cookie?: never;
@@ -20905,16 +24598,72 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_cn_dbkrtc2q3gpgqfoq5c5h",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "credit_note_number": "CN-000004",
+                     *       "status": "issued",
+                     *       "reason": "Service outage on Oct 14",
+                     *       "subtotal_cents": 1000,
+                     *       "tax_amount_cents": 0,
+                     *       "total_cents": 1000,
+                     *       "refund_amount_cents": 0,
+                     *       "credit_amount_cents": 1000,
+                     *       "out_of_band_amount_cents": 0,
+                     *       "currency": "USD",
+                     *       "issued_at": "2026-11-04T08:05:00Z",
+                     *       "refund_status": "none",
+                     *       "recorded_from_stripe": false,
+                     *       "bill_to_snapshot": {
+                     *         "display_name": "Acme Inc",
+                     *         "legal_name": "Acme Incorporated",
+                     *         "email": "billing@acme.example",
+                     *         "address_line1": "100 Market Street",
+                     *         "city": "San Francisco",
+                     *         "state": "CA",
+                     *         "postal_code": "94105",
+                     *         "country": "US"
+                     *       },
+                     *       "supplier_snapshot": {
+                     *         "name": "Example Labs Inc",
+                     *         "email": "billing@examplelabs.example",
+                     *         "address_line1": "1 Congress Avenue",
+                     *         "city": "Austin",
+                     *         "state": "TX",
+                     *         "postal_code": "78701",
+                     *         "country": "US"
+                     *       },
+                     *       "is_simulated": false,
+                     *       "issue_pending": false,
+                     *       "tax_reversal_pending": false,
+                     *       "created_at": "2026-11-04T08:00:00Z",
+                     *       "recorded_at": "2026-11-04T08:00:00Z",
+                     *       "updated_at": "2026-11-04T08:05:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Credit note not found. */
+            /** @description No credit note with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "credit note not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20924,6 +24673,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "can only issue draft credit notes",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The request has a body with a field. This route takes no body (`param` names the field). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"auto_issue\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "auto_issue"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -20945,13 +24724,20 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The issued credit note's id (`hc_cn_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "stripe_refund_id": "re_3QHk8cLkdIwHu7ix3d4e5f6a"
+                 *     }
+                 */
                 "application/json": {
+                    /** @description Stripe's id of the refund you made (`re_…`). */
                     stripe_refund_id: string;
                 };
             };
@@ -20963,35 +24749,113 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_cn_dbkrtc2q3gpgqfoq5c5g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "credit_note_number": "CN-000003",
+                     *       "status": "issued",
+                     *       "reason": "requested_by_customer",
+                     *       "subtotal_cents": 3750,
+                     *       "tax_amount_cents": 0,
+                     *       "total_cents": 3750,
+                     *       "refund_amount_cents": 3750,
+                     *       "credit_amount_cents": 0,
+                     *       "out_of_band_amount_cents": 0,
+                     *       "currency": "USD",
+                     *       "issued_at": "2026-11-03T10:15:00Z",
+                     *       "refund_status": "succeeded",
+                     *       "stripe_refund_id": "re_3QHk8cLkdIwHu7ix3d4e5f6a",
+                     *       "recorded_from_stripe": true,
+                     *       "bill_to_snapshot": {
+                     *         "display_name": "Acme Inc",
+                     *         "legal_name": "Acme Incorporated",
+                     *         "email": "billing@acme.example",
+                     *         "address_line1": "100 Market Street",
+                     *         "city": "San Francisco",
+                     *         "state": "CA",
+                     *         "postal_code": "94105",
+                     *         "country": "US"
+                     *       },
+                     *       "supplier_snapshot": {
+                     *         "name": "Example Labs Inc",
+                     *         "email": "billing@examplelabs.example",
+                     *         "address_line1": "1 Congress Avenue",
+                     *         "city": "Austin",
+                     *         "state": "TX",
+                     *         "postal_code": "78701",
+                     *         "country": "US"
+                     *       },
+                     *       "is_simulated": false,
+                     *       "issue_pending": false,
+                     *       "tax_reversal_pending": false,
+                     *       "created_at": "2026-11-03T10:15:00Z",
+                     *       "recorded_at": "2026-11-03T10:15:00Z",
+                     *       "updated_at": "2026-11-06T09:30:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Credit note not found. */
+            /** @description No credit note with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "credit note not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The note is not issued or its refund did not fail, another note already holds the refund, its row was decided another way, Stripe is not connected, or the note changed since it was read. */
+            /** @description Code `invalid_state`. The note is not issued or its refund did not fail, another note already holds the refund, its row was decided another way, Stripe is not connected, or the note changed since it was read. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "a refund made in Stripe can be attached only to an issued credit note whose card refund failed",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The refund is not of this invoice's payment, was made by Hardcount, has not succeeded, is in another currency or of another amount, or an unknown field. */
+            /** @description Code `validation_error`. `stripe_refund_id` is missing; the refund is not of this invoice's payment, was made by Hardcount, has not succeeded, or is in another currency or of another amount (`param` `stripe_refund_id`); or the body has an unknown field. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "this refund is not of the payment that paid this invoice",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "stripe_refund_id"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -21013,6 +24877,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The issued credit note's id (`hc_cn_…`). */
                 id: string;
             };
             cookie?: never;
@@ -21025,25 +24890,81 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_cn_dbkrtc2q3gpgqfoq5c5g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "credit_note_number": "CN-000003",
+                     *       "status": "issued",
+                     *       "reason": "requested_by_customer",
+                     *       "subtotal_cents": 3750,
+                     *       "tax_amount_cents": 0,
+                     *       "total_cents": 3750,
+                     *       "refund_amount_cents": 3750,
+                     *       "credit_amount_cents": 0,
+                     *       "out_of_band_amount_cents": 0,
+                     *       "currency": "USD",
+                     *       "issued_at": "2026-11-03T10:15:00Z",
+                     *       "refund_status": "succeeded",
+                     *       "stripe_refund_id": "re_3QHk7bLkdIwHu7ix2c3d4e5f",
+                     *       "recorded_from_stripe": false,
+                     *       "bill_to_snapshot": {
+                     *         "display_name": "Acme Inc",
+                     *         "legal_name": "Acme Incorporated",
+                     *         "email": "billing@acme.example",
+                     *         "address_line1": "100 Market Street",
+                     *         "city": "San Francisco",
+                     *         "state": "CA",
+                     *         "postal_code": "94105",
+                     *         "country": "US"
+                     *       },
+                     *       "supplier_snapshot": {
+                     *         "name": "Example Labs Inc",
+                     *         "email": "billing@examplelabs.example",
+                     *         "address_line1": "1 Congress Avenue",
+                     *         "city": "Austin",
+                     *         "state": "TX",
+                     *         "postal_code": "78701",
+                     *         "country": "US"
+                     *       },
+                     *       "is_simulated": false,
+                     *       "issue_pending": false,
+                     *       "tax_reversal_pending": false,
+                     *       "created_at": "2026-11-03T10:15:00Z",
+                     *       "recorded_at": "2026-11-03T10:15:00Z",
+                     *       "updated_at": "2026-11-03T12:00:04Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Credit note not found. */
+            /** @description No credit note with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "credit note not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
              * @description Code `invalid_state`. The note is not issued, has no refund part,
              *     the refund already succeeded or is still processing at Stripe,
-             *     Stripe is not connected, or the invoice was paid outside Stripe
-             *     (void the note and issue a new one with
-             *     `out_of_band_amount_cents`). Code `stripe_refund_unresolved`: the
+             *     or the invoice was paid outside Stripe (void the note and issue a
+             *     new one with `out_of_band_amount_cents`). Code `stripe_refund_unresolved`: the
              *     invoice has a refund made in Stripe that is not recorded yet
              *     (flagged for review, or still in flight). Record it, attach it to
              *     this note with `POST /v1/credit-notes/{id}/attach-stripe-refund`
@@ -21055,6 +24976,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "refund already succeeded — nothing to retry",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The request has a body with a field. This route takes no body (`param` names the field). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"amount_cents\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "amount_cents"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -21063,13 +25014,24 @@ export interface operations {
              * @description Stripe refused the refund (code `provider_error`): the note's
              *     `refund_status` is `failed`. Or Stripe gave no clear answer (code
              *     `payment_outcome_unknown`): it is `unknown`, and the customer may
-             *     already be refunded. Retry later in both cases.
+             *     already be refunded. Retry later in both cases. Stripe not
+             *     connected for this mode also answers `provider_error`.
              */
             502: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "provider_error",
+                     *         "message": "Stripe didn't make the refund, so the customer was not refunded. Check the payment in Stripe, then retry the refund.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -21090,6 +25052,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The credit note id (`hc_cn_…`). */
                 id: string;
             };
             cookie?: never;
@@ -21102,16 +25065,53 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_cn_dbkrtc2q3gpgqfoq5c5h",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "credit_note_number": "CN-000004",
+                     *       "status": "voided",
+                     *       "reason": "Service outage on Oct 14",
+                     *       "subtotal_cents": 1000,
+                     *       "tax_amount_cents": 0,
+                     *       "total_cents": 1000,
+                     *       "refund_amount_cents": 0,
+                     *       "credit_amount_cents": 1000,
+                     *       "out_of_band_amount_cents": 0,
+                     *       "currency": "USD",
+                     *       "voided_at": "2026-11-04T09:00:00Z",
+                     *       "refund_status": "none",
+                     *       "recorded_from_stripe": false,
+                     *       "is_simulated": false,
+                     *       "issue_pending": false,
+                     *       "tax_reversal_pending": false,
+                     *       "created_at": "2026-11-04T08:00:00Z",
+                     *       "recorded_at": "2026-11-04T08:00:00Z",
+                     *       "updated_at": "2026-11-04T09:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Credit note not found. */
+            /** @description No credit note with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "credit note not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -21124,6 +25124,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "cannot void an issued credit note — issued credit notes are final financial documents",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The request has a body with a field. This route takes no body (`param` names the field). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"reason\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "reason"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -21135,6 +25165,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The credit note id (`hc_cn_…`). */
                 id: string;
             };
             cookie?: never;
@@ -21151,12 +25182,22 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Credit note not found. */
+            /** @description No credit note with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "credit note not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -21178,22 +25219,145 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The draft invoice's id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Invoice finalized */
+            /** @description The invoice, finalized and after its collection. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_inv_dbj84b2q3gpgqfoq5c41",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "subscription_id": "",
+                     *       "invoice_number": "HC-000043",
+                     *       "status": "paid",
+                     *       "payment_status": "succeeded",
+                     *       "currency": "USD",
+                     *       "subtotal_cents": 25000,
+                     *       "discount_cents": 0,
+                     *       "tax_amount_cents": 0,
+                     *       "tax_rate": 0,
+                     *       "tax_provider": "manual",
+                     *       "tax_status": "ok",
+                     *       "payment_card_brand": "visa",
+                     *       "payment_card_last4": "4242",
+                     *       "total_amount_cents": 25000,
+                     *       "amount_due_cents": 0,
+                     *       "amount_paid_cents": 25000,
+                     *       "credits_applied_cents": 0,
+                     *       "billing_period_start": "2026-11-02T15:30:00Z",
+                     *       "billing_period_end": "2026-11-02T15:30:00Z",
+                     *       "billing_timezone": "UTC",
+                     *       "bill_to_snapshot": {
+                     *         "display_name": "Acme Inc",
+                     *         "legal_name": "Acme Incorporated",
+                     *         "email": "billing@acme.example",
+                     *         "address_line1": "100 Market Street",
+                     *         "city": "San Francisco",
+                     *         "state": "CA",
+                     *         "postal_code": "94105",
+                     *         "country": "US"
+                     *       },
+                     *       "supplier_snapshot": {
+                     *         "name": "Example Labs Inc",
+                     *         "email": "billing@examplelabs.example",
+                     *         "address_line1": "1 Congress Avenue",
+                     *         "city": "Austin",
+                     *         "state": "TX",
+                     *         "postal_code": "78701",
+                     *         "country": "US"
+                     *       },
+                     *       "issued_at": "2026-11-02T16:00:00Z",
+                     *       "due_at": "2026-12-02T16:00:00Z",
+                     *       "paid_at": "2026-11-02T16:00:02Z",
+                     *       "stripe_payment_intent_id": "pi_3QHk9aLkdIwHu7ix5f6a7b8c",
+                     *       "paid_out_of_band": false,
+                     *       "public_token": "hc_pinv_3b8e1d0c9f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c",
+                     *       "net_payment_term_days": 30,
+                     *       "memo": "Onboarding for the Acme rollout",
+                     *       "created_at": "2026-11-02T15:30:00Z",
+                     *       "updated_at": "2026-11-02T16:00:02Z",
+                     *       "billing_reason": "manual",
+                     *       "is_simulated": false
+                     *     }
+                     */
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description No invoice with this id in this account and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The invoice cannot be finalized now, and nothing changed. Code
+             *     `invalid_state`: it is not a draft, or its tax is still pending
+             *     (the message says whether Hardcount retries it or you must act).
+             *     Code `tax_calculation_expired`: its Stripe Tax calculation is
+             *     more than 24 hours old; retry tax, then finalize.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "can only finalize draft invoices, current status: finalized",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The request has a body with a field. This route takes no body (`param` names the field). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"send_email\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "send_email"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -21212,6 +25376,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The draft invoice's id (`hc_inv_…`). */
                 id: string;
             };
             cookie?: never;
@@ -21224,28 +25389,147 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_inv_dbj84b2q3gpgqfoq5c42",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "invoice_number": "HC-000044",
+                     *       "status": "finalized",
+                     *       "payment_status": "pending",
+                     *       "currency": "USD",
+                     *       "subtotal_cents": 8650,
+                     *       "discount_cents": 0,
+                     *       "tax_amount_cents": 735,
+                     *       "tax_rate": 8.5,
+                     *       "tax_name": "Sales Tax",
+                     *       "tax_country": "US",
+                     *       "tax_provider": "stripe_tax",
+                     *       "tax_calculation_id": "taxcalc_1QHkAbLkdIwHu7ixZ1y2x3w4",
+                     *       "tax_transaction_id": "tax_1QHkAcLkdIwHu7ixV5u6t7s8",
+                     *       "tax_status": "ok",
+                     *       "tax_retry_count": 1,
+                     *       "attention": {
+                     *         "severity": "info",
+                     *         "reason": "payment_scheduled",
+                     *         "message": "The card on file is charged automatically, usually within an hour; use Charge now to collect it right away.",
+                     *         "actions": [
+                     *           {
+                     *             "code": "charge_now",
+                     *             "label": "Charge now"
+                     *           }
+                     *         ],
+                     *         "code": "payment.scheduled",
+                     *         "detail": "Automatic charges run on a schedule, hourly by default.",
+                     *         "since": "2026-12-01T09:30:00Z",
+                     *         "due_by": "2026-12-31T00:05:00Z"
+                     *       },
+                     *       "total_amount_cents": 9385,
+                     *       "amount_due_cents": 9385,
+                     *       "amount_paid_cents": 0,
+                     *       "credits_applied_cents": 0,
+                     *       "billing_period_start": "2026-11-01T00:00:00Z",
+                     *       "billing_period_end": "2026-12-01T00:00:00Z",
+                     *       "billing_period_display": "Nov 1, 2026 – Nov 30, 2026",
+                     *       "billing_timezone": "UTC",
+                     *       "bill_to_snapshot": {
+                     *         "display_name": "Acme Inc",
+                     *         "legal_name": "Acme Incorporated",
+                     *         "email": "billing@acme.example",
+                     *         "address_line1": "100 Market Street",
+                     *         "city": "San Francisco",
+                     *         "state": "CA",
+                     *         "postal_code": "94105",
+                     *         "country": "US"
+                     *       },
+                     *       "supplier_snapshot": {
+                     *         "name": "Example Labs Inc",
+                     *         "email": "billing@examplelabs.example",
+                     *         "address_line1": "1 Congress Avenue",
+                     *         "city": "Austin",
+                     *         "state": "TX",
+                     *         "postal_code": "78701",
+                     *         "country": "US"
+                     *       },
+                     *       "issued_at": "2026-12-01T00:05:00Z",
+                     *       "due_at": "2026-12-31T00:05:00Z",
+                     *       "paid_out_of_band": false,
+                     *       "auto_charge_pending": true,
+                     *       "public_token": "hc_pinv_c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7019f2c4e1a7b3d5f6081a2b3",
+                     *       "net_payment_term_days": 30,
+                     *       "created_at": "2026-12-01T00:05:00Z",
+                     *       "updated_at": "2026-12-01T09:30:00Z",
+                     *       "billing_reason": "subscription_cycle",
+                     *       "is_simulated": false
+                     *     }
+                     */
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Invoice not found. */
+            /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "invoice not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             /**
-             * @description Invoice is not in a retryable state (status != draft, or
-             *     tax_status is not pending). Also returned when the
-             *     tax was saved but the invoice's state then stopped the
-             *     finalize.
+             * @description Code `invalid_state`. The invoice is not a draft, or its tax is
+             *     not pending and its calculation is not an expired one. Also
+             *     returned when the tax was saved but the invoice's state then
+             *     stopped the finalize.
              */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "tax retry only valid on draft invoices (current: finalized)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The request has a body with a field. This route takes no body (`param` names the field). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"force\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "force"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -24557,7 +28841,9 @@ export interface operations {
     listDunningRuns: {
         parameters: {
             query?: {
+                /** @description Only the run for this invoice. */
                 invoice_id?: string;
+                /** @description Only runs in this state. Another value answers 400. */
                 state?: "active" | "escalated" | "resolved";
                 /**
                  * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
@@ -24582,10 +28868,55 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_drun_dc7m3m2q3gpgqfoq5c70",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "policy_id": "hc_dpol_dajqj1aq3gpgqfoq5c6g",
+                     *           "state": "active",
+                     *           "reason": "payment_failed",
+                     *           "attempt_count": 1,
+                     *           "last_attempt_at": "2026-11-04T00:05:03Z",
+                     *           "next_action_at": "2026-11-08T00:05:03Z",
+                     *           "paused": false,
+                     *           "created_at": "2026-11-01T00:05:03Z",
+                     *           "updated_at": "2026-11-04T00:05:04Z",
+                     *           "invoice_number": "HC-000042",
+                     *           "invoice_amount_due_cents": 8650,
+                     *           "invoice_currency": "USD",
+                     *           "max_retry_attempts": 3
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["DunningRun"][];
                         total: components["schemas"]["ListTotal"];
                     };
+                };
+            };
+            /** @description `state` is not `active`, `escalated` or `resolved` (code `invalid_request`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "state must be one of active, escalated, resolved",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -24598,6 +28929,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The dunning run id (`hc_drun_…`). */
                 id: string;
             };
             cookie?: never;
@@ -24610,16 +28942,102 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "run": {
+                     *         "id": "hc_drun_dc7m3m2q3gpgqfoq5c70",
+                     *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *         "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *         "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *         "policy_id": "hc_dpol_dajqj1aq3gpgqfoq5c6g",
+                     *         "state": "active",
+                     *         "reason": "payment_failed",
+                     *         "attempt_count": 1,
+                     *         "last_attempt_at": "2026-11-04T00:05:03Z",
+                     *         "next_action_at": "2026-11-08T00:05:03Z",
+                     *         "paused": false,
+                     *         "created_at": "2026-11-01T00:05:03Z",
+                     *         "updated_at": "2026-11-04T00:05:04Z"
+                     *       },
+                     *       "events": [
+                     *         {
+                     *           "id": "hc_devt_dc7m3maq3gpgqfoq5c6v",
+                     *           "run_id": "hc_drun_dc7m3m2q3gpgqfoq5c70",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *           "event_type": "dunning_started",
+                     *           "state": "active",
+                     *           "reason": "payment_failed",
+                     *           "attempt_count": 0,
+                     *           "created_at": "2026-11-01T00:05:03Z",
+                     *           "recorded_at": "2026-11-01T00:05:03Z",
+                     *           "line": {
+                     *             "id": "dunning:hc_devt_dc7m3maq3gpgqfoq5c6v",
+                     *             "kind": "payment_recovery.started",
+                     *             "title": "Payment recovery started",
+                     *             "detail": [],
+                     *             "actor": {
+                     *               "kind": "automatic"
+                     *             },
+                     *             "tone": "neutral",
+                     *             "occurred_at": "2026-11-01T00:05:03Z"
+                     *           }
+                     *         },
+                     *         {
+                     *           "id": "hc_devt_dc7m3maq3gpgqfoq5c7g",
+                     *           "run_id": "hc_drun_dc7m3m2q3gpgqfoq5c70",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *           "event_type": "retry_attempted",
+                     *           "state": "active",
+                     *           "reason": "payment failed: Your card has insufficient funds.",
+                     *           "attempt_count": 1,
+                     *           "metadata": {
+                     *             "payment_intent_id": "pi_3QHk2fLkdIwHu7ix4e5f6a7b"
+                     *           },
+                     *           "created_at": "2026-11-04T00:05:03Z",
+                     *           "recorded_at": "2026-11-04T00:05:03Z",
+                     *           "line": {
+                     *             "id": "dunning:hc_devt_dc7m3maq3gpgqfoq5c7g",
+                     *             "kind": "payment_recovery.retry_failed",
+                     *             "title": "Payment retry 1 failed",
+                     *             "amount": {
+                     *               "cents": 8650,
+                     *               "currency": "USD"
+                     *             },
+                     *             "problem": "Card declined: insufficient funds",
+                     *             "detail": [],
+                     *             "actor": {
+                     *               "kind": "automatic"
+                     *             },
+                     *             "tone": "failure",
+                     *             "occurred_at": "2026-11-04T00:05:03Z"
+                     *           }
+                     *         }
+                     *       ],
+                     *       "degraded": []
+                     *     }
+                     */
                     "application/json": components["schemas"]["DunningRunDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Dunning run not found. */
+            /** @description No dunning run with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "dunning run not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -24641,14 +29059,23 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The dunning run id (`hc_drun_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "resolution": "payment_recovered"
+                 *     }
+                 */
                 "application/json": {
-                    /** @enum {string} */
+                    /**
+                     * @description How the run ends, and what happens to its invoice (see above).
+                     * @enum {string}
+                     */
                     resolution: "payment_recovered" | "invoice_voided" | "invoice_not_collectible";
                 };
             };
@@ -24663,25 +29090,45 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_drun_dc7m3m2q3gpgqfoq5c70",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "policy_id": "hc_dpol_dajqj1aq3gpgqfoq5c6g",
+                     *       "state": "resolved",
+                     *       "reason": "payment_failed",
+                     *       "attempt_count": 1,
+                     *       "last_attempt_at": "2026-11-04T00:05:03Z",
+                     *       "paused": false,
+                     *       "resolved_at": "2026-11-06T13:00:00Z",
+                     *       "resolution": "payment_recovered",
+                     *       "created_at": "2026-11-01T00:05:03Z",
+                     *       "updated_at": "2026-11-06T13:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["DunningRun"];
                 };
             };
-            /** @description Body is not valid JSON. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Dunning run or invoice not found. */
+            /** @description No dunning run with this id in this account and mode (`dunning_run not found`), or its invoice is gone (`invoice not found`). */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "dunning_run not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -24695,15 +29142,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "void the invoice: cannot void a paid invoice — issue a credit note instead",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `resolution` is missing or not one of the three values. */
+            /**
+             * @description `resolution` is missing or not one of the three values (`param`
+             *     `resolution`), or the body has an unknown field.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "resolution must be one of payment_recovered, invoice_voided, invoice_not_collectible",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "resolution"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -24725,6 +29196,22 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "active_count": 2,
+                     *       "escalated_count": 1,
+                     *       "resolved_count": 14,
+                     *       "recovered_count": 11,
+                     *       "at_risk_cents": 25950,
+                     *       "currency": "USD",
+                     *       "at_risk_by_currency": [
+                     *         {
+                     *           "currency": "USD",
+                     *           "amount_cents": 25950
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": components["schemas"]["DunningStats"];
                 };
             };
@@ -24758,6 +29245,31 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_dpol_dajqj1aq3gpgqfoq5c6g",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "name": "Default retries",
+                     *           "enabled": true,
+                     *           "is_default": true,
+                     *           "seeded": true,
+                     *           "retry_days": [
+                     *             3,
+                     *             4,
+                     *             7
+                     *           ],
+                     *           "final_subscription_action": "none",
+                     *           "final_invoice_action": "none",
+                     *           "created_at": "2026-09-15T12:00:00Z",
+                     *           "updated_at": "2026-09-15T12:00:00Z",
+                     *           "assigned_customers": 0
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["DunningPolicyListItem"][];
                         total: components["schemas"]["ListTotal"];
@@ -24788,6 +29300,19 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "name": "Strict retries",
+                 *       "enabled": true,
+                 *       "retry_days": [
+                 *         2,
+                 *         3,
+                 *         5
+                 *       ],
+                 *       "final_subscription_action": "cancel",
+                 *       "final_invoice_action": "mark_uncollectible"
+                 *     }
+                 */
                 "application/json": components["schemas"]["DunningPolicyInput"];
             };
         };
@@ -24798,30 +29323,54 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_dpol_dajqj1aq3gpgqfoq5c6h",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "name": "Strict retries",
+                     *       "enabled": true,
+                     *       "is_default": true,
+                     *       "seeded": false,
+                     *       "retry_days": [
+                     *         2,
+                     *         3,
+                     *         5
+                     *       ],
+                     *       "final_subscription_action": "cancel",
+                     *       "final_invoice_action": "mark_uncollectible",
+                     *       "created_at": "2026-11-02T10:00:00Z",
+                     *       "updated_at": "2026-11-02T10:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["DunningPolicy"];
                 };
             };
-            /** @description `invalid_request`: the body is not valid JSON. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /**
-             * @description `validation_error`: a replaced field was sent (`final_action`,
-             *     `retry_schedule`, `max_retry_attempts`, `grace_period_days`),
-             *     `retry_days` is missing or out of bounds, or an unknown final
-             *     action.
+             * @description `validation_error`, with `param` naming the field: a replaced
+             *     field was sent (`final_action`, `retry_schedule`,
+             *     `max_retry_attempts`, `grace_period_days`), `retry_days` is
+             *     missing, out of bounds or not whole days, an unknown final
+             *     action, a `name` over 255 characters, a field the server sets
+             *     (`id`, `is_default`, `seeded` and the like), or an unknown field.
              */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "entry 1 is 45; each wait is a whole number of days from 1 to 30",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "retry_days"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -24833,6 +29382,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The dunning policy id (`hc_dpol_…`). */
                 id: string;
             };
             cookie?: never;
@@ -24845,16 +29395,45 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_dpol_dajqj1aq3gpgqfoq5c6g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "name": "Default retries",
+                     *       "enabled": true,
+                     *       "is_default": true,
+                     *       "seeded": true,
+                     *       "retry_days": [
+                     *         3,
+                     *         4,
+                     *         7
+                     *       ],
+                     *       "final_subscription_action": "none",
+                     *       "final_invoice_action": "none",
+                     *       "created_at": "2026-09-15T12:00:00Z",
+                     *       "updated_at": "2026-09-15T12:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["DunningPolicy"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description `not_found`: no policy with this id in this tenant and mode. */
+            /** @description `not_found`: no policy with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "dunning_policy not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -24866,6 +29445,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The dunning policy id (`hc_dpol_…`). */
                 id: string;
             };
             cookie?: never;
@@ -24878,32 +29458,80 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "status": "deleted"
+                     *     }
+                     */
                     "application/json": {
-                        /** @enum {string} */
+                        /**
+                         * @description Always `deleted`.
+                         * @enum {string}
+                         */
                         status: "deleted";
                     };
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description `not_found`: no policy with this id in this tenant and mode. */
+            /** @description `not_found`: no policy with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "dunning_policy not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
              * @description `invalid_state`: the policy is the default (make another policy
-             *     the default first), or customers are assigned to it (reassign
-             *     them first).
+             *     the default first), customers are assigned to it (reassign
+             *     them first), or it has run payment retries on invoices.
              */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "cannot delete policy — 2 customer(s) still assigned; reassign them first",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The request has a body with a field. This route takes no body (`param` names the field). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"force\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "force"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -24925,12 +29553,26 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The dunning policy id (`hc_dpol_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "name": "Default retries",
+                 *       "enabled": true,
+                 *       "retry_days": [
+                 *         3,
+                 *         4,
+                 *         7
+                 *       ],
+                 *       "final_subscription_action": "pause",
+                 *       "final_invoice_action": "none"
+                 *     }
+                 */
                 "application/json": components["schemas"]["DunningPolicyInput"];
             };
         };
@@ -24941,25 +29583,46 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_dpol_dajqj1aq3gpgqfoq5c6g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "name": "Default retries",
+                     *       "enabled": true,
+                     *       "is_default": true,
+                     *       "seeded": false,
+                     *       "retry_days": [
+                     *         3,
+                     *         4,
+                     *         7
+                     *       ],
+                     *       "final_subscription_action": "pause",
+                     *       "final_invoice_action": "none",
+                     *       "created_at": "2026-09-15T12:00:00Z",
+                     *       "updated_at": "2026-11-02T10:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["DunningPolicy"];
                 };
             };
-            /** @description `invalid_request`: the body is not valid JSON. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description `not_found`: no policy with this id in this tenant and mode. */
+            /** @description `not_found`: no policy with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "dunning_policy not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -24969,6 +29632,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "retry_days is required: the days to wait before each retry, for example [3, 4, 7]",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "retry_days"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -24990,6 +29664,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The dunning policy id (`hc_dpol_…`). */
                 id: string;
             };
             cookie?: never;
@@ -25002,19 +29677,57 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "status": "default_updated"
+                     *     }
+                     */
                     "application/json": {
-                        /** @enum {string} */
+                        /**
+                         * @description Always `default_updated`.
+                         * @enum {string}
+                         */
                         status: "default_updated";
                     };
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description `not_found`: no policy with this id in this tenant and mode. */
+            /** @description `not_found`: no policy with this id in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "dunning_policy not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The request has a body with a field. This route takes no body (`param` names the field). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"is_default\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "is_default"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };

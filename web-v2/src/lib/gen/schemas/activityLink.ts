@@ -16,7 +16,10 @@ import type { ActivityLinkKind } from './activityLinkKind';
  * An object the row's own data names, which still exists.
  */
 export interface ActivityLink {
+  /** The kind of object. */
   kind: ActivityLinkKind;
+  /** The object's id, to fetch or link to it. */
   id: string;
+  /** The text to show for the link, such as a credit note number or a subscription's name. */
   label: string;
 }

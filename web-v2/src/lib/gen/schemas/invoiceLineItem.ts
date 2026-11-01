@@ -15,39 +15,61 @@ import type { InvoiceLineItemMetadata } from './invoiceLineItemMetadata';
 import type { InvoiceLineType } from './invoiceLineType';
 
 /**
- * A single line on an invoice.
+ * One line on an invoice: a base fee, a usage charge or another
+ * charge. Amounts are whole numbers in the currency's minor unit
+ * (cents for USD). `GET /v1/invoices/{id}` returns the lines, and
+ * `POST /v1/invoices/{id}/line-items` returns the line it added.
  */
 export interface InvoiceLineItem {
+  /** Unique identifier of the line, starting `hc_ili_`. */
   id: string;
+  /** The invoice the line is on. */
   invoice_id: string;
-  /** Owning tenant. Omitted when empty. */
+  /** The account the line belongs to. Absent when empty. */
   tenant_id?: string;
   line_type: InvoiceLineType;
+  /** On a usage line, the meter that measured the usage. Absent on other lines. */
   meter_id?: string;
-  /** The meter's unit ("tokens", "seconds", …), stamped on usage lines at write time so invoice surfaces can apply the display-scale convention (token rates read "$3.00 / 1M tokens"). Empty on non-usage lines and on lines written before the 0173 backfill. */
+  /** On a usage line, the meter's unit ("tokens", "seconds", …), as it was when the line was written, so prices can be shown per unit the way the pricing pages show them (token rates read "$3.00 / 1M tokens"). Absent on other lines, and on usage lines written before releases recorded it. */
   meter_unit?: string;
+  /**
+     * The line's text as printed on the invoice. A base fee reads like
+     * "Pro - base fee (qty 1)"; a usage line names the meter and its
+     * unit, or the labels its price takes, like "Tokens (tokens)".
+     */
   description: string;
   /** The line's exact quantity as a decimal string, for example "3" or "1.5". Line amounts stay whole cents. */
   quantity: string;
-  /** The unit price in cents at full precision, for example "0.3" for $0.003. On a usage line priced `per_unit` it is that rate; on any other line it is amount_cents ÷ quantity. Line amounts and totals stay whole cents. */
+  /** The unit price, a decimal string of cents at full precision, for example "0.3" for $0.003. On a usage line priced `per_unit` it is that rate; on any other line it is `amount_cents` ÷ `quantity`. Line amounts and totals stay whole cents. */
   unit_amount_decimal: string;
+  /**
+     * The line's amount before tax, in the currency's minor unit (cents
+     * for USD). With tax-inclusive prices, it is the net amount after
+     * the tax is taken out.
+     */
   amount_cents: number;
-  /** Tax rate as a percent (18.50 = 18.50%), up to 4-decimal precision. ADR-042/043. */
+  /** Tax rate on the line as a percent, up to four decimal places (18.5 means 18.5%). */
   tax_rate: number;
+  /** Tax on the line, in the currency's minor unit (cents for USD). */
   tax_amount_cents: number;
+  /** The tax jurisdiction the provider named for the line. Absent when none was given. */
   tax_jurisdiction?: string;
+  /** The product tax code the line was taxed under (for Stripe Tax, a `txcd_…` code). Absent when none was used. */
   tax_code?: string;
   /**
-     * Stripe-canonical structured `taxability_reason`
+     * Why the line was taxed as it was, in Stripe Tax's words
      * (`standard_rated`, `reverse_charge`, `not_collecting`,
-     * `customer_exempt`, `product_exempt`, `zero_rated`, etc.).
+     * `customer_exempt`, `product_exempt`, `zero_rated` and others).
      * `prepaid_credit_purchase` is Hardcount's own value, on a prepaid
      * commit purchase line under the manual or Stripe Tax provider:
      * the line is not taxed, and the usage the credit pays for is
-     * taxed when invoiced. Otherwise empty for non-Stripe providers.
+     * taxed when invoiced. Otherwise absent for providers other than
+     * Stripe Tax.
      */
   tax_reason?: string;
+  /** The line's amount plus its tax, in the currency's minor unit (cents for USD). */
   total_amount_cents: number;
+  /** The line's currency, the same as the invoice's. */
   currency: string;
   /** On a usage line, the shape of its price: `per_unit`, `graduated` or `package`. Absent on other lines. */
   pricing_mode?: string;
@@ -55,28 +77,29 @@ export interface InvoiceLineItem {
   price_id?: string;
   /** On a usage line, the labels its price takes. Absent for a price that takes every event, and on other lines. */
   dimension_match?: InvoiceLineItemDimensionMatch;
-  /** @nullable */
-  billing_period_start?: string | null;
-  /** @nullable */
-  billing_period_end?: string | null;
+  /** Start of the time the line bills for (included). Absent on lines with no period of their own, such as lines you add to a draft. */
+  billing_period_start?: string;
+  /** End of the time the line bills for (not included). Absent on lines with no period of their own. */
+  billing_period_end?: string;
+  /** Extra key-value data stored with the line. No API request sets it; it is absent when empty. */
   metadata?: InvoiceLineItemMetadata;
+  /** When the line was written. */
   created_at: string;
   /**
-     * Marks the line as a prepaid-commit purchase (ADR-078): when the
-     * invoice finalizes, a credit block of this many cents is granted
-     * to the customer. May differ from the line price — discounted
-     * commits sell $10k of credits for $9k. add_on lines on manual
-     * invoices only, at most one per invoice. Absent on normal lines.
-     * @nullable
+     * Marks the line as a prepaid commit purchase: when the invoice is
+     * finalized, the customer is granted a block of credit of this
+     * many cents (in the invoice's currency). It may differ from the
+     * line's price: a discounted commit sells $10,000 of credit for
+     * $9,000. Only on `add_on` lines of invoices you create, at most
+     * one per invoice. Absent on other lines.
      */
-  commit_granted_cents?: number | null;
+  commit_granted_cents?: number;
   /**
-     * Expiry of the granted commit block. The credit can be drawn up
-     * to and including this instant; a period invoice draws it when
-     * its period ends at or before it. The dashboard sends the local
-     * midnight after the picked day. Absent/null = the credits never
-     * expire (the default).
-     * @nullable
+     * When the granted credit expires. The credit can be drawn up to
+     * and including this instant; a period invoice draws it when its
+     * period ends at or before it. The dashboard sends the local
+     * midnight after the picked day. Absent when the credit never
+     * expires (the default).
      */
-  commit_expires_at?: string | null;
+  commit_expires_at?: string;
 }

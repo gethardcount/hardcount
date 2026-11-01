@@ -2186,8 +2186,9 @@ export const getGetHostedInvoiceUrl = (token: string,) => {
 /**
  * Unauthenticated. The invoice's public token in the URL is the only
  * credential. Paid and voided invoices stay viewable. A draft is
- * never shown: it returns 404 like an unknown token. Share the page
- * link with customers instead of calling this route.
+ * never shown: it returns 404 like an unknown token, and so does a
+ * token replaced by `POST /v1/invoices/{id}/rotate-public-token`.
+ * Share the page link with customers instead of calling this route.
  * @summary Data behind the hosted invoice page
  */
 export const getHostedInvoice = async (token: string, options?: RequestInit): Promise<HostedInvoice> => {
@@ -2212,7 +2213,7 @@ export const getGetHostedInvoiceQueryKey = (token: string,) => {
     }
 
 
-export const getGetHostedInvoiceQueryOptions = <TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetHostedInvoiceQueryOptions = <TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -2231,10 +2232,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetHostedInvoiceQueryResult = NonNullable<Awaited<ReturnType<typeof getHostedInvoice>>>
-export type GetHostedInvoiceQueryError = Error | void
+export type GetHostedInvoiceQueryError = Error
 
 
-export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(
+export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error>(
  token: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getHostedInvoice>>,
@@ -2244,7 +2245,7 @@ export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedI
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(
+export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error>(
  token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getHostedInvoice>>,
@@ -2254,7 +2255,7 @@ export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedI
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(
+export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error>(
  token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -2262,7 +2263,7 @@ export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedI
  * @summary Data behind the hosted invoice page
  */
 
-export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(
+export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error>(
  token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -2316,7 +2317,7 @@ export const getGetHostedInvoicePdfQueryKey = (token: string,) => {
     }
 
 
-export const getGetHostedInvoicePdfQueryOptions = <TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetHostedInvoicePdfQueryOptions = <TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -2335,10 +2336,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetHostedInvoicePdfQueryResult = NonNullable<Awaited<ReturnType<typeof getHostedInvoicePdf>>>
-export type GetHostedInvoicePdfQueryError = Error | void
+export type GetHostedInvoicePdfQueryError = Error
 
 
-export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(
+export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error>(
  token: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getHostedInvoicePdf>>,
@@ -2348,7 +2349,7 @@ export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHost
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(
+export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error>(
  token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getHostedInvoicePdf>>,
@@ -2358,7 +2359,7 @@ export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHost
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(
+export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error>(
  token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -2366,7 +2367,7 @@ export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHost
  * @summary Download the hosted invoice PDF
  */
 
-export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(
+export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error>(
  token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -2393,11 +2394,13 @@ export const getCreateHostedInvoiceCheckoutUrl = (token: string,) => {
 }
 
 /**
- * The hosted page's Pay button. Returns a Stripe Checkout URL for the
- * amount due. Hardcount has already worked out the tax, so Stripe adds
- * none. After paying, Stripe sends the customer back to the hosted
- * page with `?paid=1`. The Stripe webhook, not this redirect, marks
- * the invoice paid.
+ * The hosted page's Pay button. Unauthenticated, like the hosted
+ * invoice page. Returns a Stripe Checkout URL for the amount due.
+ * Hardcount has already worked out the tax, so Stripe adds none.
+ * Calling it again while the page is still open returns the same page,
+ * unless the amount due changed. After paying, Stripe sends the
+ * customer back to the hosted page with `?paid=1`. The Stripe webhook,
+ * not this redirect, marks the invoice paid. The route takes no body.
  * @summary Start paying the invoice in Stripe Checkout
  */
 export const createHostedInvoiceCheckout = async (token: string, options?: RequestInit): Promise<CreateHostedInvoiceCheckout200> => {
@@ -2415,7 +2418,7 @@ export const createHostedInvoiceCheckout = async (token: string, options?: Reque
 
 
 
-export const getCreateHostedInvoiceCheckoutMutationOptions = <TError = Error | void,
+export const getCreateHostedInvoiceCheckoutMutationOptions = <TError = Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext> => {
 
@@ -2444,12 +2447,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateHostedInvoiceCheckoutMutationResult = NonNullable<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>>
 
-    export type CreateHostedInvoiceCheckoutMutationError = Error | void
+    export type CreateHostedInvoiceCheckoutMutationError = Error
 
     /**
  * @summary Start paying the invoice in Stripe Checkout
  */
-export const useCreateHostedInvoiceCheckout = <TError = Error | void,
+export const useCreateHostedInvoiceCheckout = <TError = Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createHostedInvoiceCheckout>>,
@@ -3026,17 +3029,39 @@ export const getCreateCreditNoteUrl = () => {
 }
 
 /**
- * Two shapes. LINE-BASED (regular invoices): lines[] +
- * refund/credit/out_of_band allocation; capped by the invoice's
- * remaining creditable gross. COMMIT RELIEF (ADR-080, paid commit
- * invoices only): pass commit_relief and NO lines — the server
- * retires commit credits and derives the refundable cash from the
- * telescoping price-ratio anchor (discounted commits refund at the
- * purchase rate, never at face). The relief credit note is created
- * AND issued in one transaction; the credit-balance channel is
- * forbidden on relief. Unpaid commit invoices: void the invoice
- * instead.
- * @summary Create a credit note (line-based, or commit relief)
+ * Creates a credit note against a `finalized` or `paid` invoice. A
+ * credit note is a document that reduces what the customer owes, or
+ * gives money back after payment. There are two shapes.
+ *
+ * Lines, for most invoices. Send `lines`; their amounts include tax,
+ * and the note's tax is its share of the invoice's tax.
+ * - On an unpaid invoice, leave the three `*_amount_cents` fields out:
+ *   the note lowers the amount due when it is issued. It can be at
+ *   most the amount due plus the customer credit applied.
+ * - On a paid invoice, split the note's total across
+ *   `refund_amount_cents` (back to the card), `credit_amount_cents` (to
+ *   the customer's credit balance) and `out_of_band_amount_cents` (paid
+ *   back outside Hardcount). The three must add up to the total. With
+ *   all three 0, the whole note goes to the credit balance, or to the
+ *   channel `refund_type` names. The refund part can be at most what
+ *   was paid by card less the refunds on earlier notes.
+ * - All notes on an invoice together can be at most its total.
+ * - The note is a `draft` until you issue it, unless `auto_issue` is
+ *   true. Issuing applies it (see `POST /v1/credit-notes/{id}/issue`).
+ *
+ * Commit relief, for paid invoices that bought prepaid credit only.
+ * Send `commit_relief` and no `lines`. Hardcount retires that many
+ * credits from the commit and works out the cash to give back at the
+ * price the customer paid per credit, so a discounted commit is
+ * refunded at the discounted rate, never at face value. The note is
+ * created and issued in one step. Its cash goes to the card or out of
+ * band, never to the credit balance. To cancel the commit on an unpaid
+ * invoice, void the invoice instead.
+ *
+ * A note with `stripe_refund_id` records a refund already made in
+ * Stripe; see that field. Nothing is emailed; send the note with
+ * `POST /v1/credit-notes/{id}/send`.
+ * @summary Create a credit note
  */
 export const createCreditNote = async (createCreditNoteBody: CreateCreditNoteBody, options?: RequestInit): Promise<CreditNote> => {
 
@@ -3053,7 +3078,7 @@ export const createCreditNote = async (createCreditNoteBody: CreateCreditNoteBod
 
 
 
-export const getCreateCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse,
+export const getCreateCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCreditNote>>, TError,{data: CreateCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createCreditNote>>, TError,{data: CreateCreditNoteBody}, TContext> => {
 
@@ -3082,12 +3107,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateCreditNoteMutationResult = NonNullable<Awaited<ReturnType<typeof createCreditNote>>>
     export type CreateCreditNoteMutationBody = CreateCreditNoteBody
-    export type CreateCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse
+    export type CreateCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Create a credit note (line-based, or commit relief)
+ * @summary Create a credit note
  */
-export const useCreateCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse,
+export const useCreateCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCreditNote>>, TError,{data: CreateCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createCreditNote>>,
@@ -3114,9 +3139,9 @@ export const getListCreditNotesUrl = (params?: ListCreditNotesParams,) => {
 }
 
 /**
- * Lists credit notes, newest first by default. The response has no
- * `total`; page with `limit` and `offset` until a page comes back
- * shorter than `limit`.
+ * Lists credit notes in this account and mode, newest first by
+ * default. Filters are optional and combine. `total` counts every note
+ * that matches the filters.
  * @summary List credit notes
  */
 export const listCreditNotes = async (params?: ListCreditNotesParams, options?: RequestInit): Promise<ListCreditNotes200> => {
@@ -8214,6 +8239,13 @@ export const getListInvoicesUrl = (params?: ListInvoicesParams,) => {
 }
 
 /**
+ * Lists invoices in this account and mode, newest first by default.
+ * Every filter is optional, and filters combine. Each invoice carries
+ * its `attention`, if any. `total` counts every invoice that matches
+ * the filters.
+ *
+ * A `from` or `to` that is not a date answers 422 with `param` naming
+ * it, and so does a `to` before `from`.
  * @summary List invoices
  */
 export const listInvoices = async (params?: ListInvoicesParams, options?: RequestInit): Promise<ListInvoices200> => {
@@ -8318,7 +8350,8 @@ export const getCreateInvoiceUrl = () => {
  * Creates a one-off invoice in `draft` status with billing reason
  * `manual`. Send `line_items` to create the invoice and its lines in
  * one transaction, or omit them and add lines later with
- * `POST /v1/invoices/{id}/line-items`.
+ * `POST /v1/invoices/{id}/line-items`. Nothing is charged or emailed
+ * until you finalize it with `POST /v1/invoices/{id}/finalize`.
  *
  * A manual invoice uses the customer's currency. A `currency` that
  * differs from the customer's billing-profile currency, or from the
@@ -8328,14 +8361,16 @@ export const getCreateInvoiceUrl = () => {
  *
  * Defaults when a field is left out:
  * - `currency`: the customer's billing-profile currency, then the plan
- *   currency of the customer's live subscriptions, then the tenant
- *   default.
- * - `net_payment_term_days`: the tenant's net payment terms. A
+ *   currency of the customer's live subscriptions, then the account's
+ *   default currency.
+ * - `net_payment_term_days`: the account's net payment terms. A
  *   negative value is stored as 0 (due on receipt).
  * - `billing_period_start` / `billing_period_end`: now.
  *
- * Tax is not calculated here. It is calculated when the invoice is
- * finalized, so totals equal the subtotal until then.
+ * The invoice gets its number (`invoice_number`) now, and an issue and
+ * due date that finalize moves to the moment of finalizing. Tax is not
+ * calculated here. It is calculated when the invoice is finalized, so
+ * totals equal the subtotal until then.
  * @summary Create a draft invoice
  */
 export const createInvoice = async (invoiceCreateRequest: InvoiceCreateRequest, options?: RequestInit): Promise<Invoice> => {
@@ -8353,7 +8388,7 @@ export const createInvoice = async (invoiceCreateRequest: InvoiceCreateRequest, 
 
 
 
-export const getCreateInvoiceMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getCreateInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInvoice>>, TError,{data: InvoiceCreateRequest}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createInvoice>>, TError,{data: InvoiceCreateRequest}, TContext> => {
 
@@ -8382,12 +8417,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateInvoiceMutationResult = NonNullable<Awaited<ReturnType<typeof createInvoice>>>
     export type CreateInvoiceMutationBody = InvoiceCreateRequest
-    export type CreateInvoiceMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type CreateInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create a draft invoice
  */
-export const useCreateInvoice = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useCreateInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInvoice>>, TError,{data: InvoiceCreateRequest}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createInvoice>>,
@@ -8408,20 +8443,23 @@ export const getCreateInvoicePreviewUrl = () => {
 
 /**
  * Answers "what is my next bill going to look like?" from the usage
- * recorded so far. Without `period`, the preview mirrors the cycle
- * close for the subscription's current period: base fees prorate for
- * a short first period and per segment after a mid-period item add,
- * quantity change, plan swap or removal, and each meter's usage counts
- * only while a plan carrying it was on the subscription. For a
- * trialing subscription it is the first invoice after the trial: the
- * trial-end invoice when a plan bills in advance, otherwise the close
- * of the first paid period, prorated the same way. With an
- * explicit `period`, it is a flat estimate over that window and warns
- * when a mid-period change makes the invoice differ. Composes across customer / subscription / pricing;
- * registered as a sibling of `/v1/invoices` (chi picks the more
- * specific pattern, otherwise `/{id}` would capture
- * `create_preview` as an invoice ID).
- * @summary Preview the next invoice for a customer (Stripe-equivalent)
+ * recorded so far. Nothing is saved, charged or sent, and tax is not
+ * included.
+ *
+ * Without `period`, the preview mirrors the invoice the subscription's
+ * current period will close with: base fees prorate for a short first
+ * period and per segment after a mid-period item add, quantity change,
+ * plan swap or removal, and each meter's usage counts only while a
+ * plan carrying it was on the subscription. For a trialing
+ * subscription it is the first invoice after the trial: the trial-end
+ * invoice when a plan bills in advance, otherwise the close of the
+ * first paid period, prorated the same way. With an explicit `period`,
+ * it is a flat estimate over that window, at today's prices, and warns
+ * when a mid-period change makes the invoice differ.
+ *
+ * Without `subscription_id`, Hardcount uses the customer's active or
+ * trialing subscription whose current period started last.
+ * @summary Preview a customer's next invoice
  */
 export const createInvoicePreview = async (createInvoicePreviewBody: CreateInvoicePreviewBody, options?: RequestInit): Promise<InvoicePreview> => {
 
@@ -8438,7 +8476,7 @@ export const createInvoicePreview = async (createInvoicePreviewBody: CreateInvoi
 
 
 
-export const getCreateInvoicePreviewMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getCreateInvoicePreviewMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInvoicePreview>>, TError,{data: CreateInvoicePreviewBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createInvoicePreview>>, TError,{data: CreateInvoicePreviewBody}, TContext> => {
 
@@ -8467,12 +8505,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateInvoicePreviewMutationResult = NonNullable<Awaited<ReturnType<typeof createInvoicePreview>>>
     export type CreateInvoicePreviewMutationBody = CreateInvoicePreviewBody
-    export type CreateInvoicePreviewMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type CreateInvoicePreviewMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Preview the next invoice for a customer (Stripe-equivalent)
+ * @summary Preview a customer's next invoice
  */
-export const useCreateInvoicePreview = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useCreateInvoicePreview = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInvoicePreview>>, TError,{data: CreateInvoicePreviewBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createInvoicePreview>>,
@@ -8492,7 +8530,9 @@ export const getGetInvoiceUrl = (id: string,) => {
 }
 
 /**
- * @summary Get invoice with line items
+ * Returns the invoice and its lines as two keys, `invoice` and
+ * `line_items`. The invoice carries its `attention`, if any.
+ * @summary Get an invoice with its line items
  */
 export const getInvoice = async (id: string, options?: RequestInit): Promise<InvoiceWithLineItems> => {
 
@@ -8563,7 +8603,7 @@ export function useGetInvoice<TData = Awaited<ReturnType<typeof getInvoice>>, TE
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Get invoice with line items
+ * @summary Get an invoice with its line items
  */
 
 export function useGetInvoice<TData = Awaited<ReturnType<typeof getInvoice>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
@@ -8593,7 +8633,11 @@ export const getGetInvoicePdfUrl = (id: string,) => {
 }
 
 /**
- * @summary Download invoice PDF
+ * Returns the invoice as a PDF, shown inline and named after the
+ * invoice number (`HC-000042.pdf`). An issued invoice prints the
+ * customer and company details it was issued with, and every issued
+ * credit note on it. A draft prints the current details.
+ * @summary Download an invoice PDF
  */
 export const getInvoicePdf = async (id: string, options?: RequestInit): Promise<Blob> => {
 
@@ -8617,7 +8661,7 @@ export const getGetInvoicePdfQueryKey = (id: string,) => {
     }
 
 
-export const getGetInvoicePdfQueryOptions = <TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetInvoicePdfQueryOptions = <TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -8636,10 +8680,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetInvoicePdfQueryResult = NonNullable<Awaited<ReturnType<typeof getInvoicePdf>>>
-export type GetInvoicePdfQueryError = UnauthorizedResponse | RateLimitedResponse
+export type GetInvoicePdfQueryError = UnauthorizedResponse | Error | RateLimitedResponse
 
 
-export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePdf>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getInvoicePdf>>,
@@ -8649,7 +8693,7 @@ export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePdf>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getInvoicePdf>>,
@@ -8659,15 +8703,15 @@ export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Download invoice PDF
+ * @summary Download an invoice PDF
  */
 
-export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -8694,15 +8738,23 @@ export const getSendInvoiceUrl = (id: string,) => {
 }
 
 /**
- * Sends the invoice document email. The invoice must be issued:
- * finalized, paid or uncollectible. A draft or voided invoice is
- * refused with 409. `additional_emails` is
- * tri-state (ADR-082): absent → the customer's stored
- * additional_emails are CC'd (so legacy `{email}`-only bodies now
- * CC by default); explicit `[]` → primary only for this send;
- * explicit list → validated exact override (same rules as the
- * customer field — normalize, dedupe, not-the-recipient, cap 10).
- * @summary Email the invoice (PDF attached) to a recipient
+ * Queues the invoice email: the invoice PDF attached, the amount due
+ * and a link to the hosted invoice page, where the customer can pay.
+ * The invoice must be issued: `finalized`, `paid` or `uncollectible`.
+ * A draft or voided invoice is refused with 409, and so is an invoice
+ * whose charge is still unresolved.
+ *
+ * `email` is the recipient. `additional_emails` sets who is copied:
+ * - absent: the customer's stored `additional_emails` are copied,
+ *   leaving out any that equals `email`;
+ * - `[]`: nobody is copied on this send;
+ * - a list: exactly these addresses are copied, after the same checks
+ *   as the customer field: each must be one plain address, they are
+ *   lowercased and duplicates dropped, the recipient's own address is
+ *   refused, and at most 10 are allowed.
+ *
+ * This email does not set the invoice's `invoice_emailed_at`.
+ * @summary Email an invoice to the customer
  */
 export const sendInvoice = async (id: string,
     sendInvoiceBody: SendInvoiceBody, options?: RequestInit): Promise<SendInvoice200> => {
@@ -8720,7 +8772,7 @@ export const sendInvoice = async (id: string,
 
 
 
-export const getSendInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | void | Error | RateLimitedResponse,
+export const getSendInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendInvoice>>, TError,{id: string;data: SendInvoiceBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof sendInvoice>>, TError,{id: string;data: SendInvoiceBody}, TContext> => {
 
@@ -8749,12 +8801,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SendInvoiceMutationResult = NonNullable<Awaited<ReturnType<typeof sendInvoice>>>
     export type SendInvoiceMutationBody = SendInvoiceBody
-    export type SendInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | void | Error | RateLimitedResponse
+    export type SendInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Email the invoice (PDF attached) to a recipient
+ * @summary Email an invoice to the customer
  */
-export const useSendInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | void | Error | RateLimitedResponse,
+export const useSendInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendInvoice>>, TError,{id: string;data: SendInvoiceBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof sendInvoice>>,
@@ -8774,9 +8826,10 @@ export const getAddInvoiceLineItemUrl = (id: string,) => {
 }
 
 /**
- * Adds one line to a `draft` invoice and recomputes its totals.
- * `amount_cents` is `quantity × unit_amount_cents`. Only draft invoices
- * accept new lines.
+ * Adds one line to a `draft` invoice and recomputes its subtotal,
+ * total and amount due. `amount_cents` is `quantity` ×
+ * `unit_amount_cents`, and the line takes the invoice's currency. Only
+ * draft invoices accept new lines. Tax is calculated at finalize.
  * @summary Add a line item to a draft invoice
  */
 export const addInvoiceLineItem = async (id: string,
@@ -8795,7 +8848,7 @@ export const addInvoiceLineItem = async (id: string,
 
 
 
-export const getAddInvoiceLineItemMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getAddInvoiceLineItemMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addInvoiceLineItem>>, TError,{id: string;data: InvoiceLineItemInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof addInvoiceLineItem>>, TError,{id: string;data: InvoiceLineItemInput}, TContext> => {
 
@@ -8824,12 +8877,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AddInvoiceLineItemMutationResult = NonNullable<Awaited<ReturnType<typeof addInvoiceLineItem>>>
     export type AddInvoiceLineItemMutationBody = InvoiceLineItemInput
-    export type AddInvoiceLineItemMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type AddInvoiceLineItemMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Add a line item to a draft invoice
  */
-export const useAddInvoiceLineItem = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useAddInvoiceLineItem = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addInvoiceLineItem>>, TError,{id: string;data: InvoiceLineItemInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof addInvoiceLineItem>>,
@@ -8851,12 +8904,15 @@ export const getVoidInvoiceUrl = (id: string,) => {
 /**
  * Cancels a `draft`, `finalized` or `uncollectible` invoice. Voiding
  * is final. In the same transaction, credits that were applied to the
- * invoice go back to the customer's credit balance.
+ * invoice go back to the customer's credit balance, and if the
+ * invoice bought a prepaid commit, the unspent part of that credit is
+ * retired.
  *
  * After the void, Hardcount stops collection at Stripe (expires open
  * Checkout sessions and cancels the PaymentIntent where Stripe allows
- * it) and resolves any active dunning run with `invoice_voided`.
- * Fires the `invoice.voided` webhook event.
+ * it), sends the `invoice.voided` webhook event, reverses the tax with
+ * the tax provider, and resolves any active dunning run with
+ * `invoice_voided`.
  *
  * A spend-threshold invoice (`billing_reason = threshold`) that is
  * voided before its period's invoice is built gives its charges back:
@@ -8864,7 +8920,8 @@ export const getVoidInvoiceUrl = (id: string,) => {
  * billed on no invoice; bill them with a one-off invoice if they
  * should be charged.
  *
- * A paid invoice cannot be voided: issue a credit note instead.
+ * A paid invoice cannot be voided: issue a credit note instead. The
+ * route takes no body.
  * @summary Void an invoice
  */
 export const voidInvoice = async (id: string, options?: RequestInit): Promise<Invoice> => {
@@ -8938,12 +8995,14 @@ export const getResendInvoiceSetupLinkUrl = (id: string,) => {
 /**
  * Emails the customer the link to add a payment method again. It is
  * the same email Hardcount sends when an invoice is finalized and the
- * customer has no card on file. Once a card is added, Hardcount charges
- * the invoice automatically.
+ * customer has no card on file: a single-use link to the
+ * payment-update page (`PAYMENT_UPDATE_URL`), sent to the customer's
+ * email address only, with no copies. Once a card is added, the
+ * automatic charge collects the invoice.
  *
  * Works on unpaid invoices that are `finalized` or `uncollectible`.
  * This is different from `POST /v1/invoices/{id}/send`, which emails
- * the invoice itself with a link to pay it.
+ * the invoice itself with a link to pay it. The route takes no body.
  * @summary Resend the payment-method setup link
  */
 export const resendInvoiceSetupLink = async (id: string, options?: RequestInit): Promise<ResendInvoiceSetupLink200> => {
@@ -9016,8 +9075,10 @@ export const getMarkInvoiceUncollectibleUrl = (id: string,) => {
 
 /**
  * Moves a `finalized` invoice to `uncollectible` (a bad-debt write-off).
- * The invoice can still be paid later, for example with
- * `POST /v1/invoices/{id}/record-payment`. Tax is not reversed.
+ * Hardcount stops collecting it: the automatic charge and dunning
+ * leave it alone. The invoice can still be paid later, for example
+ * with `POST /v1/invoices/{id}/record-payment`. Tax is not reversed.
+ * The route takes no body.
  *
  * Resolves any active dunning run with `invoice_not_collectible`, so
  * payment retries stop. Fires the `invoice.marked_uncollectible`
@@ -9043,6 +9104,11 @@ export const getMarkInvoiceUncollectibleUrl = (id: string,) => {
  * confirmed with Stripe and it bills nothing else. A written-off invoice from an earlier period, or one not
  * tied to a subscription's period, does not affect subscription
  * changes.
+ *
+ * An invoice whose last charge got an unclear answer from Stripe with
+ * no payment named (payment status `unknown`, no
+ * `stripe_payment_intent_id`) can be written off; if the charge did
+ * succeed, the invoice is still marked paid when Stripe shows it.
  * @summary Write off an invoice as uncollectible
  */
 export const markInvoiceUncollectible = async (id: string, options?: RequestInit): Promise<Invoice> => {
@@ -9118,11 +9184,17 @@ export const getRecordInvoicePaymentUrl = (id: string,) => {
  * received another way, such as a bank transfer, cheque or cash. The
  * full amount due is recorded; partial payments are not supported.
  * The invoice gets `paid_out_of_band: true` and no
- * `stripe_payment_intent_id`.
+ * `stripe_payment_intent_id`, so there is no card to refund later.
  *
- * Resolves any active dunning run with `payment_recovered`. Fires the
- * `invoice.payment_recorded` webhook event. The optional `note` is
- * stored in the audit log, cut to 500 characters.
+ * Resolves any active dunning run with `payment_recovered`. Sends the
+ * `invoice.paid` and `invoice.payment_recorded` webhook events; the
+ * second carries `recovered_from`, the status the invoice was paid
+ * from. The optional `note` is stored in the audit log, cut to 500
+ * characters.
+ *
+ * On a written-off invoice, read its `recovery_warning` first: it says
+ * when the payment will not reconcile on its own. The payment is still
+ * recorded.
  * @summary Record a payment made outside Stripe
  */
 export const recordInvoicePayment = async (id: string,
@@ -9141,7 +9213,7 @@ export const recordInvoicePayment = async (id: string,
 
 
 
-export const getRecordInvoicePaymentMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getRecordInvoicePaymentMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordInvoicePayment>>, TError,{id: string;data?: RecordInvoicePaymentBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof recordInvoicePayment>>, TError,{id: string;data?: RecordInvoicePaymentBody}, TContext> => {
 
@@ -9170,12 +9242,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RecordInvoicePaymentMutationResult = NonNullable<Awaited<ReturnType<typeof recordInvoicePayment>>>
     export type RecordInvoicePaymentMutationBody = RecordInvoicePaymentBody | undefined
-    export type RecordInvoicePaymentMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type RecordInvoicePaymentMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Record a payment made outside Stripe
  */
-export const useRecordInvoicePayment = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useRecordInvoicePayment = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordInvoicePayment>>, TError,{id: string;data?: RecordInvoicePaymentBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof recordInvoicePayment>>,
@@ -9196,8 +9268,10 @@ export const getRotateInvoicePublicTokenUrl = (id: string,) => {
 
 /**
  * Creates a new `public_token` for the hosted invoice page. The old
- * link stops working at once. Use it when a link was shared with the
- * wrong people. Draft invoices have no public link.
+ * link, and the PDF link under it, stop working at once. Use it when a
+ * link was shared with the wrong people. Nothing is emailed: send the
+ * new link yourself, or use `POST /v1/invoices/{id}/send`. Draft
+ * invoices have no public link. The route takes no body.
  * @summary Replace the hosted invoice link
  */
 export const rotateInvoicePublicToken = async (id: string, options?: RequestInit): Promise<Invoice> => {
@@ -9270,19 +9344,24 @@ export const getCollectInvoicePaymentUrl = (id: string,) => {
 
 /**
  * Collects a `finalized`, unpaid invoice right away instead of waiting
- * for the automatic charge.
+ * for the automatic charge, which runs on a schedule (hourly by
+ * default).
  *
  * 1. The customer's credit balance is applied first. If it covers the
  *    whole amount, the invoice is marked paid and no card is charged.
  * 2. Otherwise Hardcount charges the remaining amount to the customer's
  *    saved payment method with a Stripe PaymentIntent.
  *
- * After a successful card charge, any active dunning run is resolved
- * with `payment_recovered`. Check `payment_status` on the returned
- * invoice.
+ * A paid invoice sends the `invoice.paid` webhook event (and
+ * `payment.succeeded` for a card payment), and any active dunning run
+ * is resolved with `payment_recovered`. A declined card answers 502;
+ * the invoice's `payment_status` becomes `failed`, and dunning starts
+ * when the customer's policy is enabled. Check
+ * `payment_status` on the returned invoice.
  *
  * A written-off (`uncollectible`) invoice cannot be charged here.
- * Record an offline payment or issue a new invoice instead.
+ * Record an offline payment or issue a new invoice instead. The route
+ * takes no body.
  * @summary Charge a finalized invoice now
  */
 export const collectInvoicePayment = async (id: string, options?: RequestInit): Promise<Invoice> => {
@@ -9371,7 +9450,10 @@ export const getRefundInvoiceUrl = (id: string,) => {
  *
  * Only invoices paid by card through Stripe can be refunded here. For
  * an invoice paid outside Stripe, create a credit note with
- * `out_of_band_amount_cents`.
+ * `out_of_band_amount_cents`. For an invoice that bought prepaid
+ * credit, use commit relief (`commit_relief` on
+ * `POST /v1/credit-notes`). Nothing is emailed; send the credit note
+ * with `POST /v1/credit-notes/{id}/send`.
  * @summary Refund a paid invoice
  */
 export const refundInvoice = async (id: string,
@@ -9390,7 +9472,7 @@ export const refundInvoice = async (id: string,
 
 
 
-export const getRefundInvoiceMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getRefundInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refundInvoice>>, TError,{id: string;data: RefundInvoiceBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof refundInvoice>>, TError,{id: string;data: RefundInvoiceBody}, TContext> => {
 
@@ -9419,12 +9501,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RefundInvoiceMutationResult = NonNullable<Awaited<ReturnType<typeof refundInvoice>>>
     export type RefundInvoiceMutationBody = RefundInvoiceBody
-    export type RefundInvoiceMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type RefundInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Refund a paid invoice
  */
-export const useRefundInvoice = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useRefundInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refundInvoice>>, TError,{id: string;data: RefundInvoiceBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof refundInvoice>>,
@@ -9457,9 +9539,11 @@ export const getGetInvoicePaymentTimelineUrl = (id: string,) => {
  * row, titled "Refunded in Stripe".
  * A draft invoice returns an empty list.
  *
- * Each row carries `line`, the row in the activity line standard's
- * words (ADR-128). `description`, `detail`, `error`, `status` and
+ * Each row carries `line`, the row with every word written by the
+ * server: a title, an amount, a problem line, the meta line and who
+ * did it. `description`, `detail`, `error`, `status` and
  * `amount_cents` repeat it for clients that read the older fields.
+ * Rows for the same instant are ordered cause before effect.
  *
  * If one source cannot be read, the rest is still returned and the
  * source is named in `degraded`.
@@ -9812,9 +9896,10 @@ export const getDismissInvoiceStripeRefundUrl = (id: string,
 /**
  * Records that a refund made in Stripe, which Hardcount flagged on the
  * invoice (`outcome` `needs_review`), was handled outside Hardcount.
- * The `refunded_in_stripe` notice clears. Nothing else changes: no
- * credit note, no money, no email. The note is kept on the refund and
- * in the audit log.
+ * The refund's `outcome` becomes `dismissed` and the
+ * `refunded_in_stripe` notice clears. Nothing else changes: no credit
+ * note, no money, no email. The note is kept on the refund and in the
+ * audit log.
  * @summary Dismiss a refund made in Stripe
  */
 export const dismissInvoiceStripeRefund = async (id: string,
@@ -9992,13 +10077,14 @@ export const getSendCreditNoteUrl = (id: string,) => {
 }
 
 /**
- * Sends the credit-note PDF to the customer (ADR-082 rider — CNs
- * previously had no send surface at all). Issued credit notes
- * only: drafts and voided CNs return 422. Recipient contract
- * matches the invoice send (`email` + tri-state
- * `additional_emails`). The send is recorded on the applied
- * invoice's timeline and the customer's Sent-emails section.
- * @summary Email the credit-note document (PDF attached)
+ * Queues an email with the credit note's PDF attached. Only issued
+ * credit notes can be sent: a draft or voided note answers 422. The
+ * recipients work as for `POST /v1/invoices/{id}/send`: `email` is the
+ * recipient, and `additional_emails` absent copies the customer's
+ * stored list, `[]` copies nobody, and a list copies exactly those
+ * addresses. The send shows on the invoice's activity timeline and in
+ * the customer's sent emails.
+ * @summary Email a credit note to the customer
  */
 export const sendCreditNote = async (id: string,
     sendCreditNoteBody: SendCreditNoteBody, options?: RequestInit): Promise<SendCreditNote200> => {
@@ -10016,7 +10102,7 @@ export const sendCreditNote = async (id: string,
 
 
 
-export const getSendCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | void | Error | RateLimitedResponse,
+export const getSendCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendCreditNote>>, TError,{id: string;data: SendCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof sendCreditNote>>, TError,{id: string;data: SendCreditNoteBody}, TContext> => {
 
@@ -10045,12 +10131,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SendCreditNoteMutationResult = NonNullable<Awaited<ReturnType<typeof sendCreditNote>>>
     export type SendCreditNoteMutationBody = SendCreditNoteBody
-    export type SendCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | void | Error | RateLimitedResponse
+    export type SendCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Email the credit-note document (PDF attached)
+ * @summary Email a credit note to the customer
  */
-export const useSendCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | void | Error | RateLimitedResponse,
+export const useSendCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendCreditNote>>, TError,{id: string;data: SendCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof sendCreditNote>>,
@@ -10172,12 +10258,19 @@ export const getIssueCreditNoteUrl = (id: string,) => {
 }
 
 /**
- * Moves a `draft` credit note to `issued` and applies it.
- * - Unpaid invoice: the invoice's amount due goes down. If nothing is
- *   left due, the invoice is marked `paid` and `invoice.paid` is sent,
- *   unless a charge is running on it.
- * - Paid invoice: the refund part is sent to Stripe, and the credit
- *   part is added to the customer's credit balance.
+ * Moves a `draft` credit note to `issued` and applies it. The route
+ * takes no body.
+ * - Unpaid invoice (`finalized` or `uncollectible`): the invoice's
+ *   amount due goes down, and customer credit the note displaces goes
+ *   back to the customer's balance. If nothing is left due, the
+ *   invoice is marked `paid`, `invoice.paid` is sent and its dunning
+ *   run closes.
+ * - Paid invoice: the refund part is sent to Stripe, the credit part is
+ *   added to the customer's credit balance, and the out-of-band part
+ *   is recorded. A note created while the invoice was unpaid, with no
+ *   split, puts its whole total in the credit balance.
+ * - Either way, the note's share of the tax is reversed with the tax
+ *   provider when the provider recorded the invoice's tax.
  *
  * Check the returned `status` and `refund_status`:
  * - A refund Stripe refused still returns 200, with `refund_status`
@@ -10187,8 +10280,8 @@ export const getIssueCreditNoteUrl = (id: string,) => {
  * - If the invoice's charge is still running, or the invoice is still
  *   a draft, nothing changes and the note stays `draft`. Hardcount issues
  *   it later.
- * - If the invoice was voided or written off, the draft is voided
- *   instead and returned with `status` `voided`.
+ * - If the invoice was voided, the draft is voided instead and
+ *   returned with `status` `voided`.
  * @summary Issue a draft credit note
  */
 export const issueCreditNote = async (id: string, options?: RequestInit): Promise<CreditNote> => {
@@ -10270,7 +10363,7 @@ export const getAttachStripeRefundToCreditNoteUrl = (id: string,) => {
  * and a flagged row for it is marked recorded. No new credit note, no
  * second tax reversal and no Stripe refund call. Hardcount never matches
  * a refund to a note by amount on its own.
- * @summary Attach a refund made in Stripe to a credit note whose refund failed
+ * @summary Attach a refund made in Stripe to a credit note
  */
 export const attachStripeRefundToCreditNote = async (id: string,
     attachStripeRefundToCreditNoteBody: AttachStripeRefundToCreditNoteBody, options?: RequestInit): Promise<CreditNote> => {
@@ -10320,7 +10413,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type AttachStripeRefundToCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Attach a refund made in Stripe to a credit note whose refund failed
+ * @summary Attach a refund made in Stripe to a credit note
  */
 export const useAttachStripeRefundToCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>, TError,{id: string;data: AttachStripeRefundToCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -10349,7 +10442,9 @@ export const getRetryCreditNoteRefundUrl = (id: string,) => {
  * `none`, Hardcount then resends the earlier request whose result it
  * never recorded, with the same idempotency key. While Stripe keeps
  * that key (at least 24 hours), Stripe returns the earlier request's
- * result instead of making a second refund.
+ * result instead of making a second refund. A `pending` refund whose
+ * Stripe refund is still processing is not resent. The route takes no
+ * body.
  * @summary Retry a failed credit-note refund
  */
 export const retryCreditNoteRefund = async (id: string, options?: RequestInit): Promise<CreditNote> => {
@@ -10421,8 +10516,9 @@ export const getVoidCreditNoteUrl = (id: string,) => {
 }
 
 /**
- * Cancels a `draft` credit note. Issued credit notes are final and
- * cannot be voided.
+ * Cancels a `draft` credit note. Nothing is applied or refunded. Issued
+ * credit notes are final and cannot be voided. The route takes no
+ * body.
  * @summary Void a draft credit note
  */
 export const voidCreditNote = async (id: string, options?: RequestInit): Promise<CreditNote> => {
@@ -10495,8 +10591,9 @@ export const getGetCreditNotePdfUrl = (id: string,) => {
 
 /**
  * Returns the credit note as a PDF, shown inline and named after the
- * credit note number. An issued note prints the customer and company
- * details it was issued with.
+ * credit note number (`CN-000003.pdf`). An issued note prints the
+ * customer and company details it was issued with; a draft prints the
+ * current ones.
  * @summary Download credit note PDF
  */
 export const getCreditNotePdf = async (id: string, options?: RequestInit): Promise<Blob> => {
@@ -10598,7 +10695,50 @@ export const getFinalizeInvoiceUrl = (id: string,) => {
 }
 
 /**
- * @summary Finalize draft invoice
+ * Issues a `draft` invoice and then collects it at once. The route
+ * takes no body.
+ *
+ * Finalizing:
+ * - On an invoice you created with `POST /v1/invoices`, calculates tax
+ *   with the account's tax provider, and sets `issued_at` to now and
+ *   `due_at` to `net_payment_term_days` later. An invoice the billing
+ *   engine made keeps the tax and dates it was built with.
+ * - Refuses with 409 while tax cannot be calculated (`tax_status`
+ *   `pending`): the invoice stays a draft. See
+ *   `POST /v1/invoices/{id}/retry-tax`.
+ * - Moves the invoice to `finalized`, copies the customer and company
+ *   details onto it (`bill_to_snapshot`, `supplier_snapshot`,
+ *   `footer`), grants the credit of a prepaid commit line, issues any
+ *   credit note held on the draft, creates the
+ *   hosted-page `public_token`, and records the tax with Stripe Tax
+ *   when that is the provider.
+ * - Sends the `invoice.finalized` webhook event. Its
+ *   `amount_due_cents` is before customer credit is applied.
+ *
+ * Collecting, right after, in the same request (the same steps as the
+ * automatic charge):
+ * 1. The customer's credit balance is applied. If it covers the amount
+ *    due, the invoice is marked paid and no card is charged.
+ * 2. Otherwise the saved card is charged with a Stripe PaymentIntent.
+ *    A successful charge marks the invoice paid, sends `invoice.paid`
+ *    and `payment.succeeded`, and queues a receipt email to the
+ *    customer when they have an email address. A declined charge sets `payment_status` to `failed`,
+ *    sends `payment.failed`, and starts dunning when the customer's
+ *    policy is enabled.
+ * 3. With no card on file, the customer is emailed a link to add one,
+ *    once (`no_pm_notified_at`), and dunning starts when the policy is
+ *    enabled.
+ * 4. When Stripe is not connected for the invoice's mode, the customer
+ *    is emailed the invoice itself, once (`invoice_emailed_at`), and
+ *    dunning starts when the policy is enabled.
+ *
+ * The response is the invoice after collection: paid, failed, or still
+ * queued. A collection step that does not finish is not an error
+ * here; the automatic charge, which runs on a schedule (hourly by
+ * default), picks up an invoice that is still queued. Finalizing does
+ * not otherwise email the invoice; send it with
+ * `POST /v1/invoices/{id}/send`.
+ * @summary Finalize a draft invoice
  */
 export const finalizeInvoice = async (id: string, options?: RequestInit): Promise<Invoice> => {
 
@@ -10615,7 +10755,7 @@ export const finalizeInvoice = async (id: string, options?: RequestInit): Promis
 
 
 
-export const getFinalizeInvoiceMutationOptions = <TError = UnauthorizedResponse | RateLimitedResponse,
+export const getFinalizeInvoiceMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeInvoice>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof finalizeInvoice>>, TError,{id: string}, TContext> => {
 
@@ -10644,12 +10784,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type FinalizeInvoiceMutationResult = NonNullable<Awaited<ReturnType<typeof finalizeInvoice>>>
 
-    export type FinalizeInvoiceMutationError = UnauthorizedResponse | RateLimitedResponse
+    export type FinalizeInvoiceMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Finalize draft invoice
+ * @summary Finalize a draft invoice
  */
-export const useFinalizeInvoice = <TError = UnauthorizedResponse | RateLimitedResponse,
+export const useFinalizeInvoice = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeInvoice>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof finalizeInvoice>>,
@@ -10669,29 +10809,25 @@ export const getRetryInvoiceTaxUrl = (id: string,) => {
 }
 
 /**
- * Re-runs tax calculation against a draft invoice whose
- * `tax_status` is `pending`. Backs the operator-
- * facing "Retry tax" action surfaced by the unified
- * `Attention` shape.
+ * Calculates tax again on a draft invoice whose `tax_status` is
+ * `pending`, after you fixed the cause (for example the customer's
+ * address). It also refreshes a draft whose Stripe Tax calculation is
+ * more than 24 hours old and was never recorded, which finalize
+ * refuses. The route takes no body.
  *
- * Idempotent: each call increments `tax_retry_count` and
- * rewrites the per-line and invoice-level tax fields. A retry
- * that succeeds clears `tax_pending_reason` / `tax_error_code`
- * and unblocks finalize. A retry that still fails writes the
- * new typed code so the dashboard banner refreshes — operators
- * get an immediate signal of whether their fix worked.
+ * Each call adds one to `tax_retry_count` and rewrites the tax on the
+ * lines and the invoice. A retry that succeeds clears
+ * `tax_pending_reason` and `tax_error_code`. A retry that still fails
+ * records the new error code and answers 200 with the updated
+ * invoice, so check its `attention`.
  *
- * Returns the updated invoice (carrying the re-derived
- * `attention`) on success or post-retry failure. A retry that
- * is still failing is **not** an HTTP error — the caller
- * renders the new attention.
- *
- * When the tax resolves on an invoice the billing engine made,
- * the call also finalizes it, unless collection is paused on its
- * subscription. If that finalize fails, the call returns 500 or
- * 409 and the invoice stays a draft with its tax saved: finalize
- * it.
- * @summary Retry tax calculation on a deferred invoice
+ * When the tax resolves on an invoice the billing engine made, the
+ * call also finalizes it, unless collection is paused on its
+ * subscription. The automatic charge then collects it on its next run.
+ * An invoice you created stays a draft for you to finalize. If the
+ * finalize fails, the call returns 500 or 409 and the invoice stays a
+ * draft with its tax saved: finalize it.
+ * @summary Retry tax calculation on a draft invoice
  */
 export const retryInvoiceTax = async (id: string, options?: RequestInit): Promise<Invoice> => {
 
@@ -10708,7 +10844,7 @@ export const retryInvoiceTax = async (id: string, options?: RequestInit): Promis
 
 
 
-export const getRetryInvoiceTaxMutationOptions = <TError = UnauthorizedResponse | void | RateLimitedResponse,
+export const getRetryInvoiceTaxMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryInvoiceTax>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof retryInvoiceTax>>, TError,{id: string}, TContext> => {
 
@@ -10737,12 +10873,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RetryInvoiceTaxMutationResult = NonNullable<Awaited<ReturnType<typeof retryInvoiceTax>>>
 
-    export type RetryInvoiceTaxMutationError = UnauthorizedResponse | void | RateLimitedResponse
+    export type RetryInvoiceTaxMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Retry tax calculation on a deferred invoice
+ * @summary Retry tax calculation on a draft invoice
  */
-export const useRetryInvoiceTax = <TError = UnauthorizedResponse | void | RateLimitedResponse,
+export const useRetryInvoiceTax = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryInvoiceTax>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof retryInvoiceTax>>,
@@ -15050,7 +15186,8 @@ export const getListDunningRunsUrl = (params?: ListDunningRunsParams,) => {
 /**
  * Dunning is the process of retrying a failed invoice payment on a
  * schedule. A dunning run tracks those retries for one invoice. Runs
- * are listed newest first.
+ * are listed newest first, each with its invoice's number, amount due
+ * and currency, and its policy's retry count.
  * @summary List dunning runs
  */
 export const listDunningRuns = async (params?: ListDunningRunsParams, options?: RequestInit): Promise<ListDunningRuns200> => {
@@ -15075,7 +15212,7 @@ export const getListDunningRunsQueryKey = (params?: ListDunningRunsParams,) => {
     }
 
 
-export const getListDunningRunsQueryOptions = <TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListDunningRunsQueryOptions = <TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -15094,10 +15231,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListDunningRunsQueryResult = NonNullable<Awaited<ReturnType<typeof listDunningRuns>>>
-export type ListDunningRunsQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListDunningRunsQueryError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListDunningRunsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listDunningRuns>>,
@@ -15107,7 +15244,7 @@ export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunning
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listDunningRuns>>,
@@ -15117,7 +15254,7 @@ export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunning
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -15125,7 +15262,7 @@ export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunning
  * @summary List dunning runs
  */
 
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -15152,6 +15289,10 @@ export const getGetDunningRunUrl = (id: string,) => {
 }
 
 /**
+ * Returns the run and its history, oldest first. Each event carries
+ * `line`, the event in the words the invoice's activity timeline uses.
+ * A source that cannot be read is named in `degraded` instead of
+ * failing the call.
  * @summary Get a dunning run with its events
  */
 export const getDunningRun = async (id: string, options?: RequestInit): Promise<DunningRunDetail> => {
@@ -15265,6 +15406,8 @@ export const getResolveDunningRunUrl = (id: string,) => {
  * If the invoice step fails, the run stays open and the error is
  * returned. If the invoice is already in the requested state, that
  * step is skipped. Fires the `dunning.resolved` webhook event once.
+ * The other two resolutions, `retries_exhausted` and
+ * `action_failed`, are set only by Hardcount.
  * @summary Resolve a dunning run
  */
 export const resolveDunningRun = async (id: string,
@@ -15283,7 +15426,7 @@ export const resolveDunningRun = async (id: string,
 
 
 
-export const getResolveDunningRunMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getResolveDunningRunMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveDunningRun>>, TError,{id: string;data: ResolveDunningRunBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof resolveDunningRun>>, TError,{id: string;data: ResolveDunningRunBody}, TContext> => {
 
@@ -15312,12 +15455,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ResolveDunningRunMutationResult = NonNullable<Awaited<ReturnType<typeof resolveDunningRun>>>
     export type ResolveDunningRunMutationBody = ResolveDunningRunBody
-    export type ResolveDunningRunMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type ResolveDunningRunMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Resolve a dunning run
  */
-export const useResolveDunningRun = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useResolveDunningRun = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveDunningRun>>, TError,{id: string;data: ResolveDunningRunBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof resolveDunningRun>>,
@@ -15338,8 +15481,9 @@ export const getGetDunningStatsUrl = () => {
 
 /**
  * Counts of dunning runs by state, and the amount still due on active
- * and escalated runs. The amount covers only invoices in the tenant's
- * default currency, named in `currency`.
+ * and escalated runs whose invoice is still open. `at_risk_cents`
+ * covers only invoices in the account's default currency, named in
+ * `currency`; `at_risk_by_currency` has every currency.
  * @summary Get dunning totals
  */
 export const getDunningStats = async ( options?: RequestInit): Promise<DunningStats> => {
@@ -15448,8 +15592,9 @@ export const getListDunningPoliciesUrl = (params?: ListDunningPoliciesParams,) =
 }
 
 /**
- * Every dunning policy in this tenant and mode, the default first, then
- * oldest first. Each one carries how many customers are assigned to it.
+ * Every dunning policy in this account and mode, the default first,
+ * then oldest first. Each one carries how many customers are assigned
+ * to it.
  * @summary List dunning policies
  */
 export const listDunningPolicies = async (params?: ListDunningPoliciesParams, options?: RequestInit): Promise<ListDunningPolicies200> => {
@@ -15557,12 +15702,16 @@ export const getCreateDunningPolicyUrl = () => {
  * enabled policy you create in a mode takes the default from it,
  * unless you have edited it or made it the default yourself; later
  * ones do not (use set-default). Customers without an assigned policy
- * use the default, so check `is_default` in the response.
+ * use the default, so check `is_default` in the response. Assign a
+ * policy to a customer with `dunning_policy_id` on
+ * `PATCH /v1/customers/{id}`.
  *
  * `enabled` defaults to false. A disabled policy starts no dunning, so
  * send `enabled: true` for the policy to take effect. A policy created
- * disabled never takes the default from "Default retries".
- * @summary Create dunning policy
+ * disabled never takes the default from "Default retries". A run that
+ * has started keeps following its policy as it is when each retry
+ * runs.
+ * @summary Create a dunning policy
  */
 export const createDunningPolicy = async (dunningPolicyInput: DunningPolicyInput, options?: RequestInit): Promise<DunningPolicy> => {
 
@@ -15579,7 +15728,7 @@ export const createDunningPolicy = async (dunningPolicyInput: DunningPolicyInput
 
 
 
-export const getCreateDunningPolicyMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getCreateDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext> => {
 
@@ -15608,12 +15757,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof createDunningPolicy>>>
     export type CreateDunningPolicyMutationBody = DunningPolicyInput
-    export type CreateDunningPolicyMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type CreateDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Create dunning policy
+ * @summary Create a dunning policy
  */
-export const useCreateDunningPolicy = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useCreateDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createDunningPolicy>>,
@@ -15633,7 +15782,7 @@ export const getGetDunningPolicyUrl = (id: string,) => {
 }
 
 /**
- * @summary Get dunning policy
+ * @summary Get a dunning policy
  */
 export const getDunningPolicy = async (id: string, options?: RequestInit): Promise<DunningPolicy> => {
 
@@ -15704,7 +15853,7 @@ export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunning
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Get dunning policy
+ * @summary Get a dunning policy
  */
 
 export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
@@ -15738,8 +15887,11 @@ export const getUpdateDunningPolicyUrl = (id: string,) => {
  * partial update: an omitted field takes its default (`enabled`
  * false, `name` empty, pause the subscription, leave the invoice
  * open), and `retry_days` is required. Send the full policy.
- * `is_default` cannot be changed here; use set-default.
- * @summary Replace dunning policy settings
+ * `is_default` cannot be changed here; use set-default. Editing the
+ * "Default retries" policy the account started with sets its
+ * `seeded` to false. Runs already started follow the new settings
+ * from their next step.
+ * @summary Replace a dunning policy's settings
  */
 export const updateDunningPolicy = async (id: string,
     dunningPolicyInput: DunningPolicyInput, options?: RequestInit): Promise<DunningPolicy> => {
@@ -15757,7 +15909,7 @@ export const updateDunningPolicy = async (id: string,
 
 
 
-export const getUpdateDunningPolicyMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getUpdateDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDunningPolicy>>, TError,{id: string;data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateDunningPolicy>>, TError,{id: string;data: DunningPolicyInput}, TContext> => {
 
@@ -15786,12 +15938,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof updateDunningPolicy>>>
     export type UpdateDunningPolicyMutationBody = DunningPolicyInput
-    export type UpdateDunningPolicyMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type UpdateDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Replace dunning policy settings
+ * @summary Replace a dunning policy's settings
  */
-export const useUpdateDunningPolicy = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useUpdateDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDunningPolicy>>, TError,{id: string;data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateDunningPolicy>>,
@@ -15811,9 +15963,11 @@ export const getDeleteDunningPolicyUrl = (id: string,) => {
 }
 
 /**
- * Deletes the policy. Refused for the default policy and for a policy
- * that customers are still assigned to.
- * @summary Delete dunning policy
+ * Deletes the policy. Refused for the default policy, for a policy
+ * that customers are still assigned to, and for a policy that has run
+ * payment retries (their history refers to it). The route takes no
+ * body.
+ * @summary Delete a dunning policy
  */
 export const deleteDunningPolicy = async (id: string, options?: RequestInit): Promise<DeleteDunningPolicy200> => {
 
@@ -15862,7 +16016,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteDunningPolicyMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Delete dunning policy
+ * @summary Delete a dunning policy
  */
 export const useDeleteDunningPolicy = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDunningPolicy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -15886,7 +16040,8 @@ export const getSetDefaultDunningPolicyUrl = (id: string,) => {
 /**
  * Makes this policy the default and the previous default a normal
  * policy, in one step. Customers without an assigned policy use the
- * new default for dunning started from now on.
+ * new default for dunning started from now on. A policy made default
+ * this way is no longer `seeded`. The route takes no body.
  * @summary Make a dunning policy the default
  */
 export const setDefaultDunningPolicy = async (id: string, options?: RequestInit): Promise<SetDefaultDunningPolicy200> => {

@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * What happens to the subscription when retries run out.
+ */
 export type DunningPolicyFinalSubscriptionAction = typeof DunningPolicyFinalSubscriptionAction[keyof typeof DunningPolicyFinalSubscriptionAction];
 
 

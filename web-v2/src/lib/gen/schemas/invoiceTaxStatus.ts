@@ -12,10 +12,10 @@
  */
 
 /**
- * Whether tax has been calculated. `ok`: it has. `pending`: the
- * calculation failed, and `tax_error_code` says why and whether
- * Hardcount retries it. A pending invoice cannot be finalized, so a wrong
- * tax amount is never sent.
+ * Whether tax has been calculated. `ok`: it has (a zero tax counts).
+ * `pending`: the calculation failed, and `tax_error_code` says why and
+ * whether Hardcount retries it. A pending invoice stays a draft and
+ * cannot be finalized, so a wrong tax amount is never sent.
  */
 export type InvoiceTaxStatus = typeof InvoiceTaxStatus[keyof typeof InvoiceTaxStatus];
 

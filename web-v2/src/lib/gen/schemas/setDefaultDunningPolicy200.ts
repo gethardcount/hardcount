@@ -13,5 +13,6 @@
 import type { SetDefaultDunningPolicy200Status } from './setDefaultDunningPolicy200Status';
 
 export type SetDefaultDunningPolicy200 = {
+  /** Always `default_updated`. */
   status: SetDefaultDunningPolicy200Status;
 };

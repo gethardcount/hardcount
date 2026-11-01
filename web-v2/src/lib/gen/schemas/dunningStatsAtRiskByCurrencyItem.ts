@@ -12,6 +12,8 @@
  */
 
 export type DunningStatsAtRiskByCurrencyItem = {
+  /** The currency of this entry, uppercase. */
   currency: string;
+  /** The amount at risk in this currency, in its minor unit (cents for USD). */
   amount_cents: number;
 };

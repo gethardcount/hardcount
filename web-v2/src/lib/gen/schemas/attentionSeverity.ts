@@ -12,9 +12,9 @@
  */
 
 /**
- * Urgency of an Attention surface. Operators sort/filter on this
- * and the dashboard renders one colour per level. Priority
- * descending: Critical > Warning > Info.
+ * How urgent an `Attention` notice is, most urgent first: `critical`,
+ * `warning`, `info`. Sort or filter on it; the dashboard shows one
+ * colour per level.
  */
 export type AttentionSeverity = typeof AttentionSeverity[keyof typeof AttentionSeverity];
 

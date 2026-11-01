@@ -20,7 +20,10 @@ import type { ActivityActorVia } from './activityActorVia';
  * written with the row names one.
  */
 export interface ActivityActor {
+  /** The kind of actor. */
   kind: ActivityActorKind;
+  /** The person's name or email, the API key's name, or the customer's display name. Absent for `automatic` and when no name is known. */
   name?: string;
+  /** Where the customer acted. Set only for `customer`. */
   via?: ActivityActorVia;
 }

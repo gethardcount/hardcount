@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Why you are refunding, stored as the credit note's `reason`.
+ */
 export type RefundInvoiceBodyReason = typeof RefundInvoiceBodyReason[keyof typeof RefundInvoiceBodyReason];
 
 

@@ -11,6 +11,13 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Where the row comes from: `lifecycle` (created, finalized, paid,
+ * voided, written off), `payment` (a charge attempt), `dunning` (a
+ * payment retry run), `email` (an email to the customer),
+ * `credit_note`, `dispute` or `stripe_refund` (a refund made in
+ * Stripe outside Hardcount).
+ */
 export type InvoiceTimelineEventSource = typeof InvoiceTimelineEventSource[keyof typeof InvoiceTimelineEventSource];
 
 

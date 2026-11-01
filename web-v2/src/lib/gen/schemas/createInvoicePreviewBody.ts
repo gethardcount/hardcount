@@ -16,15 +16,15 @@ export type CreateInvoicePreviewBody = {
   /** Customer to preview the invoice for. */
   customer_id: string;
   /**
-     * Optional. Defaults to the customer's primary active
-     * subscription if not supplied.
+     * Optional. The subscription to preview; it must belong to
+     * `customer_id`. Defaults to the customer's active or
+     * trialing subscription whose current period started last.
      */
   subscription_id?: string;
   /**
-     * Optional explicit window. Both bounds must be
-     * supplied together; partial windows are rejected.
-     * Defaults to the resolved subscription's current
-     * cycle.
+     * Optional explicit window, `from` before `to`. Both bounds
+     * must be supplied together; partial windows are rejected.
+     * Defaults to the subscription's current period.
      */
   period?: CreateInvoicePreviewBodyPeriod;
 };

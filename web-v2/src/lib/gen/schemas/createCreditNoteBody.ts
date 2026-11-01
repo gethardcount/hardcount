@@ -15,13 +15,17 @@ import type { CreateCreditNoteBodyLinesItem } from './createCreditNoteBodyLinesI
 import type { CreateCreditNoteBodyRefundType } from './createCreditNoteBodyRefundType';
 
 export type CreateCreditNoteBody = {
+  /** The invoice to credit. It must be `finalized` or `paid`. */
   invoice_id: string;
+  /** Why you are crediting, printed on the note. Required for a line-based note; a relief takes it from `commit_relief.reason` when this is empty. */
   reason?: string;
+  /** The credited amounts, tax included. At least one line for a line-based note; none with `commit_relief`. */
   lines?: CreateCreditNoteBodyLinesItem[];
-  /** Not with commit_relief; put the relief's split inside commit_relief. */
+  /** Part of the total refunded to the card, in the currency's minor unit (cents for USD). Paid invoices only. Not with commit_relief; put the relief's split inside commit_relief. */
   refund_amount_cents?: number;
+  /** Part of the total added to the customer's credit balance, in the currency's minor unit (cents for USD). Paid invoices only. Not with commit_relief. */
   credit_amount_cents?: number;
-  /** Not with commit_relief; put the relief's split inside commit_relief. */
+  /** Part of the total paid back outside Hardcount, in the currency's minor unit (cents for USD). Paid invoices only. Not with commit_relief; put the relief's split inside commit_relief. */
   out_of_band_amount_cents?: number;
   /**
      * Older single-channel form. On a paid invoice whose three
@@ -29,13 +33,19 @@ export type CreateCreditNoteBody = {
      * puts the whole note in that channel. Not with commit_relief.
      */
   refund_type?: CreateCreditNoteBodyRefundType;
+  /**
+     * True issues the note in the same call. If the issue fails,
+     * the draft is voided and the error is returned. Defaults to
+     * false (the note stays a draft).
+     */
   auto_issue?: boolean;
   /**
      * Links a refund made in Stripe outside Hardcount as this
-     * note's card refund, Stripe's `refunds[]` shape: Hardcount
+     * note's card refund, like Stripe's `refunds[]`: Hardcount
      * reads the refund from Stripe and calls nothing else
      * there for it. The refund must be of the payment that paid
-     * this invoice, not made by Hardcount, and succeeded; `refund_amount_cents` must be its amount,
+     * this invoice, not made by Hardcount, and succeeded;
+     * `refund_amount_cents` must be its amount,
      * `credit_amount_cents` 0, and `auto_issue` true (the
      * note is issued at once). The caps on the invoice still
      * apply. A refund Hardcount flagged on the invoice
@@ -48,7 +58,7 @@ export type CreateCreditNoteBody = {
      * relief's split goes in here, not at the top level: a top-level
      * `refund_amount_cents`, `out_of_band_amount_cents` or
      * `refund_type` is a 422. Example after a lost dispute:
-     * `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
+     * `{"invoice_id": "hc_inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
      */
   commit_relief?: CreateCreditNoteBodyCommitRelief;
 };

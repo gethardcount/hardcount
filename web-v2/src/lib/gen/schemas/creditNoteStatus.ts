@@ -11,6 +11,11 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `draft`: created but not applied; it can be issued or voided.
+ * `issued`: applied to the invoice and final. `voided`: cancelled
+ * before it was issued.
+ */
 export type CreditNoteStatus = typeof CreditNoteStatus[keyof typeof CreditNoteStatus];
 
 

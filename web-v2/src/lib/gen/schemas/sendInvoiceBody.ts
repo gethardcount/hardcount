@@ -12,7 +12,11 @@
  */
 
 export type SendInvoiceBody = {
+  /** The recipient, one plain address such as `billing@acme.example`, with no display name. */
   email: string;
-  /** @maxItems 10 */
+  /**
+     * Addresses to copy on this send. See the description for absent, empty and a list.
+     * @maxItems 10
+     */
   additional_emails?: string[];
 };

@@ -13,18 +13,29 @@
 import type { DunningPolicyInputFinalInvoiceAction } from './dunningPolicyInputFinalInvoiceAction';
 import type { DunningPolicyInputFinalSubscriptionAction } from './dunningPolicyInputFinalSubscriptionAction';
 
+/**
+ * The body of `POST /v1/dunning/policies` and
+ * `PATCH /v1/dunning/policies/{id}`. A PATCH replaces every setting,
+ * so send the full policy. `id`, `tenant_id`, `is_default`, `seeded`,
+ * `created_at` and `updated_at` are set by the server; sending one is
+ * refused with 422.
+ */
 export interface DunningPolicyInput {
-  /** @maxLength 255 */
+  /**
+     * A name for the policy, up to 255 characters. Defaults to empty.
+     * @maxLength 255
+     */
   name?: string;
   /** A disabled policy starts no dunning. */
   enabled?: boolean;
   /**
      * Days to wait before each retry. The first counts from the failed
-     * payment, or, with no card on file, from the collection that found
-     * none. Each later one counts from the retry before it: `[3, 4, 7]`
-     * retries on day 3, 7 and 14. The number of retries is the length
-     * of the list. A day is 24 hours. `retry_schedule`,
-     * `max_retry_attempts` and `grace_period_days` are refused.
+     * payment or the collection that found no card. Each later one
+     * counts from the retry before it: `[3, 4, 7]` retries on day 3, 7
+     * and 14. The number of retries is the length of the list, 1 to
+     * 15, and each wait is a whole number of days from 1 to 30. A day
+     * is 24 hours. `retry_schedule`, `max_retry_attempts`,
+     * `grace_period_days` and `final_action` are refused.
      * @minItems 1
      * @maxItems 15
      * @items.minimum 1
@@ -40,9 +51,14 @@ export interface DunningPolicyInput {
      * `subscription.canceled` with `canceled_by: dunning`. It does
      * nothing if the subscription is already canceled. If a scheduled
      * cancel was already due, that cancel happens instead, and its
-     * event says `canceled_by: schedule`.
+     * event says `canceled_by: schedule`. `none` leaves it alone. An
+     * invoice with no subscription is not affected.
      */
   final_subscription_action?: DunningPolicyInputFinalSubscriptionAction;
-  /** What happens to the invoice when retries run out. */
+  /**
+     * What happens to the invoice when retries run out.
+     * `mark_uncollectible` writes it off as bad debt; `none` leaves it
+     * open and due.
+     */
   final_invoice_action?: DunningPolicyInputFinalInvoiceAction;
 }

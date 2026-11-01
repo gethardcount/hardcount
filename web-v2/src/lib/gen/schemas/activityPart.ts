@@ -17,8 +17,10 @@ import type { ActivityMoney } from './activityMoney';
  * One piece of a meta segment. Exactly one field is set.
  */
 export interface ActivityPart {
+  /** Plain words to show as they are. */
   text?: string;
   money?: ActivityMoney;
+  /** A time to format for the reader, such as a retry date. */
   time?: string;
   link?: ActivityLink;
 }

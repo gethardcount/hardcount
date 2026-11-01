@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Always `sent`, meaning the email is queued.
+ */
 export type SendCreditNote200Status = typeof SendCreditNote200Status[keyof typeof SendCreditNote200Status];
 
 

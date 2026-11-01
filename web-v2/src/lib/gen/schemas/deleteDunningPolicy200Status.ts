@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Always `deleted`.
+ */
 export type DeleteDunningPolicy200Status = typeof DeleteDunningPolicy200Status[keyof typeof DeleteDunningPolicy200Status];
 
 

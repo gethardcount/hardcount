@@ -12,5 +12,6 @@
  */
 
 export type AttachStripeRefundToCreditNoteBody = {
+  /** Stripe's id of the refund you made (`re_…`). */
   stripe_refund_id: string;
 };

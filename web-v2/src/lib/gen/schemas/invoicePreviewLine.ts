@@ -14,19 +14,35 @@ import type { InvoicePreviewLineDimensionMatch } from './invoicePreviewLineDimen
 import type { InvoicePreviewLineLineType } from './invoicePreviewLineLineType';
 import type { InvoicePreviewLinePricingMode } from './invoicePreviewLinePricingMode';
 
+/**
+ * One line of an invoice preview.
+ */
 export interface InvoicePreviewLine {
+  /** `base_fee`: a plan's flat fee. `usage`: metered usage priced by a plan price. */
   line_type: InvoicePreviewLineLineType;
+  /** The text the invoice line would carry. */
   description: string;
+  /** On a usage line, the meter that measured the usage. Absent on base fee lines. */
   meter_id?: string;
+  /** On a usage line, the meter's unit, such as `tokens`. Absent on base fee lines. */
   meter_unit?: string;
   /** On a usage line, the plan price that priced it. */
   price_id?: string;
   /** On a usage line, the labels its price takes. Absent for a price that takes every event. */
   dimension_match?: InvoicePreviewLineDimensionMatch;
+  /** The line's currency, the plan's. */
   currency: string;
   /** Exact quantity as a decimal string. */
   quantity: string;
+  /**
+     * Unit price in whole cents of the currency's minor unit. On a base
+     * fee line it is the plan's base fee per unit; on a usage line it is
+     * `amount_cents` ÷ `quantity` rounded to a whole cent, so a sub-cent
+     * rate shows 0.
+     */
   unit_amount_cents: number;
+  /** The line's amount, in the currency's minor unit (cents for USD). */
   amount_cents: number;
+  /** On a usage line, the shape of its price. Absent on base fee lines. */
   pricing_mode?: InvoicePreviewLinePricingMode;
 }

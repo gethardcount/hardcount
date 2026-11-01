@@ -12,13 +12,23 @@
  */
 import type { CreditNoteStatsByCurrencyItem } from './creditNoteStatsByCurrencyItem';
 
+/**
+ * What `GET /v1/credit-notes/stats` returns: how many credit notes
+ * there are in each status, and the money on the issued ones, per
+ * currency. It covers every note in this mode.
+ */
 export interface CreditNoteStats {
+  /** Credit notes in `draft`. */
   draft_count: number;
+  /** Credit notes in `issued`. */
   issued_count: number;
+  /** Credit notes in `voided`. */
   voided_count: number;
   /**
-     * Money on issued notes, one entry per currency, the tenant's
-     * default currency first. Empty when no note is issued.
+     * Money on issued notes, one entry per currency, the account's
+     * default currency first. Empty when no note is issued. Amounts are
+     * in the currency's minor unit (cents for USD) and never added
+     * across currencies.
      */
   by_currency: CreditNoteStatsByCurrencyItem[];
 }

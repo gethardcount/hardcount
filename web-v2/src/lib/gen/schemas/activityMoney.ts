@@ -11,7 +11,12 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * An amount on an activity row. The dashboard formats it, for example as `$86.50`.
+ */
 export interface ActivityMoney {
+  /** The amount in the currency's minor unit (cents for USD). */
   cents: number;
+  /** The currency, as an uppercase ISO 4217 code. */
   currency: string;
 }

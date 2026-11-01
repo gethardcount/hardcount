@@ -12,10 +12,17 @@
  */
 
 /**
- * Lifecycle state of the invoice. `uncollectible` marks an invoice
- * a dunning policy has given up collecting (no further retries) while
- * keeping it on the books — distinct from `voided` (cancelled, owes
- * nothing).
+ * Where the invoice is in its life.
+ * - `draft`: not issued yet. Lines can still be added, and nothing is
+ *   charged.
+ * - `finalized`: issued and owed. Hardcount collects it.
+ * - `paid`: settled, by card, credit, an offline payment or a credit
+ *   note that left nothing due.
+ * - `voided`: cancelled. Nothing is owed. Voiding is final.
+ * - `uncollectible`: written off as bad debt, by you
+ *   (`POST /v1/invoices/{id}/mark-uncollectible`) or by a dunning
+ *   policy's final action. Hardcount stops collecting it, but it stays
+ *   on the books and can still be paid.
  */
 export type InvoiceStatus = typeof InvoiceStatus[keyof typeof InvoiceStatus];
 

@@ -12,18 +12,30 @@
  */
 
 /**
- * What an issued invoice or credit note prints about its seller (the
- * tenant's company), copied when the document was issued (ADR-109).
+ * What an issued invoice or credit note prints about its seller: your
+ * company details from the account settings, copied when the document
+ * was issued. A later change to the settings does not change it.
+ * Every field is absent when the setting was empty.
  */
 export interface DocumentSupplier {
+  /** Your company name. */
   name?: string;
+  /** Your company's contact email. */
   email?: string;
+  /** Your company's phone number. */
   phone?: string;
+  /** First line of your company address. */
   address_line1?: string;
+  /** Second line of your company address. */
   address_line2?: string;
+  /** City of your company address. */
   city?: string;
+  /** State or region of your company address. */
   state?: string;
+  /** Postal code of your company address. */
   postal_code?: string;
+  /** Country of your company address. */
   country?: string;
+  /** Your company's tax ID. */
   tax_id?: string;
 }

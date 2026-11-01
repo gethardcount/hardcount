@@ -25,17 +25,23 @@ import type { InvoiceStripeRefundStatus } from './invoiceStripeRefundStatus';
  * that.
  */
 export interface InvoiceStripeRefund {
+  /** Unique identifier of the refund record, `hc_srf_` and 24 hex characters. */
   id: string;
+  /** The invoice whose payment was refunded. */
   invoice_id: string;
+  /** Stripe's refund id (`re_…`). */
   stripe_refund_id: string;
   /** The refunded payment. */
   stripe_payment_intent_id: string;
+  /** The refunded Stripe charge (`ch_…`). Absent when Stripe did not send it. */
   stripe_charge_id?: string;
+  /** The refunded amount, in the currency's minor unit (cents for USD). */
   amount_cents: number;
+  /** The refund's currency, uppercase. */
   currency: string;
   /** Stripe's refund status, as Stripe sends it. */
   status: InvoiceStripeRefundStatus;
-  /** Stripe's refund reason, for example `requested_by_customer`. Absent when none was given. */
+  /** Stripe's refund reason (`duplicate`, `fraudulent` or `requested_by_customer`). Absent when none was given. */
   reason?: string;
   /** Why Stripe could not make the refund, once it failed. */
   failure_reason?: string;
@@ -65,11 +71,16 @@ export interface InvoiceStripeRefund {
   review_reason?: InvoiceStripeRefundReviewReason;
   /** The credit note that records the refund, when `outcome` is `credit_note`. */
   credit_note_id?: string;
+  /** The note given when the refund was dismissed. Absent unless `outcome` is `dismissed`. */
   dismissed_note?: string;
+  /** When the refund was dismissed. Absent unless `outcome` is `dismissed`. */
   dismissed_at?: string;
   /** When Stripe made the refund. */
   refund_created_at: string;
+  /** True for a live-mode payment, false for test mode. */
   livemode: boolean;
+  /** When Hardcount first recorded the refund. */
   created_at: string;
+  /** When Hardcount last updated the record. */
   updated_at: string;
 }

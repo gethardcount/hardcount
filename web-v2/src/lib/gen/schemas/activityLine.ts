@@ -16,12 +16,13 @@ import type { ActivityMoney } from './activityMoney';
 import type { ActivityPart } from './activityPart';
 
 /**
- * One activity row in the words of the activity line standard
- * (ADR-128): a title with no values, the amount when the event moves
- * money, asks for it or cancels money owed, a problem line on failure
- * and warning rows, the meta line's parts and the actor, a tone, and
- * the event's time on the entity's calendar. `recorded_at` is the
- * real-world time, set only for an entity on a test clock.
+ * One activity row, with every word written by the server: a title
+ * with no values, the amount when the event moves money, asks for it
+ * or cancels money owed, a problem line on failure and warning rows,
+ * the meta line's parts and the actor, a tone, and the event's time on
+ * the entity's calendar. `recorded_at` is the real-world time, set
+ * only for an entity on a test clock. The invoice payment timeline and
+ * dunning run events carry it.
  */
 export interface ActivityLine {
   /**
@@ -34,13 +35,16 @@ export interface ActivityLine {
   id: string;
   /** Machine name of the event. */
   kind: string;
+  /** What happened, in plain words with no values, for example "Payment failed". */
   title: string;
   amount?: ActivityMoney;
+  /** What went wrong or what it means, on failure and warning rows whose title does not say it all. Absent otherwise. */
   problem?: string;
   /**
      * The meta line before the actor. Each item is one segment, shown
      * joined by " · "; a segment's parts read as one phrase, for
      * example a money part followed by the text " refunded to card".
+     * An empty list when there is nothing to add.
      */
   detail: ActivityPart[][];
   actor?: ActivityActor;
@@ -50,6 +54,8 @@ export interface ActivityLine {
      * be collected. failure: an attempt failed.
      */
   tone: ActivityLineTone;
+  /** When the event happened, on the entity's calendar (the test clock's time for an entity on a test clock). */
   occurred_at: string;
+  /** The real-world time of the event. Set only for an entity on a test clock, when it is known. */
   recorded_at?: string;
 }

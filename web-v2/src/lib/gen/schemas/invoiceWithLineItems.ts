@@ -14,12 +14,11 @@ import type { Invoice } from './invoice';
 import type { InvoiceLineItem } from './invoiceLineItem';
 
 /**
- * Response shape for `GET /v1/invoices/{id}`. The handler returns the
- * invoice and its line items as separate top-level keys (rather than
- * nesting `line_items` inside the invoice) so the client can render
- * the two arrays independently.
+ * What `GET /v1/invoices/{id}` returns: the invoice and its lines, as
+ * two keys side by side.
  */
 export interface InvoiceWithLineItems {
   invoice: Invoice;
+  /** The invoice's lines. An empty list when it has none. */
   line_items: InvoiceLineItem[];
 }

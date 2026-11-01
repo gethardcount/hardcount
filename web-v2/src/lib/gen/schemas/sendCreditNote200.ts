@@ -13,5 +13,6 @@
 import type { SendCreditNote200Status } from './sendCreditNote200Status';
 
 export type SendCreditNote200 = {
+  /** Always `sent`, meaning the email is queued. */
   status: SendCreditNote200Status;
 };

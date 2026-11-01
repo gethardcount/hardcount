@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * How the run ends, and what happens to its invoice (see above).
+ */
 export type ResolveDunningRunBodyResolution = typeof ResolveDunningRunBodyResolution[keyof typeof ResolveDunningRunBodyResolution];
 
 

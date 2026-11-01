@@ -3137,34 +3137,43 @@ type APIKeyRotation struct {
 // `automatic` is anything Hardcount did on its own. Absent when no fact
 // written with the row names one.
 type ActivityActor struct {
+	// Kind The kind of actor.
 	Kind ActivityActorKind `json:"kind"`
-	Name string            `json:"name,omitempty"`
-	Via  ActivityActorVia  `json:"via,omitempty"`
+
+	// Name The person's name or email, the API key's name, or the customer's display name. Absent for `automatic` and when no name is known.
+	Name string `json:"name,omitempty"`
+
+	// Via Where the customer acted. Set only for `customer`.
+	Via ActivityActorVia `json:"via,omitempty"`
 }
 
-// ActivityActorKind defines model for ActivityActor.Kind.
+// ActivityActorKind The kind of actor.
 type ActivityActorKind string
 
-// ActivityActorVia defines model for ActivityActor.Via.
+// ActivityActorVia Where the customer acted. Set only for `customer`.
 type ActivityActorVia string
 
-// ActivityLine One activity row in the words of the activity line standard
-// (ADR-128): a title with no values, the amount when the event moves
-// money, asks for it or cancels money owed, a problem line on failure
-// and warning rows, the meta line's parts and the actor, a tone, and
-// the event's time on the entity's calendar. `recorded_at` is the
-// real-world time, set only for an entity on a test clock.
+// ActivityLine One activity row, with every word written by the server: a title
+// with no values, the amount when the event moves money, asks for it
+// or cancels money owed, a problem line on failure and warning rows,
+// the meta line's parts and the actor, a tone, and the event's time on
+// the entity's calendar. `recorded_at` is the real-world time, set
+// only for an entity on a test clock. The invoice payment timeline and
+// dunning run events carry it.
 type ActivityLine struct {
 	// Actor Who did it. `person` and `api_key` carry the name (a person's email
 	// when they have no name), `customer` says where through `via`, and
 	// `automatic` is anything Hardcount did on its own. Absent when no fact
 	// written with the row names one.
-	Actor  ActivityActor `json:"actor,omitempty"`
+	Actor ActivityActor `json:"actor,omitempty"`
+
+	// Amount An amount on an activity row. The dashboard formats it, for example as `$86.50`.
 	Amount ActivityMoney `json:"amount,omitempty"`
 
 	// Detail The meta line before the actor. Each item is one segment, shown
 	// joined by " · "; a segment's parts read as one phrase, for
 	// example a money part followed by the text " refunded to card".
+	// An empty list when there is nothing to add.
 	Detail [][]ActivityPart `json:"detail"`
 
 	// Id The row's stable key: the event's `id` on an invoice timeline
@@ -3175,11 +3184,19 @@ type ActivityLine struct {
 	Id string `json:"id"`
 
 	// Kind Machine name of the event.
-	Kind       string    `json:"kind"`
+	Kind string `json:"kind"`
+
+	// OccurredAt When the event happened, on the entity's calendar (the test clock's time for an entity on a test clock).
 	OccurredAt time.Time `json:"occurred_at"`
-	Problem    string    `json:"problem,omitempty"`
+
+	// Problem What went wrong or what it means, on failure and warning rows whose title does not say it all. Absent otherwise.
+	Problem string `json:"problem,omitempty"`
+
+	// RecordedAt The real-world time of the event. Set only for an entity on a test clock, when it is known.
 	RecordedAt time.Time `json:"recorded_at,omitempty"`
-	Title      string    `json:"title"`
+
+	// Title What happened, in plain words with no values, for example "Payment failed".
+	Title string `json:"title"`
 
 	// Tone neutral: something happened. success: money arrived, or was
 	// returned as intended. warning: needs a look, or money will not
@@ -3194,27 +3211,41 @@ type ActivityLineTone string
 
 // ActivityLink An object the row's own data names, which still exists.
 type ActivityLink struct {
-	Id    string           `json:"id"`
-	Kind  ActivityLinkKind `json:"kind"`
-	Label string           `json:"label"`
+	// Id The object's id, to fetch or link to it.
+	Id string `json:"id"`
+
+	// Kind The kind of object.
+	Kind ActivityLinkKind `json:"kind"`
+
+	// Label The text to show for the link, such as a credit note number or a subscription's name.
+	Label string `json:"label"`
 }
 
-// ActivityLinkKind defines model for ActivityLink.Kind.
+// ActivityLinkKind The kind of object.
 type ActivityLinkKind string
 
-// ActivityMoney defines model for ActivityMoney.
+// ActivityMoney An amount on an activity row. The dashboard formats it, for example as `$86.50`.
 type ActivityMoney struct {
-	Cents    int64  `json:"cents"`
+	// Cents The amount in the currency's minor unit (cents for USD).
+	Cents int64 `json:"cents"`
+
+	// Currency The currency, as an uppercase ISO 4217 code.
 	Currency string `json:"currency"`
 }
 
 // ActivityPart One piece of a meta segment. Exactly one field is set.
 type ActivityPart struct {
 	// Link An object the row's own data names, which still exists.
-	Link  ActivityLink  `json:"link,omitempty"`
+	Link ActivityLink `json:"link,omitempty"`
+
+	// Money An amount on an activity row. The dashboard formats it, for example as `$86.50`.
 	Money ActivityMoney `json:"money,omitempty"`
-	Text  string        `json:"text,omitempty"`
-	Time  time.Time     `json:"time,omitempty"`
+
+	// Text Plain words to show as they are.
+	Text string `json:"text,omitempty"`
+
+	// Time A time to format for the reader, such as a retry date.
+	Time time.Time `json:"time,omitempty"`
 }
 
 // AnalyticsMrrMovementPoint defines model for AnalyticsMrrMovementPoint.
@@ -3382,240 +3413,312 @@ type AnalyticsUsagePoint struct {
 	Quantity string `json:"quantity"`
 }
 
-// Attention Unified "this invoice needs operator attention" surface.
-// Computed server-side from durable invoice fields
-// (`tax_status`, `tax_error_code`, `payment_status`,
-// `last_payment_error`). Never persisted —
-// always derived. Omitted entirely when the invoice is healthy
-// (matches Stripe's `last_finalization_error: null` ergonomic).
-// See ADR-009.
+// Attention Why an invoice needs your attention now, and what to do about it.
+// Hardcount works it out each time the invoice is read, from the
+// invoice's tax and payment state; it is never stored. The invoice
+// leaves it out when nothing needs attention. `GET /v1/invoices`,
+// `GET /v1/invoices/{id}` and the finalize, retry-tax and
+// rotate-public-token responses carry it; the other invoice responses
+// and the webhook events do not.
 type Attention struct {
-	// Actions Prescribed next steps. First item is the primary CTA; the
-	// rest are secondary.
+	// Actions Recommended next steps. The first is the main one; the rest are
+	// secondary. Absent when there is nothing to do but wait.
 	Actions []AttentionActionItem `json:"actions,omitempty"`
 
-	// Code Open, dotted, provider-specific code (e.g.
-	// `tax.customer_data_invalid`, `payment.declined`).
-	// New codes ship without a contract
-	// bump. Stripe parity.
+	// Code Open, dotted code naming the exact cause, for example
+	// `tax.customer_data_invalid` or `payment.declined`. New codes can
+	// appear in any release, as with Stripe's error codes.
 	Code string `json:"code,omitempty"`
 
 	// Detail Hardcount's own explanation behind `message`: why the state
 	// holds, what Hardcount does on its own, and ids support may ask
 	// for (for example the payment intent ids of a payment
 	// anomaly). Plain text; may contain blank-line paragraph
-	// breaks. Never a provider payload — that is
+	// breaks. Never a provider payload: that is
 	// `provider_response`.
 	Detail string `json:"detail,omitempty"`
 
-	// DocUrl Deep link to operator-facing documentation for this
-	// reason. Stripe parity.
+	// DocUrl A link to documentation about this reason. Absent when there is
+	// no page for it.
 	DocUrl string `json:"doc_url,omitempty"`
 
 	// DueBy The invoice's payment deadline (its `due_at`). Hardcount does not
-	// act on this date; it is shown so the operator knows it.
-	// Absent when the invoice has no due date.
+	// act on this date; it is shown so you know it. Absent when the
+	// reason does not show a deadline or the invoice has none.
 	DueBy time.Time `json:"due_by,omitempty"`
 
-	// Message Human-readable copy, safe to render verbatim: one plain
-	// sentence saying what happens and what to do. Facts that must
-	// show up front follow on more lines, separated by a newline
-	// (`\n`), one sentence each and up to three lines in all: the
-	// setup-link email on `no_payment_method` (and on
-	// `dunning_exhausted` when no link can be emailed), and the
-	// prepaid credit at risk on an unpaid commit invoice. A no-card
-	// commit invoice carries all three. Wording may change between
-	// releases; switch on `reason` and `code`, not on this text.
+	// Message Text that is safe to show as it is: one plain sentence saying
+	// what happens and what to do. Facts that must show up front
+	// follow on more lines, separated by a newline (`\n`), one sentence
+	// each and up to three lines in all: the setup-link email on
+	// `no_payment_method` (and on `dunning_exhausted` when no link can
+	// be emailed), and the prepaid credit at risk on an unpaid commit
+	// invoice. A no-card commit invoice carries all three. The wording
+	// can change between releases; switch on `reason` and `code`, not
+	// on this text.
 	Message string `json:"message"`
 
 	// NextAttemptAt When Hardcount will next retry on its own. Today only a tax
 	// retry sets it. Absent when no automatic retry is scheduled.
 	NextAttemptAt time.Time `json:"next_attempt_at,omitempty"`
 
-	// Param Dotted-path pointer at the entity field the operator must
-	// edit to resolve the issue (e.g.
-	// `customer.address.postal_code`). Stripe parity. Empty
-	// when the resolution isn't field-scoped.
+	// Param Dotted path to the field you need to edit to fix the cause, for
+	// example `customer.address.postal_code`. Absent when the fix is not
+	// one field.
 	Param string `json:"param,omitempty"`
 
-	// ProviderResponse The provider's own response (Stripe Tax error envelope,
-	// Stripe's last payment error), exactly as received. Present
-	// only when Hardcount called the provider.
+	// ProviderResponse The provider's own response (a Stripe Tax error, or Stripe's last
+	// payment error), exactly as received. Present only when Hardcount
+	// called the provider.
 	ProviderResponse string `json:"provider_response,omitempty"`
 
-	// Reason Closed, typed code naming why an invoice needs operator
-	// attention. Stable public-API contract — codes are never
-	// repurposed; deprecations keep the code reserved and add a
-	// successor. See `Attention.code` for the open, provider-specific
-	// sub-code. `payment_anomaly` (ADR-068) reports money that does
-	// not reconcile — double charge, captured-vs-booked amount
-	// mismatch, or a payment on a voided invoice — and is surfaced
-	// even on paid/voided invoices. `dunning_exhausted` reports a
-	// no-payment-method invoice whose automatic recovery has ended
-	// without collecting (2026-07-22). `collection_paused` reports an
-	// invoice that is queued for auto-charge but whose subscription
-	// has `pause_collection` set, so the charge sweeps deliberately
-	// skip it (2026-07-28). A dunning run already open on the invoice
-	// keeps retrying it through the pause, and `message` then says so;
-	// with no open run it is not charged automatically until
-	// collection resumes. `commit_exposure` reports an
-	// unpaid invoice that funded a prepaid commit whose credit is
-	// already spendable (ADR-078 funds commits at issue, not at
-	// payment) — note this reason is only returned when no other
-	// reason applies; when one does, the exposure is folded into that
-	// reason's `message` and its `actions` instead, so clients must
-	// not treat the reason code as the presence test for exposure
-	// (2026-08-04). `dispute_lost` reports a payment on the invoice that
-	// the customer disputed with their bank and that the dispute took
-	// back (the dispute closed as `lost`). Hardcount leaves the invoice paid
-	// and moves no money; the operator records the loss. Surfaced on paid
-	// invoices. On an invoice that bought prepaid credit, the message
-	// also says how much of the credit is still spendable and names
-	// commit relief, because an ordinary credit note is refused there.
-	// When the invoice also has `payment_anomaly`, that reason stays and
-	// its message asks the operator to check Stripe before any refund.
-	// The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-	// (2026-10-19). `refunded_in_stripe` reports a refund of the invoice's
-	// payment made in Stripe outside Hardcount that Hardcount did not record
-	// as a credit note: the invoice was not paid yet, the currency
-	// differs, the invoice bought prepaid credit, Hardcount first saw the
-	// refund more than a day after it was made, or the refund is more than
-	// the invoice had left to refund or credit. `code` is
-	// `payment.refunded_in_stripe.` and that review reason. The operator
-	// records it with a credit note that names the refund
-	// (`stripe_refund_id` on `POST /v1/credit-notes`) or dismisses it
-	// (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
-	// Surfaced on paid invoices (2026-10-30). `amount_below_minimum` reports an invoice Stripe
-	// refused to charge, or refused a payment page for, because the amount
-	// is below Stripe's minimum charge. The minimum depends on the
-	// currency the Stripe account settles in; Stripe's reply, in
-	// `provider_response`, names it. Nothing was charged, the invoice
-	// stays `finalized` with `payment_status` `pending`, it is not
-	// charged again automatically, dunning does not start (a run already
-	// open ends), and the customer is not emailed. The operator voids it
-	// or records a payment; Collect payment applies the customer's credit
-	// balance and pays it if that covers the amount, and otherwise asks
-	// Stripe again. Stripe's answer can change (for a converted charge the
-	// minimum is the settlement currency's), and a different answer ends
-	// this reason (2026-10-23).
+	// Reason Why an invoice needs your attention, as a closed code. A code is never
+	// reused for another meaning; a retired code stays reserved.
+	// `Attention.code` carries the open, provider-specific sub-code.
+	// - `tax_calculation_failed`: the tax provider could not calculate
+	//   tax. The cause is in `code`.
+	// - `tax_location_required`: the customer's billing address or tax ID
+	//   is missing or not valid for the tax provider. Edit the billing
+	//   profile.
+	// - `payment_failed`: the card was declined. The decline code is in
+	//   `code`.
+	// - `payment_unconfirmed`: a charge got an unclear answer from Stripe.
+	//   Hardcount asks Stripe what happened.
+	// - `payment_anomaly`: money does not reconcile: a double charge, a
+	//   captured amount that differs from the amount booked, or a payment
+	//   on a voided invoice. Shown even on paid and voided invoices.
+	// - `payment_processing`: Stripe is still processing a charge. It
+	//   settles on its own.
+	// - `payment_scheduled`: the invoice is queued, and the automatic
+	//   charge collects it on its next run.
+	// - `awaiting_payment`: the invoice is unpaid and not queued for an
+	//   automatic charge. Only invoices written by older releases reach
+	//   this state.
+	// - `no_payment_method`: the customer has no card on file. The invoice
+	//   stays queued, and the automatic charge collects it on its first
+	//   run after a card is added.
+	// - `dunning_exhausted`: the customer still has no card and automatic
+	//   recovery has ended without collecting; the policy's final action
+	//   ran. If that action paused collection on the subscription, resume
+	//   it too: the automatic charge skips a paused subscription even
+	//   after a card is added.
+	// - `collection_paused`: the invoice is queued for an automatic charge,
+	//   but its subscription has `pause_collection` set, so the automatic
+	//   charge skips it. A dunning run already open on the invoice keeps
+	//   retrying it through the pause, and `message` then says so. With no
+	//   open run it is not charged automatically until collection
+	//   resumes.
+	// - `commit_exposure`: the invoice funded a prepaid commit whose
+	//   credit is already spendable, and the invoice is unpaid. Prepaid
+	//   credit is granted when the invoice is issued, not when it is paid.
+	//   This reason is returned only when no other reason applies. When
+	//   one does, the exposure is folded into that reason's `message` and
+	//   `actions` instead, so do not treat this code as the only sign of
+	//   exposure.
+	// - `dispute_lost`: the customer disputed a payment on the invoice with
+	//   their bank, and the dispute closed as `lost`, so the bank took the
+	//   money back. Hardcount leaves the invoice paid and moves no money;
+	//   you record the loss. Shown on paid invoices. On an invoice that
+	//   bought prepaid credit, the message also says how much of the
+	//   credit is still spendable and names commit relief, because an
+	//   ordinary credit note is refused there. When the invoice also has
+	//   `payment_anomaly`, that reason stays and its message asks you to
+	//   check Stripe before any refund. The disputes are at
+	//   `GET /v1/invoices/{id}/disputes`.
+	// - `refunded_in_stripe`: a refund of the invoice's payment was made
+	//   in Stripe outside Hardcount, and Hardcount did not record it as a
+	//   credit note: the invoice was not paid yet, the currency differs,
+	//   the invoice bought prepaid credit, Hardcount first saw the refund
+	//   more than a day after it was made, or the refund is more than the
+	//   invoice had left to refund or credit. `code` is
+	//   `payment.refunded_in_stripe.` followed by that review reason.
+	//   Record it with a credit note that names the refund
+	//   (`stripe_refund_id` on `POST /v1/credit-notes`) or dismiss it
+	//   (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
+	//   Shown on paid invoices.
+	// - `amount_below_minimum`: Stripe refused to charge the invoice, or
+	//   refused a payment page for it, because the amount is below
+	//   Stripe's minimum charge. The minimum depends on the currency the
+	//   Stripe account settles in; Stripe's reply, in
+	//   `provider_response`, names it. Nothing was charged, the invoice
+	//   stays `finalized` with `payment_status` `pending`, it is not
+	//   charged again automatically, dunning does not start (a run already
+	//   open ends), and the customer is not emailed. Void it or record a
+	//   payment. `POST /v1/invoices/{id}/collect` applies the customer's
+	//   credit balance and marks the invoice paid if that covers it, and
+	//   otherwise asks Stripe again. Stripe's answer can change (for a
+	//   converted charge the minimum is the settlement currency's), and a
+	//   different answer ends this reason.
 	Reason AttentionReason `json:"reason"`
 
-	// Severity Urgency of an Attention surface. Operators sort/filter on this
-	// and the dashboard renders one colour per level. Priority
-	// descending: Critical > Warning > Info.
+	// Severity How urgent an `Attention` notice is, most urgent first: `critical`,
+	// `warning`, `info`. Sort or filter on it; the dashboard shows one
+	// colour per level.
 	Severity AttentionSeverity `json:"severity"`
 
-	// Since When the attention condition started — operators triage
-	// by age. tax_deferred_at for tax reasons; due_at for
-	// overdue; updated_at as a proxy for payment failures.
+	// Since When the condition started, so you can sort by age. For a tax
+	// reason it is when tax was deferred, and for
+	// `amount_below_minimum` when Stripe refused the amount. Otherwise
+	// it is when the invoice last changed; on a test clock, when it was
+	// issued or its last charge failed. Absent when it is not known.
 	Since time.Time `json:"since,omitempty"`
 }
 
-// AttentionAction Operator's recommended next step. Closed enum because every
-// code maps to a concrete server endpoint or frontend route,
-// and audit logs key off the code. `reconcile_payment` opens the
-// payment in Stripe; it is offered on `payment_anomaly`, where the
-// refund or correction is made there. `mark_uncollectible` opens
-// the write-off and is offered only on a parked invoice (payment
-// status unknown with no payment intent recorded), for a customer
-// who paid another way: Hardcount records a payment that Stripe shows,
-// and charges the invoice again if none appears within 24 hours.
-// Dashboards render it as a secondary action. `void_invoice` is offered
-// on prepaid-commit exposure, only while some of the granted
-// credit is still unspent: voiding retires the unspent balance
-// (ADR-078) and is the sole recovery for an unpaid invoice whose
-// credit is already live. Credit the customer has already spent
-// is never clawed back (2026-08-04). It is also offered on
-// `amount_below_minimum`, an amount Stripe will not charge
-// (2026-10-23).
+// AttentionAction A recommended next step, as a closed code. Each code maps to an API
+// route or a dashboard page.
+//   - `edit_billing_profile`: fix the customer's billing address or tax
+//     ID.
+//   - `retry_tax`: `POST /v1/invoices/{id}/retry-tax`.
+//   - `retry_payment` and `charge_now`: `POST /v1/invoices/{id}/collect`.
+//   - `wait_provider`: nothing to do; the provider is expected to answer.
+//   - `rotate_api_key`: replace the Stripe key under Settings.
+//   - `reconcile_payment`: open the payment in Stripe and refund or
+//     correct it there. Offered on `payment_anomaly`.
+//   - `review_registration`: check your tax registrations with the tax
+//     provider.
+//   - `send_reminder`: email the customer. On `no_payment_method` and
+//     `dunning_exhausted` that is the setup link
+//     (`POST /v1/invoices/{id}/resend-setup-link`); otherwise it is the
+//     invoice with its payment link (`POST /v1/invoices/{id}/send`).
+//   - `add_payment_method`: add a card for the customer.
+//   - `update_payment_method`: send the customer a link to replace a
+//     card that was declined.
+//   - `connect_tax_provider`: connect the tax provider under Settings.
+//   - `void_invoice`: `POST /v1/invoices/{id}/void`. Offered on
+//     prepaid-commit exposure while some granted credit is unspent:
+//     voiding retires the unspent balance, and credit already spent is
+//     not taken back. Also offered on `amount_below_minimum`.
+//   - `mark_uncollectible`:
+//     `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
+//     parked invoice (payment status `unknown` with no payment intent
+//     recorded), for a customer who paid another way. Hardcount still
+//     records a payment that Stripe shows, and charges the invoice again
+//     if none appears within 24 hours. The dashboard shows it as a
+//     secondary action.
 type AttentionAction string
 
-// AttentionActionItem defines model for AttentionActionItem.
+// AttentionActionItem One recommended next step on an `Attention` notice.
 type AttentionActionItem struct {
-	// Code Operator's recommended next step. Closed enum because every
-	// code maps to a concrete server endpoint or frontend route,
-	// and audit logs key off the code. `reconcile_payment` opens the
-	// payment in Stripe; it is offered on `payment_anomaly`, where the
-	// refund or correction is made there. `mark_uncollectible` opens
-	// the write-off and is offered only on a parked invoice (payment
-	// status unknown with no payment intent recorded), for a customer
-	// who paid another way: Hardcount records a payment that Stripe shows,
-	// and charges the invoice again if none appears within 24 hours.
-	// Dashboards render it as a secondary action. `void_invoice` is offered
-	// on prepaid-commit exposure, only while some of the granted
-	// credit is still unspent: voiding retires the unspent balance
-	// (ADR-078) and is the sole recovery for an unpaid invoice whose
-	// credit is already live. Credit the customer has already spent
-	// is never clawed back (2026-08-04). It is also offered on
-	// `amount_below_minimum`, an amount Stripe will not charge
-	// (2026-10-23).
+	// Code A recommended next step, as a closed code. Each code maps to an API
+	// route or a dashboard page.
+	// - `edit_billing_profile`: fix the customer's billing address or tax
+	//   ID.
+	// - `retry_tax`: `POST /v1/invoices/{id}/retry-tax`.
+	// - `retry_payment` and `charge_now`: `POST /v1/invoices/{id}/collect`.
+	// - `wait_provider`: nothing to do; the provider is expected to answer.
+	// - `rotate_api_key`: replace the Stripe key under Settings.
+	// - `reconcile_payment`: open the payment in Stripe and refund or
+	//   correct it there. Offered on `payment_anomaly`.
+	// - `review_registration`: check your tax registrations with the tax
+	//   provider.
+	// - `send_reminder`: email the customer. On `no_payment_method` and
+	//   `dunning_exhausted` that is the setup link
+	//   (`POST /v1/invoices/{id}/resend-setup-link`); otherwise it is the
+	//   invoice with its payment link (`POST /v1/invoices/{id}/send`).
+	// - `add_payment_method`: add a card for the customer.
+	// - `update_payment_method`: send the customer a link to replace a
+	//   card that was declined.
+	// - `connect_tax_provider`: connect the tax provider under Settings.
+	// - `void_invoice`: `POST /v1/invoices/{id}/void`. Offered on
+	//   prepaid-commit exposure while some granted credit is unspent:
+	//   voiding retires the unspent balance, and credit already spent is
+	//   not taken back. Also offered on `amount_below_minimum`.
+	// - `mark_uncollectible`:
+	//   `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
+	//   parked invoice (payment status `unknown` with no payment intent
+	//   recorded), for a customer who paid another way. Hardcount still
+	//   records a payment that Stripe shows, and charges the invoice again
+	//   if none appears within 24 hours. The dashboard shows it as a
+	//   secondary action.
 	Code AttentionAction `json:"code"`
 
-	// Label Default rendering label. UIs are free to substitute
-	// localized copy.
+	// Label A default button label. You can show your own, translated text
+	// instead. Absent when there is none.
 	Label string `json:"label,omitempty"`
 }
 
-// AttentionReason Closed, typed code naming why an invoice needs operator
-// attention. Stable public-API contract — codes are never
-// repurposed; deprecations keep the code reserved and add a
-// successor. See `Attention.code` for the open, provider-specific
-// sub-code. `payment_anomaly` (ADR-068) reports money that does
-// not reconcile — double charge, captured-vs-booked amount
-// mismatch, or a payment on a voided invoice — and is surfaced
-// even on paid/voided invoices. `dunning_exhausted` reports a
-// no-payment-method invoice whose automatic recovery has ended
-// without collecting (2026-07-22). `collection_paused` reports an
-// invoice that is queued for auto-charge but whose subscription
-// has `pause_collection` set, so the charge sweeps deliberately
-// skip it (2026-07-28). A dunning run already open on the invoice
-// keeps retrying it through the pause, and `message` then says so;
-// with no open run it is not charged automatically until
-// collection resumes. `commit_exposure` reports an
-// unpaid invoice that funded a prepaid commit whose credit is
-// already spendable (ADR-078 funds commits at issue, not at
-// payment) — note this reason is only returned when no other
-// reason applies; when one does, the exposure is folded into that
-// reason's `message` and its `actions` instead, so clients must
-// not treat the reason code as the presence test for exposure
-// (2026-08-04). `dispute_lost` reports a payment on the invoice that
-// the customer disputed with their bank and that the dispute took
-// back (the dispute closed as `lost`). Hardcount leaves the invoice paid
-// and moves no money; the operator records the loss. Surfaced on paid
-// invoices. On an invoice that bought prepaid credit, the message
-// also says how much of the credit is still spendable and names
-// commit relief, because an ordinary credit note is refused there.
-// When the invoice also has `payment_anomaly`, that reason stays and
-// its message asks the operator to check Stripe before any refund.
-// The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-// (2026-10-19). `refunded_in_stripe` reports a refund of the invoice's
-// payment made in Stripe outside Hardcount that Hardcount did not record
-// as a credit note: the invoice was not paid yet, the currency
-// differs, the invoice bought prepaid credit, Hardcount first saw the
-// refund more than a day after it was made, or the refund is more than
-// the invoice had left to refund or credit. `code` is
-// `payment.refunded_in_stripe.` and that review reason. The operator
-// records it with a credit note that names the refund
-// (`stripe_refund_id` on `POST /v1/credit-notes`) or dismisses it
-// (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
-// Surfaced on paid invoices (2026-10-30). `amount_below_minimum` reports an invoice Stripe
-// refused to charge, or refused a payment page for, because the amount
-// is below Stripe's minimum charge. The minimum depends on the
-// currency the Stripe account settles in; Stripe's reply, in
-// `provider_response`, names it. Nothing was charged, the invoice
-// stays `finalized` with `payment_status` `pending`, it is not
-// charged again automatically, dunning does not start (a run already
-// open ends), and the customer is not emailed. The operator voids it
-// or records a payment; Collect payment applies the customer's credit
-// balance and pays it if that covers the amount, and otherwise asks
-// Stripe again. Stripe's answer can change (for a converted charge the
-// minimum is the settlement currency's), and a different answer ends
-// this reason (2026-10-23).
+// AttentionReason Why an invoice needs your attention, as a closed code. A code is never
+// reused for another meaning; a retired code stays reserved.
+// `Attention.code` carries the open, provider-specific sub-code.
+//   - `tax_calculation_failed`: the tax provider could not calculate
+//     tax. The cause is in `code`.
+//   - `tax_location_required`: the customer's billing address or tax ID
+//     is missing or not valid for the tax provider. Edit the billing
+//     profile.
+//   - `payment_failed`: the card was declined. The decline code is in
+//     `code`.
+//   - `payment_unconfirmed`: a charge got an unclear answer from Stripe.
+//     Hardcount asks Stripe what happened.
+//   - `payment_anomaly`: money does not reconcile: a double charge, a
+//     captured amount that differs from the amount booked, or a payment
+//     on a voided invoice. Shown even on paid and voided invoices.
+//   - `payment_processing`: Stripe is still processing a charge. It
+//     settles on its own.
+//   - `payment_scheduled`: the invoice is queued, and the automatic
+//     charge collects it on its next run.
+//   - `awaiting_payment`: the invoice is unpaid and not queued for an
+//     automatic charge. Only invoices written by older releases reach
+//     this state.
+//   - `no_payment_method`: the customer has no card on file. The invoice
+//     stays queued, and the automatic charge collects it on its first
+//     run after a card is added.
+//   - `dunning_exhausted`: the customer still has no card and automatic
+//     recovery has ended without collecting; the policy's final action
+//     ran. If that action paused collection on the subscription, resume
+//     it too: the automatic charge skips a paused subscription even
+//     after a card is added.
+//   - `collection_paused`: the invoice is queued for an automatic charge,
+//     but its subscription has `pause_collection` set, so the automatic
+//     charge skips it. A dunning run already open on the invoice keeps
+//     retrying it through the pause, and `message` then says so. With no
+//     open run it is not charged automatically until collection
+//     resumes.
+//   - `commit_exposure`: the invoice funded a prepaid commit whose
+//     credit is already spendable, and the invoice is unpaid. Prepaid
+//     credit is granted when the invoice is issued, not when it is paid.
+//     This reason is returned only when no other reason applies. When
+//     one does, the exposure is folded into that reason's `message` and
+//     `actions` instead, so do not treat this code as the only sign of
+//     exposure.
+//   - `dispute_lost`: the customer disputed a payment on the invoice with
+//     their bank, and the dispute closed as `lost`, so the bank took the
+//     money back. Hardcount leaves the invoice paid and moves no money;
+//     you record the loss. Shown on paid invoices. On an invoice that
+//     bought prepaid credit, the message also says how much of the
+//     credit is still spendable and names commit relief, because an
+//     ordinary credit note is refused there. When the invoice also has
+//     `payment_anomaly`, that reason stays and its message asks you to
+//     check Stripe before any refund. The disputes are at
+//     `GET /v1/invoices/{id}/disputes`.
+//   - `refunded_in_stripe`: a refund of the invoice's payment was made
+//     in Stripe outside Hardcount, and Hardcount did not record it as a
+//     credit note: the invoice was not paid yet, the currency differs,
+//     the invoice bought prepaid credit, Hardcount first saw the refund
+//     more than a day after it was made, or the refund is more than the
+//     invoice had left to refund or credit. `code` is
+//     `payment.refunded_in_stripe.` followed by that review reason.
+//     Record it with a credit note that names the refund
+//     (`stripe_refund_id` on `POST /v1/credit-notes`) or dismiss it
+//     (`POST /v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss`).
+//     Shown on paid invoices.
+//   - `amount_below_minimum`: Stripe refused to charge the invoice, or
+//     refused a payment page for it, because the amount is below
+//     Stripe's minimum charge. The minimum depends on the currency the
+//     Stripe account settles in; Stripe's reply, in
+//     `provider_response`, names it. Nothing was charged, the invoice
+//     stays `finalized` with `payment_status` `pending`, it is not
+//     charged again automatically, dunning does not start (a run already
+//     open ends), and the customer is not emailed. Void it or record a
+//     payment. `POST /v1/invoices/{id}/collect` applies the customer's
+//     credit balance and marks the invoice paid if that covers it, and
+//     otherwise asks Stripe again. Stripe's answer can change (for a
+//     converted charge the minimum is the settlement currency's), and a
+//     different answer ends this reason.
 type AttentionReason string
 
-// AttentionSeverity Urgency of an Attention surface. Operators sort/filter on this
-// and the dashboard renders one colour per level. Priority
-// descending: Critical > Warning > Info.
+// AttentionSeverity How urgent an `Attention` notice is, most urgent first: `critical`,
+// `warning`, `info`. Sort or filter on it; the dashboard shows one
+// colour per level.
 type AttentionSeverity string
 
 // AuditLogEntry defines model for AuditLogEntry.
@@ -3981,75 +4084,148 @@ type CreditLiveCurrency struct {
 }
 
 // CreditNote A credit note reduces what a customer owes on an invoice, or gives
-// money back after it was paid. Its total is split three ways: refund
-// to the card (`refund_amount_cents`), credit to the customer's
+// money back after it was paid. On an unpaid invoice it lowers
+// `amount_due_cents`. On a paid invoice its total is split three ways:
+// refund to the card (`refund_amount_cents`), credit to the customer's
 // balance (`credit_amount_cents`), and money returned outside Hardcount
-// (`out_of_band_amount_cents`).
+// (`out_of_band_amount_cents`). Amounts are whole numbers in the
+// currency's minor unit (cents for USD). The credit note routes and
+// `POST /v1/invoices/{id}/refund` return it.
 type CreditNote struct {
-	// BillToSnapshot What an issued invoice or credit note prints about its buyer, copied
-	// when the document was issued (ADR-109). The printed name is
-	// `legal_name` when set, otherwise `display_name`.
+	// BillToSnapshot What an issued invoice or credit note prints about its buyer. It is
+	// copied from the customer and the billing profile when the document
+	// is issued, so a later edit to either does not change it. The printed
+	// name is `legal_name` when set, otherwise `display_name`.
 	BillToSnapshot DocumentBillTo `json:"bill_to_snapshot,omitempty"`
 
-	// CommitRetiredCents Prepaid commit credits this note retired. Absent on other notes.
-	CommitRetiredCents int64     `json:"commit_retired_cents,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	CreditAmountCents  int64     `json:"credit_amount_cents"`
-	CreditNoteNumber   string    `json:"credit_note_number"`
-	Currency           string    `json:"currency"`
-	CustomerId         string    `json:"customer_id"`
-	Id                 string    `json:"id"`
-	InvoiceId          string    `json:"invoice_id"`
+	// CommitRetiredCents Prepaid commit credits this note retired, in the currency's minor unit (cents for USD). Absent on other notes.
+	CommitRetiredCents int64 `json:"commit_retired_cents,omitempty"`
 
-	// IsSimulated True when `issued_at` is test-clock time.
+	// CreatedAt When the note was created. For an invoice on a test clock, the clock's time.
+	CreatedAt time.Time `json:"created_at"`
+
+	// CreditAmountCents Part of the total added to the customer's credit balance, in the
+	// currency's minor unit (cents for USD). 0 on a note against an
+	// unpaid invoice.
+	CreditAmountCents int64 `json:"credit_amount_cents"`
+
+	// CreditNoteNumber The number printed on the note: the account's credit note prefix
+	// (default `CN`), a hyphen and a sequence padded to six digits, for
+	// example `CN-000003`. Test mode and live mode count separately.
+	// Set when the note is created, drafts included.
+	CreditNoteNumber string `json:"credit_note_number"`
+
+	// Currency The invoice's currency, uppercase.
+	Currency string `json:"currency"`
+
+	// CustomerId The invoice's customer.
+	CustomerId string `json:"customer_id"`
+
+	// Id Unique identifier of the credit note, starting `hc_cn_`.
+	Id string `json:"id"`
+
+	// InvoiceId The invoice the note credits.
+	InvoiceId string `json:"invoice_id"`
+
+	// IsSimulated True when the note's dates are test-clock time (its invoice's customer is on a test clock).
 	IsSimulated bool `json:"is_simulated"`
 
-	// IssuePending True on a draft that Hardcount will issue automatically.
-	IssuePending         bool                   `json:"issue_pending"`
-	IssuedAt             time.Time              `json:"issued_at,omitempty"`
-	Metadata             map[string]interface{} `json:"metadata,omitempty"`
-	OutOfBandAmountCents int64                  `json:"out_of_band_amount_cents"`
-	Reason               string                 `json:"reason"`
+	// IssuePending True on a draft that Hardcount will issue automatically, such as the credit for unused time after a plan downgrade.
+	IssuePending bool `json:"issue_pending"`
 
-	// RecordedAt Real-world time the row was written, when `created_at` is test-clock time.
+	// IssuedAt When the note was issued. Absent until it is issued.
+	IssuedAt time.Time `json:"issued_at,omitempty"`
+
+	// Metadata Extra key-value data stored with the note. No API request sets it; it is absent when empty.
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// OutOfBandAmountCents Part of the total paid back outside Hardcount (a bank transfer,
+	// cash), recorded for the books, in the currency's minor unit
+	// (cents for USD). 0 on a note against an unpaid invoice.
+	OutOfBandAmountCents int64 `json:"out_of_band_amount_cents"`
+
+	// Reason Why the note was made, as given when it was created. A refund
+	// made with `POST /v1/invoices/{id}/refund` carries its refund
+	// reason (`duplicate`, `fraudulent`, `requested_by_customer` or
+	// `other`).
+	Reason string `json:"reason"`
+
+	// RecordedAt The real-world time the note was created. It differs from
+	// `created_at` only when the invoice is on a test clock. Absent on
+	// notes created before releases recorded it.
 	RecordedAt time.Time `json:"recorded_at,omitempty"`
 
 	// RecordedFromStripe True when the card refund is a refund made in Stripe outside
 	// Hardcount: recorded from Stripe's refund webhook, or linked with
 	// `stripe_refund_id` at create. Hardcount made no refund call for
 	// it; `stripe_refund_id` names the refund.
-	RecordedFromStripe bool  `json:"recorded_from_stripe"`
-	RefundAmountCents  int64 `json:"refund_amount_cents"`
+	RecordedFromStripe bool `json:"recorded_from_stripe"`
 
-	// RefundStatus The refund part's state at Stripe. `unknown`: Stripe gave no
+	// RefundAmountCents Part of the total refunded to the card that paid the invoice, in
+	// the currency's minor unit (cents for USD). 0 on a note against an
+	// unpaid invoice.
+	RefundAmountCents int64 `json:"refund_amount_cents"`
+
+	// RefundStatus The refund part's state at Stripe. `none`: no refund was sent
+	// (no refund part, or the note is not issued yet). `pending`:
+	// Stripe has not finished it. `succeeded` and `failed`: Stripe's
+	// answer. `unknown`: Stripe gave no
 	// clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
 	// a 429), so the customer may already be refunded. Don't refund it
 	// again in the Stripe Dashboard. Retry it with
 	// `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
 	// refund at Stripe first and then resends the same request with
 	// the same idempotency key.
-	RefundStatus   CreditNoteRefundStatus `json:"refund_status"`
-	Status         CreditNoteStatus       `json:"status"`
-	StripeRefundId string                 `json:"stripe_refund_id,omitempty"`
-	SubtotalCents  int64                  `json:"subtotal_cents"`
+	RefundStatus CreditNoteRefundStatus `json:"refund_status"`
 
-	// SupplierSnapshot What an issued invoice or credit note prints about its seller (the
-	// tenant's company), copied when the document was issued (ADR-109).
+	// Status `draft`: created but not applied; it can be issued or voided.
+	// `issued`: applied to the invoice and final. `voided`: cancelled
+	// before it was issued.
+	Status CreditNoteStatus `json:"status"`
+
+	// StripeRefundId The Stripe refund (`re_…`) of the refund part. Absent until Stripe made one.
+	StripeRefundId string `json:"stripe_refund_id,omitempty"`
+
+	// SubtotalCents The credited amount without its tax, in the currency's minor unit (cents for USD).
+	SubtotalCents int64 `json:"subtotal_cents"`
+
+	// SupplierSnapshot What an issued invoice or credit note prints about its seller: your
+	// company details from the account settings, copied when the document
+	// was issued. A later change to the settings does not change it.
+	// Every field is absent when the setting was empty.
 	SupplierSnapshot DocumentSupplier `json:"supplier_snapshot,omitempty"`
-	TaxAmountCents   int64            `json:"tax_amount_cents"`
+
+	// TaxAmountCents The tax part of the credited amount, in the currency's minor
+	// unit (cents for USD). It is the invoice's own tax share of the
+	// note, so crediting half of an invoice reverses half of its tax.
+	TaxAmountCents int64 `json:"tax_amount_cents"`
 
 	// TaxReversalPending True when the tax reversal failed and will be retried.
 	TaxReversalPending bool `json:"tax_reversal_pending"`
 
-	// TaxTransactionId Tax provider's reversal transaction, set when the note is issued.
-	TaxTransactionId string    `json:"tax_transaction_id,omitempty"`
-	TenantId         string    `json:"tenant_id,omitempty"`
-	TotalCents       int64     `json:"total_cents"`
-	UpdatedAt        time.Time `json:"updated_at"`
-	VoidedAt         time.Time `json:"voided_at,omitempty"`
+	// TaxTransactionId The tax provider's reversal transaction, set when the note is
+	// issued against an invoice whose tax the provider recorded.
+	// Absent otherwise.
+	TaxTransactionId string `json:"tax_transaction_id,omitempty"`
+
+	// TenantId The account the credit note belongs to. Absent when empty.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TotalCents The credited amount with tax, in the currency's minor unit (cents
+	// for USD): the sum of the note's lines.
+	TotalCents int64 `json:"total_cents"`
+
+	// UpdatedAt When the note last changed.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// VoidedAt When the note was voided. Absent unless it is voided.
+	VoidedAt time.Time `json:"voided_at,omitempty"`
 }
 
-// CreditNoteRefundStatus The refund part's state at Stripe. `unknown`: Stripe gave no
+// CreditNoteRefundStatus The refund part's state at Stripe. `none`: no refund was sent
+// (no refund part, or the note is not issued yet). `pending`:
+// Stripe has not finished it. `succeeded` and `failed`: Stripe's
+// answer. `unknown`: Stripe gave no
 // clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
 // a 429), so the customer may already be refunded. Don't refund it
 // again in the Stripe Dashboard. Retry it with
@@ -4058,17 +4234,25 @@ type CreditNote struct {
 // the same idempotency key.
 type CreditNoteRefundStatus string
 
-// CreditNoteStatus defines model for CreditNote.Status.
+// CreditNoteStatus `draft`: created but not applied; it can be issued or voided.
+// `issued`: applied to the invoice and final. `voided`: cancelled
+// before it was issued.
 type CreditNoteStatus string
 
-// CreditNoteStats defines model for CreditNoteStats.
+// CreditNoteStats What `GET /v1/credit-notes/stats` returns: how many credit notes
+// there are in each status, and the money on the issued ones, per
+// currency. It covers every note in this mode.
 type CreditNoteStats struct {
-	// ByCurrency Money on issued notes, one entry per currency, the tenant's
-	// default currency first. Empty when no note is issued.
+	// ByCurrency Money on issued notes, one entry per currency, the account's
+	// default currency first. Empty when no note is issued. Amounts are
+	// in the currency's minor unit (cents for USD) and never added
+	// across currencies.
 	ByCurrency []struct {
 		// CreditedCents Added to customers' credit balances.
-		CreditedCents int64  `json:"credited_cents"`
-		Currency      string `json:"currency"`
+		CreditedCents int64 `json:"credited_cents"`
+
+		// Currency The currency of this entry, uppercase.
+		Currency string `json:"currency"`
 
 		// OutOfBandCents Recorded as paid back outside Stripe.
 		OutOfBandCents int64 `json:"out_of_band_cents"`
@@ -4085,8 +4269,14 @@ type CreditNoteStats struct {
 		// TotalCents Total of the issued notes.
 		TotalCents int64 `json:"total_cents"`
 	} `json:"by_currency"`
-	DraftCount  int `json:"draft_count"`
+
+	// DraftCount Credit notes in `draft`.
+	DraftCount int `json:"draft_count"`
+
+	// IssuedCount Credit notes in `issued`.
 	IssuedCount int `json:"issued_count"`
+
+	// VoidedCount Credit notes in `voided`.
 	VoidedCount int `json:"voided_count"`
 }
 
@@ -4575,15 +4765,17 @@ type CustomerUsageMeter struct {
 }
 
 // DisputeWebhookEventData The `data` of the outbound webhook events `payment.dispute_opened`
-// and `payment.dispute_closed` (docs/webhooks.md): the invoice the
-// disputed payment paid and the dispute, each as the API returns it.
-// Both are saved in the same transaction that records the dispute, so
-// a crash cannot drop them. `payment.dispute_opened` is sent once per
-// dispute, when Hardcount first records it; if the first event Hardcount
-// receives is already the close, both are sent, and both carry the
-// closed status and `closed_at`. Their delivery order is not
-// guaranteed. `payment.dispute_closed` is sent when the dispute
-// reaches a closed status it did not have: `won`, `lost`,
+// and `payment.dispute_closed` (docs/api/webhook-events.md): the
+// invoice the disputed payment paid and the dispute, each as the API
+// returns it. The invoice leaves out `attention`, `recovery_warning`,
+// `billing_period_display` and `test_clock_id`, which are worked out
+// per read. Both events are saved in the same transaction that records
+// the dispute, so a crash cannot drop them. `payment.dispute_opened`
+// is sent once per dispute, when Hardcount first records it; if the
+// first event Hardcount receives is already the close, both are sent,
+// and both carry the closed status and `closed_at`. Their delivery
+// order is not guaranteed. `payment.dispute_closed` is sent when the
+// dispute reaches a closed status it did not have: `won`, `lost`,
 // `warning_closed` or `prevented`. A lost dispute that Stripe later
 // marks won sends it again.
 type DisputeWebhookEventData struct {
@@ -4595,57 +4787,120 @@ type DisputeWebhookEventData struct {
 	// stays paid and no money moves.
 	Dispute InvoiceDispute `json:"dispute"`
 
-	// Invoice A Hardcount invoice. Returned from create, finalize, void, list, get,
-	// rotate-public-token, and collect-payment endpoints.
+	// Invoice A bill for one customer, in one currency. The billing engine creates
+	// one at the end of each subscription period (and for a subscription's
+	// start, a change, a cancel or a spend threshold); you can also create
+	// one-off invoices with `POST /v1/invoices`. An invoice starts as a
+	// `draft`, is `finalized` when issued, and ends `paid`, `voided` or
+	// `uncollectible`. Every amount is a whole number in the currency's
+	// minor unit (cents for USD). The invoice routes and the `invoice.*`
+	// and `payment.*` webhook events return it.
 	Invoice Invoice `json:"invoice"`
 }
 
-// DocumentBillTo What an issued invoice or credit note prints about its buyer, copied
-// when the document was issued (ADR-109). The printed name is
-// `legal_name` when set, otherwise `display_name`.
+// DocumentBillTo What an issued invoice or credit note prints about its buyer. It is
+// copied from the customer and the billing profile when the document
+// is issued, so a later edit to either does not change it. The printed
+// name is `legal_name` when set, otherwise `display_name`.
 type DocumentBillTo struct {
+	// AddressLine1 First address line of the billing profile. Absent when none was set.
 	AddressLine1 string `json:"address_line1,omitempty"`
+
+	// AddressLine2 Second address line of the billing profile. Absent when none was set.
 	AddressLine2 string `json:"address_line2,omitempty"`
-	City         string `json:"city,omitempty"`
-	Country      string `json:"country,omitempty"`
-	DisplayName  string `json:"display_name"`
-	Email        string `json:"email,omitempty"`
-	LegalName    string `json:"legal_name,omitempty"`
-	PostalCode   string `json:"postal_code,omitempty"`
-	State        string `json:"state,omitempty"`
+
+	// City City of the billing profile. Absent when none was set.
+	City string `json:"city,omitempty"`
+
+	// Country Country of the billing profile, as a two-letter ISO 3166 code. Absent when none was set.
+	Country string `json:"country,omitempty"`
+
+	// DisplayName The customer's display name when the document was issued.
+	DisplayName string `json:"display_name"`
+
+	// Email The customer's email address. Absent when none was set.
+	Email string `json:"email,omitempty"`
+
+	// LegalName The billing profile's legal name. Absent when none was set.
+	LegalName string `json:"legal_name,omitempty"`
+
+	// PostalCode Postal code of the billing profile. Absent when none was set.
+	PostalCode string `json:"postal_code,omitempty"`
+
+	// State State or region of the billing profile. Absent when none was set.
+	State string `json:"state,omitempty"`
 
 	// TaxId On an invoice, the tax ID its tax was calculated with when set,
-	// otherwise the billing profile's tax ID at issue.
-	TaxId     string `json:"tax_id,omitempty"`
+	// otherwise the billing profile's tax ID at issue. Absent when
+	// there is none.
+	TaxId string `json:"tax_id,omitempty"`
+
+	// TaxIdType The kind of tax ID, as the billing profile stores it. Absent when none was set.
 	TaxIdType string `json:"tax_id_type,omitempty"`
 }
 
-// DocumentSupplier What an issued invoice or credit note prints about its seller (the
-// tenant's company), copied when the document was issued (ADR-109).
+// DocumentSupplier What an issued invoice or credit note prints about its seller: your
+// company details from the account settings, copied when the document
+// was issued. A later change to the settings does not change it.
+// Every field is absent when the setting was empty.
 type DocumentSupplier struct {
+	// AddressLine1 First line of your company address.
 	AddressLine1 string `json:"address_line1,omitempty"`
+
+	// AddressLine2 Second line of your company address.
 	AddressLine2 string `json:"address_line2,omitempty"`
-	City         string `json:"city,omitempty"`
-	Country      string `json:"country,omitempty"`
-	Email        string `json:"email,omitempty"`
-	Name         string `json:"name,omitempty"`
-	Phone        string `json:"phone,omitempty"`
-	PostalCode   string `json:"postal_code,omitempty"`
-	State        string `json:"state,omitempty"`
-	TaxId        string `json:"tax_id,omitempty"`
+
+	// City City of your company address.
+	City string `json:"city,omitempty"`
+
+	// Country Country of your company address.
+	Country string `json:"country,omitempty"`
+
+	// Email Your company's contact email.
+	Email string `json:"email,omitempty"`
+
+	// Name Your company name.
+	Name string `json:"name,omitempty"`
+
+	// Phone Your company's phone number.
+	Phone string `json:"phone,omitempty"`
+
+	// PostalCode Postal code of your company address.
+	PostalCode string `json:"postal_code,omitempty"`
+
+	// State State or region of your company address.
+	State string `json:"state,omitempty"`
+
+	// TaxId Your company's tax ID.
+	TaxId string `json:"tax_id,omitempty"`
 }
 
-// DunningPolicy defines model for DunningPolicy.
+// DunningPolicy A dunning policy: how failed or missing payments are retried, and
+// what happens when the retries run out. Every account starts with one
+// policy per mode, "Default retries" (retries on day 3, 7 and 14, then
+// no final action), as the default. Customers without an assigned
+// policy use the default.
 type DunningPolicy struct {
-	CreatedAt               time.Time                            `json:"created_at"`
-	Enabled                 bool                                 `json:"enabled"`
-	FinalInvoiceAction      DunningPolicyFinalInvoiceAction      `json:"final_invoice_action"`
+	// CreatedAt When the policy was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Enabled Whether the policy starts dunning. A disabled policy starts no runs.
+	Enabled bool `json:"enabled"`
+
+	// FinalInvoiceAction What happens to the invoice when retries run out.
+	FinalInvoiceAction DunningPolicyFinalInvoiceAction `json:"final_invoice_action"`
+
+	// FinalSubscriptionAction What happens to the subscription when retries run out.
 	FinalSubscriptionAction DunningPolicyFinalSubscriptionAction `json:"final_subscription_action"`
-	Id                      string                               `json:"id"`
+
+	// Id Unique identifier of the policy, starting `hc_dpol_`.
+	Id string `json:"id"`
 
 	// IsDefault Customers without an assigned policy use the default.
-	IsDefault bool   `json:"is_default"`
-	Name      string `json:"name"`
+	IsDefault bool `json:"is_default"`
+
+	// Name The policy's name. Can be empty.
+	Name string `json:"name"`
 
 	// RetryDays Days to wait before each retry; the number of retries is its length.
 	RetryDays []int `json:"retry_days"`
@@ -4655,23 +4910,33 @@ type DunningPolicy struct {
 	// true, the next enabled policy you create becomes the default
 	// instead. Set by the server: a request body that sends it is
 	// refused with 422.
-	Seeded    bool      `json:"seeded"`
-	TenantId  string    `json:"tenant_id,omitempty"`
+	Seeded bool `json:"seeded"`
+
+	// TenantId The account the policy belongs to. Absent when empty.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the policy last changed.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// DunningPolicyFinalInvoiceAction defines model for DunningPolicy.FinalInvoiceAction.
+// DunningPolicyFinalInvoiceAction What happens to the invoice when retries run out.
 type DunningPolicyFinalInvoiceAction string
 
-// DunningPolicyFinalSubscriptionAction defines model for DunningPolicy.FinalSubscriptionAction.
+// DunningPolicyFinalSubscriptionAction What happens to the subscription when retries run out.
 type DunningPolicyFinalSubscriptionAction string
 
-// DunningPolicyInput defines model for DunningPolicyInput.
+// DunningPolicyInput The body of `POST /v1/dunning/policies` and
+// `PATCH /v1/dunning/policies/{id}`. A PATCH replaces every setting,
+// so send the full policy. `id`, `tenant_id`, `is_default`, `seeded`,
+// `created_at` and `updated_at` are set by the server; sending one is
+// refused with 422.
 type DunningPolicyInput struct {
 	// Enabled A disabled policy starts no dunning.
 	Enabled bool `json:"enabled,omitempty"`
 
 	// FinalInvoiceAction What happens to the invoice when retries run out.
+	// `mark_uncollectible` writes it off as bad debt; `none` leaves it
+	// open and due.
 	FinalInvoiceAction DunningPolicyInputFinalInvoiceAction `json:"final_invoice_action,omitempty"`
 
 	// FinalSubscriptionAction What happens to the subscription when retries run out. `pause`
@@ -4682,20 +4947,26 @@ type DunningPolicyInput struct {
 	// `subscription.canceled` with `canceled_by: dunning`. It does
 	// nothing if the subscription is already canceled. If a scheduled
 	// cancel was already due, that cancel happens instead, and its
-	// event says `canceled_by: schedule`.
+	// event says `canceled_by: schedule`. `none` leaves it alone. An
+	// invoice with no subscription is not affected.
 	FinalSubscriptionAction DunningPolicyInputFinalSubscriptionAction `json:"final_subscription_action,omitempty"`
-	Name                    string                                    `json:"name,omitempty"`
+
+	// Name A name for the policy, up to 255 characters. Defaults to empty.
+	Name string `json:"name,omitempty"`
 
 	// RetryDays Days to wait before each retry. The first counts from the failed
-	// payment, or, with no card on file, from the collection that found
-	// none. Each later one counts from the retry before it: `[3, 4, 7]`
-	// retries on day 3, 7 and 14. The number of retries is the length
-	// of the list. A day is 24 hours. `retry_schedule`,
-	// `max_retry_attempts` and `grace_period_days` are refused.
+	// payment or the collection that found no card. Each later one
+	// counts from the retry before it: `[3, 4, 7]` retries on day 3, 7
+	// and 14. The number of retries is the length of the list, 1 to
+	// 15, and each wait is a whole number of days from 1 to 30. A day
+	// is 24 hours. `retry_schedule`, `max_retry_attempts`,
+	// `grace_period_days` and `final_action` are refused.
 	RetryDays []int `json:"retry_days"`
 }
 
 // DunningPolicyInputFinalInvoiceAction What happens to the invoice when retries run out.
+// `mark_uncollectible` writes it off as bad debt; `none` leaves it
+// open and due.
 type DunningPolicyInputFinalInvoiceAction string
 
 // DunningPolicyInputFinalSubscriptionAction What happens to the subscription when retries run out. `pause`
@@ -4706,22 +4977,35 @@ type DunningPolicyInputFinalInvoiceAction string
 // `subscription.canceled` with `canceled_by: dunning`. It does
 // nothing if the subscription is already canceled. If a scheduled
 // cancel was already due, that cancel happens instead, and its
-// event says `canceled_by: schedule`.
+// event says `canceled_by: schedule`. `none` leaves it alone. An
+// invoice with no subscription is not affected.
 type DunningPolicyInputFinalSubscriptionAction string
 
 // DunningPolicyListItem defines model for DunningPolicyListItem.
 type DunningPolicyListItem struct {
 	// AssignedCustomers Customers explicitly assigned to this policy. Customers using it only as the default are not counted.
-	AssignedCustomers       int                                          `json:"assigned_customers"`
-	CreatedAt               time.Time                                    `json:"created_at"`
-	Enabled                 bool                                         `json:"enabled"`
-	FinalInvoiceAction      DunningPolicyListItemFinalInvoiceAction      `json:"final_invoice_action"`
+	AssignedCustomers int `json:"assigned_customers"`
+
+	// CreatedAt When the policy was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Enabled Whether the policy starts dunning. A disabled policy starts no runs.
+	Enabled bool `json:"enabled"`
+
+	// FinalInvoiceAction What happens to the invoice when retries run out.
+	FinalInvoiceAction DunningPolicyListItemFinalInvoiceAction `json:"final_invoice_action"`
+
+	// FinalSubscriptionAction What happens to the subscription when retries run out.
 	FinalSubscriptionAction DunningPolicyListItemFinalSubscriptionAction `json:"final_subscription_action"`
-	Id                      string                                       `json:"id"`
+
+	// Id Unique identifier of the policy, starting `hc_dpol_`.
+	Id string `json:"id"`
 
 	// IsDefault Customers without an assigned policy use the default.
-	IsDefault bool   `json:"is_default"`
-	Name      string `json:"name"`
+	IsDefault bool `json:"is_default"`
+
+	// Name The policy's name. Can be empty.
+	Name string `json:"name"`
 
 	// RetryDays Days to wait before each retry; the number of retries is its length.
 	RetryDays []int `json:"retry_days"`
@@ -4731,36 +5015,55 @@ type DunningPolicyListItem struct {
 	// true, the next enabled policy you create becomes the default
 	// instead. Set by the server: a request body that sends it is
 	// refused with 422.
-	Seeded    bool      `json:"seeded"`
-	TenantId  string    `json:"tenant_id,omitempty"`
+	Seeded bool `json:"seeded"`
+
+	// TenantId The account the policy belongs to. Absent when empty.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the policy last changed.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// DunningPolicyListItemFinalInvoiceAction defines model for DunningPolicyListItem.FinalInvoiceAction.
+// DunningPolicyListItemFinalInvoiceAction What happens to the invoice when retries run out.
 type DunningPolicyListItemFinalInvoiceAction string
 
-// DunningPolicyListItemFinalSubscriptionAction defines model for DunningPolicyListItem.FinalSubscriptionAction.
+// DunningPolicyListItemFinalSubscriptionAction What happens to the subscription when retries run out.
 type DunningPolicyListItemFinalSubscriptionAction string
 
-// DunningRun defines model for DunningRun.
+// DunningRun A dunning run: the payment retries for one unpaid invoice. Dunning
+// is retrying a failed or missing payment on a schedule (the
+// invoice's dunning policy), and running the policy's final action
+// when the retries run out. Each invoice has at most one run.
 type DunningRun struct {
-	AttemptCount int       `json:"attempt_count"`
-	CreatedAt    time.Time `json:"created_at"`
-	CustomerId   string    `json:"customer_id,omitempty"`
+	// AttemptCount How many retries have run so far.
+	AttemptCount int `json:"attempt_count"`
+
+	// CreatedAt When the run started: when the payment failed or the collection
+	// found no card. For an invoice on a test clock, the clock's time.
+	CreatedAt time.Time `json:"created_at"`
+
+	// CustomerId The invoice's customer. Absent when not recorded.
+	CustomerId string `json:"customer_id,omitempty"`
 
 	// EffectiveNow The test clock's current time, when the customer is on a test clock. Filled in on list responses.
 	EffectiveNow time.Time `json:"effective_now,omitempty"`
-	Id           string    `json:"id"`
 
-	// InvoiceAmountDueCents Filled in on list responses.
+	// Id Unique identifier of the run, starting `hc_drun_`.
+	Id string `json:"id"`
+
+	// InvoiceAmountDueCents What the invoice still owes, in the currency's minor unit (cents for USD). Filled in on list responses; absent when 0.
 	InvoiceAmountDueCents int64 `json:"invoice_amount_due_cents,omitempty"`
 
-	// InvoiceCurrency Filled in on list responses.
+	// InvoiceCurrency The invoice's currency. Filled in on list responses.
 	InvoiceCurrency string `json:"invoice_currency,omitempty"`
-	InvoiceId       string `json:"invoice_id"`
 
-	// InvoiceNumber Filled in on list responses.
-	InvoiceNumber string    `json:"invoice_number,omitempty"`
+	// InvoiceId The invoice the run collects.
+	InvoiceId string `json:"invoice_id"`
+
+	// InvoiceNumber The invoice's number. Filled in on list responses.
+	InvoiceNumber string `json:"invoice_number,omitempty"`
+
+	// LastAttemptAt When the last retry ran. Absent before the first retry.
 	LastAttemptAt time.Time `json:"last_attempt_at,omitempty"`
 
 	// MaxRetryAttempts How many retries the run's policy makes: the length of its
@@ -4768,11 +5071,22 @@ type DunningRun struct {
 	// When `attempt_count` has reached it, no charge is retried:
 	// `next_action_at` is when the final action (pause, cancel or
 	// mark uncollectible) runs.
-	MaxRetryAttempts int       `json:"max_retry_attempts,omitempty"`
-	NextActionAt     time.Time `json:"next_action_at,omitempty"`
-	Paused           bool      `json:"paused"`
-	PolicyId         string    `json:"policy_id"`
-	Reason           string    `json:"reason,omitempty"`
+	MaxRetryAttempts int `json:"max_retry_attempts,omitempty"`
+
+	// NextActionAt When the run acts next: the next retry, or the final action once
+	// the retries are used. Absent when the run has ended.
+	NextActionAt time.Time `json:"next_action_at,omitempty"`
+
+	// Paused True while the run is paused, so its retries are skipped. No API route pauses a run.
+	Paused bool `json:"paused"`
+
+	// PolicyId The dunning policy whose schedule and final action the run follows.
+	PolicyId string `json:"policy_id"`
+
+	// Reason Why the run started: `payment_failed` (a charge was declined or
+	// refused) or `no_payment_method` (the customer had no card, so
+	// nothing was charged). Absent when not recorded.
+	Reason string `json:"reason,omitempty"`
 
 	// Resolution How the run ended, set when it is resolved. Exception:
 	// `action_failed` is set on a run that is still `active`. The
@@ -4780,19 +5094,25 @@ type DunningRun struct {
 	// will be retried at `next_action_at`. `amount_below_minimum`: a
 	// charge on the invoice was refused by Stripe because the amount is
 	// below its minimum charge, so the run ended without its final
-	// action.
+	// action. Absent while the run is active.
 	Resolution DunningRunResolution `json:"resolution,omitempty"`
-	ResolvedAt time.Time            `json:"resolved_at,omitempty"`
+
+	// ResolvedAt When the run ended, resolved or escalated. Absent while it is active.
+	ResolvedAt time.Time `json:"resolved_at,omitempty"`
 
 	// State `active`: retries are running. `escalated`: retries ran out
 	// (`resolution` is `retries_exhausted`). `resolved`: the run ended
 	// another way; see `resolution`.
-	State    DunningRunState `json:"state"`
-	TenantId string          `json:"tenant_id,omitempty"`
+	State DunningRunState `json:"state"`
 
-	// TestClockId Filled in on list responses.
-	TestClockId string    `json:"test_clock_id,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// TenantId The account the run belongs to. Absent when empty.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TestClockId The customer's test clock, when they are on one. Filled in on list responses.
+	TestClockId string `json:"test_clock_id,omitempty"`
+
+	// UpdatedAt When the run last changed.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // DunningRunResolution How the run ended, set when it is resolved. Exception:
@@ -4801,7 +5121,7 @@ type DunningRun struct {
 // will be retried at `next_action_at`. `amount_below_minimum`: a
 // charge on the invoice was refused by Stripe because the amount is
 // below its minimum charge, so the run ended without its final
-// action.
+// action. Absent while the run is active.
 type DunningRunResolution string
 
 // DunningRunState `active`: retries are running. `escalated`: retries ran out
@@ -4809,7 +5129,7 @@ type DunningRunResolution string
 // another way; see `resolution`.
 type DunningRunState string
 
-// DunningRunDetail defines model for DunningRunDetail.
+// DunningRunDetail What `GET /v1/dunning/runs/{id}` returns, the run and its event history.
 type DunningRunDetail struct {
 	// Degraded Sources that could not be read. `events`: the event history, so
 	// `events` is empty. `invoice`: the run's invoice, so no event has
@@ -4818,58 +5138,108 @@ type DunningRunDetail struct {
 	// `charge_attempts` the decline reason and amount, `audit` who
 	// resolved the run.
 	Degraded []DunningRunDetailDegraded `json:"degraded"`
-	Events   []DunningRunEvent          `json:"events"`
-	Run      DunningRun                 `json:"run"`
+
+	// Events The run's events, oldest first. Empty when the history could not be read (`degraded` names `events`).
+	Events []DunningRunEvent `json:"events"`
+
+	// Run A dunning run: the payment retries for one unpaid invoice. Dunning
+	// is retrying a failed or missing payment on a schedule (the
+	// invoice's dunning policy), and running the policy's final action
+	// when the retries run out. Each invoice has at most one run.
+	Run DunningRun `json:"run"`
 }
 
 // DunningRunDetailDegraded defines model for DunningRunDetail.Degraded.
 type DunningRunDetailDegraded string
 
-// DunningRunEvent defines model for DunningRunEvent.
+// DunningRunEvent One step in a dunning run's history, as `GET /v1/dunning/runs/{id}` returns it, oldest first.
 type DunningRunEvent struct {
-	AttemptCount int                      `json:"attempt_count"`
-	CreatedAt    time.Time                `json:"created_at"`
-	EventType    DunningRunEventEventType `json:"event_type"`
-	Id           string                   `json:"id"`
-	InvoiceId    string                   `json:"invoice_id"`
+	// AttemptCount The run's retry count at this event.
+	AttemptCount int `json:"attempt_count"`
 
-	// Line The event in the words of the activity line standard (ADR-128):
-	// the line the invoice's payment timeline shows for the same
-	// event, without that timeline's folds. Absent when the run's
-	// invoice could not be read (`degraded` names `invoice`).
-	Line       ActivityLine           `json:"line,omitempty"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
-	Reason     string                 `json:"reason,omitempty"`
-	RecordedAt time.Time              `json:"recorded_at,omitempty"`
-	RunId      string                 `json:"run_id"`
-	State      DunningRunEventState   `json:"state"`
-	TenantId   string                 `json:"tenant_id,omitempty"`
+	// CreatedAt When the event happened. For an invoice on a test clock, the clock's time.
+	CreatedAt time.Time `json:"created_at"`
+
+	// EventType `dunning_started`: the run began. `retry_attempted`: a retry ran
+	// (or was skipped; see `reason`). `escalated`: the retries ran out
+	// and the final action ran. `resolved`: the run ended.
+	EventType DunningRunEventEventType `json:"event_type"`
+
+	// Id Unique identifier of the event, starting `hc_devt_`.
+	Id string `json:"id"`
+
+	// InvoiceId The run's invoice.
+	InvoiceId string `json:"invoice_id"`
+
+	// Line The event in the words of the activity line: the line the
+	// invoice's payment timeline shows for the same event, without
+	// that timeline's folds. Absent when the run's invoice could not
+	// be read (`degraded` names `invoice`).
+	Line ActivityLine `json:"line,omitempty"`
+
+	// Metadata Extra facts about the event, such as `payment_intent_id` on a retry that charged. Absent when empty.
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// Reason Detail that depends on the event. On `dunning_started`, why the
+	// run started (`payment_failed` or `no_payment_method`). On
+	// `retry_attempted`, the outcome: `succeeded`, the decline text
+	// (for example `payment failed: Your card has insufficient
+	// funds.`), or a reason nothing was charged (`no_payment_method`,
+	// `card_refused`, `needs_confirmation`, `amount_below_minimum`,
+	// `payment_processing`). On `escalated`, what the final action did,
+	// joined with `+` (`subscription_paused`, `subscription_canceled`,
+	// `invoice_marked_uncollectible`), empty when it changed nothing. On
+	// `resolved`, what ended the run, such as `payment_recovered` or
+	// `invoice_voided`. Absent when empty.
+	Reason string `json:"reason,omitempty"`
+
+	// RecordedAt The real-world time the event was written. Absent on events written before releases recorded it.
+	RecordedAt time.Time `json:"recorded_at,omitempty"`
+
+	// RunId The run the event belongs to.
+	RunId string `json:"run_id"`
+
+	// State The run's state after this event.
+	State DunningRunEventState `json:"state"`
+
+	// TenantId The account the event belongs to. Absent when empty.
+	TenantId string `json:"tenant_id,omitempty"`
 }
 
-// DunningRunEventEventType defines model for DunningRunEvent.EventType.
+// DunningRunEventEventType `dunning_started`: the run began. `retry_attempted`: a retry ran
+// (or was skipped; see `reason`). `escalated`: the retries ran out
+// and the final action ran. `resolved`: the run ended.
 type DunningRunEventEventType string
 
-// DunningRunEventState defines model for DunningRunEvent.State.
+// DunningRunEventState The run's state after this event.
 type DunningRunEventState string
 
-// DunningStats defines model for DunningStats.
+// DunningStats What `GET /v1/dunning/stats` returns: dunning runs counted by state,
+// and the amount still due on the open ones. It covers every run in
+// this mode. Amounts are in the currency's minor unit (cents for USD).
 type DunningStats struct {
+	// ActiveCount Runs in `active`, still retrying.
 	ActiveCount int `json:"active_count"`
 
 	// AtRiskByCurrency Amount due on active and escalated runs whose invoice is still
 	// open, one entry per currency. `currency` comes first, then the
 	// largest amount. Empty when no run is at risk.
 	AtRiskByCurrency []struct {
-		AmountCents int64  `json:"amount_cents"`
-		Currency    string `json:"currency"`
+		// AmountCents The amount at risk in this currency, in its minor unit (cents for USD).
+		AmountCents int64 `json:"amount_cents"`
+
+		// Currency The currency of this entry, uppercase.
+		Currency string `json:"currency"`
 	} `json:"at_risk_by_currency"`
 
-	// AtRiskCents Amount due on active and escalated runs whose invoice is still open, in `currency` only. A voided or written-off invoice is not at risk.
+	// AtRiskCents Amount due on active and escalated runs whose invoice is still open, in `currency` only, in its minor unit (cents for USD). A voided or written-off invoice is not at risk.
 	AtRiskCents int64 `json:"at_risk_cents"`
 
-	// Currency The tenant's default currency.
-	Currency       string `json:"currency"`
-	EscalatedCount int    `json:"escalated_count"`
+	// Currency The account's default currency, the one `at_risk_cents` counts.
+	Currency string `json:"currency"`
+
+	// EscalatedCount Runs in `escalated`, whose retries ran out.
+	EscalatedCount int `json:"escalated_count"`
 
 	// RecoveredCount Resolved runs that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0). A run closed by a credit note or customer credit that left nothing due is resolved, not recovered.
 	RecoveredCount int `json:"recovered_count"`
@@ -5001,33 +5371,77 @@ type HeldUsageReleaseResult struct {
 	StillHeld int `json:"still_held"`
 }
 
-// HostedInvoice What the hosted invoice page shows. It leaves out internal ids and
+// HostedInvoice What the hosted invoice page shows, from
+// `GET /v1/public/invoices/{token}`. It leaves out internal ids and
 // Stripe details. `bill_to` and the company details in `branding`
-// come from the same place as the invoice PDF's.
+// come from the same place as the invoice PDF's: an issued invoice
+// shows the details it was issued with. Amounts are whole numbers in
+// the currency's minor unit (cents for USD).
 type HostedInvoice struct {
+	// BillTo The buyer as the PDF prints it. Each field is absent when empty.
 	BillTo struct {
+		// AddressLine1 First address line.
 		AddressLine1 string `json:"address_line1,omitempty"`
+
+		// AddressLine2 Second address line.
 		AddressLine2 string `json:"address_line2,omitempty"`
-		City         string `json:"city,omitempty"`
-		Country      string `json:"country,omitempty"`
-		Email        string `json:"email,omitempty"`
-		Name         string `json:"name,omitempty"`
-		PostalCode   string `json:"postal_code,omitempty"`
-		State        string `json:"state,omitempty"`
+
+		// City City.
+		City string `json:"city,omitempty"`
+
+		// Country Country, as a two-letter code.
+		Country string `json:"country,omitempty"`
+
+		// Email The customer's email address.
+		Email string `json:"email,omitempty"`
+
+		// Name The billing profile's legal name, or the customer's display name when it has none.
+		Name string `json:"name,omitempty"`
+
+		// PostalCode Postal code.
+		PostalCode string `json:"postal_code,omitempty"`
+
+		// State State or region.
+		State string `json:"state,omitempty"`
 	} `json:"bill_to"`
+
+	// Branding The seller's company details and branding. Each field is absent when empty.
 	Branding struct {
-		BrandColor          string `json:"brand_color,omitempty"`
+		// BrandColor The seller's brand color, as the account settings store it (for example `#4F46E5`).
+		BrandColor string `json:"brand_color,omitempty"`
+
+		// CompanyAddressLine1 First line of the seller's address.
 		CompanyAddressLine1 string `json:"company_address_line1,omitempty"`
+
+		// CompanyAddressLine2 Second line of the seller's address.
 		CompanyAddressLine2 string `json:"company_address_line2,omitempty"`
-		CompanyCity         string `json:"company_city,omitempty"`
-		CompanyCountry      string `json:"company_country,omitempty"`
-		CompanyEmail        string `json:"company_email,omitempty"`
-		CompanyName         string `json:"company_name,omitempty"`
-		CompanyPhone        string `json:"company_phone,omitempty"`
-		CompanyPostalCode   string `json:"company_postal_code,omitempty"`
-		CompanyState        string `json:"company_state,omitempty"`
-		LogoUrl             string `json:"logo_url,omitempty"`
-		SupportUrl          string `json:"support_url,omitempty"`
+
+		// CompanyCity City of the seller's address.
+		CompanyCity string `json:"company_city,omitempty"`
+
+		// CompanyCountry Country of the seller's address.
+		CompanyCountry string `json:"company_country,omitempty"`
+
+		// CompanyEmail The seller's contact email.
+		CompanyEmail string `json:"company_email,omitempty"`
+
+		// CompanyName The seller's company name.
+		CompanyName string `json:"company_name,omitempty"`
+
+		// CompanyPhone The seller's phone number.
+		CompanyPhone string `json:"company_phone,omitempty"`
+
+		// CompanyPostalCode Postal code of the seller's address.
+		CompanyPostalCode string `json:"company_postal_code,omitempty"`
+
+		// CompanyState State or region of the seller's address.
+		CompanyState string `json:"company_state,omitempty"`
+
+		// LogoUrl The seller's logo, from the current account settings.
+		LogoUrl string `json:"logo_url,omitempty"`
+
+		// SupportUrl Where the customer can get help, from the current account settings.
+		SupportUrl string `json:"support_url,omitempty"`
 	} `json:"branding"`
 
 	// CreditNotes The invoice's issued credit notes, as its PDF prints them, so
@@ -5038,70 +5452,143 @@ type HostedInvoice struct {
 	// Stripe confirmed it, credit added to the customer's balance, or
 	// an amount settled another way. Empty when there are none.
 	CreditNotes []struct {
-		AmountCents         int64  `json:"amount_cents"`
-		BeforePayment       bool   `json:"before_payment"`
-		CreditedCents       int64  `json:"credited_cents,omitempty"`
-		Number              string `json:"number"`
-		RefundedCents       int64  `json:"refunded_cents,omitempty"`
-		SettledOutsideCents int64  `json:"settled_outside_cents,omitempty"`
+		// AmountCents The credit note's total, in the currency's minor unit (cents for USD).
+		AmountCents int64 `json:"amount_cents"`
+
+		// BeforePayment True when the note was issued before payment and lowered what is owed.
+		BeforePayment bool `json:"before_payment"`
+
+		// CreditedCents For a note after payment, the credit added to the customer's balance. Absent when 0.
+		CreditedCents int64 `json:"credited_cents,omitempty"`
+
+		// Number The credit note's number, for example `CN-000003`.
+		Number string `json:"number"`
+
+		// RefundedCents For a note after payment, the card refund once Stripe confirmed it. Absent when 0.
+		RefundedCents int64 `json:"refunded_cents,omitempty"`
+
+		// SettledOutsideCents For a note after payment, the amount paid back another way. Absent when 0.
+		SettledOutsideCents int64 `json:"settled_outside_cents,omitempty"`
 	} `json:"credit_notes"`
+
+	// Invoice The invoice's number, status, totals and dates.
 	Invoice struct {
-		AmountDueCents  int64 `json:"amount_due_cents"`
+		// AmountDueCents What is still owed, in the currency's minor unit (cents for USD). 0 once paid.
+		AmountDueCents int64 `json:"amount_due_cents"`
+
+		// AmountPaidCents What was paid, in the currency's minor unit (cents for USD).
 		AmountPaidCents int64 `json:"amount_paid_cents"`
 
 		// BillingTimezone The time zone to show the dates in, so they match the PDF.
-		BillingTimezone     string    `json:"billing_timezone,omitempty"`
-		CreditsAppliedCents int64     `json:"credits_applied_cents"`
-		Currency            string    `json:"currency"`
-		DiscountCents       int64     `json:"discount_cents"`
-		DueAt               time.Time `json:"due_at,omitempty"`
+		BillingTimezone string `json:"billing_timezone,omitempty"`
 
-		// Footer The footer this invoice was issued with.
-		Footer        string    `json:"footer,omitempty"`
-		InvoiceNumber string    `json:"invoice_number"`
-		IssuedAt      time.Time `json:"issued_at,omitempty"`
-		Memo          string    `json:"memo,omitempty"`
-		PaidAt        time.Time `json:"paid_at,omitempty"`
+		// CreditsAppliedCents Customer credit used to pay the invoice, in the currency's minor unit (cents for USD).
+		CreditsAppliedCents int64 `json:"credits_applied_cents"`
 
-		// PaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
-		// returned an ambiguous error (5xx, timeout, connection reset) where
-		// we cannot tell whether Stripe processed the charge. With a payment
-		// intent recorded, Hardcount asks Stripe for it after a short wait. With
-		// none (a parked invoice), Hardcount lists the customer's payments at
-		// Stripe every billing tick: it records a payment for the invoice that
-		// appears, and if none has appeared 24 hours after the attempt the
-		// invoice goes back to `pending` (`failed` after a dunning retry) and
-		// is charged again as usual.
+		// Currency The invoice's currency, as an uppercase ISO 4217 code.
+		Currency string `json:"currency"`
+
+		// DiscountCents Discount taken off the subtotal, in the currency's minor unit (cents for USD).
+		DiscountCents int64 `json:"discount_cents"`
+
+		// DueAt When payment is due.
+		DueAt time.Time `json:"due_at,omitempty"`
+
+		// Footer The footer this invoice was issued with. Absent when there is none.
+		Footer string `json:"footer,omitempty"`
+
+		// InvoiceNumber The number printed on the invoice, for example `HC-000042`.
+		InvoiceNumber string `json:"invoice_number"`
+
+		// IssuedAt When the invoice was issued.
+		IssuedAt time.Time `json:"issued_at,omitempty"`
+
+		// Memo The invoice's note. Absent when empty.
+		Memo string `json:"memo,omitempty"`
+
+		// PaidAt When the invoice was paid. Absent until it is paid.
+		PaidAt time.Time `json:"paid_at,omitempty"`
+
+		// PaymentStatus The state of the invoice's payment.
+		// - `pending`: nothing has been charged yet, or a charge is about to
+		//   be sent.
+		// - `processing`: Stripe is still working on a charge.
+		// - `succeeded`: the invoice is paid.
+		// - `failed`: the last charge was declined or refused. Dunning, when
+		//   a policy is on, retries it.
+		// - `unknown`: a Stripe charge got an unclear answer (a 5xx, a timeout
+		//   or a dropped connection), so Hardcount cannot tell whether Stripe
+		//   took the money. With a payment intent recorded, Hardcount asks
+		//   Stripe for it after a short wait. With none (a parked invoice),
+		//   Hardcount lists the customer's payments at Stripe on every billing
+		//   tick: it records a payment for the invoice that appears, and if
+		//   none has appeared 24 hours after the attempt the invoice goes back
+		//   to `pending` (`failed` after a dunning retry) and is charged again
+		//   as usual.
 		PaymentStatus InvoicePaymentStatus `json:"payment_status"`
 
-		// Status Lifecycle state of the invoice. `uncollectible` marks an invoice
-		// a dunning policy has given up collecting (no further retries) while
-		// keeping it on the books — distinct from `voided` (cancelled, owes
-		// nothing).
-		Status          InvoiceStatus `json:"status"`
-		SubtotalCents   int64         `json:"subtotal_cents"`
-		TaxAmountCents  int64         `json:"tax_amount_cents"`
-		TaxExemptReason string        `json:"tax_exempt_reason,omitempty"`
-		TaxName         string        `json:"tax_name,omitempty"`
+		// Status Where the invoice is in its life.
+		// - `draft`: not issued yet. Lines can still be added, and nothing is
+		//   charged.
+		// - `finalized`: issued and owed. Hardcount collects it.
+		// - `paid`: settled, by card, credit, an offline payment or a credit
+		//   note that left nothing due.
+		// - `voided`: cancelled. Nothing is owed. Voiding is final.
+		// - `uncollectible`: written off as bad debt, by you
+		//   (`POST /v1/invoices/{id}/mark-uncollectible`) or by a dunning
+		//   policy's final action. Hardcount stops collecting it, but it stays
+		//   on the books and can still be paid.
+		Status InvoiceStatus `json:"status"`
+
+		// SubtotalCents The sum of the line amounts before discount and tax, in the currency's minor unit (cents for USD).
+		SubtotalCents int64 `json:"subtotal_cents"`
+
+		// TaxAmountCents Tax on the invoice, in the currency's minor unit (cents for USD).
+		TaxAmountCents int64 `json:"tax_amount_cents"`
+
+		// TaxExemptReason Why the customer is exempt from tax. Absent when they are not.
+		TaxExemptReason string `json:"tax_exempt_reason,omitempty"`
+
+		// TaxName The tax's label, such as `VAT`. Absent when there is none.
+		TaxName string `json:"tax_name,omitempty"`
 
 		// TaxRate Tax rate in percent, for example `18` for 18%.
-		TaxRate          float32   `json:"tax_rate"`
-		TaxReverseCharge bool      `json:"tax_reverse_charge,omitempty"`
-		TotalAmountCents int64     `json:"total_amount_cents"`
-		VoidedAt         time.Time `json:"voided_at,omitempty"`
+		TaxRate float32 `json:"tax_rate"`
+
+		// TaxReverseCharge True when reverse charge applies and the customer accounts for the tax. Absent when false.
+		TaxReverseCharge bool `json:"tax_reverse_charge,omitempty"`
+
+		// TotalAmountCents The invoice total with tax, in the currency's minor unit (cents for USD).
+		TotalAmountCents int64 `json:"total_amount_cents"`
+
+		// VoidedAt When the invoice was voided. Absent unless it is voided.
+		VoidedAt time.Time `json:"voided_at,omitempty"`
 	} `json:"invoice"`
+
+	// LineItems The invoice's lines.
 	LineItems []struct {
-		AmountCents int64  `json:"amount_cents"`
-		Currency    string `json:"currency"`
+		// AmountCents The line's amount before tax, in the currency's minor unit (cents for USD).
+		AmountCents int64 `json:"amount_cents"`
+
+		// Currency The line's currency.
+		Currency string `json:"currency"`
+
+		// Description The line's text.
 		Description string `json:"description"`
-		MeterUnit   string `json:"meter_unit,omitempty"`
+
+		// MeterUnit On a usage line, the meter's unit, such as `tokens`. Absent on other lines.
+		MeterUnit string `json:"meter_unit,omitempty"`
 
 		// Quantity The exact quantity as a decimal string, for example `3` or `1.5`.
-		Quantity         string `json:"quantity"`
-		TaxAmountCents   int64  `json:"tax_amount_cents,omitempty"`
-		TotalAmountCents int64  `json:"total_amount_cents"`
+		Quantity string `json:"quantity"`
 
-		// UnitAmountDecimal The unit price in cents at full precision, for example `0.3` for $0.003.
+		// TaxAmountCents Tax on the line, in the currency's minor unit (cents for USD). Absent when 0.
+		TaxAmountCents int64 `json:"tax_amount_cents,omitempty"`
+
+		// TotalAmountCents The line's amount plus its tax, in the currency's minor unit (cents for USD).
+		TotalAmountCents int64 `json:"total_amount_cents"`
+
+		// UnitAmountDecimal The unit price, a decimal string of cents at full precision, for example `0.3` for $0.003.
 		UnitAmountDecimal string `json:"unit_amount_decimal"`
 	} `json:"line_items"`
 
@@ -5130,53 +5617,115 @@ type HostedInvoice struct {
 // charge.
 type HostedInvoicePayUnavailableReason string
 
-// Invoice A Hardcount invoice. Returned from create, finalize, void, list, get,
-// rotate-public-token, and collect-payment endpoints.
+// Invoice A bill for one customer, in one currency. The billing engine creates
+// one at the end of each subscription period (and for a subscription's
+// start, a change, a cancel or a spend threshold); you can also create
+// one-off invoices with `POST /v1/invoices`. An invoice starts as a
+// `draft`, is `finalized` when issued, and ends `paid`, `voided` or
+// `uncollectible`. Every amount is a whole number in the currency's
+// minor unit (cents for USD). The invoice routes and the `invoice.*`
+// and `payment.*` webhook events return it.
 type Invoice struct {
-	AmountDueCents  int64 `json:"amount_due_cents"`
+	// AmountDueCents What the customer still owes, in the currency's minor unit (cents
+	// for USD): the total, less customer credit applied
+	// (`credits_applied_cents`), credit notes issued before payment,
+	// and payments. It becomes 0 when the invoice is paid. A voided or
+	// written-off invoice keeps the amount that was due.
+	AmountDueCents int64 `json:"amount_due_cents"`
+
+	// AmountPaidCents What was paid by card or recorded as an offline payment, in the
+	// currency's minor unit (cents for USD). Set when the invoice is
+	// paid, to the amount that was due then; 0 before. Credit applied
+	// is counted in `credits_applied_cents`, not here.
 	AmountPaidCents int64 `json:"amount_paid_cents"`
 
-	// Attention Unified "this invoice needs operator attention" surface.
-	// Computed server-side from durable invoice fields
-	// (`tax_status`, `tax_error_code`, `payment_status`,
-	// `last_payment_error`). Never persisted —
-	// always derived. Omitted entirely when the invoice is healthy
-	// (matches Stripe's `last_finalization_error: null` ergonomic).
-	// See ADR-009.
-	Attention         Attention `json:"attention,omitempty"`
-	AutoChargePending bool      `json:"auto_charge_pending,omitempty"`
+	// Attention Why an invoice needs your attention now, and what to do about it.
+	// Hardcount works it out each time the invoice is read, from the
+	// invoice's tax and payment state; it is never stored. The invoice
+	// leaves it out when nothing needs attention. `GET /v1/invoices`,
+	// `GET /v1/invoices/{id}` and the finalize, retry-tax and
+	// rotate-public-token responses carry it; the other invoice responses
+	// and the webhook events do not.
+	Attention Attention `json:"attention,omitempty"`
 
-	// BillToSnapshot The buyer details this invoice was issued with (ADR-109), copied
-	// when it left draft. The PDF, the hosted page and the dashboard
-	// render an issued invoice from this copy, so a later edit to the
-	// customer or billing profile does not change it. Absent on drafts
-	// and on invoices issued before this field existed; those render
-	// from the current customer details.
+	// AutoChargePending True while the invoice is queued for the automatic charge, which
+	// applies credit and charges the saved card. Absent when false.
+	AutoChargePending bool `json:"auto_charge_pending,omitempty"`
+
+	// BillToSnapshot The buyer details this invoice was issued with, copied when it
+	// left draft. The PDF, the hosted page and the dashboard show an
+	// issued invoice from this copy, so a later edit to the customer
+	// or billing profile does not change it. Absent on drafts and on
+	// invoices issued before this field existed; those show the
+	// current customer details.
 	BillToSnapshot DocumentBillTo `json:"bill_to_snapshot,omitempty"`
 
-	// BillingPeriodDisplay Human period string with the inclusive last covered day ("Jun 1, 2028 – Jun 30, 2028"), date-only in the invoice's billing timezone (ADR-058 / ADR-077). Computed on read; the raw billing_period_start/end stay half-open. Empty/omitted for one-off invoices with no period.
-	BillingPeriodDisplay string    `json:"billing_period_display,omitempty"`
-	BillingPeriodEnd     time.Time `json:"billing_period_end"`
-	BillingPeriodStart   time.Time `json:"billing_period_start"`
+	// BillingPeriodDisplay The period as people read it, with its last day included, in `billing_timezone`: for example "Oct 1, 2026 – Oct 31, 2026". `billing_period_start` and `billing_period_end` stay the exact boundaries. Worked out when the invoice is read, so it comes with the same responses as `attention`. Absent when the period starts and ends at the same instant.
+	BillingPeriodDisplay string `json:"billing_period_display,omitempty"`
 
-	// BillingReason Mirrors Stripe's `invoice.billing_reason`. Classifies the trigger
-	// that produced the invoice. Stamped at create time and never mutated.
+	// BillingPeriodEnd End of the period the invoice bills (not included): the next
+	// period's start. On a one-off invoice created without a period,
+	// the time it was created.
+	BillingPeriodEnd time.Time `json:"billing_period_end"`
+
+	// BillingPeriodStart Start of the period the invoice bills (included). On a one-off
+	// invoice created without a period, the time it was created.
+	BillingPeriodStart time.Time `json:"billing_period_start"`
+
+	// BillingReason Why the invoice was made, like Stripe's `invoice.billing_reason`.
+	// Set when the invoice is created and never changed.
+	// - `subscription_cycle`: the invoice for a subscription period that
+	//   ended (a renewal).
+	// - `subscription_create`: the first invoice when a subscription
+	//   starts.
+	// - `subscription_cancel`: the final invoice when a subscription is
+	//   canceled at once in the middle of a period.
+	// - `subscription_update`: the invoice for a change in the middle of a
+	//   period, such as a plan upgrade, a quantity increase or an added
+	//   item.
+	// - `manual`: an invoice you created with `POST /v1/invoices`.
+	// - `threshold`: an early invoice because a spend threshold was
+	//   crossed.
 	BillingReason InvoiceBillingReason `json:"billing_reason,omitempty"`
 
-	// BillingTimezone IANA timezone the period boundaries are anchored in — the org billing timezone resolved and denormalized onto the invoice at issue (ADR-077). billing_period_display is rendered in this zone, so an issued invoice's dates stay fixed even if the org later changes its timezone. Empty only on legacy invoices created before the zone was stamped (cycle invoices before migration 0134, manual invoices before 2026-10-16).
-	BillingTimezone     string    `json:"billing_timezone,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	CreditsAppliedCents int64     `json:"credits_applied_cents"`
-	Currency            string    `json:"currency"`
-	CustomerId          string    `json:"customer_id"`
-	DiscountCents       int64     `json:"discount_cents"`
-	DueAt               time.Time `json:"due_at,omitempty"`
+	// BillingTimezone The IANA time zone the period boundaries are in: the account's billing time zone, copied onto the invoice when it was created. `billing_period_display`, the PDF and the hosted page show dates in it, so an issued invoice's dates stay the same if the account later changes its time zone. Absent only on invoices created before releases recorded it.
+	BillingTimezone string `json:"billing_timezone,omitempty"`
 
-	// Footer The tenant's `invoice_footer` as it was when this invoice was
-	// issued. Printed on the PDF and the hosted invoice page. Empty on
-	// a draft.
+	// CreatedAt When the invoice was created. For a customer on a test clock, the clock's time.
+	CreatedAt time.Time `json:"created_at"`
+
+	// CreditsAppliedCents How much of the customer's credit balance paid this invoice, in
+	// the currency's minor unit (cents for USD). Credit is applied when
+	// the invoice is collected (after finalize, or by
+	// `POST /v1/invoices/{id}/collect`). A void gives it back to the
+	// customer's balance.
+	CreditsAppliedCents int64 `json:"credits_applied_cents"`
+
+	// Currency The invoice's currency, as an uppercase ISO 4217 code. Every
+	// amount on the invoice and its lines is in this currency's minor
+	// unit.
+	Currency string `json:"currency"`
+
+	// CustomerId The customer the invoice bills.
+	CustomerId string `json:"customer_id"`
+
+	// DiscountCents Discount taken off the subtotal, in the currency's minor unit (cents for USD). 0 when there is none.
+	DiscountCents int64 `json:"discount_cents"`
+
+	// DueAt When payment is due: `issued_at` plus `net_payment_term_days`
+	// calendar days, counted in `billing_timezone`. Set with
+	// `issued_at`. Hardcount does not charge on this date: it collects
+	// right after finalize and retries on the dunning schedule. The
+	// `overdue` filter of `GET /v1/invoices` uses it.
+	DueAt time.Time `json:"due_at,omitempty"`
+
+	// Footer The account's invoice footer as it was when this invoice was
+	// issued. Printed on the PDF and the hosted invoice page. Absent on
+	// a draft and when no footer was set.
 	Footer string `json:"footer,omitempty"`
-	Id     string `json:"id"`
+
+	// Id Unique identifier of the invoice, starting `hc_inv_`.
+	Id string `json:"id"`
 
 	// InvoiceEmailedAt When Hardcount itself emailed the customer this invoice, because
 	// Stripe is not connected for the invoice's mode and the customer
@@ -5184,102 +5733,141 @@ type Invoice struct {
 	// `POST /v1/invoices/{id}/send` does not set it.
 	InvoiceEmailedAt time.Time `json:"invoice_emailed_at,omitempty"`
 
-	// InvoiceNumber Set when the invoice is created, including drafts.
+	// InvoiceNumber The number printed on the invoice: the account's invoice prefix
+	// (default `HC`), a hyphen and a sequence padded to six digits, for
+	// example `HC-000042`. Test mode and live mode count separately.
+	// Set when the invoice is created, drafts included.
 	InvoiceNumber string `json:"invoice_number"`
 
-	// IsSimulated Whether this invoice's domain timestamps (created/issued/due/paid)
-	// were stamped on a test clock's simulated time rather than
-	// wall-clock. Captured at write time (engine: the subscription is
-	// clock-pinned; manual composer: the customer is clock-pinned). The
-	// dashboard renders a "simulated" badge from this authoritative flag
-	// instead of inferring it. Always false in live mode.
+	// IsSimulated True when the invoice's dates (created, issued, due, paid) are
+	// on a test clock's time instead of the real time. Recorded when
+	// the invoice is written: for a cycle invoice, its subscription is
+	// on a test clock; for one you create, its customer is. Always
+	// false in live mode.
 	IsSimulated bool `json:"is_simulated"`
 
-	// IssuedAt Set when the invoice transitions out of draft.
-	IssuedAt           time.Time              `json:"issued_at,omitempty"`
-	LastPaymentError   string                 `json:"last_payment_error,omitempty"`
-	Memo               string                 `json:"memo,omitempty"`
-	Metadata           map[string]interface{} `json:"metadata,omitempty"`
-	NetPaymentTermDays int                    `json:"net_payment_term_days"`
+	// IssuedAt When the invoice was issued. Every invoice gets one when it is
+	// created, drafts included. An invoice you create with
+	// `POST /v1/invoices` gets a new one when it is finalized.
+	IssuedAt time.Time `json:"issued_at,omitempty"`
+
+	// LastPaymentError Stripe's message for the last failed charge, word for word (it is
+	// written for the cardholder). Absent when no charge has failed.
+	LastPaymentError string `json:"last_payment_error,omitempty"`
+
+	// Memo A note you set when creating the invoice, printed on the PDF and the hosted page. Absent when empty.
+	Memo string `json:"memo,omitempty"`
+
+	// Metadata Extra key-value data stored with the invoice. No API request sets it; it is absent when empty.
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// NetPaymentTermDays Days from `issued_at` to `due_at`. 0 means due on receipt.
+	NetPaymentTermDays int `json:"net_payment_term_days"`
 
 	// NoPmNotifiedAt When the customer was emailed a link to add a payment method for
 	// this invoice. The email is sent once.
 	NoPmNotifiedAt time.Time `json:"no_pm_notified_at,omitempty"`
-	PaidAt         time.Time `json:"paid_at,omitempty"`
+
+	// PaidAt When the invoice was paid. Absent until it is paid.
+	PaidAt time.Time `json:"paid_at,omitempty"`
 
 	// PaidOutOfBand True when the payment was recorded as made outside Hardcount, such as
 	// a bank transfer or cheque (`POST /v1/invoices/{id}/record-payment`,
-	// or a payment recovery run resolved as `payment_recovered`). Such
+	// or a dunning run resolved as `payment_recovered`). Such
 	// an invoice has no `stripe_payment_intent_id`, so there is no card
 	// to refund.
 	PaidOutOfBand bool `json:"paid_out_of_band"`
 
-	// PaymentAnomalyCapturedCents The amount Stripe took in that unexpected payment.
+	// PaymentAnomalyCapturedCents The amount Stripe took in that unexpected payment, in the currency's minor unit (cents for USD). Absent when there is none.
 	PaymentAnomalyCapturedCents int64 `json:"payment_anomaly_captured_cents,omitempty"`
 
 	// PaymentAnomalyKind Set when a payment arrived that the invoice did not expect. The
 	// webhook event name of the cause: `payment.duplicate_charge`,
 	// `payment.amount_mismatch`, `payment.currency_mismatch` or
 	// `payment.received_on_voided_invoice`.
-	// Only the latest one is kept.
+	// Only the latest one is kept. Absent when there is none.
 	PaymentAnomalyKind string `json:"payment_anomaly_kind,omitempty"`
 
-	// PaymentAnomalyPaymentIntentId The Stripe PaymentIntent of that unexpected payment.
+	// PaymentAnomalyPaymentIntentId The Stripe PaymentIntent of that unexpected payment. Absent when there is none.
 	PaymentAnomalyPaymentIntentId string `json:"payment_anomaly_payment_intent_id,omitempty"`
 
-	// PaymentCardBrand Brand of the saved card that paid the invoice. Absent when the card is unknown.
+	// PaymentCardBrand Brand of the saved card that paid the invoice, as Stripe names it (for example `visa`). Absent when the card is unknown.
 	PaymentCardBrand string `json:"payment_card_brand,omitempty"`
 
-	// PaymentCardLast4 Last four digits of the saved card that paid the invoice.
+	// PaymentCardLast4 Last four digits of the saved card that paid the invoice. Absent when the card is unknown.
 	PaymentCardLast4 string `json:"payment_card_last4,omitempty"`
 
-	// PaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
-	// returned an ambiguous error (5xx, timeout, connection reset) where
-	// we cannot tell whether Stripe processed the charge. With a payment
-	// intent recorded, Hardcount asks Stripe for it after a short wait. With
-	// none (a parked invoice), Hardcount lists the customer's payments at
-	// Stripe every billing tick: it records a payment for the invoice that
-	// appears, and if none has appeared 24 hours after the attempt the
-	// invoice goes back to `pending` (`failed` after a dunning retry) and
-	// is charged again as usual.
+	// PaymentStatus The state of the invoice's payment.
+	// - `pending`: nothing has been charged yet, or a charge is about to
+	//   be sent.
+	// - `processing`: Stripe is still working on a charge.
+	// - `succeeded`: the invoice is paid.
+	// - `failed`: the last charge was declined or refused. Dunning, when
+	//   a policy is on, retries it.
+	// - `unknown`: a Stripe charge got an unclear answer (a 5xx, a timeout
+	//   or a dropped connection), so Hardcount cannot tell whether Stripe
+	//   took the money. With a payment intent recorded, Hardcount asks
+	//   Stripe for it after a short wait. With none (a parked invoice),
+	//   Hardcount lists the customer's payments at Stripe on every billing
+	//   tick: it records a payment for the invoice that appears, and if
+	//   none has appeared 24 hours after the attempt the invoice goes back
+	//   to `pending` (`failed` after a dunning retry) and is charged again
+	//   as usual.
 	PaymentStatus InvoicePaymentStatus `json:"payment_status"`
 
 	// ProviderPaymentStatus Stripe's PaymentIntent status the last time Hardcount checked it,
 	// word for word. For information only: `payment_status` is the
 	// invoice's payment state. Absent until Hardcount has checked. An
-	// invoice checked by the Stripe Search sweep of releases before
-	// this one may still show `search_not_found`,
-	// `search_terminal_only` or `search_error`.
+	// invoice checked by the Stripe Search sweep of earlier releases
+	// may still show `search_not_found`, `search_terminal_only` or
+	// `search_error`.
 	ProviderPaymentStatus string `json:"provider_payment_status,omitempty"`
 
 	// ProviderSyncedAt When Hardcount last asked Stripe about this invoice's payment, whether
 	// or not Stripe answered: a read of `provider_payment_status`, or a
-	// check of a charge whose result was lost.
+	// check of a charge whose result was lost. Absent until then.
 	ProviderSyncedAt time.Time `json:"provider_synced_at,omitempty"`
 
-	// PublicToken Hosted-invoice-URL credential (Stripe-parity
-	// `hosted_invoice_url`). Generated at finalize; drafts have an
-	// empty token. Rotatable via `POST
-	// /v1/invoices/{id}/rotate-public-token`.
+	// PublicToken The token in the hosted invoice page's link, like Stripe's
+	// `hosted_invoice_url`; `GET /v1/public/invoices/{token}` serves
+	// the page's data. Anyone with it can view and pay the invoice, so
+	// share it only with the customer. Created at finalize; absent on
+	// drafts. Replace it with
+	// `POST /v1/invoices/{id}/rotate-public-token`.
 	PublicToken string `json:"public_token,omitempty"`
 
-	// RecoveryWarning What an operator must know BEFORE recording an OFFLINE payment on a
-	// written-off invoice — a consequence that will go unreconciled, NOT
-	// a refusal. Absent when there is nothing to say.
+	// RecoveryWarning What you should know before you record an offline payment on a
+	// written-off invoice: a consequence that will not reconcile on
+	// its own, never a refusal. Sent only on `uncollectible` invoices,
+	// by the same responses that carry `attention`. Absent when there
+	// is nothing to say.
 	RecoveryWarning RecoveryWarning `json:"recovery_warning,omitempty"`
 
 	// SourceChangeType The kind of subscription item change that produced a proration:
 	// `plan` (the item moved to another plan), `quantity` (its quantity
 	// changed), `add` (the item was added) or `remove` (the item was
 	// removed).
-	SourceChangeType         ItemChangeType `json:"source_change_type,omitempty"`
-	SourcePlanChangedAt      time.Time      `json:"source_plan_changed_at,omitempty"`
-	SourceSubscriptionItemId string         `json:"source_subscription_item_id,omitempty"`
+	SourceChangeType ItemChangeType `json:"source_change_type,omitempty"`
 
-	// Status Lifecycle state of the invoice. `uncollectible` marks an invoice
-	// a dunning policy has given up collecting (no further retries) while
-	// keeping it on the books — distinct from `voided` (cancelled, owes
-	// nothing).
+	// SourcePlanChangedAt On an invoice for a change in the middle of a period
+	// (`billing_reason` `subscription_update`), when the change took
+	// effect. Absent on other invoices.
+	SourcePlanChangedAt time.Time `json:"source_plan_changed_at,omitempty"`
+
+	// SourceSubscriptionItemId On an invoice for a change in the middle of a period, the subscription item that changed. Absent on other invoices.
+	SourceSubscriptionItemId string `json:"source_subscription_item_id,omitempty"`
+
+	// Status Where the invoice is in its life.
+	// - `draft`: not issued yet. Lines can still be added, and nothing is
+	//   charged.
+	// - `finalized`: issued and owed. Hardcount collects it.
+	// - `paid`: settled, by card, credit, an offline payment or a credit
+	//   note that left nothing due.
+	// - `voided`: cancelled. Nothing is owed. Voiding is final.
+	// - `uncollectible`: written off as bad debt, by you
+	//   (`POST /v1/invoices/{id}/mark-uncollectible`) or by a dunning
+	//   policy's final action. Hardcount stops collecting it, but it stays
+	//   on the books and can still be paid.
 	Status InvoiceStatus `json:"status"`
 
 	// StripePaymentIntentId The Stripe PaymentIntent of the card charge that paid the
@@ -5290,66 +5878,94 @@ type Invoice struct {
 	// refused the last charge as below its minimum.
 	StripePaymentIntentId string `json:"stripe_payment_intent_id,omitempty"`
 
-	// SubscriptionId Empty for one-off invoices not tied to a subscription.
+	// SubscriptionId The subscription the invoice bills. An empty string for a one-off invoice.
 	SubscriptionId string `json:"subscription_id"`
-	SubtotalCents  int64  `json:"subtotal_cents"`
 
-	// SupplierSnapshot The seller (company) details this invoice was issued with
-	// (ADR-109), copied when it left draft. Absent on drafts and on
-	// invoices issued before this field existed. Branding (logo, brand
-	// color) is not part of it.
+	// SubtotalCents The sum of the line amounts, before discount and tax, in the
+	// currency's minor unit (cents for USD). With tax-inclusive
+	// prices, it is the net amount after the tax is taken out.
+	SubtotalCents int64 `json:"subtotal_cents"`
+
+	// SupplierSnapshot Your company details this invoice was issued with, copied when it
+	// left draft. Absent on drafts and on invoices issued before this
+	// field existed. Branding (logo, brand color) is not part of it.
 	SupplierSnapshot DocumentSupplier `json:"supplier_snapshot,omitempty"`
-	TaxAmountCents   int64            `json:"tax_amount_cents"`
 
-	// TaxCalculationId Provider-side calculation reference captured at build time.
-	// For Stripe Tax this expires after 24 h; persisted so finalized
-	// invoices remain reconstructable past expiry.
-	TaxCalculationId string    `json:"tax_calculation_id,omitempty"`
-	TaxCountry       string    `json:"tax_country,omitempty"`
-	TaxDeferredAt    time.Time `json:"tax_deferred_at,omitempty"`
+	// TaxAmountCents Tax on the invoice, in the currency's minor unit (cents for USD).
+	// On an invoice you create with `POST /v1/invoices`, it is 0 until
+	// finalize calculates the tax.
+	TaxAmountCents int64 `json:"tax_amount_cents"`
+
+	// TaxCalculationId The tax provider's calculation reference (Stripe Tax only). A
+	// Stripe Tax calculation expires after 24 hours; Hardcount keeps
+	// the reference so a finalized invoice can still be traced.
+	// Absent for the manual and none providers.
+	TaxCalculationId string `json:"tax_calculation_id,omitempty"`
+
+	// TaxCountry The country the tax was calculated for. Absent when none was recorded.
+	TaxCountry string `json:"tax_country,omitempty"`
+
+	// TaxDeferredAt When the tax calculation failed and the invoice was held as a draft. Absent unless tax is or was deferred.
+	TaxDeferredAt time.Time `json:"tax_deferred_at,omitempty"`
 
 	// TaxErrorCode Why tax could not be calculated, as a code. Set while
 	// `tax_status` is `pending`; `tax_pending_reason` has the
 	// detail.
-	TaxErrorCode    InvoiceTaxErrorCode `json:"tax_error_code,omitempty"`
-	TaxExemptReason string              `json:"tax_exempt_reason,omitempty"`
-	TaxId           string              `json:"tax_id,omitempty"`
-	TaxName         string              `json:"tax_name,omitempty"`
+	TaxErrorCode InvoiceTaxErrorCode `json:"tax_error_code,omitempty"`
+
+	// TaxExemptReason Why the customer is exempt from tax, as recorded on the customer. Absent when they are not exempt.
+	TaxExemptReason string `json:"tax_exempt_reason,omitempty"`
+
+	// TaxId The customer's tax ID the tax was calculated with. Absent when there was none.
+	TaxId string `json:"tax_id,omitempty"`
+
+	// TaxName The tax's label, such as `VAT` or `Sales Tax`. Absent when there is none.
+	TaxName string `json:"tax_name,omitempty"`
 
 	// TaxNextRetryAt The earliest time the background retry may calculate tax again,
 	// after a failed attempt. Absent when a retry may run now.
-	TaxNextRetryAt   time.Time `json:"tax_next_retry_at,omitempty"`
-	TaxPendingReason string    `json:"tax_pending_reason,omitempty"`
+	TaxNextRetryAt time.Time `json:"tax_next_retry_at,omitempty"`
 
-	// TaxProvider Durable audit snapshot of the upstream tax engine that ran the
-	// calculation (e.g. `stripe`, `none`, `manual`).
+	// TaxPendingReason The provider's explanation of why tax could not be calculated, while `tax_status` is `pending`. Absent otherwise.
+	TaxPendingReason string `json:"tax_pending_reason,omitempty"`
+
+	// TaxProvider The tax engine that calculated the tax: `stripe_tax`, `manual` (a
+	// flat rate from the account settings) or `none`. Kept for the
+	// record and never changed afterwards. Absent until tax is
+	// calculated.
 	TaxProvider string `json:"tax_provider,omitempty"`
 
-	// TaxRate Tax rate as a percent (18.50 = 18.50%), up to 4-decimal precision. ADR-042/043.
-	TaxRate          float64 `json:"tax_rate"`
-	TaxRetryCount    int     `json:"tax_retry_count,omitempty"`
-	TaxReverseCharge bool    `json:"tax_reverse_charge,omitempty"`
+	// TaxRate Tax rate as a percent, up to four decimal places (18.5 means 18.5%).
+	TaxRate float64 `json:"tax_rate"`
 
-	// TaxReversedAt When the provider's tax transaction was reversed after a void or
-	// write-off, or found to need no reversal. Absent while the
-	// reversal is not confirmed.
+	// TaxRetryCount How many times tax was calculated again after the first try:
+	// each `POST /v1/invoices/{id}/retry-tax` and each automatic retry.
+	// Absent when 0.
+	TaxRetryCount int `json:"tax_retry_count,omitempty"`
+
+	// TaxReverseCharge True when reverse charge applies: no tax is charged and the
+	// customer accounts for it. Absent when false.
+	TaxReverseCharge bool `json:"tax_reverse_charge,omitempty"`
+
+	// TaxReversedAt When the provider's tax transaction was reversed after a void,
+	// or found to need no reversal. Absent while the reversal is not
+	// confirmed.
 	TaxReversedAt time.Time `json:"tax_reversed_at,omitempty"`
 
-	// TaxStatus Whether tax has been calculated. `ok`: it has. `pending`: the
-	// calculation failed, and `tax_error_code` says why and whether
-	// Hardcount retries it. A pending invoice cannot be finalized, so a wrong
-	// tax amount is never sent.
+	// TaxStatus Whether tax has been calculated. `ok`: it has (a zero tax counts).
+	// `pending`: the calculation failed, and `tax_error_code` says why and
+	// whether Hardcount retries it. A pending invoice stays a draft and
+	// cannot be finalized, so a wrong tax amount is never sent.
 	TaxStatus InvoiceTaxStatus `json:"tax_status,omitempty"`
 
-	// TaxTransactionId Provider-side committed transaction reference, captured at
-	// finalize. For Stripe Tax this is `tx_xxx` and is the handle
-	// the provider needs for a later reversal when a credit note is
-	// issued.
+	// TaxTransactionId The tax provider's committed transaction (Stripe Tax only),
+	// recorded at finalize. Hardcount reverses it when the invoice is
+	// voided or a credit note is issued. Absent until committed, and
+	// for providers that keep no record.
 	TaxTransactionId string `json:"tax_transaction_id,omitempty"`
 
-	// TenantId Owning tenant. Returned for diagnostic clarity but redundant
-	// with the API key (which already determines the tenant).
-	// Omitted when empty.
+	// TenantId The account the invoice belongs to. Your API key already decides
+	// the account, so you rarely need it.
 	TenantId string `json:"tenant_id,omitempty"`
 
 	// TestClockId The test clock this invoice's dates follow: the clock its customer
@@ -5357,13 +5973,22 @@ type Invoice struct {
 	// customer on `GET /v1/invoices` and `GET /v1/invoices/{id}`; other
 	// responses may leave it out. Left out for a customer on wall-clock
 	// time, and always in live mode.
-	TestClockId      string `json:"test_clock_id,omitempty"`
-	TotalAmountCents int64  `json:"total_amount_cents"`
+	TestClockId string `json:"test_clock_id,omitempty"`
 
-	// UncollectibleAt When the invoice was marked uncollectible.
+	// TotalAmountCents The invoice total: `subtotal_cents` minus `discount_cents` plus
+	// `tax_amount_cents`, in the currency's minor unit (cents for USD).
+	// It is what the invoice charges before credit and payments, and it
+	// does not change when the invoice is paid.
+	TotalAmountCents int64 `json:"total_amount_cents"`
+
+	// UncollectibleAt When the invoice was written off as uncollectible. Absent unless it was.
 	UncollectibleAt time.Time `json:"uncollectible_at,omitempty"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	VoidedAt        time.Time `json:"voided_at,omitempty"`
+
+	// UpdatedAt When the invoice last changed.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// VoidedAt When the invoice was voided. Absent unless it is voided.
+	VoidedAt time.Time `json:"voided_at,omitempty"`
 }
 
 // InvoiceTaxErrorCode Why tax could not be calculated, as a code. Set while
@@ -5371,24 +5996,48 @@ type Invoice struct {
 // detail.
 type InvoiceTaxErrorCode string
 
-// InvoiceBillingReason Mirrors Stripe's `invoice.billing_reason`. Classifies the trigger
-// that produced the invoice. Stamped at create time and never mutated.
+// InvoiceBillingReason Why the invoice was made, like Stripe's `invoice.billing_reason`.
+// Set when the invoice is created and never changed.
+//   - `subscription_cycle`: the invoice for a subscription period that
+//     ended (a renewal).
+//   - `subscription_create`: the first invoice when a subscription
+//     starts.
+//   - `subscription_cancel`: the final invoice when a subscription is
+//     canceled at once in the middle of a period.
+//   - `subscription_update`: the invoice for a change in the middle of a
+//     period, such as a plan upgrade, a quantity increase or an added
+//     item.
+//   - `manual`: an invoice you created with `POST /v1/invoices`.
+//   - `threshold`: an early invoice because a spend threshold was
+//     crossed.
 type InvoiceBillingReason string
 
-// InvoiceCreateRequest defines model for InvoiceCreateRequest.
+// InvoiceCreateRequest The body of `POST /v1/invoices`, which creates a one-off draft invoice.
 type InvoiceCreateRequest struct {
-	BillingPeriodEnd   time.Time `json:"billing_period_end,omitempty"`
+	// BillingPeriodEnd End of the period the invoice covers. Defaults to now.
+	BillingPeriodEnd time.Time `json:"billing_period_end,omitempty"`
+
+	// BillingPeriodStart Start of the period the invoice covers. Defaults to now.
 	BillingPeriodStart time.Time `json:"billing_period_start,omitempty"`
 
-	// Currency ISO 4217 code. Must be the customer's currency (see 409). Defaults to the billing-profile currency, then the live subscriptions' plan currency, then the tenant default.
-	Currency   string `json:"currency,omitempty"`
+	// Currency Uppercase or lowercase ISO 4217 code; it is stored uppercase. It
+	// must be the customer's currency (see the 409). Defaults to the
+	// billing profile's currency, then the plan currency of the
+	// customer's live subscriptions, then the account's default
+	// currency. Currencies with no minor unit (such as JPY) are
+	// refused.
+	Currency string `json:"currency,omitempty"`
+
+	// CustomerId The customer to bill. Must exist in this account and mode.
 	CustomerId string `json:"customer_id"`
 
-	// LineItems Lines created in the same transaction as the invoice.
+	// LineItems Lines created in the same transaction as the invoice. Leave out to create an invoice with no lines and add them later.
 	LineItems []InvoiceLineItemInput `json:"line_items,omitempty"`
-	Memo      string                 `json:"memo,omitempty"`
 
-	// NetPaymentTermDays Days until the invoice is due. 0 means due on receipt. Defaults to the tenant's net payment terms.
+	// Memo A note printed on the invoice. Leading and trailing spaces are removed.
+	Memo string `json:"memo,omitempty"`
+
+	// NetPaymentTermDays Days until the invoice is due. 0 means due on receipt. Defaults to the account's net payment terms. A negative value is stored as 0.
 	NetPaymentTermDays int `json:"net_payment_term_days,omitempty"`
 
 	// SubscriptionId Optional. Must belong to `customer_id`. Leave out for a one-off invoice. The subscription's own cycle invoices are still billed, also for the same period.
@@ -5402,37 +6051,53 @@ type InvoiceCreateRequest struct {
 // Hardcount records and reports a dispute, and nothing else: the invoice
 // stays paid and no money moves.
 type InvoiceDispute struct {
-	// AmountCents The disputed amount. It can differ from the payment.
+	// AmountCents The disputed amount, in the currency's minor unit (cents for USD). It can differ from the payment.
 	AmountCents int64 `json:"amount_cents"`
 
 	// ClosedAt When Stripe closed it. Absent while it is open.
-	ClosedAt  time.Time `json:"closed_at,omitempty"`
+	ClosedAt time.Time `json:"closed_at,omitempty"`
+
+	// CreatedAt When Hardcount first recorded the dispute.
 	CreatedAt time.Time `json:"created_at"`
-	Currency  string    `json:"currency"`
+
+	// Currency The dispute's currency, uppercase.
+	Currency string `json:"currency"`
 
 	// EvidenceDueBy The deadline to respond in Stripe. Absent when Stripe gave none.
 	EvidenceDueBy time.Time `json:"evidence_due_by,omitempty"`
-	Id            string    `json:"id"`
-	InvoiceId     string    `json:"invoice_id"`
-	Livemode      bool      `json:"livemode"`
+
+	// Id Unique identifier of the dispute record, `hc_dsp_` and 24 hex characters.
+	Id string `json:"id"`
+
+	// InvoiceId The invoice whose payment is disputed.
+	InvoiceId string `json:"invoice_id"`
+
+	// Livemode True for a live-mode payment, false for test mode.
+	Livemode bool `json:"livemode"`
 
 	// OpenedAt When Stripe opened the dispute.
 	OpenedAt time.Time `json:"opened_at"`
 
-	// Reason The reason the cardholder gave, for example `fraudulent`.
+	// Reason The reason the cardholder gave, for example `fraudulent`. Absent when Stripe gave none.
 	Reason string `json:"reason,omitempty"`
 
 	// Status Stripe's dispute status, as Stripe sends it. The `warning_`
 	// statuses are an inquiry, which comes before a chargeback or
 	// instead of one. `won`, `lost`, `warning_closed` and `prevented`
 	// are closed.
-	Status          InvoiceDisputeStatus `json:"status"`
-	StripeChargeId  string               `json:"stripe_charge_id,omitempty"`
-	StripeDisputeId string               `json:"stripe_dispute_id"`
+	Status InvoiceDisputeStatus `json:"status"`
+
+	// StripeChargeId The disputed Stripe charge (`ch_…`). Absent when Stripe did not send it.
+	StripeChargeId string `json:"stripe_charge_id,omitempty"`
+
+	// StripeDisputeId Stripe's dispute id (`du_…`).
+	StripeDisputeId string `json:"stripe_dispute_id"`
 
 	// StripePaymentIntentId The disputed payment.
-	StripePaymentIntentId string    `json:"stripe_payment_intent_id"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	StripePaymentIntentId string `json:"stripe_payment_intent_id"`
+
+	// UpdatedAt When Hardcount last updated the record from a Stripe event.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // InvoiceDisputeStatus Stripe's dispute status, as Stripe sends it. The `warning_`
@@ -5441,8 +6106,9 @@ type InvoiceDispute struct {
 // are closed.
 type InvoiceDisputeStatus string
 
-// InvoiceDisputeList defines model for InvoiceDisputeList.
+// InvoiceDisputeList What `GET /v1/invoices/{id}/disputes` returns, one page of the invoice's disputes, oldest first.
 type InvoiceDisputeList struct {
+	// Data The disputes on this page. An empty list when the invoice has none.
 	Data []InvoiceDispute `json:"data"`
 
 	// Total How many rows match the request's filters, on every page, not only
@@ -5451,38 +6117,70 @@ type InvoiceDisputeList struct {
 	Total ListTotal `json:"total"`
 }
 
-// InvoiceLineItem A single line on an invoice.
+// InvoiceLineItem One line on an invoice: a base fee, a usage charge or another
+// charge. Amounts are whole numbers in the currency's minor unit
+// (cents for USD). `GET /v1/invoices/{id}` returns the lines, and
+// `POST /v1/invoices/{id}/line-items` returns the line it added.
 type InvoiceLineItem struct {
-	AmountCents        int64     `json:"amount_cents"`
-	BillingPeriodEnd   time.Time `json:"billing_period_end,omitempty"`
+	// AmountCents The line's amount before tax, in the currency's minor unit (cents
+	// for USD). With tax-inclusive prices, it is the net amount after
+	// the tax is taken out.
+	AmountCents int64 `json:"amount_cents"`
+
+	// BillingPeriodEnd End of the time the line bills for (not included). Absent on lines with no period of their own.
+	BillingPeriodEnd time.Time `json:"billing_period_end,omitempty"`
+
+	// BillingPeriodStart Start of the time the line bills for (included). Absent on lines with no period of their own, such as lines you add to a draft.
 	BillingPeriodStart time.Time `json:"billing_period_start,omitempty"`
 
-	// CommitExpiresAt Expiry of the granted commit block. The credit can be drawn up
-	// to and including this instant; a period invoice draws it when
-	// its period ends at or before it. The dashboard sends the local
-	// midnight after the picked day. Absent/null = the credits never
-	// expire (the default).
+	// CommitExpiresAt When the granted credit expires. The credit can be drawn up to
+	// and including this instant; a period invoice draws it when its
+	// period ends at or before it. The dashboard sends the local
+	// midnight after the picked day. Absent when the credit never
+	// expires (the default).
 	CommitExpiresAt time.Time `json:"commit_expires_at,omitempty"`
 
-	// CommitGrantedCents Marks the line as a prepaid-commit purchase (ADR-078): when the
-	// invoice finalizes, a credit block of this many cents is granted
-	// to the customer. May differ from the line price — discounted
-	// commits sell $10k of credits for $9k. add_on lines on manual
-	// invoices only, at most one per invoice. Absent on normal lines.
-	CommitGrantedCents int64     `json:"commit_granted_cents,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	Currency           string    `json:"currency"`
-	Description        string    `json:"description"`
+	// CommitGrantedCents Marks the line as a prepaid commit purchase: when the invoice is
+	// finalized, the customer is granted a block of credit of this
+	// many cents (in the invoice's currency). It may differ from the
+	// line's price: a discounted commit sells $10,000 of credit for
+	// $9,000. Only on `add_on` lines of invoices you create, at most
+	// one per invoice. Absent on other lines.
+	CommitGrantedCents int64 `json:"commit_granted_cents,omitempty"`
+
+	// CreatedAt When the line was written.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Currency The line's currency, the same as the invoice's.
+	Currency string `json:"currency"`
+
+	// Description The line's text as printed on the invoice. A base fee reads like
+	// "Pro - base fee (qty 1)"; a usage line names the meter and its
+	// unit, or the labels its price takes, like "Tokens (tokens)".
+	Description string `json:"description"`
 
 	// DimensionMatch On a usage line, the labels its price takes. Absent for a price that takes every event, and on other lines.
-	DimensionMatch map[string]string      `json:"dimension_match,omitempty"`
-	Id             string                 `json:"id"`
-	InvoiceId      string                 `json:"invoice_id"`
-	LineType       InvoiceLineType        `json:"line_type"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	MeterId        string                 `json:"meter_id,omitempty"`
+	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
 
-	// MeterUnit The meter's unit ("tokens", "seconds", …), stamped on usage lines at write time so invoice surfaces can apply the display-scale convention (token rates read "$3.00 / 1M tokens"). Empty on non-usage lines and on lines written before the 0173 backfill.
+	// Id Unique identifier of the line, starting `hc_ili_`.
+	Id string `json:"id"`
+
+	// InvoiceId The invoice the line is on.
+	InvoiceId string `json:"invoice_id"`
+
+	// LineType What an invoice line charges for. `base_fee`: a plan's flat fee for
+	// the period. `usage`: metered usage, priced by a plan price.
+	// `add_on`: any other charge, such as a line you add to a draft (the
+	// default for those).
+	LineType InvoiceLineType `json:"line_type"`
+
+	// Metadata Extra key-value data stored with the line. No API request sets it; it is absent when empty.
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// MeterId On a usage line, the meter that measured the usage. Absent on other lines.
+	MeterId string `json:"meter_id,omitempty"`
+
+	// MeterUnit On a usage line, the meter's unit ("tokens", "seconds", …), as it was when the line was written, so prices can be shown per unit the way the pricing pages show them (token rates read "$3.00 / 1M tokens"). Absent on other lines, and on usage lines written before releases recorded it.
 	MeterUnit string `json:"meter_unit,omitempty"`
 
 	// PriceId On a usage line, the plan price that billed it. Absent on other lines.
@@ -5492,32 +6190,43 @@ type InvoiceLineItem struct {
 	PricingMode string `json:"pricing_mode,omitempty"`
 
 	// Quantity The line's exact quantity as a decimal string, for example "3" or "1.5". Line amounts stay whole cents.
-	Quantity        string `json:"quantity"`
-	TaxAmountCents  int64  `json:"tax_amount_cents"`
-	TaxCode         string `json:"tax_code,omitempty"`
+	Quantity string `json:"quantity"`
+
+	// TaxAmountCents Tax on the line, in the currency's minor unit (cents for USD).
+	TaxAmountCents int64 `json:"tax_amount_cents"`
+
+	// TaxCode The product tax code the line was taxed under (for Stripe Tax, a `txcd_…` code). Absent when none was used.
+	TaxCode string `json:"tax_code,omitempty"`
+
+	// TaxJurisdiction The tax jurisdiction the provider named for the line. Absent when none was given.
 	TaxJurisdiction string `json:"tax_jurisdiction,omitempty"`
 
-	// TaxRate Tax rate as a percent (18.50 = 18.50%), up to 4-decimal precision. ADR-042/043.
+	// TaxRate Tax rate on the line as a percent, up to four decimal places (18.5 means 18.5%).
 	TaxRate float64 `json:"tax_rate"`
 
-	// TaxReason Stripe-canonical structured `taxability_reason`
+	// TaxReason Why the line was taxed as it was, in Stripe Tax's words
 	// (`standard_rated`, `reverse_charge`, `not_collecting`,
-	// `customer_exempt`, `product_exempt`, `zero_rated`, etc.).
+	// `customer_exempt`, `product_exempt`, `zero_rated` and others).
 	// `prepaid_credit_purchase` is Hardcount's own value, on a prepaid
 	// commit purchase line under the manual or Stripe Tax provider:
 	// the line is not taxed, and the usage the credit pays for is
-	// taxed when invoiced. Otherwise empty for non-Stripe providers.
+	// taxed when invoiced. Otherwise absent for providers other than
+	// Stripe Tax.
 	TaxReason string `json:"tax_reason,omitempty"`
 
-	// TenantId Owning tenant. Omitted when empty.
-	TenantId         string `json:"tenant_id,omitempty"`
-	TotalAmountCents int64  `json:"total_amount_cents"`
+	// TenantId The account the line belongs to. Absent when empty.
+	TenantId string `json:"tenant_id,omitempty"`
 
-	// UnitAmountDecimal The unit price in cents at full precision, for example "0.3" for $0.003. On a usage line priced `per_unit` it is that rate; on any other line it is amount_cents ÷ quantity. Line amounts and totals stay whole cents.
+	// TotalAmountCents The line's amount plus its tax, in the currency's minor unit (cents for USD).
+	TotalAmountCents int64 `json:"total_amount_cents"`
+
+	// UnitAmountDecimal The unit price, a decimal string of cents at full precision, for example "0.3" for $0.003. On a usage line priced `per_unit` it is that rate; on any other line it is `amount_cents` ÷ `quantity`. Line amounts and totals stay whole cents.
 	UnitAmountDecimal string `json:"unit_amount_decimal"`
 }
 
-// InvoiceLineItemInput A line to add to a draft invoice.
+// InvoiceLineItemInput A line to add to a draft invoice, with `POST /v1/invoices` or
+// `POST /v1/invoices/{id}/line-items`. Its amount is `quantity` ×
+// `unit_amount_cents`.
 type InvoiceLineItemInput struct {
 	// CommitExpiresAt When the granted credit expires. The credit can be drawn up to
 	// and including this instant; a period invoice draws it when its
@@ -5528,38 +6237,61 @@ type InvoiceLineItemInput struct {
 
 	// CommitGrantedCents Makes this line a prepaid commit purchase: when the invoice is
 	// finalized, the customer gets this many cents of credit. Only on
-	// `add_on` lines of manual invoices, at most one per invoice.
-	CommitGrantedCents int64  `json:"commit_granted_cents,omitempty"`
-	Description        string `json:"description"`
+	// `add_on` lines of invoices you create, at most one per invoice.
+	// At most 100,000,000 ($1,000,000).
+	CommitGrantedCents int64 `json:"commit_granted_cents,omitempty"`
 
-	// LineType Defaults to `add_on`.
-	LineType        InvoiceLineItemInputLineType `json:"line_type,omitempty"`
-	Quantity        int64                        `json:"quantity"`
-	UnitAmountCents int64                        `json:"unit_amount_cents"`
+	// Description The text printed on the line. Must not be blank.
+	Description string `json:"description"`
+
+	// LineType What the line charges for. Defaults to `add_on`.
+	LineType InvoiceLineItemInputLineType `json:"line_type,omitempty"`
+
+	// Quantity How many units, a whole number of 1 or more.
+	Quantity int64 `json:"quantity"`
+
+	// UnitAmountCents Price of one unit in the currency's minor unit (cents for USD),
+	// a whole number of 1 or more. The line's amount is `quantity` ×
+	// `unit_amount_cents`; a product too large for 64-bit cents is
+	// refused.
+	UnitAmountCents int64 `json:"unit_amount_cents"`
 }
 
-// InvoiceLineItemInputLineType Defaults to `add_on`.
+// InvoiceLineItemInputLineType What the line charges for. Defaults to `add_on`.
 type InvoiceLineItemInputLineType string
 
-// InvoiceLineType defines model for InvoiceLineType.
+// InvoiceLineType What an invoice line charges for. `base_fee`: a plan's flat fee for
+// the period. `usage`: metered usage, priced by a plan price.
+// `add_on`: any other charge, such as a line you add to a draft (the
+// default for those).
 type InvoiceLineType string
 
-// InvoicePaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
-// returned an ambiguous error (5xx, timeout, connection reset) where
-// we cannot tell whether Stripe processed the charge. With a payment
-// intent recorded, Hardcount asks Stripe for it after a short wait. With
-// none (a parked invoice), Hardcount lists the customer's payments at
-// Stripe every billing tick: it records a payment for the invoice that
-// appears, and if none has appeared 24 hours after the attempt the
-// invoice goes back to `pending` (`failed` after a dunning retry) and
-// is charged again as usual.
+// InvoicePaymentStatus The state of the invoice's payment.
+//   - `pending`: nothing has been charged yet, or a charge is about to
+//     be sent.
+//   - `processing`: Stripe is still working on a charge.
+//   - `succeeded`: the invoice is paid.
+//   - `failed`: the last charge was declined or refused. Dunning, when
+//     a policy is on, retries it.
+//   - `unknown`: a Stripe charge got an unclear answer (a 5xx, a timeout
+//     or a dropped connection), so Hardcount cannot tell whether Stripe
+//     took the money. With a payment intent recorded, Hardcount asks
+//     Stripe for it after a short wait. With none (a parked invoice),
+//     Hardcount lists the customer's payments at Stripe on every billing
+//     tick: it records a payment for the invoice that appears, and if
+//     none has appeared 24 hours after the attempt the invoice goes back
+//     to `pending` (`failed` after a dunning retry) and is charged again
+//     as usual.
 type InvoicePaymentStatus string
 
-// InvoicePaymentTimeline defines model for InvoicePaymentTimeline.
+// InvoicePaymentTimeline What `GET /v1/invoices/{id}/payment-timeline` returns: the invoice's
+// activity, oldest first, and which sources could not be read.
 type InvoicePaymentTimeline struct {
 	// Degraded Sources that could not be read, so their rows are missing.
 	Degraded []InvoicePaymentTimelineDegraded `json:"degraded"`
-	Events   []InvoiceTimelineEvent           `json:"events"`
+
+	// Events The rows, oldest first. An empty list for a draft.
+	Events []InvoiceTimelineEvent `json:"events"`
 
 	// Truncated True when the credit-note source hit its limit of 100 rows.
 	Truncated bool `json:"truncated"`
@@ -5568,63 +6300,104 @@ type InvoicePaymentTimeline struct {
 // InvoicePaymentTimelineDegraded defines model for InvoicePaymentTimeline.Degraded.
 type InvoicePaymentTimelineDegraded string
 
-// InvoicePreview A dry-run invoice built from the usage recorded so far. Nothing is
-// saved.
+// InvoicePreview A dry-run invoice built from the usage recorded so far, from
+// `POST /v1/invoices/create_preview`. Nothing is saved. Amounts are
+// whole numbers in the currency's minor unit (cents for USD), and
+// tax is not included.
 type InvoicePreview struct {
-	BillingPeriodEnd   time.Time            `json:"billing_period_end"`
-	BillingPeriodStart time.Time            `json:"billing_period_start"`
-	CustomerId         string               `json:"customer_id"`
-	GeneratedAt        time.Time            `json:"generated_at"`
-	Lines              []InvoicePreviewLine `json:"lines"`
+	// BillingPeriodEnd End of the window the preview covers (not included).
+	BillingPeriodEnd time.Time `json:"billing_period_end"`
+
+	// BillingPeriodStart Start of the window the preview covers (included).
+	BillingPeriodStart time.Time `json:"billing_period_start"`
+
+	// CustomerId The customer the preview is for.
+	CustomerId string `json:"customer_id"`
+
+	// GeneratedAt When the preview was built. For a customer on a test clock, the clock's time.
+	GeneratedAt time.Time `json:"generated_at"`
+
+	// Lines The lines the invoice would have. An empty list when nothing would be billed.
+	Lines []InvoicePreviewLine `json:"lines"`
 
 	// PlanName The names of the subscription's plans, comma-separated.
-	PlanName       string `json:"plan_name"`
+	PlanName string `json:"plan_name"`
+
+	// SubscriptionId The subscription the preview bills.
 	SubscriptionId string `json:"subscription_id"`
 
 	// Totals One total per currency on the lines.
 	Totals []InvoicePreviewTotal `json:"totals"`
 
-	// Warnings Ways the real invoice can differ from this preview.
+	// Warnings Ways the real invoice can differ from this preview, in plain words. An empty list when there are none.
 	Warnings []string `json:"warnings"`
 }
 
-// InvoicePreviewLine defines model for InvoicePreviewLine.
+// InvoicePreviewLine One line of an invoice preview.
 type InvoicePreviewLine struct {
-	AmountCents int64  `json:"amount_cents"`
-	Currency    string `json:"currency"`
+	// AmountCents The line's amount, in the currency's minor unit (cents for USD).
+	AmountCents int64 `json:"amount_cents"`
+
+	// Currency The line's currency, the plan's.
+	Currency string `json:"currency"`
+
+	// Description The text the invoice line would carry.
 	Description string `json:"description"`
 
 	// DimensionMatch On a usage line, the labels its price takes. Absent for a price that takes every event.
-	DimensionMatch map[string]string          `json:"dimension_match,omitempty"`
-	LineType       InvoicePreviewLineLineType `json:"line_type"`
-	MeterId        string                     `json:"meter_id,omitempty"`
-	MeterUnit      string                     `json:"meter_unit,omitempty"`
+	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
+
+	// LineType `base_fee`: a plan's flat fee. `usage`: metered usage priced by a plan price.
+	LineType InvoicePreviewLineLineType `json:"line_type"`
+
+	// MeterId On a usage line, the meter that measured the usage. Absent on base fee lines.
+	MeterId string `json:"meter_id,omitempty"`
+
+	// MeterUnit On a usage line, the meter's unit, such as `tokens`. Absent on base fee lines.
+	MeterUnit string `json:"meter_unit,omitempty"`
 
 	// PriceId On a usage line, the plan price that priced it.
-	PriceId     string                        `json:"price_id,omitempty"`
+	PriceId string `json:"price_id,omitempty"`
+
+	// PricingMode On a usage line, the shape of its price. Absent on base fee lines.
 	PricingMode InvoicePreviewLinePricingMode `json:"pricing_mode,omitempty"`
 
 	// Quantity Exact quantity as a decimal string.
-	Quantity        string `json:"quantity"`
-	UnitAmountCents int64  `json:"unit_amount_cents"`
+	Quantity string `json:"quantity"`
+
+	// UnitAmountCents Unit price in whole cents of the currency's minor unit. On a base
+	// fee line it is the plan's base fee per unit; on a usage line it is
+	// `amount_cents` ÷ `quantity` rounded to a whole cent, so a sub-cent
+	// rate shows 0.
+	UnitAmountCents int64 `json:"unit_amount_cents"`
 }
 
-// InvoicePreviewLineLineType defines model for InvoicePreviewLine.LineType.
+// InvoicePreviewLineLineType `base_fee`: a plan's flat fee. `usage`: metered usage priced by a plan price.
 type InvoicePreviewLineLineType string
 
-// InvoicePreviewLinePricingMode defines model for InvoicePreviewLine.PricingMode.
+// InvoicePreviewLinePricingMode On a usage line, the shape of its price. Absent on base fee lines.
 type InvoicePreviewLinePricingMode string
 
-// InvoicePreviewTotal defines model for InvoicePreviewTotal.
+// InvoicePreviewTotal The total of an invoice preview's lines in one currency.
 type InvoicePreviewTotal struct {
-	AmountCents int64  `json:"amount_cents"`
-	Currency    string `json:"currency"`
+	// AmountCents The sum of the lines in this currency, in its minor unit (cents for USD), before tax.
+	AmountCents int64 `json:"amount_cents"`
+
+	// Currency The currency, uppercase.
+	Currency string `json:"currency"`
 }
 
-// InvoiceStatus Lifecycle state of the invoice. `uncollectible` marks an invoice
-// a dunning policy has given up collecting (no further retries) while
-// keeping it on the books — distinct from `voided` (cancelled, owes
-// nothing).
+// InvoiceStatus Where the invoice is in its life.
+//   - `draft`: not issued yet. Lines can still be added, and nothing is
+//     charged.
+//   - `finalized`: issued and owed. Hardcount collects it.
+//   - `paid`: settled, by card, credit, an offline payment or a credit
+//     note that left nothing due.
+//   - `voided`: cancelled. Nothing is owed. Voiding is final.
+//   - `uncollectible`: written off as bad debt, by you
+//     (`POST /v1/invoices/{id}/mark-uncollectible`) or by a dunning
+//     policy's final action. Hardcount stops collecting it, but it stays
+//     on the books and can still be paid.
 type InvoiceStatus string
 
 // InvoiceStripeRefund A refund made in Stripe outside Hardcount (the Stripe dashboard, or
@@ -5636,20 +6409,35 @@ type InvoiceStatus string
 // it first saw the refund, and only the operator changes it after
 // that.
 type InvoiceStripeRefund struct {
-	AmountCents int64     `json:"amount_cents"`
-	CreatedAt   time.Time `json:"created_at"`
+	// AmountCents The refunded amount, in the currency's minor unit (cents for USD).
+	AmountCents int64 `json:"amount_cents"`
+
+	// CreatedAt When Hardcount first recorded the refund.
+	CreatedAt time.Time `json:"created_at"`
 
 	// CreditNoteId The credit note that records the refund, when `outcome` is `credit_note`.
-	CreditNoteId  string    `json:"credit_note_id,omitempty"`
-	Currency      string    `json:"currency"`
-	DismissedAt   time.Time `json:"dismissed_at,omitempty"`
-	DismissedNote string    `json:"dismissed_note,omitempty"`
+	CreditNoteId string `json:"credit_note_id,omitempty"`
+
+	// Currency The refund's currency, uppercase.
+	Currency string `json:"currency"`
+
+	// DismissedAt When the refund was dismissed. Absent unless `outcome` is `dismissed`.
+	DismissedAt time.Time `json:"dismissed_at,omitempty"`
+
+	// DismissedNote The note given when the refund was dismissed. Absent unless `outcome` is `dismissed`.
+	DismissedNote string `json:"dismissed_note,omitempty"`
 
 	// FailureReason Why Stripe could not make the refund, once it failed.
 	FailureReason string `json:"failure_reason,omitempty"`
-	Id            string `json:"id"`
-	InvoiceId     string `json:"invoice_id"`
-	Livemode      bool   `json:"livemode"`
+
+	// Id Unique identifier of the refund record, `hc_srf_` and 24 hex characters.
+	Id string `json:"id"`
+
+	// InvoiceId The invoice whose payment was refunded.
+	InvoiceId string `json:"invoice_id"`
+
+	// Livemode True for a live-mode payment, false for test mode.
+	Livemode bool `json:"livemode"`
 
 	// Outcome `awaiting`: first seen pending or requiring action. Nothing is
 	// recorded or sent until a later event shows how it ended: once it
@@ -5668,7 +6456,7 @@ type InvoiceStripeRefund struct {
 	// handled it outside Hardcount.
 	Outcome InvoiceStripeRefundOutcome `json:"outcome"`
 
-	// Reason Stripe's refund reason, for example `requested_by_customer`. Absent when none was given.
+	// Reason Stripe's refund reason (`duplicate`, `fraudulent` or `requested_by_customer`). Absent when none was given.
 	Reason string `json:"reason,omitempty"`
 
 	// RefundCreatedAt When Stripe made the refund.
@@ -5680,13 +6468,19 @@ type InvoiceStripeRefund struct {
 	ReviewReason InvoiceStripeRefundReviewReason `json:"review_reason,omitempty"`
 
 	// Status Stripe's refund status, as Stripe sends it.
-	Status         InvoiceStripeRefundStatus `json:"status"`
-	StripeChargeId string                    `json:"stripe_charge_id,omitempty"`
+	Status InvoiceStripeRefundStatus `json:"status"`
+
+	// StripeChargeId The refunded Stripe charge (`ch_…`). Absent when Stripe did not send it.
+	StripeChargeId string `json:"stripe_charge_id,omitempty"`
 
 	// StripePaymentIntentId The refunded payment.
-	StripePaymentIntentId string    `json:"stripe_payment_intent_id"`
-	StripeRefundId        string    `json:"stripe_refund_id"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	StripePaymentIntentId string `json:"stripe_payment_intent_id"`
+
+	// StripeRefundId Stripe's refund id (`re_…`).
+	StripeRefundId string `json:"stripe_refund_id"`
+
+	// UpdatedAt When Hardcount last updated the record.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // InvoiceStripeRefundOutcome `awaiting`: first seen pending or requiring action. Nothing is
@@ -5714,8 +6508,9 @@ type InvoiceStripeRefundReviewReason string
 // InvoiceStripeRefundStatus Stripe's refund status, as Stripe sends it.
 type InvoiceStripeRefundStatus string
 
-// InvoiceStripeRefundList defines model for InvoiceStripeRefundList.
+// InvoiceStripeRefundList What `GET /v1/invoices/{id}/stripe-refunds` returns, one page of the refunds made in Stripe on the invoice's payments, oldest first.
 type InvoiceStripeRefundList struct {
+	// Data The refunds on this page. An empty list when the invoice has none.
 	Data []InvoiceStripeRefund `json:"data"`
 
 	// Total How many rows match the request's filters, on every page, not only
@@ -5724,66 +6519,102 @@ type InvoiceStripeRefundList struct {
 	Total ListTotal `json:"total"`
 }
 
-// InvoiceTaxStatus Whether tax has been calculated. `ok`: it has. `pending`: the
-// calculation failed, and `tax_error_code` says why and whether
-// Hardcount retries it. A pending invoice cannot be finalized, so a wrong
-// tax amount is never sent.
+// InvoiceTaxStatus Whether tax has been calculated. `ok`: it has (a zero tax counts).
+// `pending`: the calculation failed, and `tax_error_code` says why and
+// whether Hardcount retries it. A pending invoice stays a draft and
+// cannot be finalized, so a wrong tax amount is never sent.
 type InvoiceTaxStatus string
 
-// InvoiceTimelineEvent defines model for InvoiceTimelineEvent.
+// InvoiceTimelineEvent One row of an invoice's activity timeline
+// (`GET /v1/invoices/{id}/payment-timeline`). `line` is the row in the
+// activity line's words; `description`, `detail`, `error`, `status`,
+// `amount_cents` and `currency` repeat it for clients that read the
+// older fields.
 type InvoiceTimelineEvent struct {
-	AmountCents  int64  `json:"amount_cents,omitempty"`
-	AttemptCount int    `json:"attempt_count,omitempty"`
-	Currency     string `json:"currency,omitempty"`
+	// AmountCents The line's amount, in the currency's minor unit (cents for USD). Absent when the row has no amount.
+	AmountCents int64 `json:"amount_cents,omitempty"`
+
+	// AttemptCount On dunning rows, the run's retry count at the event; on the paid row, the retries that ran before payment. Absent when 0.
+	AttemptCount int `json:"attempt_count,omitempty"`
+
+	// Currency The currency of `amount_cents`. Absent when the row has no amount.
+	Currency string `json:"currency,omitempty"`
 
 	// Description The line's title.
 	Description string `json:"description"`
 
-	// Detail The line's meta line as text, its actor last, for example "Visa •••• 4242 · After 2 retries".
+	// Detail The line's meta line as text, its actor last, for example "Visa •••• 4242 · After 2 retries". Absent when empty.
 	Detail string `json:"detail,omitempty"`
 
-	// Error The line's problem.
-	Error     string `json:"error,omitempty"`
+	// Error The line's problem. Absent when there is none.
+	Error string `json:"error,omitempty"`
+
+	// EventType Machine name of the event, for example `invoice.finalized`,
+	// `charge_attempt.failed`, `retry_attempted`, `credit_note.issued`
+	// or `payment.dispute_opened`.
 	EventType string `json:"event_type"`
 
 	// Id Stable key for the row.
 	Id string `json:"id"`
 
-	// IsSimulated True when `timestamp` is test-clock time.
+	// IsSimulated True when `timestamp` is test-clock time. Absent when false.
 	IsSimulated bool `json:"is_simulated,omitempty"`
 
-	// Line One activity row in the words of the activity line standard
-	// (ADR-128): a title with no values, the amount when the event moves
-	// money, asks for it or cancels money owed, a problem line on failure
-	// and warning rows, the meta line's parts and the actor, a tone, and
-	// the event's time on the entity's calendar. `recorded_at` is the
-	// real-world time, set only for an entity on a test clock.
-	Line            ActivityLine `json:"line"`
-	PaymentIntentId string       `json:"payment_intent_id,omitempty"`
+	// Line One activity row, with every word written by the server: a title
+	// with no values, the amount when the event moves money, asks for it
+	// or cancels money owed, a problem line on failure and warning rows,
+	// the meta line's parts and the actor, a tone, and the event's time on
+	// the entity's calendar. `recorded_at` is the real-world time, set
+	// only for an entity on a test clock. The invoice payment timeline and
+	// dunning run events carry it.
+	Line ActivityLine `json:"line"`
 
-	// RecordedAt Real-world time of a row whose `timestamp` is test-clock time.
-	RecordedAt time.Time                  `json:"recorded_at,omitempty"`
-	Source     InvoiceTimelineEventSource `json:"source"`
+	// PaymentIntentId The Stripe PaymentIntent the row is about, on payment, dunning, dispute and refund rows that name one. Absent otherwise.
+	PaymentIntentId string `json:"payment_intent_id,omitempty"`
+
+	// RecordedAt Real-world time of a row whose `timestamp` is test-clock time. Absent otherwise.
+	RecordedAt time.Time `json:"recorded_at,omitempty"`
+
+	// Source Where the row comes from: `lifecycle` (created, finalized, paid,
+	// voided, written off), `payment` (a charge attempt), `dunning` (a
+	// payment retry run), `email` (an email to the customer),
+	// `credit_note`, `dispute` or `stripe_refund` (a refund made in
+	// Stripe outside Hardcount).
+	Source InvoiceTimelineEventSource `json:"source"`
 
 	// Status The line's tone in older words, read by the dashboard's dot.
-	Status    InvoiceTimelineEventStatus `json:"status"`
-	Timestamp time.Time                  `json:"timestamp"`
+	Status InvoiceTimelineEventStatus `json:"status"`
+
+	// Timestamp When the event happened, to the second: on the invoice's
+	// calendar (the test clock's time for an invoice on a test clock),
+	// and at Stripe's own time for disputes and refunds made in Stripe.
+	Timestamp time.Time `json:"timestamp"`
 }
 
-// InvoiceTimelineEventSource defines model for InvoiceTimelineEvent.Source.
+// InvoiceTimelineEventSource Where the row comes from: `lifecycle` (created, finalized, paid,
+// voided, written off), `payment` (a charge attempt), `dunning` (a
+// payment retry run), `email` (an email to the customer),
+// `credit_note`, `dispute` or `stripe_refund` (a refund made in
+// Stripe outside Hardcount).
 type InvoiceTimelineEventSource string
 
 // InvoiceTimelineEventStatus The line's tone in older words, read by the dashboard's dot.
 type InvoiceTimelineEventStatus string
 
-// InvoiceWithLineItems Response shape for `GET /v1/invoices/{id}`. The handler returns the
-// invoice and its line items as separate top-level keys (rather than
-// nesting `line_items` inside the invoice) so the client can render
-// the two arrays independently.
+// InvoiceWithLineItems What `GET /v1/invoices/{id}` returns: the invoice and its lines, as
+// two keys side by side.
 type InvoiceWithLineItems struct {
-	// Invoice A Hardcount invoice. Returned from create, finalize, void, list, get,
-	// rotate-public-token, and collect-payment endpoints.
-	Invoice   Invoice           `json:"invoice"`
+	// Invoice A bill for one customer, in one currency. The billing engine creates
+	// one at the end of each subscription period (and for a subscription's
+	// start, a change, a cancel or a spend threshold); you can also create
+	// one-off invoices with `POST /v1/invoices`. An invoice starts as a
+	// `draft`, is `finalized` when issued, and ends `paid`, `voided` or
+	// `uncollectible`. Every amount is a whole number in the currency's
+	// minor unit (cents for USD). The invoice routes and the `invoice.*`
+	// and `payment.*` webhook events return it.
+	Invoice Invoice `json:"invoice"`
+
+	// LineItems The invoice's lines. An empty list when it has none.
 	LineItems []InvoiceLineItem `json:"line_items"`
 }
 
@@ -6619,10 +7450,17 @@ type PublicPaymentUpdate struct {
 	// InvoiceNumber The number of the invoice the link was sent for.
 	InvoiceNumber string `json:"invoice_number"`
 
-	// InvoiceStatus Lifecycle state of the invoice. `uncollectible` marks an invoice
-	// a dunning policy has given up collecting (no further retries) while
-	// keeping it on the books — distinct from `voided` (cancelled, owes
-	// nothing).
+	// InvoiceStatus Where the invoice is in its life.
+	// - `draft`: not issued yet. Lines can still be added, and nothing is
+	//   charged.
+	// - `finalized`: issued and owed. Hardcount collects it.
+	// - `paid`: settled, by card, credit, an offline payment or a credit
+	//   note that left nothing due.
+	// - `voided`: cancelled. Nothing is owed. Voiding is final.
+	// - `uncollectible`: written off as bad debt, by you
+	//   (`POST /v1/invoices/{id}/mark-uncollectible`) or by a dunning
+	//   policy's final action. Hardcount stops collecting it, but it stays
+	//   on the books and can still be paid.
 	InvoiceStatus InvoiceStatus `json:"invoice_status"`
 }
 
@@ -6915,34 +7753,39 @@ type RecipePrice struct {
 // RecipePriceMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
 type RecipePriceMode string
 
-// RecoveryWarning What an operator must know BEFORE recording an OFFLINE payment on a
-// written-off invoice (`status = uncollectible`) — a consequence that
-// will go unreconciled, never a refusal. The money already arrived, and
-// refusing to record it would only make the books wrong too.
-//
-// A written-off invoice is settled by RECORDING writers only — an
-// offline payment, or Hardcount recording a card charge that Stripe shows
-// succeeded (its webhook, or the check of an unresolved charge).
-// Nothing initiates a card
-// charge against one (ADR-113): recovery of a returned customer runs on
-// normal rails via a fresh recovery invoice.
-//
-// `tax_reversed_unrecoverable` — the invoice's tax was reversed with the
-// tax provider and cannot be re-reported automatically; the recorded
-// payment collects tax already reported as not collected.
-// `relief_not_reissued` — a credit the invoice was owed was never
-// applied, so `amount_due_cents` is higher than what is owed and the
-// customer may have overpaid.
+// RecoveryWarning What you should know before you record an offline payment on a
+// written-off invoice (`status` `uncollectible`): a consequence that
+// will not reconcile on its own. It never refuses the payment, because
+// the money already arrived. A written-off invoice is never charged by
+// card. It is settled only by recording a payment: an offline payment,
+// or a card payment Stripe shows succeeded.
 type RecoveryWarning struct {
-	// Blocked Always false — this shape only ever warns.
-	Blocked bool                `json:"blocked"`
-	Code    RecoveryWarningCode `json:"code,omitempty"`
+	// Blocked Always false. This object only warns; it never refuses.
+	Blocked bool `json:"blocked"`
 
-	// Message Operator-facing sentence naming the consequence that will go unreconciled if the payment is recorded.
+	// Code What will not reconcile.
+	// `tax_reversed_unrecoverable`: the invoice's Stripe Tax
+	// transaction was reversed, and recording the payment does not
+	// report it again, so the tax collected will not appear in your
+	// tax provider's records.
+	// `relief_not_reissued`: a credit the invoice was owed was never
+	// applied, so `amount_due_cents` is higher than what is owed and the
+	// customer may have overpaid.
+	Code RecoveryWarningCode `json:"code,omitempty"`
+
+	// Message One sentence for the operator naming the consequence and what to
+	// do about it.
 	Message string `json:"message,omitempty"`
 }
 
-// RecoveryWarningCode defines model for RecoveryWarning.Code.
+// RecoveryWarningCode What will not reconcile.
+// `tax_reversed_unrecoverable`: the invoice's Stripe Tax
+// transaction was reversed, and recording the payment does not
+// report it again, so the tax collected will not appear in your
+// tax provider's records.
+// `relief_not_reissued`: a credit the invoice was owed was never
+// applied, so `amount_due_cents` is higher than what is owed and the
+// customer may have overpaid.
 type RecoveryWarningCode string
 
 // SentEmail One billing email Hardcount sent, or tried to send, to a customer
@@ -7056,15 +7899,24 @@ type StripeConnection struct {
 type StripeConnectionLastVerifiedErrorKind string
 
 // StripeRefundWebhookEventData The `data` of the outbound webhook event `payment.refunded_in_stripe`
-// (docs/webhooks.md): the invoice the refunded payment belongs to, as
-// it stood (a refund never changes it), and the refund as the API
-// returns it. Sent once per refund, when its outcome is decided: when
-// Hardcount first sees it, or, for a refund first seen in flight, when
-// it succeeds, fails or is canceled. Saved in the same transaction that
-// records it. A later change to the refund sends nothing more.
+// (docs/api/webhook-events.md): the invoice the refunded payment
+// belongs to, as it stood (a refund never changes it), and the refund
+// as the API returns it. The invoice leaves out `attention`,
+// `recovery_warning`, `billing_period_display` and `test_clock_id`,
+// which are worked out per read. Sent once per refund, when its
+// outcome is decided: when Hardcount first sees it, or, for a refund
+// first seen in flight, when it succeeds, fails or is canceled. Saved
+// in the same transaction that records it. A later change to the
+// refund sends nothing more.
 type StripeRefundWebhookEventData struct {
-	// Invoice A Hardcount invoice. Returned from create, finalize, void, list, get,
-	// rotate-public-token, and collect-payment endpoints.
+	// Invoice A bill for one customer, in one currency. The billing engine creates
+	// one at the end of each subscription period (and for a subscription's
+	// start, a change, a cancel or a spend threshold); you can also create
+	// one-off invoices with `POST /v1/invoices`. An invoice starts as a
+	// `draft`, is `finalized` when issued, and ends `paid`, `voided` or
+	// `uncollectible`. Every amount is a whole number in the currency's
+	// minor unit (cents for USD). The invoice routes and the `invoice.*`
+	// and `payment.*` webhook events return it.
 	Invoice Invoice `json:"invoice"`
 
 	// Refund A refund made in Stripe outside Hardcount (the Stripe dashboard, or
@@ -7500,12 +8352,13 @@ type SubscriptionTimelineEvent struct {
 	// IsSimulated True when the action affected a subscription on a test clock.
 	IsSimulated bool `json:"is_simulated,omitempty"`
 
-	// Line One activity row in the words of the activity line standard
-	// (ADR-128): a title with no values, the amount when the event moves
-	// money, asks for it or cancels money owed, a problem line on failure
-	// and warning rows, the meta line's parts and the actor, a tone, and
-	// the event's time on the entity's calendar. `recorded_at` is the
-	// real-world time, set only for an entity on a test clock.
+	// Line One activity row, with every word written by the server: a title
+	// with no values, the amount when the event moves money, asks for it
+	// or cancels money owed, a problem line on failure and warning rows,
+	// the meta line's parts and the actor, a tone, and the event's time on
+	// the entity's calendar. `recorded_at` is the real-world time, set
+	// only for an entity on a test clock. The invoice payment timeline and
+	// dunning run events carry it.
 	Line ActivityLine `json:"line"`
 
 	// SimEffectiveAt The test clock's simulated time when the action took effect.
@@ -8498,19 +9351,27 @@ type BootstrapJSONBody struct {
 
 // ListCreditNotesParams defines parameters for ListCreditNotes.
 type ListCreditNotesParams struct {
-	InvoiceId  string                      `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
-	CustomerId string                      `form:"customer_id,omitempty" json:"customer_id,omitempty"`
-	Status     ListCreditNotesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	// InvoiceId Only notes against this invoice.
+	InvoiceId string `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
 
-	// RefundStatus `needs_attention` returns issued, non-test-clock notes whose
+	// CustomerId Only this customer's notes.
+	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
+
+	// Status Only notes in this status.
+	Status ListCreditNotesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// RefundStatus Only notes whose refund is in this state. `needs_attention`
+	// returns issued, non-test-clock notes whose
 	// refund failed or has an unknown result, has been pending more
 	// than 72 hours, or has a refund amount still at `none` after 1
 	// hour.
 	RefundStatus ListCreditNotesParamsRefundStatus `form:"refund_status,omitempty" json:"refund_status,omitempty"`
 
 	// Sort One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default).
-	Sort string                   `form:"sort,omitempty" json:"sort,omitempty"`
-	Dir  ListCreditNotesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+	Sort string `form:"sort,omitempty" json:"sort,omitempty"`
+
+	// Dir Sort direction, `desc` (the default) or `asc`.
+	Dir ListCreditNotesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
@@ -8532,46 +9393,64 @@ type ListCreditNotesParamsDir string
 
 // CreateCreditNoteJSONBody defines parameters for CreateCreditNote.
 type CreateCreditNoteJSONBody struct {
+	// AutoIssue True issues the note in the same call. If the issue fails,
+	// the draft is voided and the error is returned. Defaults to
+	// false (the note stays a draft).
 	AutoIssue bool `json:"auto_issue,omitempty"`
 
 	// CommitRelief Mutually exclusive with lines and credit_amount_cents. The
 	// relief's split goes in here, not at the top level: a top-level
 	// `refund_amount_cents`, `out_of_band_amount_cents` or
 	// `refund_type` is a 422. Example after a lost dispute:
-	// `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
+	// `{"invoice_id": "hc_inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
 	CommitRelief struct {
 		// InvoiceId Optional. Defaults to the top-level invoice_id.
-		InvoiceId            string `json:"invoice_id,omitempty"`
-		OutOfBandAmountCents int    `json:"out_of_band_amount_cents,omitempty"`
+		InvoiceId string `json:"invoice_id,omitempty"`
+
+		// OutOfBandAmountCents Optional. Part of the cash paid back outside Hardcount.
+		OutOfBandAmountCents int `json:"out_of_band_amount_cents,omitempty"`
 
 		// Reason Optional. Defaults to the top-level reason.
 		Reason string `json:"reason,omitempty"`
 
-		// RefundAmountCents Optional allocation; must sum with out_of_band to the derived cash.
+		// RefundAmountCents Optional. Part of the cash refunded to the card. With `out_of_band_amount_cents` it must add up to the cash Hardcount works out. When both are left out, the cash goes to the card if the invoice was paid by card, otherwise out of band.
 		RefundAmountCents int `json:"refund_amount_cents,omitempty"`
 
-		// RetireAll Retire the LIVE remaining (absorbs racing drawdowns).
+		// RetireAll Retire all the commit credit left at the moment the relief runs, so credit the customer spends meanwhile is not counted. `retire_cents` is then ignored.
 		RetireAll bool `json:"retire_all,omitempty"`
 
-		// RetireCents Commit credits to retire (1..remaining).
+		// RetireCents Commit credits to retire, from 1 to what is left of the commit.
 		RetireCents int `json:"retire_cents,omitempty"`
 	} `json:"commit_relief,omitempty"`
-	CreditAmountCents int    `json:"credit_amount_cents,omitempty"`
-	InvoiceId         string `json:"invoice_id"`
-	Lines             []struct {
+
+	// CreditAmountCents Part of the total added to the customer's credit balance, in the currency's minor unit (cents for USD). Paid invoices only. Not with commit_relief.
+	CreditAmountCents int `json:"credit_amount_cents,omitempty"`
+
+	// InvoiceId The invoice to credit. It must be `finalized` or `paid`.
+	InvoiceId string `json:"invoice_id"`
+
+	// Lines The credited amounts, tax included. At least one line for a line-based note; none with `commit_relief`.
+	Lines []struct {
+		// Description The text printed on the line.
 		Description string `json:"description,omitempty"`
 
-		// InvoiceLineItemId Optional. The invoice line this credit line reverses.
+		// InvoiceLineItemId Optional. The invoice line this credit line reverses. It must be a line of this invoice.
 		InvoiceLineItemId string `json:"invoice_line_item_id,omitempty"`
-		Quantity          int    `json:"quantity,omitempty"`
-		UnitAmountCents   int    `json:"unit_amount_cents,omitempty"`
+
+		// Quantity How many units, 1 or more.
+		Quantity int `json:"quantity,omitempty"`
+
+		// UnitAmountCents Credit per unit, tax included, in the currency's minor unit (cents for USD). 1 or more.
+		UnitAmountCents int `json:"unit_amount_cents,omitempty"`
 	} `json:"lines,omitempty"`
 
-	// OutOfBandAmountCents Not with commit_relief; put the relief's split inside commit_relief.
-	OutOfBandAmountCents int    `json:"out_of_band_amount_cents,omitempty"`
-	Reason               string `json:"reason,omitempty"`
+	// OutOfBandAmountCents Part of the total paid back outside Hardcount, in the currency's minor unit (cents for USD). Paid invoices only. Not with commit_relief; put the relief's split inside commit_relief.
+	OutOfBandAmountCents int `json:"out_of_band_amount_cents,omitempty"`
 
-	// RefundAmountCents Not with commit_relief; put the relief's split inside commit_relief.
+	// Reason Why you are crediting, printed on the note. Required for a line-based note; a relief takes it from `commit_relief.reason` when this is empty.
+	Reason string `json:"reason,omitempty"`
+
+	// RefundAmountCents Part of the total refunded to the card, in the currency's minor unit (cents for USD). Paid invoices only. Not with commit_relief; put the relief's split inside commit_relief.
 	RefundAmountCents int `json:"refund_amount_cents,omitempty"`
 
 	// RefundType Older single-channel form. On a paid invoice whose three
@@ -8580,10 +9459,11 @@ type CreateCreditNoteJSONBody struct {
 	RefundType CreateCreditNoteJSONBodyRefundType `json:"refund_type,omitempty"`
 
 	// StripeRefundId Links a refund made in Stripe outside Hardcount as this
-	// note's card refund, Stripe's `refunds[]` shape: Hardcount
+	// note's card refund, like Stripe's `refunds[]`: Hardcount
 	// reads the refund from Stripe and calls nothing else
 	// there for it. The refund must be of the payment that paid
-	// this invoice, not made by Hardcount, and succeeded; `refund_amount_cents` must be its amount,
+	// this invoice, not made by Hardcount, and succeeded;
+	// `refund_amount_cents` must be its amount,
 	// `credit_amount_cents` 0, and `auto_issue` true (the
 	// note is issued at once). The caps on the invoice still
 	// apply. A refund Hardcount flagged on the invoice
@@ -8608,6 +9488,7 @@ type CreateCreditNoteJSONBodyRefundType string
 
 // AttachStripeRefundToCreditNoteJSONBody defines parameters for AttachStripeRefundToCreditNote.
 type AttachStripeRefundToCreditNoteJSONBody struct {
+	// StripeRefundId Stripe's id of the refund you made (`re_…`).
 	StripeRefundId string `json:"stripe_refund_id"`
 }
 
@@ -8646,8 +9527,11 @@ type RetryCreditNoteRefundParams struct {
 
 // SendCreditNoteJSONBody defines parameters for SendCreditNote.
 type SendCreditNoteJSONBody struct {
-	AdditionalEmails []string            `json:"additional_emails,omitempty"`
-	Email            openapi_types.Email `json:"email"`
+	// AdditionalEmails Addresses to copy on this send. Absent copies the customer's stored list; `[]` copies nobody.
+	AdditionalEmails []string `json:"additional_emails,omitempty"`
+
+	// Email The recipient, one plain address such as `billing@acme.example`, with no display name.
+	Email openapi_types.Email `json:"email"`
 }
 
 // SendCreditNoteParams defines parameters for SendCreditNote.
@@ -9077,8 +9961,11 @@ type SetDefaultDunningPolicy200JSONResponseBodyStatus string
 
 // ListDunningRunsParams defines parameters for ListDunningRuns.
 type ListDunningRunsParams struct {
-	InvoiceId string                     `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
-	State     ListDunningRunsParamsState `form:"state,omitempty" json:"state,omitempty"`
+	// InvoiceId Only the run for this invoice.
+	InvoiceId string `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
+
+	// State Only runs in this state. Another value answers 400.
+	State ListDunningRunsParamsState `form:"state,omitempty" json:"state,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
@@ -9094,6 +9981,7 @@ type ListDunningRunsParamsState string
 
 // ResolveDunningRunJSONBody defines parameters for ResolveDunningRun.
 type ResolveDunningRunJSONBody struct {
+	// Resolution How the run ends, and what happens to its invoice (see above).
 	Resolution ResolveDunningRunJSONBodyResolution `json:"resolution"`
 }
 
@@ -9193,10 +10081,20 @@ type IngestLitellmSpendJSONBody2 struct {
 
 // ListInvoicesParams defines parameters for ListInvoices.
 type ListInvoicesParams struct {
-	CustomerId     string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
+	// CustomerId Only this customer's invoices.
+	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
+
+	// SubscriptionId Only invoices that bill this subscription.
 	SubscriptionId string `form:"subscription_id,omitempty" json:"subscription_id,omitempty"`
-	Status         string `form:"status,omitempty" json:"status,omitempty"`
-	PaymentStatus  string `form:"payment_status,omitempty" json:"payment_status,omitempty"`
+
+	// Status Only invoices in this status: `draft`, `finalized`, `paid`,
+	// `voided` or `uncollectible`. Another value matches nothing.
+	Status string `form:"status,omitempty" json:"status,omitempty"`
+
+	// PaymentStatus Only invoices with this payment status: `pending`, `processing`,
+	// `succeeded`, `failed` or `unknown`. Another value matches
+	// nothing.
+	PaymentStatus string `form:"payment_status,omitempty" json:"payment_status,omitempty"`
 
 	// Search Case-insensitive substring match on the invoice number or the customer's name or email.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
@@ -9209,18 +10107,20 @@ type ListInvoicesParams struct {
 	// bare YYYY-MM-DD (anchored at 23:59:59.999999Z, the end of that day).
 	To string `form:"to,omitempty" json:"to,omitempty"`
 
-	// Overdue When true, restrict to open invoices past their due date
-	// that haven't settled (finalized + due_at < now +
-	// payment_status not succeeded/processing). Backs the
-	// dashboard's "Past due" segment.
+	// Overdue `true` keeps only open invoices past their due date: `finalized`,
+	// `due_at` before the current real time, and `payment_status` not
+	// `succeeded`, `processing` or `unknown`. Any other value applies
+	// no filter. The dashboard's Past due view uses it.
 	Overdue bool `form:"overdue,omitempty" json:"overdue,omitempty"`
 
 	// Ids Comma-separated invoice IDs to fetch exactly.
 	Ids string `form:"ids,omitempty" json:"ids,omitempty"`
 
-	// Sort One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps.
-	Sort string                `form:"sort,omitempty" json:"sort,omitempty"`
-	Dir  ListInvoicesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+	// Sort One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps. An unknown key sorts by created_at.
+	Sort string `form:"sort,omitempty" json:"sort,omitempty"`
+
+	// Dir Sort direction, `desc` (the default) or `asc`.
+	Dir ListInvoicesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
@@ -9250,17 +10150,20 @@ type CreateInvoicePreviewJSONBody struct {
 	// CustomerId Customer to preview the invoice for.
 	CustomerId string `json:"customer_id"`
 
-	// Period Optional explicit window. Both bounds must be
-	// supplied together; partial windows are rejected.
-	// Defaults to the resolved subscription's current
-	// cycle.
+	// Period Optional explicit window, `from` before `to`. Both bounds
+	// must be supplied together; partial windows are rejected.
+	// Defaults to the subscription's current period.
 	Period struct {
+		// From Start of the window (included), RFC 3339.
 		From time.Time `json:"from"`
-		To   time.Time `json:"to"`
+
+		// To End of the window (not included), RFC 3339.
+		To time.Time `json:"to"`
 	} `json:"period,omitempty"`
 
-	// SubscriptionId Optional. Defaults to the customer's primary active
-	// subscription if not supplied.
+	// SubscriptionId Optional. The subscription to preview; it must belong to
+	// `customer_id`. Defaults to the customer's active or
+	// trialing subscription whose current period started last.
 	SubscriptionId string `json:"subscription_id,omitempty"`
 }
 
@@ -9353,8 +10256,10 @@ type RefundInvoiceJSONBody struct {
 	AmountCents int64 `json:"amount_cents,omitempty"`
 
 	// Description Text for the credit note line. Defaults to "Refund: <reason>".
-	Description string                      `json:"description,omitempty"`
-	Reason      RefundInvoiceJSONBodyReason `json:"reason"`
+	Description string `json:"description,omitempty"`
+
+	// Reason Why you are refunding, stored as the credit note's `reason`.
+	Reason RefundInvoiceJSONBodyReason `json:"reason"`
 }
 
 // RefundInvoiceParams defines parameters for RefundInvoice.
@@ -9409,8 +10314,11 @@ type RotateInvoicePublicTokenParams struct {
 
 // SendInvoiceJSONBody defines parameters for SendInvoice.
 type SendInvoiceJSONBody struct {
-	AdditionalEmails []string            `json:"additional_emails,omitempty"`
-	Email            openapi_types.Email `json:"email"`
+	// AdditionalEmails Addresses to copy on this send. See the description for absent, empty and a list.
+	AdditionalEmails []string `json:"additional_emails,omitempty"`
+
+	// Email The recipient, one plain address such as `billing@acme.example`, with no display name.
+	Email openapi_types.Email `json:"email"`
 }
 
 // SendInvoiceParams defines parameters for SendInvoice.
@@ -9440,7 +10348,7 @@ type ListInvoiceStripeRefundsParams struct {
 
 // DismissInvoiceStripeRefundJSONBody defines parameters for DismissInvoiceStripeRefund.
 type DismissInvoiceStripeRefundJSONBody struct {
-	// Note How the refund was handled. 1 to 1000 characters.
+	// Note How the refund was handled. 1 to 1000 characters; leading and trailing spaces are removed.
 	Note string `json:"note"`
 }
 
@@ -11234,7 +12142,7 @@ type ServerInterface interface {
 	// List credit notes
 	// (GET /v1/credit-notes)
 	ListCreditNotes(w http.ResponseWriter, r *http.Request, params ListCreditNotesParams)
-	// Create a credit note (line-based, or commit relief)
+	// Create a credit note
 	// (POST /v1/credit-notes)
 	CreateCreditNote(w http.ResponseWriter, r *http.Request, params CreateCreditNoteParams)
 	// Get credit note totals
@@ -11243,7 +12151,7 @@ type ServerInterface interface {
 	// Get a credit note
 	// (GET /v1/credit-notes/{id})
 	GetCreditNote(w http.ResponseWriter, r *http.Request, id string)
-	// Attach a refund made in Stripe to a credit note whose refund failed
+	// Attach a refund made in Stripe to a credit note
 	// (POST /v1/credit-notes/{id}/attach-stripe-refund)
 	AttachStripeRefundToCreditNote(w http.ResponseWriter, r *http.Request, id string, params AttachStripeRefundToCreditNoteParams)
 	// Issue a draft credit note
@@ -11255,7 +12163,7 @@ type ServerInterface interface {
 	// Retry a failed credit-note refund
 	// (POST /v1/credit-notes/{id}/retry-refund)
 	RetryCreditNoteRefund(w http.ResponseWriter, r *http.Request, id string, params RetryCreditNoteRefundParams)
-	// Email the credit-note document (PDF attached)
+	// Email a credit note to the customer
 	// (POST /v1/credit-notes/{id}/send)
 	SendCreditNote(w http.ResponseWriter, r *http.Request, id string, params SendCreditNoteParams)
 	// Void a draft credit note
@@ -11333,16 +12241,16 @@ type ServerInterface interface {
 	// List dunning policies
 	// (GET /v1/dunning/policies)
 	ListDunningPolicies(w http.ResponseWriter, r *http.Request, params ListDunningPoliciesParams)
-	// Create dunning policy
+	// Create a dunning policy
 	// (POST /v1/dunning/policies)
 	CreateDunningPolicy(w http.ResponseWriter, r *http.Request, params CreateDunningPolicyParams)
-	// Delete dunning policy
+	// Delete a dunning policy
 	// (DELETE /v1/dunning/policies/{id})
 	DeleteDunningPolicy(w http.ResponseWriter, r *http.Request, id string)
-	// Get dunning policy
+	// Get a dunning policy
 	// (GET /v1/dunning/policies/{id})
 	GetDunningPolicy(w http.ResponseWriter, r *http.Request, id string)
-	// Replace dunning policy settings
+	// Replace a dunning policy's settings
 	// (PATCH /v1/dunning/policies/{id})
 	UpdateDunningPolicy(w http.ResponseWriter, r *http.Request, id string, params UpdateDunningPolicyParams)
 	// Make a dunning policy the default
@@ -11384,10 +12292,10 @@ type ServerInterface interface {
 	// Create a draft invoice
 	// (POST /v1/invoices)
 	CreateInvoice(w http.ResponseWriter, r *http.Request, params CreateInvoiceParams)
-	// Preview the next invoice for a customer (Stripe-equivalent)
+	// Preview a customer's next invoice
 	// (POST /v1/invoices/create_preview)
 	CreateInvoicePreview(w http.ResponseWriter, r *http.Request, params CreateInvoicePreviewParams)
-	// Get invoice with line items
+	// Get an invoice with its line items
 	// (GET /v1/invoices/{id})
 	GetInvoice(w http.ResponseWriter, r *http.Request, id string)
 	// Charge a finalized invoice now
@@ -11396,7 +12304,7 @@ type ServerInterface interface {
 	// List the card disputes on an invoice
 	// (GET /v1/invoices/{id}/disputes)
 	ListInvoiceDisputes(w http.ResponseWriter, r *http.Request, id string, params ListInvoiceDisputesParams)
-	// Finalize draft invoice
+	// Finalize a draft invoice
 	// (POST /v1/invoices/{id}/finalize)
 	FinalizeInvoice(w http.ResponseWriter, r *http.Request, id string, params FinalizeInvoiceParams)
 	// Add a line item to a draft invoice
@@ -11408,7 +12316,7 @@ type ServerInterface interface {
 	// Get the invoice activity timeline
 	// (GET /v1/invoices/{id}/payment-timeline)
 	GetInvoicePaymentTimeline(w http.ResponseWriter, r *http.Request, id string)
-	// Download invoice PDF
+	// Download an invoice PDF
 	// (GET /v1/invoices/{id}/pdf)
 	GetInvoicePdf(w http.ResponseWriter, r *http.Request, id string)
 	// Record a payment made outside Stripe
@@ -11420,13 +12328,13 @@ type ServerInterface interface {
 	// Resend the payment-method setup link
 	// (POST /v1/invoices/{id}/resend-setup-link)
 	ResendInvoiceSetupLink(w http.ResponseWriter, r *http.Request, id string, params ResendInvoiceSetupLinkParams)
-	// Retry tax calculation on a deferred invoice
+	// Retry tax calculation on a draft invoice
 	// (POST /v1/invoices/{id}/retry-tax)
 	RetryInvoiceTax(w http.ResponseWriter, r *http.Request, id string, params RetryInvoiceTaxParams)
 	// Replace the hosted invoice link
 	// (POST /v1/invoices/{id}/rotate-public-token)
 	RotateInvoicePublicToken(w http.ResponseWriter, r *http.Request, id string, params RotateInvoicePublicTokenParams)
-	// Email the invoice (PDF attached) to a recipient
+	// Email an invoice to the customer
 	// (POST /v1/invoices/{id}/send)
 	SendInvoice(w http.ResponseWriter, r *http.Request, id string, params SendInvoiceParams)
 	// List the refunds made in Stripe on an invoice
@@ -11864,7 +12772,7 @@ func (_ Unimplemented) ListCreditNotes(w http.ResponseWriter, r *http.Request, p
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Create a credit note (line-based, or commit relief)
+// Create a credit note
 // (POST /v1/credit-notes)
 func (_ Unimplemented) CreateCreditNote(w http.ResponseWriter, r *http.Request, params CreateCreditNoteParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11882,7 +12790,7 @@ func (_ Unimplemented) GetCreditNote(w http.ResponseWriter, r *http.Request, id 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Attach a refund made in Stripe to a credit note whose refund failed
+// Attach a refund made in Stripe to a credit note
 // (POST /v1/credit-notes/{id}/attach-stripe-refund)
 func (_ Unimplemented) AttachStripeRefundToCreditNote(w http.ResponseWriter, r *http.Request, id string, params AttachStripeRefundToCreditNoteParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11906,7 +12814,7 @@ func (_ Unimplemented) RetryCreditNoteRefund(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Email the credit-note document (PDF attached)
+// Email a credit note to the customer
 // (POST /v1/credit-notes/{id}/send)
 func (_ Unimplemented) SendCreditNote(w http.ResponseWriter, r *http.Request, id string, params SendCreditNoteParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -12062,25 +12970,25 @@ func (_ Unimplemented) ListDunningPolicies(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Create dunning policy
+// Create a dunning policy
 // (POST /v1/dunning/policies)
 func (_ Unimplemented) CreateDunningPolicy(w http.ResponseWriter, r *http.Request, params CreateDunningPolicyParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Delete dunning policy
+// Delete a dunning policy
 // (DELETE /v1/dunning/policies/{id})
 func (_ Unimplemented) DeleteDunningPolicy(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get dunning policy
+// Get a dunning policy
 // (GET /v1/dunning/policies/{id})
 func (_ Unimplemented) GetDunningPolicy(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Replace dunning policy settings
+// Replace a dunning policy's settings
 // (PATCH /v1/dunning/policies/{id})
 func (_ Unimplemented) UpdateDunningPolicy(w http.ResponseWriter, r *http.Request, id string, params UpdateDunningPolicyParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -12164,13 +13072,13 @@ func (_ Unimplemented) CreateInvoice(w http.ResponseWriter, r *http.Request, par
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Preview the next invoice for a customer (Stripe-equivalent)
+// Preview a customer's next invoice
 // (POST /v1/invoices/create_preview)
 func (_ Unimplemented) CreateInvoicePreview(w http.ResponseWriter, r *http.Request, params CreateInvoicePreviewParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get invoice with line items
+// Get an invoice with its line items
 // (GET /v1/invoices/{id})
 func (_ Unimplemented) GetInvoice(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -12188,7 +13096,7 @@ func (_ Unimplemented) ListInvoiceDisputes(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Finalize draft invoice
+// Finalize a draft invoice
 // (POST /v1/invoices/{id}/finalize)
 func (_ Unimplemented) FinalizeInvoice(w http.ResponseWriter, r *http.Request, id string, params FinalizeInvoiceParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -12212,7 +13120,7 @@ func (_ Unimplemented) GetInvoicePaymentTimeline(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Download invoice PDF
+// Download an invoice PDF
 // (GET /v1/invoices/{id}/pdf)
 func (_ Unimplemented) GetInvoicePdf(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -12236,7 +13144,7 @@ func (_ Unimplemented) ResendInvoiceSetupLink(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Retry tax calculation on a deferred invoice
+// Retry tax calculation on a draft invoice
 // (POST /v1/invoices/{id}/retry-tax)
 func (_ Unimplemented) RetryInvoiceTax(w http.ResponseWriter, r *http.Request, id string, params RetryInvoiceTaxParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -12248,7 +13156,7 @@ func (_ Unimplemented) RotateInvoicePublicToken(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Email the invoice (PDF attached) to a recipient
+// Email an invoice to the customer
 // (POST /v1/invoices/{id}/send)
 func (_ Unimplemented) SendInvoice(w http.ResponseWriter, r *http.Request, id string, params SendInvoiceParams) {
 	w.WriteHeader(http.StatusNotImplemented)

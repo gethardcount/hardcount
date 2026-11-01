@@ -12,12 +12,13 @@
  */
 
 /**
- * Optional explicit window. Both bounds must be
- * supplied together; partial windows are rejected.
- * Defaults to the resolved subscription's current
- * cycle.
+ * Optional explicit window, `from` before `to`. Both bounds
+ * must be supplied together; partial windows are rejected.
+ * Defaults to the subscription's current period.
  */
 export type CreateInvoicePreviewBodyPeriod = {
+  /** Start of the window (included), RFC 3339. */
   from: string;
+  /** End of the window (not included), RFC 3339. */
   to: string;
 };

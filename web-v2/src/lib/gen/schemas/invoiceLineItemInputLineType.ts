@@ -12,7 +12,7 @@
  */
 
 /**
- * Defaults to `add_on`.
+ * What the line charges for. Defaults to `add_on`.
  */
 export type InvoiceLineItemInputLineType = typeof InvoiceLineItemInputLineType[keyof typeof InvoiceLineItemInputLineType];
 

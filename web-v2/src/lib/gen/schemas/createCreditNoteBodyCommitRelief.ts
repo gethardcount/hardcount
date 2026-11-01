@@ -16,18 +16,19 @@
  * relief's split goes in here, not at the top level: a top-level
  * `refund_amount_cents`, `out_of_band_amount_cents` or
  * `refund_type` is a 422. Example after a lost dispute:
- * `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
+ * `{"invoice_id": "hc_inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
  */
 export type CreateCreditNoteBodyCommitRelief = {
   /** Optional. Defaults to the top-level invoice_id. */
   invoice_id?: string;
   /** Optional. Defaults to the top-level reason. */
   reason?: string;
-  /** Commit credits to retire (1..remaining). */
+  /** Commit credits to retire, from 1 to what is left of the commit. */
   retire_cents?: number;
-  /** Retire the LIVE remaining (absorbs racing drawdowns). */
+  /** Retire all the commit credit left at the moment the relief runs, so credit the customer spends meanwhile is not counted. `retire_cents` is then ignored. */
   retire_all?: boolean;
-  /** Optional allocation; must sum with out_of_band to the derived cash. */
+  /** Optional. Part of the cash refunded to the card. With `out_of_band_amount_cents` it must add up to the cash Hardcount works out. When both are left out, the cash goes to the card if the invoice was paid by card, otherwise out of band. */
   refund_amount_cents?: number;
+  /** Optional. Part of the cash paid back outside Hardcount. */
   out_of_band_amount_cents?: number;
 };

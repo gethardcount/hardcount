@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The kind of object.
+ */
 export type ActivityLinkKind = typeof ActivityLinkKind[keyof typeof ActivityLinkKind];
 
 

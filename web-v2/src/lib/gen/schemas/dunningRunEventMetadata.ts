@@ -11,4 +11,7 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Extra facts about the event, such as `payment_intent_id` on a retry that charged. Absent when empty.
+ */
 export type DunningRunEventMetadata = { [key: string]: unknown };

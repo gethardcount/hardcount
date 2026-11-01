@@ -13,7 +13,11 @@
 import type { InvoiceStripeRefund } from './invoiceStripeRefund';
 import type { ListTotal } from './listTotal';
 
+/**
+ * What `GET /v1/invoices/{id}/stripe-refunds` returns, one page of the refunds made in Stripe on the invoice's payments, oldest first.
+ */
 export interface InvoiceStripeRefundList {
+  /** The refunds on this page. An empty list when the invoice has none. */
   data: InvoiceStripeRefund[];
   total: ListTotal;
 }

@@ -14,8 +14,12 @@ import type { DunningRun } from './dunningRun';
 import type { DunningRunDetailDegradedItem } from './dunningRunDetailDegradedItem';
 import type { DunningRunEvent } from './dunningRunEvent';
 
+/**
+ * What `GET /v1/dunning/runs/{id}` returns, the run and its event history.
+ */
 export interface DunningRunDetail {
   run: DunningRun;
+  /** The run's events, oldest first. Empty when the history could not be read (`degraded` names `events`). */
   events: DunningRunEvent[];
   /**
      * Sources that could not be read. `events`: the event history, so

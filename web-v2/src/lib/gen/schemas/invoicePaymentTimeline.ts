@@ -13,7 +13,12 @@
 import type { InvoicePaymentTimelineDegradedItem } from './invoicePaymentTimelineDegradedItem';
 import type { InvoiceTimelineEvent } from './invoiceTimelineEvent';
 
+/**
+ * What `GET /v1/invoices/{id}/payment-timeline` returns: the invoice's
+ * activity, oldest first, and which sources could not be read.
+ */
 export interface InvoicePaymentTimeline {
+  /** The rows, oldest first. An empty list for a draft. */
   events: InvoiceTimelineEvent[];
   /** Sources that could not be read, so their rows are missing. */
   degraded: InvoicePaymentTimelineDegradedItem[];

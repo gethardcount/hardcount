@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * What happens to the invoice when retries run out.
+ */
 export type DunningPolicyFinalInvoiceAction = typeof DunningPolicyFinalInvoiceAction[keyof typeof DunningPolicyFinalInvoiceAction];
 
 

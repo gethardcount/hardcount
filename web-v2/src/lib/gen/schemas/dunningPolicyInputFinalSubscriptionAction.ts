@@ -20,7 +20,8 @@
  * `subscription.canceled` with `canceled_by: dunning`. It does
  * nothing if the subscription is already canceled. If a scheduled
  * cancel was already due, that cancel happens instead, and its
- * event says `canceled_by: schedule`.
+ * event says `canceled_by: schedule`. `none` leaves it alone. An
+ * invoice with no subscription is not affected.
  */
 export type DunningPolicyInputFinalSubscriptionAction = typeof DunningPolicyInputFinalSubscriptionAction[keyof typeof DunningPolicyInputFinalSubscriptionAction];
 

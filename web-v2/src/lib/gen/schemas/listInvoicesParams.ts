@@ -15,9 +15,24 @@ import type { ListInvoicesDir } from './listInvoicesDir';
 import type { OffsetParameter } from './offsetParameter';
 
 export type ListInvoicesParams = {
+/**
+ * Only this customer's invoices.
+ */
 customer_id?: string;
+/**
+ * Only invoices that bill this subscription.
+ */
 subscription_id?: string;
+/**
+ * Only invoices in this status: `draft`, `finalized`, `paid`,
+ * `voided` or `uncollectible`. Another value matches nothing.
+ */
 status?: string;
+/**
+ * Only invoices with this payment status: `pending`, `processing`,
+ * `succeeded`, `failed` or `unknown`. Another value matches
+ * nothing.
+ */
 payment_status?: string;
 /**
  * Case-insensitive substring match on the invoice number or the customer's name or email.
@@ -34,10 +49,10 @@ from?: string;
  */
 to?: string;
 /**
- * When true, restrict to open invoices past their due date
- * that haven't settled (finalized + due_at < now +
- * payment_status not succeeded/processing). Backs the
- * dashboard's "Past due" segment.
+ * `true` keeps only open invoices past their due date: `finalized`,
+ * `due_at` before the current real time, and `payment_status` not
+ * `succeeded`, `processing` or `unknown`. Any other value applies
+ * no filter. The dashboard's Past due view uses it.
  */
 overdue?: boolean;
 /**
@@ -45,9 +60,12 @@ overdue?: boolean;
  */
 ids?: string;
 /**
- * One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps.
+ * One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps. An unknown key sorts by created_at.
  */
 sort?: string;
+/**
+ * Sort direction, `desc` (the default) or `asc`.
+ */
 dir?: ListInvoicesDir;
 /**
  * Rows per page, from 1 to 100. Default 50. Any other value, or one

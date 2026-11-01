@@ -12,8 +12,20 @@
  */
 
 /**
- * Mirrors Stripe's `invoice.billing_reason`. Classifies the trigger
- * that produced the invoice. Stamped at create time and never mutated.
+ * Why the invoice was made, like Stripe's `invoice.billing_reason`.
+ * Set when the invoice is created and never changed.
+ * - `subscription_cycle`: the invoice for a subscription period that
+ *   ended (a renewal).
+ * - `subscription_create`: the first invoice when a subscription
+ *   starts.
+ * - `subscription_cancel`: the final invoice when a subscription is
+ *   canceled at once in the middle of a period.
+ * - `subscription_update`: the invoice for a change in the middle of a
+ *   period, such as a plan upgrade, a quantity increase or an added
+ *   item.
+ * - `manual`: an invoice you created with `POST /v1/invoices`.
+ * - `threshold`: an early invoice because a spend threshold was
+ *   crossed.
  */
 export type InvoiceBillingReason = typeof InvoiceBillingReason[keyof typeof InvoiceBillingReason];
 

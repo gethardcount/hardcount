@@ -18,14 +18,21 @@ import type { HostedInvoiceLineItemsItem } from './hostedInvoiceLineItemsItem';
 import type { HostedInvoicePayUnavailableReason } from './hostedInvoicePayUnavailableReason';
 
 /**
- * What the hosted invoice page shows. It leaves out internal ids and
+ * What the hosted invoice page shows, from
+ * `GET /v1/public/invoices/{token}`. It leaves out internal ids and
  * Stripe details. `bill_to` and the company details in `branding`
- * come from the same place as the invoice PDF's.
+ * come from the same place as the invoice PDF's: an issued invoice
+ * shows the details it was issued with. Amounts are whole numbers in
+ * the currency's minor unit (cents for USD).
  */
 export interface HostedInvoice {
+  /** The invoice's number, status, totals and dates. */
   invoice: HostedInvoiceInvoice;
+  /** The invoice's lines. */
   line_items: HostedInvoiceLineItemsItem[];
+  /** The buyer as the PDF prints it. Each field is absent when empty. */
   bill_to: HostedInvoiceBillTo;
+  /** The seller's company details and branding. Each field is absent when empty. */
   branding: HostedInvoiceBranding;
   /**
      * The invoice's issued credit notes, as its PDF prints them, so

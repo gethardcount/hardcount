@@ -11,6 +11,12 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * What an invoice line charges for. `base_fee`: a plan's flat fee for
+ * the period. `usage`: metered usage, priced by a plan price.
+ * `add_on`: any other charge, such as a line you add to a draft (the
+ * default for those).
+ */
 export type InvoiceLineType = typeof InvoiceLineType[keyof typeof InvoiceLineType];
 
 

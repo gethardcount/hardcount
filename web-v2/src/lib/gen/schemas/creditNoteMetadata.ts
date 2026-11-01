@@ -11,4 +11,7 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Extra key-value data stored with the note. No API request sets it; it is absent when empty.
+ */
 export type CreditNoteMetadata = { [key: string]: unknown };

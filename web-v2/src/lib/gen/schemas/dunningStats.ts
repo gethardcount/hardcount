@@ -12,16 +12,23 @@
  */
 import type { DunningStatsAtRiskByCurrencyItem } from './dunningStatsAtRiskByCurrencyItem';
 
+/**
+ * What `GET /v1/dunning/stats` returns: dunning runs counted by state,
+ * and the amount still due on the open ones. It covers every run in
+ * this mode. Amounts are in the currency's minor unit (cents for USD).
+ */
 export interface DunningStats {
+  /** Runs in `active`, still retrying. */
   active_count: number;
+  /** Runs in `escalated`, whose retries ran out. */
   escalated_count: number;
   /** Resolved runs, whatever closed them (a payment, a void or a write-off). */
   resolved_count: number;
   /** Resolved runs that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0). A run closed by a credit note or customer credit that left nothing due is resolved, not recovered. */
   recovered_count: number;
-  /** Amount due on active and escalated runs whose invoice is still open, in `currency` only. A voided or written-off invoice is not at risk. */
+  /** Amount due on active and escalated runs whose invoice is still open, in `currency` only, in its minor unit (cents for USD). A voided or written-off invoice is not at risk. */
   at_risk_cents: number;
-  /** The tenant's default currency. */
+  /** The account's default currency, the one `at_risk_cents` counts. */
   currency: string;
   /**
      * Amount due on active and escalated runs whose invoice is still

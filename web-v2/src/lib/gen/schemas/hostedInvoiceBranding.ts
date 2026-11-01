@@ -11,17 +11,32 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The seller's company details and branding. Each field is absent when empty.
+ */
 export type HostedInvoiceBranding = {
+  /** The seller's company name. */
   company_name?: string;
+  /** The seller's contact email. */
   company_email?: string;
+  /** The seller's phone number. */
   company_phone?: string;
+  /** First line of the seller's address. */
   company_address_line1?: string;
+  /** Second line of the seller's address. */
   company_address_line2?: string;
+  /** City of the seller's address. */
   company_city?: string;
+  /** State or region of the seller's address. */
   company_state?: string;
+  /** Postal code of the seller's address. */
   company_postal_code?: string;
+  /** Country of the seller's address. */
   company_country?: string;
+  /** The seller's logo, from the current account settings. */
   logo_url?: string;
+  /** The seller's brand color, as the account settings store it (for example `#4F46E5`). */
   brand_color?: string;
+  /** Where the customer can get help, from the current account settings. */
   support_url?: string;
 };

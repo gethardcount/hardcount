@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Always `default_updated`.
+ */
 export type SetDefaultDunningPolicy200Status = typeof SetDefaultDunningPolicy200Status[keyof typeof SetDefaultDunningPolicy200Status];
 
 

@@ -12,7 +12,11 @@
  */
 
 export type SendCreditNoteBody = {
+  /** The recipient, one plain address such as `billing@acme.example`, with no display name. */
   email: string;
-  /** @maxItems 10 */
+  /**
+     * Addresses to copy on this send. Absent copies the customer's stored list; `[]` copies nobody.
+     * @maxItems 10
+     */
   additional_emails?: string[];
 };

@@ -23,57 +23,102 @@ import type { ItemChangeType } from './itemChangeType';
 import type { RecoveryWarning } from './recoveryWarning';
 
 /**
- * A Hardcount invoice. Returned from create, finalize, void, list, get,
- * rotate-public-token, and collect-payment endpoints.
+ * A bill for one customer, in one currency. The billing engine creates
+ * one at the end of each subscription period (and for a subscription's
+ * start, a change, a cancel or a spend threshold); you can also create
+ * one-off invoices with `POST /v1/invoices`. An invoice starts as a
+ * `draft`, is `finalized` when issued, and ends `paid`, `voided` or
+ * `uncollectible`. Every amount is a whole number in the currency's
+ * minor unit (cents for USD). The invoice routes and the `invoice.*`
+ * and `payment.*` webhook events return it.
  */
 export interface Invoice {
+  /** Unique identifier of the invoice, starting `hc_inv_`. */
   id: string;
   /**
-     * Owning tenant. Returned for diagnostic clarity but redundant
-     * with the API key (which already determines the tenant).
-     * Omitted when empty.
+     * The account the invoice belongs to. Your API key already decides
+     * the account, so you rarely need it.
      */
   tenant_id?: string;
+  /** The customer the invoice bills. */
   customer_id: string;
-  /** Empty for one-off invoices not tied to a subscription. */
+  /** The subscription the invoice bills. An empty string for a one-off invoice. */
   subscription_id: string;
-  /** Set when the invoice is created, including drafts. */
+  /**
+     * The number printed on the invoice: the account's invoice prefix
+     * (default `HC`), a hyphen and a sequence padded to six digits, for
+     * example `HC-000042`. Test mode and live mode count separately.
+     * Set when the invoice is created, drafts included.
+     */
   invoice_number: string;
   status: InvoiceStatus;
   payment_status: InvoicePaymentStatus;
+  /**
+     * The invoice's currency, as an uppercase ISO 4217 code. Every
+     * amount on the invoice and its lines is in this currency's minor
+     * unit.
+     */
   currency: string;
+  /**
+     * The sum of the line amounts, before discount and tax, in the
+     * currency's minor unit (cents for USD). With tax-inclusive
+     * prices, it is the net amount after the tax is taken out.
+     */
   subtotal_cents: number;
+  /** Discount taken off the subtotal, in the currency's minor unit (cents for USD). 0 when there is none. */
   discount_cents: number;
+  /**
+     * Tax on the invoice, in the currency's minor unit (cents for USD).
+     * On an invoice you create with `POST /v1/invoices`, it is 0 until
+     * finalize calculates the tax.
+     */
   tax_amount_cents: number;
-  /** Tax rate as a percent (18.50 = 18.50%), up to 4-decimal precision. ADR-042/043. */
+  /** Tax rate as a percent, up to four decimal places (18.5 means 18.5%). */
   tax_rate: number;
+  /** The tax's label, such as `VAT` or `Sales Tax`. Absent when there is none. */
   tax_name?: string;
+  /** The country the tax was calculated for. Absent when none was recorded. */
   tax_country?: string;
+  /** The customer's tax ID the tax was calculated with. Absent when there was none. */
   tax_id?: string;
   /**
-     * Durable audit snapshot of the upstream tax engine that ran the
-     * calculation (e.g. `stripe`, `none`, `manual`).
+     * The tax engine that calculated the tax: `stripe_tax`, `manual` (a
+     * flat rate from the account settings) or `none`. Kept for the
+     * record and never changed afterwards. Absent until tax is
+     * calculated.
      */
   tax_provider?: string;
   /**
-     * Provider-side calculation reference captured at build time.
-     * For Stripe Tax this expires after 24 h; persisted so finalized
-     * invoices remain reconstructable past expiry.
+     * The tax provider's calculation reference (Stripe Tax only). A
+     * Stripe Tax calculation expires after 24 hours; Hardcount keeps
+     * the reference so a finalized invoice can still be traced.
+     * Absent for the manual and none providers.
      */
   tax_calculation_id?: string;
   /**
-     * Provider-side committed transaction reference, captured at
-     * finalize. For Stripe Tax this is `tx_xxx` and is the handle
-     * the provider needs for a later reversal when a credit note is
-     * issued.
+     * The tax provider's committed transaction (Stripe Tax only),
+     * recorded at finalize. Hardcount reverses it when the invoice is
+     * voided or a credit note is issued. Absent until committed, and
+     * for providers that keep no record.
      */
   tax_transaction_id?: string;
+  /**
+     * True when reverse charge applies: no tax is charged and the
+     * customer accounts for it. Absent when false.
+     */
   tax_reverse_charge?: boolean;
+  /** Why the customer is exempt from tax, as recorded on the customer. Absent when they are not exempt. */
   tax_exempt_reason?: string;
   tax_status?: InvoiceTaxStatus;
-  /** @nullable */
-  tax_deferred_at?: string | null;
+  /** When the tax calculation failed and the invoice was held as a draft. Absent unless tax is or was deferred. */
+  tax_deferred_at?: string;
+  /**
+     * How many times tax was calculated again after the first try:
+     * each `POST /v1/invoices/{id}/retry-tax` and each automatic retry.
+     * Absent when 0.
+     */
   tax_retry_count?: number;
+  /** The provider's explanation of why tax could not be calculated, while `tax_status` is `pending`. Absent otherwise. */
   tax_pending_reason?: string;
   /**
      * Why tax could not be calculated, as a code. Set while
@@ -87,9 +132,9 @@ export interface Invoice {
      */
   tax_next_retry_at?: string;
   /**
-     * When the provider's tax transaction was reversed after a void or
-     * write-off, or found to need no reversal. Absent while the
-     * reversal is not confirmed.
+     * When the provider's tax transaction was reversed after a void,
+     * or found to need no reversal. Absent while the reversal is not
+     * confirmed.
      */
   tax_reversed_at?: string;
   /**
@@ -97,62 +142,105 @@ export interface Invoice {
      * webhook event name of the cause: `payment.duplicate_charge`,
      * `payment.amount_mismatch`, `payment.currency_mismatch` or
      * `payment.received_on_voided_invoice`.
-     * Only the latest one is kept.
+     * Only the latest one is kept. Absent when there is none.
      */
   payment_anomaly_kind?: string;
-  /** The Stripe PaymentIntent of that unexpected payment. */
+  /** The Stripe PaymentIntent of that unexpected payment. Absent when there is none. */
   payment_anomaly_payment_intent_id?: string;
-  /** The amount Stripe took in that unexpected payment. */
+  /** The amount Stripe took in that unexpected payment, in the currency's minor unit (cents for USD). Absent when there is none. */
   payment_anomaly_captured_cents?: number;
-  /** Brand of the saved card that paid the invoice. Absent when the card is unknown. */
+  /** Brand of the saved card that paid the invoice, as Stripe names it (for example `visa`). Absent when the card is unknown. */
   payment_card_brand?: string;
-  /** Last four digits of the saved card that paid the invoice. */
+  /** Last four digits of the saved card that paid the invoice. Absent when the card is unknown. */
   payment_card_last4?: string;
   attention?: Attention;
   /**
-     * What an operator must know BEFORE recording an OFFLINE payment on a
-     * written-off invoice — a consequence that will go unreconciled, NOT
-     * a refusal. Absent when there is nothing to say.
+     * What you should know before you record an offline payment on a
+     * written-off invoice: a consequence that will not reconcile on
+     * its own, never a refusal. Sent only on `uncollectible` invoices,
+     * by the same responses that carry `attention`. Absent when there
+     * is nothing to say.
      */
   recovery_warning?: RecoveryWarning;
+  /**
+     * The invoice total: `subtotal_cents` minus `discount_cents` plus
+     * `tax_amount_cents`, in the currency's minor unit (cents for USD).
+     * It is what the invoice charges before credit and payments, and it
+     * does not change when the invoice is paid.
+     */
   total_amount_cents: number;
+  /**
+     * What the customer still owes, in the currency's minor unit (cents
+     * for USD): the total, less customer credit applied
+     * (`credits_applied_cents`), credit notes issued before payment,
+     * and payments. It becomes 0 when the invoice is paid. A voided or
+     * written-off invoice keeps the amount that was due.
+     */
   amount_due_cents: number;
+  /**
+     * What was paid by card or recorded as an offline payment, in the
+     * currency's minor unit (cents for USD). Set when the invoice is
+     * paid, to the amount that was due then; 0 before. Credit applied
+     * is counted in `credits_applied_cents`, not here.
+     */
   amount_paid_cents: number;
+  /**
+     * How much of the customer's credit balance paid this invoice, in
+     * the currency's minor unit (cents for USD). Credit is applied when
+     * the invoice is collected (after finalize, or by
+     * `POST /v1/invoices/{id}/collect`). A void gives it back to the
+     * customer's balance.
+     */
   credits_applied_cents: number;
+  /**
+     * Start of the period the invoice bills (included). On a one-off
+     * invoice created without a period, the time it was created.
+     */
   billing_period_start: string;
+  /**
+     * End of the period the invoice bills (not included): the next
+     * period's start. On a one-off invoice created without a period,
+     * the time it was created.
+     */
   billing_period_end: string;
-  /** Human period string with the inclusive last covered day ("Jun 1, 2028 – Jun 30, 2028"), date-only in the invoice's billing timezone (ADR-058 / ADR-077). Computed on read; the raw billing_period_start/end stay half-open. Empty/omitted for one-off invoices with no period. */
+  /** The period as people read it, with its last day included, in `billing_timezone`: for example "Oct 1, 2026 – Oct 31, 2026". `billing_period_start` and `billing_period_end` stay the exact boundaries. Worked out when the invoice is read, so it comes with the same responses as `attention`. Absent when the period starts and ends at the same instant. */
   billing_period_display?: string;
-  /** IANA timezone the period boundaries are anchored in — the org billing timezone resolved and denormalized onto the invoice at issue (ADR-077). billing_period_display is rendered in this zone, so an issued invoice's dates stay fixed even if the org later changes its timezone. Empty only on legacy invoices created before the zone was stamped (cycle invoices before migration 0134, manual invoices before 2026-10-16). */
+  /** The IANA time zone the period boundaries are in: the account's billing time zone, copied onto the invoice when it was created. `billing_period_display`, the PDF and the hosted page show dates in it, so an issued invoice's dates stay the same if the account later changes its time zone. Absent only on invoices created before releases recorded it. */
   billing_timezone?: string;
   /**
-     * The buyer details this invoice was issued with (ADR-109), copied
-     * when it left draft. The PDF, the hosted page and the dashboard
-     * render an issued invoice from this copy, so a later edit to the
-     * customer or billing profile does not change it. Absent on drafts
-     * and on invoices issued before this field existed; those render
-     * from the current customer details.
+     * The buyer details this invoice was issued with, copied when it
+     * left draft. The PDF, the hosted page and the dashboard show an
+     * issued invoice from this copy, so a later edit to the customer
+     * or billing profile does not change it. Absent on drafts and on
+     * invoices issued before this field existed; those show the
+     * current customer details.
      */
   bill_to_snapshot?: DocumentBillTo;
   /**
-     * The seller (company) details this invoice was issued with
-     * (ADR-109), copied when it left draft. Absent on drafts and on
-     * invoices issued before this field existed. Branding (logo, brand
-     * color) is not part of it.
+     * Your company details this invoice was issued with, copied when it
+     * left draft. Absent on drafts and on invoices issued before this
+     * field existed. Branding (logo, brand color) is not part of it.
      */
   supplier_snapshot?: DocumentSupplier;
   /**
-     * Set when the invoice transitions out of draft.
-     * @nullable
+     * When the invoice was issued. Every invoice gets one when it is
+     * created, drafts included. An invoice you create with
+     * `POST /v1/invoices` gets a new one when it is finalized.
      */
-  issued_at?: string | null;
-  /** @nullable */
-  due_at?: string | null;
-  /** @nullable */
-  paid_at?: string | null;
-  /** @nullable */
-  voided_at?: string | null;
-  /** When the invoice was marked uncollectible. */
+  issued_at?: string;
+  /**
+     * When payment is due: `issued_at` plus `net_payment_term_days`
+     * calendar days, counted in `billing_timezone`. Set with
+     * `issued_at`. Hardcount does not charge on this date: it collects
+     * right after finalize and retries on the dunning schedule. The
+     * `overdue` filter of `GET /v1/invoices` uses it.
+     */
+  due_at?: string;
+  /** When the invoice was paid. Absent until it is paid. */
+  paid_at?: string;
+  /** When the invoice was voided. Absent unless it is voided. */
+  voided_at?: string;
+  /** When the invoice was written off as uncollectible. Absent unless it was. */
   uncollectible_at?: string;
   /**
      * The Stripe PaymentIntent of the card charge that paid the
@@ -166,12 +254,20 @@ export interface Invoice {
   /**
      * True when the payment was recorded as made outside Hardcount, such as
      * a bank transfer or cheque (`POST /v1/invoices/{id}/record-payment`,
-     * or a payment recovery run resolved as `payment_recovered`). Such
+     * or a dunning run resolved as `payment_recovered`). Such
      * an invoice has no `stripe_payment_intent_id`, so there is no card
      * to refund.
      */
   paid_out_of_band: boolean;
+  /**
+     * Stripe's message for the last failed charge, word for word (it is
+     * written for the cardholder). Absent when no charge has failed.
+     */
   last_payment_error?: string;
+  /**
+     * True while the invoice is queued for the automatic charge, which
+     * applies credit and charges the saved card. Absent when false.
+     */
   auto_charge_pending?: boolean;
   /**
      * When the customer was emailed a link to add a payment method for
@@ -189,47 +285,58 @@ export interface Invoice {
      * Stripe's PaymentIntent status the last time Hardcount checked it,
      * word for word. For information only: `payment_status` is the
      * invoice's payment state. Absent until Hardcount has checked. An
-     * invoice checked by the Stripe Search sweep of releases before
-     * this one may still show `search_not_found`,
-     * `search_terminal_only` or `search_error`.
+     * invoice checked by the Stripe Search sweep of earlier releases
+     * may still show `search_not_found`, `search_terminal_only` or
+     * `search_error`.
      */
   provider_payment_status?: string;
   /**
      * When Hardcount last asked Stripe about this invoice's payment, whether
      * or not Stripe answered: a read of `provider_payment_status`, or a
-     * check of a charge whose result was lost.
+     * check of a charge whose result was lost. Absent until then.
      */
   provider_synced_at?: string;
   /**
-     * Hosted-invoice-URL credential (Stripe-parity
-     * `hosted_invoice_url`). Generated at finalize; drafts have an
-     * empty token. Rotatable via `POST
-     * /v1/invoices/{id}/rotate-public-token`.
+     * The token in the hosted invoice page's link, like Stripe's
+     * `hosted_invoice_url`; `GET /v1/public/invoices/{token}` serves
+     * the page's data. Anyone with it can view and pay the invoice, so
+     * share it only with the customer. Created at finalize; absent on
+     * drafts. Replace it with
+     * `POST /v1/invoices/{id}/rotate-public-token`.
      */
   public_token?: string;
+  /** Days from `issued_at` to `due_at`. 0 means due on receipt. */
   net_payment_term_days: number;
+  /** A note you set when creating the invoice, printed on the PDF and the hosted page. Absent when empty. */
   memo?: string;
   /**
-     * The tenant's `invoice_footer` as it was when this invoice was
-     * issued. Printed on the PDF and the hosted invoice page. Empty on
-     * a draft.
+     * The account's invoice footer as it was when this invoice was
+     * issued. Printed on the PDF and the hosted invoice page. Absent on
+     * a draft and when no footer was set.
      */
   footer?: string;
+  /** Extra key-value data stored with the invoice. No API request sets it; it is absent when empty. */
   metadata?: InvoiceMetadata;
+  /** When the invoice was created. For a customer on a test clock, the clock's time. */
   created_at: string;
+  /** When the invoice last changed. */
   updated_at: string;
-  /** @nullable */
-  source_plan_changed_at?: string | null;
+  /**
+     * On an invoice for a change in the middle of a period
+     * (`billing_reason` `subscription_update`), when the change took
+     * effect. Absent on other invoices.
+     */
+  source_plan_changed_at?: string;
+  /** On an invoice for a change in the middle of a period, the subscription item that changed. Absent on other invoices. */
   source_subscription_item_id?: string;
   source_change_type?: ItemChangeType;
   billing_reason?: InvoiceBillingReason;
   /**
-     * Whether this invoice's domain timestamps (created/issued/due/paid)
-     * were stamped on a test clock's simulated time rather than
-     * wall-clock. Captured at write time (engine: the subscription is
-     * clock-pinned; manual composer: the customer is clock-pinned). The
-     * dashboard renders a "simulated" badge from this authoritative flag
-     * instead of inferring it. Always false in live mode.
+     * True when the invoice's dates (created, issued, due, paid) are
+     * on a test clock's time instead of the real time. Recorded when
+     * the invoice is written: for a cycle invoice, its subscription is
+     * on a test clock; for one you create, its customer is. Always
+     * false in live mode.
      */
   is_simulated: boolean;
   /**

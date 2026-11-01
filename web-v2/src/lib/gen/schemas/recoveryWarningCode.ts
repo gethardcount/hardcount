@@ -11,6 +11,16 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * What will not reconcile.
+ * `tax_reversed_unrecoverable`: the invoice's Stripe Tax
+ * transaction was reversed, and recording the payment does not
+ * report it again, so the tax collected will not appear in your
+ * tax provider's records.
+ * `relief_not_reissued`: a credit the invoice was owed was never
+ * applied, so `amount_due_cents` is higher than what is owed and the
+ * customer may have overpaid.
+ */
 export type RecoveryWarningCode = typeof RecoveryWarningCode[keyof typeof RecoveryWarningCode];
 
 

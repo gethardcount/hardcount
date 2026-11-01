@@ -15,15 +15,17 @@ import type { InvoiceDispute } from './invoiceDispute';
 
 /**
  * The `data` of the outbound webhook events `payment.dispute_opened`
- * and `payment.dispute_closed` (docs/webhooks.md): the invoice the
- * disputed payment paid and the dispute, each as the API returns it.
- * Both are saved in the same transaction that records the dispute, so
- * a crash cannot drop them. `payment.dispute_opened` is sent once per
- * dispute, when Hardcount first records it; if the first event Hardcount
- * receives is already the close, both are sent, and both carry the
- * closed status and `closed_at`. Their delivery order is not
- * guaranteed. `payment.dispute_closed` is sent when the dispute
- * reaches a closed status it did not have: `won`, `lost`,
+ * and `payment.dispute_closed` (docs/api/webhook-events.md): the
+ * invoice the disputed payment paid and the dispute, each as the API
+ * returns it. The invoice leaves out `attention`, `recovery_warning`,
+ * `billing_period_display` and `test_clock_id`, which are worked out
+ * per read. Both events are saved in the same transaction that records
+ * the dispute, so a crash cannot drop them. `payment.dispute_opened`
+ * is sent once per dispute, when Hardcount first records it; if the
+ * first event Hardcount receives is already the close, both are sent,
+ * and both carry the closed status and `closed_at`. Their delivery
+ * order is not guaranteed. `payment.dispute_closed` is sent when the
+ * dispute reaches a closed status it did not have: `won`, `lost`,
  * `warning_closed` or `prevented`. A lost dispute that Stripe later
  * marks won sends it again.
  */

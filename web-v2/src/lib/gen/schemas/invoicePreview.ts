@@ -14,20 +14,28 @@ import type { InvoicePreviewLine } from './invoicePreviewLine';
 import type { InvoicePreviewTotal } from './invoicePreviewTotal';
 
 /**
- * A dry-run invoice built from the usage recorded so far. Nothing is
- * saved.
+ * A dry-run invoice built from the usage recorded so far, from
+ * `POST /v1/invoices/create_preview`. Nothing is saved. Amounts are
+ * whole numbers in the currency's minor unit (cents for USD), and
+ * tax is not included.
  */
 export interface InvoicePreview {
+  /** The customer the preview is for. */
   customer_id: string;
+  /** The subscription the preview bills. */
   subscription_id: string;
   /** The names of the subscription's plans, comma-separated. */
   plan_name: string;
+  /** Start of the window the preview covers (included). */
   billing_period_start: string;
+  /** End of the window the preview covers (not included). */
   billing_period_end: string;
+  /** The lines the invoice would have. An empty list when nothing would be billed. */
   lines: InvoicePreviewLine[];
   /** One total per currency on the lines. */
   totals: InvoicePreviewTotal[];
-  /** Ways the real invoice can differ from this preview. */
+  /** Ways the real invoice can differ from this preview, in plain words. An empty list when there are none. */
   warnings: string[];
+  /** When the preview was built. For a customer on a test clock, the clock's time. */
   generated_at: string;
 }

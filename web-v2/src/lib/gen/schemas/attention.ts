@@ -15,51 +15,49 @@ import type { AttentionReason } from './attentionReason';
 import type { AttentionSeverity } from './attentionSeverity';
 
 /**
- * Unified "this invoice needs operator attention" surface.
- * Computed server-side from durable invoice fields
- * (`tax_status`, `tax_error_code`, `payment_status`,
- * `last_payment_error`). Never persisted —
- * always derived. Omitted entirely when the invoice is healthy
- * (matches Stripe's `last_finalization_error: null` ergonomic).
- * See ADR-009.
+ * Why an invoice needs your attention now, and what to do about it.
+ * Hardcount works it out each time the invoice is read, from the
+ * invoice's tax and payment state; it is never stored. The invoice
+ * leaves it out when nothing needs attention. `GET /v1/invoices`,
+ * `GET /v1/invoices/{id}` and the finalize, retry-tax and
+ * rotate-public-token responses carry it; the other invoice responses
+ * and the webhook events do not.
  */
 export interface Attention {
   severity: AttentionSeverity;
   reason: AttentionReason;
   /**
-     * Human-readable copy, safe to render verbatim: one plain
-     * sentence saying what happens and what to do. Facts that must
-     * show up front follow on more lines, separated by a newline
-     * (`\n`), one sentence each and up to three lines in all: the
-     * setup-link email on `no_payment_method` (and on
-     * `dunning_exhausted` when no link can be emailed), and the
-     * prepaid credit at risk on an unpaid commit invoice. A no-card
-     * commit invoice carries all three. Wording may change between
-     * releases; switch on `reason` and `code`, not on this text.
+     * Text that is safe to show as it is: one plain sentence saying
+     * what happens and what to do. Facts that must show up front
+     * follow on more lines, separated by a newline (`\n`), one sentence
+     * each and up to three lines in all: the setup-link email on
+     * `no_payment_method` (and on `dunning_exhausted` when no link can
+     * be emailed), and the prepaid credit at risk on an unpaid commit
+     * invoice. A no-card commit invoice carries all three. The wording
+     * can change between releases; switch on `reason` and `code`, not
+     * on this text.
      */
   message: string;
   /**
-     * Prescribed next steps. First item is the primary CTA; the
-     * rest are secondary.
+     * Recommended next steps. The first is the main one; the rest are
+     * secondary. Absent when there is nothing to do but wait.
      */
   actions?: AttentionActionItem[];
   /**
-     * Open, dotted, provider-specific code (e.g.
-     * `tax.customer_data_invalid`, `payment.declined`).
-     * New codes ship without a contract
-     * bump. Stripe parity.
+     * Open, dotted code naming the exact cause, for example
+     * `tax.customer_data_invalid` or `payment.declined`. New codes can
+     * appear in any release, as with Stripe's error codes.
      */
   code?: string;
   /**
-     * Deep link to operator-facing documentation for this
-     * reason. Stripe parity.
+     * A link to documentation about this reason. Absent when there is
+     * no page for it.
      */
   doc_url?: string;
   /**
-     * Dotted-path pointer at the entity field the operator must
-     * edit to resolve the issue (e.g.
-     * `customer.address.postal_code`). Stripe parity. Empty
-     * when the resolution isn't field-scoped.
+     * Dotted path to the field you need to edit to fix the cause, for
+     * example `customer.address.postal_code`. Absent when the fix is not
+     * one field.
      */
   param?: string;
   /**
@@ -67,20 +65,22 @@ export interface Attention {
      * holds, what Hardcount does on its own, and ids support may ask
      * for (for example the payment intent ids of a payment
      * anomaly). Plain text; may contain blank-line paragraph
-     * breaks. Never a provider payload — that is
+     * breaks. Never a provider payload: that is
      * `provider_response`.
      */
   detail?: string;
   /**
-     * The provider's own response (Stripe Tax error envelope,
-     * Stripe's last payment error), exactly as received. Present
-     * only when Hardcount called the provider.
+     * The provider's own response (a Stripe Tax error, or Stripe's last
+     * payment error), exactly as received. Present only when Hardcount
+     * called the provider.
      */
   provider_response?: string;
   /**
-     * When the attention condition started — operators triage
-     * by age. tax_deferred_at for tax reasons; due_at for
-     * overdue; updated_at as a proxy for payment failures.
+     * When the condition started, so you can sort by age. For a tax
+     * reason it is when tax was deferred, and for
+     * `amount_below_minimum` when Stripe refused the amount. Otherwise
+     * it is when the invoice last changed; on a test clock, when it was
+     * issued or its last charge failed. Absent when it is not known.
      */
   since?: string;
   /**
@@ -90,8 +90,8 @@ export interface Attention {
   next_attempt_at?: string;
   /**
      * The invoice's payment deadline (its `due_at`). Hardcount does not
-     * act on this date; it is shown so the operator knows it.
-     * Absent when the invoice has no due date.
+     * act on this date; it is shown so you know it. Absent when the
+     * reason does not show a deadline or the invoice has none.
      */
   due_by?: string;
 }

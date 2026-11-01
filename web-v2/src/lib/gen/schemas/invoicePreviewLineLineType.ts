@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `base_fee`: a plan's flat fee. `usage`: metered usage priced by a plan price.
+ */
 export type InvoicePreviewLineLineType = typeof InvoicePreviewLineLineType[keyof typeof InvoicePreviewLineLineType];
 
 

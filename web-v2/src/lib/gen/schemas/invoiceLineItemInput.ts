@@ -13,20 +13,33 @@
 import type { InvoiceLineItemInputLineType } from './invoiceLineItemInputLineType';
 
 /**
- * A line to add to a draft invoice.
+ * A line to add to a draft invoice, with `POST /v1/invoices` or
+ * `POST /v1/invoices/{id}/line-items`. Its amount is `quantity` ×
+ * `unit_amount_cents`.
  */
 export interface InvoiceLineItemInput {
+  /** The text printed on the line. Must not be blank. */
   description: string;
-  /** Defaults to `add_on`. */
+  /** What the line charges for. Defaults to `add_on`. */
   line_type?: InvoiceLineItemInputLineType;
-  /** @minimum 1 */
+  /**
+     * How many units, a whole number of 1 or more.
+     * @minimum 1
+     */
   quantity: number;
-  /** @minimum 1 */
+  /**
+     * Price of one unit in the currency's minor unit (cents for USD),
+     * a whole number of 1 or more. The line's amount is `quantity` ×
+     * `unit_amount_cents`; a product too large for 64-bit cents is
+     * refused.
+     * @minimum 1
+     */
   unit_amount_cents: number;
   /**
      * Makes this line a prepaid commit purchase: when the invoice is
      * finalized, the customer gets this many cents of credit. Only on
-     * `add_on` lines of manual invoices, at most one per invoice.
+     * `add_on` lines of invoices you create, at most one per invoice.
+     * At most 100,000,000 ($1,000,000).
      * @minimum 1
      * @maximum 100000000
      */

@@ -12,14 +12,20 @@
  */
 
 export type HostedInvoiceLineItemsItem = {
+  /** The line's text. */
   description: string;
   /** The exact quantity as a decimal string, for example `3` or `1.5`. */
   quantity: string;
-  /** The unit price in cents at full precision, for example `0.3` for $0.003. */
+  /** The unit price, a decimal string of cents at full precision, for example `0.3` for $0.003. */
   unit_amount_decimal: string;
+  /** On a usage line, the meter's unit, such as `tokens`. Absent on other lines. */
   meter_unit?: string;
+  /** The line's amount before tax, in the currency's minor unit (cents for USD). */
   amount_cents: number;
+  /** Tax on the line, in the currency's minor unit (cents for USD). Absent when 0. */
   tax_amount_cents?: number;
+  /** The line's amount plus its tax, in the currency's minor unit (cents for USD). */
   total_amount_cents: number;
+  /** The line's currency. */
   currency: string;
 };

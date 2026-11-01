@@ -12,6 +12,9 @@
  */
 import type { DunningPolicy } from './dunningPolicy';
 
+/**
+ * A dunning policy as `GET /v1/dunning/policies` lists it, with how many customers are assigned to it.
+ */
 export type DunningPolicyListItem = DunningPolicy & {
   /** Customers explicitly assigned to this policy. Customers using it only as the default are not counted. */
   assigned_customers: number;

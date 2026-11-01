@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Where the customer acted. Set only for `customer`.
+ */
 export type ActivityActorVia = typeof ActivityActorVia[keyof typeof ActivityActorVia];
 
 

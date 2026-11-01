@@ -12,6 +12,7 @@
  */
 
 export type CreditNoteStatsByCurrencyItem = {
+  /** The currency of this entry, uppercase. */
   currency: string;
   /** Total of the issued notes. */
   total_cents: number;

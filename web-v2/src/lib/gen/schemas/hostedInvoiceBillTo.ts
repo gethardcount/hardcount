@@ -11,13 +11,24 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The buyer as the PDF prints it. Each field is absent when empty.
+ */
 export type HostedInvoiceBillTo = {
+  /** The billing profile's legal name, or the customer's display name when it has none. */
   name?: string;
+  /** The customer's email address. */
   email?: string;
+  /** First address line. */
   address_line1?: string;
+  /** Second address line. */
   address_line2?: string;
+  /** City. */
   city?: string;
+  /** State or region. */
   state?: string;
+  /** Postal code. */
   postal_code?: string;
+  /** Country, as a two-letter code. */
   country?: string;
 };

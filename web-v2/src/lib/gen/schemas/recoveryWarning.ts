@@ -13,29 +13,30 @@
 import type { RecoveryWarningCode } from './recoveryWarningCode';
 
 /**
- * What an operator must know BEFORE recording an OFFLINE payment on a
- * written-off invoice (`status = uncollectible`) — a consequence that
- * will go unreconciled, never a refusal. The money already arrived, and
- * refusing to record it would only make the books wrong too.
- *
- * A written-off invoice is settled by RECORDING writers only — an
- * offline payment, or Hardcount recording a card charge that Stripe shows
- * succeeded (its webhook, or the check of an unresolved charge).
- * Nothing initiates a card
- * charge against one (ADR-113): recovery of a returned customer runs on
- * normal rails via a fresh recovery invoice.
- *
- * `tax_reversed_unrecoverable` — the invoice's tax was reversed with the
- * tax provider and cannot be re-reported automatically; the recorded
- * payment collects tax already reported as not collected.
- * `relief_not_reissued` — a credit the invoice was owed was never
- * applied, so `amount_due_cents` is higher than what is owed and the
- * customer may have overpaid.
+ * What you should know before you record an offline payment on a
+ * written-off invoice (`status` `uncollectible`): a consequence that
+ * will not reconcile on its own. It never refuses the payment, because
+ * the money already arrived. A written-off invoice is never charged by
+ * card. It is settled only by recording a payment: an offline payment,
+ * or a card payment Stripe shows succeeded.
  */
 export interface RecoveryWarning {
-  /** Always false — this shape only ever warns. */
+  /** Always false. This object only warns; it never refuses. */
   blocked: boolean;
+  /**
+     * What will not reconcile.
+     * `tax_reversed_unrecoverable`: the invoice's Stripe Tax
+     * transaction was reversed, and recording the payment does not
+     * report it again, so the tax collected will not appear in your
+     * tax provider's records.
+     * `relief_not_reissued`: a credit the invoice was owed was never
+     * applied, so `amount_due_cents` is higher than what is owed and the
+     * customer may have overpaid.
+     */
   code?: RecoveryWarningCode;
-  /** Operator-facing sentence naming the consequence that will go unreconciled if the payment is recorded. */
+  /**
+     * One sentence for the operator naming the consequence and what to
+     * do about it.
+     */
   message?: string;
 }

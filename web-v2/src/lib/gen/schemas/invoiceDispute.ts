@@ -21,9 +21,13 @@ import type { InvoiceDisputeStatus } from './invoiceDisputeStatus';
  * stays paid and no money moves.
  */
 export interface InvoiceDispute {
+  /** Unique identifier of the dispute record, `hc_dsp_` and 24 hex characters. */
   id: string;
+  /** The invoice whose payment is disputed. */
   invoice_id: string;
+  /** Stripe's dispute id (`du_…`). */
   stripe_dispute_id: string;
+  /** The disputed Stripe charge (`ch_…`). Absent when Stripe did not send it. */
   stripe_charge_id?: string;
   /** The disputed payment. */
   stripe_payment_intent_id: string;
@@ -34,10 +38,11 @@ export interface InvoiceDispute {
      * are closed.
      */
   status: InvoiceDisputeStatus;
-  /** The reason the cardholder gave, for example `fraudulent`. */
+  /** The reason the cardholder gave, for example `fraudulent`. Absent when Stripe gave none. */
   reason?: string;
-  /** The disputed amount. It can differ from the payment. */
+  /** The disputed amount, in the currency's minor unit (cents for USD). It can differ from the payment. */
   amount_cents: number;
+  /** The dispute's currency, uppercase. */
   currency: string;
   /** The deadline to respond in Stripe. Absent when Stripe gave none. */
   evidence_due_by?: string;
@@ -45,7 +50,10 @@ export interface InvoiceDispute {
   opened_at: string;
   /** When Stripe closed it. Absent while it is open. */
   closed_at?: string;
+  /** True for a live-mode payment, false for test mode. */
   livemode: boolean;
+  /** When Hardcount first recorded the dispute. */
   created_at: string;
+  /** When Hardcount last updated the record from a Stripe event. */
   updated_at: string;
 }

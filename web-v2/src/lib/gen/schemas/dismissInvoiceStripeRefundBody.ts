@@ -12,6 +12,6 @@
  */
 
 export type DismissInvoiceStripeRefundBody = {
-  /** How the refund was handled. 1 to 1000 characters. */
+  /** How the refund was handled. 1 to 1000 characters; leading and trailing spaces are removed. */
   note: string;
 };

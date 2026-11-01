@@ -13,5 +13,6 @@
 import type { ResolveDunningRunBodyResolution } from './resolveDunningRunBodyResolution';
 
 export type ResolveDunningRunBody = {
+  /** How the run ends, and what happens to its invoice (see above). */
   resolution: ResolveDunningRunBodyResolution;
 };

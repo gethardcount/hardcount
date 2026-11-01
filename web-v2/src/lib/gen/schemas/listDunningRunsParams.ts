@@ -15,9 +15,12 @@ import type { ListDunningRunsState } from './listDunningRunsState';
 import type { OffsetParameter } from './offsetParameter';
 
 export type ListDunningRunsParams = {
+/**
+ * Only the run for this invoice.
+ */
 invoice_id?: string;
 /**
- * Exact run state. Any other value is a 422.
+ * Only runs in this state. Another value answers 400.
  */
 state?: ListDunningRunsState;
 /**

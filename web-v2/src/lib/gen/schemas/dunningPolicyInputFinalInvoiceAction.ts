@@ -13,6 +13,8 @@
 
 /**
  * What happens to the invoice when retries run out.
+ * `mark_uncollectible` writes it off as bad debt; `none` leaves it
+ * open and due.
  */
 export type DunningPolicyInputFinalInvoiceAction = typeof DunningPolicyInputFinalInvoiceAction[keyof typeof DunningPolicyInputFinalInvoiceAction];
 

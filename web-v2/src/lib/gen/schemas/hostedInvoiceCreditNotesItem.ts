@@ -12,10 +12,16 @@
  */
 
 export type HostedInvoiceCreditNotesItem = {
+  /** The credit note's number, for example `CN-000003`. */
   number: string;
+  /** The credit note's total, in the currency's minor unit (cents for USD). */
   amount_cents: number;
+  /** True when the note was issued before payment and lowered what is owed. */
   before_payment: boolean;
+  /** For a note after payment, the card refund once Stripe confirmed it. Absent when 0. */
   refunded_cents?: number;
+  /** For a note after payment, the credit added to the customer's balance. Absent when 0. */
   credited_cents?: number;
+  /** For a note after payment, the amount paid back another way. Absent when 0. */
   settled_outside_cents?: number;
 };

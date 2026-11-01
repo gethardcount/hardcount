@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The run's state after this event.
+ */
 export type DunningRunEventState = typeof DunningRunEventState[keyof typeof DunningRunEventState];
 
 

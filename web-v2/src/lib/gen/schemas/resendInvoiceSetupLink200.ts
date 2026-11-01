@@ -13,5 +13,6 @@
 import type { ResendInvoiceSetupLink200Status } from './resendInvoiceSetupLink200Status';
 
 export type ResendInvoiceSetupLink200 = {
+  /** Always `sent`, meaning the email is queued. */
   status: ResendInvoiceSetupLink200Status;
 };

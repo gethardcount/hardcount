@@ -12,15 +12,22 @@
  */
 
 /**
- * Payment-attempt status. `unknown` marks a Stripe charge attempt that
- * returned an ambiguous error (5xx, timeout, connection reset) where
- * we cannot tell whether Stripe processed the charge. With a payment
- * intent recorded, Hardcount asks Stripe for it after a short wait. With
- * none (a parked invoice), Hardcount lists the customer's payments at
- * Stripe every billing tick: it records a payment for the invoice that
- * appears, and if none has appeared 24 hours after the attempt the
- * invoice goes back to `pending` (`failed` after a dunning retry) and
- * is charged again as usual.
+ * The state of the invoice's payment.
+ * - `pending`: nothing has been charged yet, or a charge is about to
+ *   be sent.
+ * - `processing`: Stripe is still working on a charge.
+ * - `succeeded`: the invoice is paid.
+ * - `failed`: the last charge was declined or refused. Dunning, when
+ *   a policy is on, retries it.
+ * - `unknown`: a Stripe charge got an unclear answer (a 5xx, a timeout
+ *   or a dropped connection), so Hardcount cannot tell whether Stripe
+ *   took the money. With a payment intent recorded, Hardcount asks
+ *   Stripe for it after a short wait. With none (a parked invoice),
+ *   Hardcount lists the customer's payments at Stripe on every billing
+ *   tick: it records a payment for the invoice that appears, and if
+ *   none has appeared 24 hours after the attempt the invoice goes back
+ *   to `pending` (`failed` after a dunning retry) and is charged again
+ *   as usual.
  */
 export type InvoicePaymentStatus = typeof InvoicePaymentStatus[keyof typeof InvoicePaymentStatus];
 

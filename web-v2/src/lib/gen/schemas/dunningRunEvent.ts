@@ -15,23 +15,53 @@ import type { DunningRunEventEventType } from './dunningRunEventEventType';
 import type { DunningRunEventMetadata } from './dunningRunEventMetadata';
 import type { DunningRunEventState } from './dunningRunEventState';
 
+/**
+ * One step in a dunning run's history, as `GET /v1/dunning/runs/{id}` returns it, oldest first.
+ */
 export interface DunningRunEvent {
+  /** Unique identifier of the event, starting `hc_devt_`. */
   id: string;
+  /** The run the event belongs to. */
   run_id: string;
+  /** The account the event belongs to. Absent when empty. */
   tenant_id?: string;
+  /** The run's invoice. */
   invoice_id: string;
+  /**
+     * `dunning_started`: the run began. `retry_attempted`: a retry ran
+     * (or was skipped; see `reason`). `escalated`: the retries ran out
+     * and the final action ran. `resolved`: the run ended.
+     */
   event_type: DunningRunEventEventType;
+  /** The run's state after this event. */
   state: DunningRunEventState;
+  /**
+     * Detail that depends on the event. On `dunning_started`, why the
+     * run started (`payment_failed` or `no_payment_method`). On
+     * `retry_attempted`, the outcome: `succeeded`, the decline text
+     * (for example `payment failed: Your card has insufficient
+     * funds.`), or a reason nothing was charged (`no_payment_method`,
+     * `card_refused`, `needs_confirmation`, `amount_below_minimum`,
+     * `payment_processing`). On `escalated`, what the final action did,
+     * joined with `+` (`subscription_paused`, `subscription_canceled`,
+     * `invoice_marked_uncollectible`), empty when it changed nothing. On
+     * `resolved`, what ended the run, such as `payment_recovered` or
+     * `invoice_voided`. Absent when empty.
+     */
   reason?: string;
+  /** The run's retry count at this event. */
   attempt_count: number;
+  /** Extra facts about the event, such as `payment_intent_id` on a retry that charged. Absent when empty. */
   metadata?: DunningRunEventMetadata;
+  /** When the event happened. For an invoice on a test clock, the clock's time. */
   created_at: string;
+  /** The real-world time the event was written. Absent on events written before releases recorded it. */
   recorded_at?: string;
   /**
-     * The event in the words of the activity line standard (ADR-128):
-     * the line the invoice's payment timeline shows for the same
-     * event, without that timeline's folds. Absent when the run's
-     * invoice could not be read (`degraded` names `invoice`).
+     * The event in the words of the activity line: the line the
+     * invoice's payment timeline shows for the same event, without
+     * that timeline's folds. Absent when the run's invoice could not
+     * be read (`degraded` names `invoice`).
      */
   line?: ActivityLine;
 }

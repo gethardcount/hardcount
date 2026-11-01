@@ -12,9 +12,12 @@
  */
 
 export type CreateCreditNoteBodyLinesItem = {
-  /** Optional. The invoice line this credit line reverses. */
+  /** Optional. The invoice line this credit line reverses. It must be a line of this invoice. */
   invoice_line_item_id?: string;
+  /** The text printed on the line. */
   description?: string;
+  /** How many units, 1 or more. */
   quantity?: number;
+  /** Credit per unit, tax included, in the currency's minor unit (cents for USD). 1 or more. */
   unit_amount_cents?: number;
 };

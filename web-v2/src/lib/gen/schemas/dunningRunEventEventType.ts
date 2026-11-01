@@ -11,6 +11,11 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `dunning_started`: the run began. `retry_attempted`: a retry ran
+ * (or was skipped; see `reason`). `escalated`: the retries ran out
+ * and the final action ran. `resolved`: the run ended.
+ */
 export type DunningRunEventEventType = typeof DunningRunEventEventType[keyof typeof DunningRunEventEventType];
 
 

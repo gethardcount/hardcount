@@ -13,11 +13,22 @@
 import type { DunningRunResolution } from './dunningRunResolution';
 import type { DunningRunState } from './dunningRunState';
 
+/**
+ * A dunning run: the payment retries for one unpaid invoice. Dunning
+ * is retrying a failed or missing payment on a schedule (the
+ * invoice's dunning policy), and running the policy's final action
+ * when the retries run out. Each invoice has at most one run.
+ */
 export interface DunningRun {
+  /** Unique identifier of the run, starting `hc_drun_`. */
   id: string;
+  /** The account the run belongs to. Absent when empty. */
   tenant_id?: string;
+  /** The invoice the run collects. */
   invoice_id: string;
+  /** The invoice's customer. Absent when not recorded. */
   customer_id?: string;
+  /** The dunning policy whose schedule and final action the run follows. */
   policy_id: string;
   /**
      * `active`: retries are running. `escalated`: retries ran out
@@ -25,11 +36,24 @@ export interface DunningRun {
      * another way; see `resolution`.
      */
   state: DunningRunState;
+  /**
+     * Why the run started: `payment_failed` (a charge was declined or
+     * refused) or `no_payment_method` (the customer had no card, so
+     * nothing was charged). Absent when not recorded.
+     */
   reason?: string;
+  /** How many retries have run so far. */
   attempt_count: number;
+  /** When the last retry ran. Absent before the first retry. */
   last_attempt_at?: string;
+  /**
+     * When the run acts next: the next retry, or the final action once
+     * the retries are used. Absent when the run has ended.
+     */
   next_action_at?: string;
+  /** True while the run is paused, so its retries are skipped. No API route pauses a run. */
   paused: boolean;
+  /** When the run ended, resolved or escalated. Absent while it is active. */
   resolved_at?: string;
   /**
      * How the run ended, set when it is resolved. Exception:
@@ -38,20 +62,25 @@ export interface DunningRun {
      * will be retried at `next_action_at`. `amount_below_minimum`: a
      * charge on the invoice was refused by Stripe because the amount is
      * below its minimum charge, so the run ended without its final
-     * action.
+     * action. Absent while the run is active.
      */
   resolution?: DunningRunResolution;
+  /**
+     * When the run started: when the payment failed or the collection
+     * found no card. For an invoice on a test clock, the clock's time.
+     */
   created_at: string;
+  /** When the run last changed. */
   updated_at: string;
-  /** Filled in on list responses. */
+  /** The invoice's number. Filled in on list responses. */
   invoice_number?: string;
-  /** Filled in on list responses. */
+  /** What the invoice still owes, in the currency's minor unit (cents for USD). Filled in on list responses; absent when 0. */
   invoice_amount_due_cents?: number;
-  /** Filled in on list responses. */
+  /** The invoice's currency. Filled in on list responses. */
   invoice_currency?: string;
   /** The test clock's current time, when the customer is on a test clock. Filled in on list responses. */
   effective_now?: string;
-  /** Filled in on list responses. */
+  /** The customer's test clock, when they are on one. Filled in on list responses. */
   test_clock_id?: string;
   /**
      * How many retries the run's policy makes: the length of its
