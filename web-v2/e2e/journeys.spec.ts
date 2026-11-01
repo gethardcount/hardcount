@@ -1007,6 +1007,21 @@ test('a new account: Home welcomes the operator, and the setup checklist opens w
   await expect(checklist).toHaveCount(0)
 })
 
+test('on this computer, the Stripe webhook step gives the Stripe CLI command, not a URL to add in Stripe', async ({ page }) => {
+  // A checked key with no webhook secret yet: the card shows step 2. The e2e
+  // dashboard runs on localhost, which Stripe can never call, so step A is the
+  // `stripe listen` command, forwarding to this mode's webhook URL.
+  await page.route(url => url.pathname === '/v1/settings/stripe', route => route.request().method() === 'GET'
+    ? route.fulfill({ json: { data: [{ id: 'hc_spc_e2e', livemode: false, secret_key_last4: '0000', publishable_key: 'pk_e2e', verified_at: '2026-11-01T00:00:00Z', has_webhook_secret: false }] } })
+    : route.fallback())
+  await page.goto('/settings?tab=payments')
+  await expect(page.getByText("Hardcount runs on this computer, so Stripe can’t send events to it.", { exact: false })).toBeVisible()
+  const origin = new URL(page.url()).origin
+  await expect(page.getByText(`stripe listen --forward-to ${origin}/v1/webhooks/stripe/hc_spc_e2e`, { exact: true })).toBeVisible()
+  await expect(page.getByText('paste this URL')).toHaveCount(0)
+  await expect(page.getByText('Paste the signing secret the command printed')).toBeVisible()
+})
+
 test('the setup checklist ticks Connect Stripe only for a working key in this mode, and counts test-clock customers', async ({ page }) => {
   const key = (livemode: boolean, extra = {}) => ({ id: `e2e_${livemode}`, livemode, secret_key_last4: '0000', publishable_key: 'pk_e2e', has_webhook_secret: true, ...extra })
   let creds: object[] = []
