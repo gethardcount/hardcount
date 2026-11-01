@@ -1704,7 +1704,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	r.Route("/v1/exports", func(r chi.Router) {
 		r.Use(session.MiddlewareOrAPIKey(sessionSvc, authSvc))
 		r.Use(rateLimiter.Middleware())
-		r.Use(mw.Timeout(5 * time.Minute))
+		// The handler moves each response's write deadline to match
+		// (extendExportWriteDeadline): the server's WriteTimeout is 35 s.
+		r.Use(mw.Timeout(exportTimeout))
 		exportsH := newExportsHandler(customerStore, invoiceStore, subStore, usageStore, auditLogger, auditLogger)
 		r.Mount("/", exportsH.Routes(
 			auth.Require(auth.PermCustomerRead),

@@ -508,9 +508,9 @@ type Subscription struct {
 	CancelEffectiveAt *time.Time `json:"cancel_effective_at,omitempty"`
 	// PauseCollection holds the Stripe-parity collection-pause state. When
 	// non-nil, the cycle still advances but the engine generates the
-	// invoice as draft and skips finalize/charge/dunning. Distinct from
-	// Status=paused, which is the hard freeze (sub excluded from
-	// GetDueBilling entirely). Nil means collection is running normally.
+	// invoice as draft and skips finalize/charge/dunning. It is the only
+	// pause: there is no paused status. Nil means collection is running
+	// normally.
 	PauseCollection *PauseCollection `json:"pause_collection,omitempty"`
 	// BillingThresholds holds the early-invoice (billing threshold) config. When
 	// non-nil, the threshold scan tick computes the in-cycle running

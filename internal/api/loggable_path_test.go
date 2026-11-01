@@ -65,7 +65,7 @@ func TestLoggablePath_NeverContainsTokens(t *testing.T) {
 // truncated CSV was indistinguishable from a complete one.
 func TestExportAbort_WritesIncompleteMarker(t *testing.T) {
 	rec := httptest.NewRecorder()
-	cw := writeCSVHeaders(rec, "customers")
+	cw := writeCSVHeaders(rec, httptest.NewRequest("GET", "/v1/exports/customers.csv", nil), "customers")
 	_ = cw.Write([]string{"id", "email"})
 	_ = cw.Write([]string{"cus_1", "a@b.test"})
 
