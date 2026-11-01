@@ -60,8 +60,8 @@ func WebhookEventResource(eventType string) string {
 
 // WebhookEventExtras lists, for every event type in the catalog, the keys
 // its data may carry beside the resource. An empty list means the event
-// carries the resource alone. docs/webhooks.md shows the same list per
-// event; webhook_catalog_test.go fails when the two differ.
+// carries the resource alone. docs/api/webhook-events.md shows the same list per
+// event; webhook_events_doc_test.go fails when the two differ.
 var WebhookEventExtras = map[string][]string{
 	EventInvoiceFinalized:           {},
 	EventInvoicePaid:                {},
@@ -75,7 +75,7 @@ var WebhookEventExtras = map[string][]string{
 	EventPaymentFailed:    {},
 	// The charge that raised the anomaly. The invoice's
 	// stripe_payment_intent_id is not always another charge: on
-	// amount_mismatch it is this one (docs/webhooks.md, per event).
+	// amount_mismatch it is this one (docs/api/webhook-events.md, per event).
 	EventPaymentDuplicateCharge: {"incoming_payment_intent_id", "captured_cents"},
 	EventPaymentAmountMismatch:  {"incoming_payment_intent_id", "captured_cents"},
 	// charge_currency: the charge's currency (upper case); the invoice

@@ -237,8 +237,8 @@ const (
 // subscriber to "invoice.payment_failed" (real name: payment.failed) got
 // silence forever — Hardcount's own shipped recipes carried two such phantom
 // names. Keep in lockstep with the constants above, the dashboard's
-// EVENT_GROUPS picker (web-v2/src/pages/Webhooks.tsx) and docs/webhooks.md;
-// webhook_catalog_test.go fails when they differ.
+// EVENT_GROUPS picker (web-v2/src/pages/Webhooks.tsx) and docs/api/webhook-events.md;
+// webhook_catalog_test.go and webhook_events_doc_test.go fail when they differ.
 var KnownWebhookEventTypes = map[string]bool{
 	EventInvoiceFinalized:                   true,
 	EventInvoicePaid:                        true,

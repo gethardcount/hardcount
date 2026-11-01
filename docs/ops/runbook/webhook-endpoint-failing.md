@@ -8,8 +8,8 @@ error, the next retry time). Back to the [runbook index](index.md).
 ## Symptom
 
 - `hardcount_webhook_deliveries_total{status="failed"}` rises. It counts
-  deliveries marked failed after their last retry, about 26.5 hours after
-  the first attempt, for all endpoints together (it has no endpoint label).
+  deliveries marked failed after their last retry, about 26 hours 36
+  minutes after the first attempt, for all endpoints together (it has no endpoint label).
 - Earlier, from the first failed attempt: the WARN line
   `webhook delivery scheduled for retry`, which names the `endpoint_id`.
   The last failure logs `webhook delivery permanently failed` at ERROR.
