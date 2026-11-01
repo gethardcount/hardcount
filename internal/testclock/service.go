@@ -416,15 +416,15 @@ func (s *Service) Advance(ctx context.Context, tenantID, id string, input Advanc
 
 	if s.queue != nil {
 		// Async path. The worker drains the queue and calls
-		// RunCatchup. If enqueue fails (buffer full), revert to
-		// internal_failure so the operator gets visible feedback
-		// rather than a clock stuck in 'advancing' forever.
+		// RunCatchup. If enqueue fails (buffer full), park the clock in
+		// internal_failure so the operator gets visible feedback and
+		// resumes it with RetryAdvance, rather than a clock stuck in
+		// 'advancing' forever. The clock is not put back to ready at its
+		// old time: for the moment it was advancing, its new frozen_time
+		// was "now" for its customers (usage, a new subscription), and a
+		// clock never moves back.
 		if err := s.queue.Enqueue(CatchupJob{TenantID: tenantID, ClockID: id, PrevFrozenTime: current.FrozenTime}); err != nil {
-			if _, ferr := s.store.MarkFailed(ctx, tenantID, id, "catchup queue full: "+err.Error()); ferr != nil {
-				slog.Error("test clock: failed to mark clock as failed after enqueue error",
-					"clock_id", id, "enqueue_err", err, "mark_err", ferr)
-			}
-			return domain.TestClock{}, fmt.Errorf("dispatch catchup: %w", err)
+			return domain.TestClock{}, s.parkAfterEnqueueFailed(ctx, tenantID, id, "catchup queue full: ", err)
 		}
 		return advancing, nil
 	}
@@ -470,11 +470,7 @@ func (s *Service) RetryAdvance(ctx context.Context, tenantID, id string) (domain
 
 	if s.queue != nil {
 		if err := s.queue.Enqueue(CatchupJob{TenantID: tenantID, ClockID: id, PrevFrozenTime: current.FrozenTime}); err != nil {
-			if _, ferr := s.store.MarkFailed(ctx, tenantID, id, "catchup queue full on retry: "+err.Error()); ferr != nil {
-				slog.Error("test clock: failed to mark clock as failed after retry-enqueue error",
-					"clock_id", id, "enqueue_err", err, "mark_err", ferr)
-			}
-			return domain.TestClock{}, fmt.Errorf("dispatch retry catchup: %w", err)
+			return domain.TestClock{}, s.parkAfterEnqueueFailed(ctx, tenantID, id, "catchup queue full on retry: ", err)
 		}
 		return advancing, nil
 	}
@@ -484,6 +480,23 @@ func (s *Service) RetryAdvance(ctx context.Context, tenantID, id string) (domain
 		return domain.TestClock{}, err
 	}
 	return s.store.Get(ctx, tenantID, id)
+}
+
+// parkAfterEnqueueFailed moves a clock whose catch-up could not be queued
+// from advancing to internal_failure, and returns the error to answer with.
+// The enqueue error stays in the chain (ErrQueueFull: the handler's 503,
+// resume with retry-advance) only when the clock was parked. When the park
+// fails too, the clock stays advancing with no job queued, the next boot's
+// RecoverInFlight queues it, and the answer is a plain error (500): telling
+// the caller to retry-advance a clock that is not in internal_failure would
+// send it to a 409.
+func (s *Service) parkAfterEnqueueFailed(ctx context.Context, tenantID, id, reasonPrefix string, enqueueErr error) error {
+	if _, err := s.store.MarkFailed(ctx, tenantID, id, reasonPrefix+enqueueErr.Error()); err != nil {
+		slog.Error("test clock: failed to mark clock as failed after enqueue error",
+			"clock_id", id, "enqueue_err", enqueueErr, "mark_err", err)
+		return fmt.Errorf("dispatch catchup: %v; mark clock failed: %w", enqueueErr, err)
+	}
+	return fmt.Errorf("dispatch catchup: %w", enqueueErr)
 }
 
 // RunCatchup is the worker's entry point. The "real work" — looping

@@ -57,7 +57,8 @@ type CatchupRunner func(ctx context.Context, job CatchupJob) error
 const CatchupTimeout = 10 * time.Minute
 
 // ErrQueueFull is returned by Enqueue when the buffered channel is
-// at capacity. Callers translate to 503 Service Unavailable.
+// at capacity. The advance and retry-advance handlers answer it with 503
+// catchup_queue_full (writeAdvanceError).
 var ErrQueueFull = errors.New("test-clock catchup queue is full")
 
 // chanCatchupQueue is a bounded, in-process channel-backed queue.
