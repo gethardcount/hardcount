@@ -13378,8 +13378,8 @@ export interface components {
              */
             frozen_time: string;
             /**
-             * @description `ready`: it can be advanced or deleted. `advancing`: billing is
-             *     catching up to the new time. `internal_failure`: the last advance
+             * @description `ready`: it can be advanced. `advancing`: billing is catching up
+             *     to the new time. `internal_failure`: the last advance
              *     failed partway; resume it with `POST /v1/test-clocks/{id}/retry-advance`.
              * @enum {string}
              */
@@ -13673,6 +13673,52 @@ export interface components {
             };
         };
         /**
+         * @description The credential is valid but may not call this route. A usage-only
+         *     key (`hc_ingest_…`) can only send usage and call `GET /v1/whoami`;
+         *     use a secret key.
+         */
+        Forbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "type": "authentication_error",
+                 *         "code": "forbidden",
+                 *         "message": "insufficient permissions: this key type does not have customer:read access",
+                 *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /**
+         * @description This route takes no body, and the request sent one with a field.
+         *     `param` names the field. Send no body, `{}` or `null`.
+         */
+        BodyNotAllowed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "type": "invalid_request_error",
+                 *         "code": "validation_error",
+                 *         "message": "unknown field \"at_period_end\"",
+                 *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                 *         "param": "at_period_end"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /**
          * @description The body is not one valid JSON value, it is empty where the
          *     operation needs one, or a field has the wrong JSON type (such as a
          *     string where a number belongs). On a route that takes
@@ -13942,6 +13988,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -14042,6 +14089,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description A customer with this `external_id` already exists in this account
              *     and mode (`already_exists`, `param: external_id`).
@@ -14151,6 +14199,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
@@ -14235,6 +14284,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
@@ -14365,6 +14415,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description No customer with this ID in this account and mode
              *     (`customer not found`), or no dunning policy with the
@@ -14480,6 +14531,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description The customer has no billing profile yet, or the customer does not
              *     exist. Both return `billing profile not found`.
@@ -14596,6 +14648,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
@@ -14741,6 +14794,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
@@ -14857,6 +14911,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
@@ -15005,6 +15060,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
@@ -15091,6 +15147,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
@@ -15194,6 +15251,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
@@ -15396,6 +15454,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description No customer with this ID in this account and mode. The message
              *     reads `payment_method not found`.
@@ -15503,6 +15562,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No such payment method for this customer, or it is already detached. */
             404: {
                 headers: {
@@ -15602,6 +15662,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No such active payment method for this customer. */
             404: {
                 headers: {
@@ -16140,6 +16201,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["InvalidBody"];
             /** @description Unknown token, or the invoice is a draft. */
             404: {
                 headers: {
@@ -16506,6 +16568,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -16591,6 +16654,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description A meter with this `event_name` already exists in this account and
              *     mode (`already_exists`, `param: event_name`).
@@ -16676,6 +16740,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `not_found`: no meter with this ID in this account and mode. */
             404: {
                 headers: {
@@ -16766,6 +16831,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No meter with this ID in this account and mode. */
             404: {
                 headers: {
@@ -16938,6 +17004,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -17090,6 +17157,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this `invoice_id` in this account and mode. The message says `credit_note not found`. */
             404: {
                 headers: {
@@ -17224,6 +17292,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
@@ -17347,6 +17416,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this `customer_id` in this account and mode. */
             404: {
                 headers: {
@@ -17439,6 +17509,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -17526,6 +17597,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
@@ -17605,6 +17677,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -17686,6 +17759,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description `url` is missing, is not `https://`, cannot be looked up, or
              *     points to a private address; an event type is unknown; or the
@@ -17753,6 +17827,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No endpoint with this id in this mode, or it was deleted. */
             404: {
                 headers: {
@@ -17807,7 +17882,9 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No endpoint with this id in this mode, or it was already deleted. */
             404: {
                 headers: {
@@ -17827,6 +17904,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["BodyNotAllowed"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -17906,6 +17984,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No endpoint with this id in this mode, or it was deleted. */
             404: {
                 headers: {
@@ -17993,7 +18072,9 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookSecretRotation"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No endpoint with this id in this mode. */
             404: {
                 headers: {
@@ -18013,6 +18094,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["BodyNotAllowed"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -18073,6 +18155,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No endpoint with this id in this mode, or it was deleted. */
             404: {
                 headers: {
@@ -18141,7 +18224,9 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookDeliveryReplayResult"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No such delivery in this mode, the delivery belongs to another endpoint, or the endpoint was deleted. */
             404: {
                 headers: {
@@ -18180,6 +18265,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["BodyNotAllowed"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -18230,6 +18316,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -18293,6 +18380,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -18449,6 +18537,7 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookReplayResult"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /** @description The caller lacks the `apikey:read` permission (an ingest key). */
             403: {
@@ -18488,6 +18577,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["BodyNotAllowed"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -18855,6 +18945,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -19002,6 +19093,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description Nothing is created. `already_exists`: a plan with this `code`
              *     exists in this account and mode (`param: code`). `price_exists`:
@@ -19116,6 +19208,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `not_found`: no plan with this ID in this account and mode. */
             404: {
                 headers: {
@@ -19267,6 +19360,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `not_found`: no plan with this ID in this account and mode. */
             404: {
                 headers: {
@@ -19432,6 +19526,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `not_found`: no plan with this ID in this account and mode. */
             404: {
                 headers: {
@@ -19542,6 +19637,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `not_found`: no plan with this ID in this account and mode. */
             404: {
                 headers: {
@@ -19666,6 +19762,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description `not_found`: no such plan (`plan not found`), or no such price on
              *     it, a removed price included (`price not found`).
@@ -19796,6 +19893,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description `not_found`: no such plan (`plan not found`), or no such price on
              *     it, a removed price included (`price not found`).
@@ -19965,6 +20063,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -20101,6 +20200,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this `customer_id` in this account and mode (code `not_found`). */
             404: {
                 headers: {
@@ -20248,7 +20348,9 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
@@ -20411,7 +20513,9 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
@@ -20534,6 +20638,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No subscription with this ID in this account and mode (code `not_found`). */
             404: {
                 headers: {
@@ -20623,7 +20728,9 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
@@ -20796,6 +20903,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
@@ -20919,7 +21027,9 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
@@ -21101,6 +21211,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
@@ -21222,7 +21333,9 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
@@ -21358,7 +21471,9 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
@@ -21528,6 +21643,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
@@ -21727,6 +21843,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
@@ -21847,7 +21964,9 @@ export interface operations {
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
@@ -21978,6 +22097,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
@@ -22077,7 +22197,9 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description No subscription with this ID in this account and mode (message
              *     `subscription not found`), or the item is not on this
@@ -22254,6 +22376,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description No subscription with this ID in this account and mode (message
              *     `subscription not found`), or the item is not on this
@@ -22374,7 +22497,9 @@ export interface operations {
                     "application/json": components["schemas"]["SubscriptionItem"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description The item is not found or is not on this subscription. */
             404: {
                 headers: {
@@ -22520,6 +22645,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
@@ -22631,6 +22757,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `validation_error`: a malformed `dimensions` pair, a `from` or `to` that cannot be parsed, `to` before `from`, or a `limit` or `offset` out of range (param names the field). */
             422: {
                 headers: {
@@ -23209,6 +23336,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description `validation_error`: a missing, empty or whitespace-only
              *     `idempotency_key`, or one longer than 255 characters (param
@@ -23310,6 +23438,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -23365,6 +23494,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description `validation_error`: `external_customer_id` is missing; no
              *     customer has that external ID yet and no `customer_id` was
@@ -23436,6 +23566,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `validation_error`: `external_customer_id` is missing, or the body has an unknown field (`param` names it; the body must use only the fields listed here). */
             422: {
                 headers: {
@@ -23527,6 +23658,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `validation_error`: a malformed `dimensions` pair, an unknown `tz`, a `from` or `to` that cannot be parsed, or `to` before `from`. */
             422: {
                 headers: {
@@ -23685,6 +23817,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -23776,6 +23909,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer, or no subscription, with this id in this account and mode (code `not_found`). */
             404: {
                 headers: {
@@ -23980,6 +24114,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer, or no subscription, with this id in this account and mode. */
             404: {
                 headers: {
@@ -24153,6 +24288,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -24197,6 +24333,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -24287,6 +24424,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -24419,6 +24557,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -24556,7 +24695,9 @@ export interface operations {
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -24671,7 +24812,9 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -24831,7 +24974,9 @@ export interface operations {
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -25001,6 +25146,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -25159,7 +25305,9 @@ export interface operations {
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -25298,7 +25446,9 @@ export interface operations {
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -25519,6 +25669,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -25706,6 +25857,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -25784,6 +25936,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -25864,6 +26017,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -25959,6 +26113,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode, or no refund with this Stripe id on it. */
             404: {
                 headers: {
@@ -26057,6 +26212,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -26125,6 +26281,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No credit note with this id in this account and mode. */
             404: {
                 headers: {
@@ -26257,6 +26414,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No credit note with this id in this account and mode. */
             404: {
                 headers: {
@@ -26360,7 +26518,9 @@ export interface operations {
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No credit note with this id in this account and mode. */
             404: {
                 headers: {
@@ -26518,6 +26678,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No credit note with this id in this account and mode. */
             404: {
                 headers: {
@@ -26661,7 +26822,9 @@ export interface operations {
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No credit note with this id in this account and mode. */
             404: {
                 headers: {
@@ -26820,7 +26983,9 @@ export interface operations {
                     "application/json": components["schemas"]["CreditNote"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No credit note with this id in this account and mode. */
             404: {
                 headers: {
@@ -26907,6 +27072,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No credit note with this id in this account and mode. */
             404: {
                 headers: {
@@ -27022,7 +27188,9 @@ export interface operations {
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -27200,7 +27368,9 @@ export interface operations {
                     "application/json": components["schemas"]["Invoice"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No invoice with this id in this account and mode. */
             404: {
                 headers: {
@@ -27459,6 +27629,8 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["InvalidBody"];
+            422: components["responses"]["BodyNotAllowed"];
             429: components["responses"]["RateLimited"];
             /** @description The session could not be ended. It still works, and the cookie was not cleared. */
             500: {
@@ -28132,6 +28304,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /** @description The caller is not a dashboard session (an API key). */
             403: {
@@ -28171,6 +28344,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["BodyNotAllowed"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -28193,6 +28367,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /** @description The caller is not a dashboard session (an API key). */
             403: {
@@ -28251,6 +28426,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["BodyNotAllowed"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -28399,7 +28575,9 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description The request has a body with a field (`param` names it). This
              *     route takes no body: send none, `{}` or `null`.
@@ -28488,6 +28666,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -28579,6 +28758,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description `validation_error`: a required field is missing (`param` then
              *     lists `provider, model, token_type` together, or
@@ -28630,6 +28810,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No rate with this ID in this account and mode. */
             404: {
                 headers: {
@@ -28752,6 +28933,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
@@ -28900,6 +29082,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this `customer_id` in this account and mode. */
             404: {
                 headers: {
@@ -28990,6 +29173,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
@@ -29048,6 +29232,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
@@ -29385,6 +29570,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /** @description Caller is in live mode, or the key lacks the `testclock:write` permission. */
             403: {
@@ -29777,6 +29963,7 @@ export interface operations {
                     "application/json": components["schemas"]["TestClock"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /** @description Caller is in live mode, or the key lacks the `testclock:write` permission. */
             403: {
@@ -30134,6 +30321,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -30204,6 +30392,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -30342,6 +30531,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No recipe with this key. */
             404: {
                 headers: {
@@ -30505,6 +30695,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No recipe with this key. */
             404: {
                 headers: {
@@ -30639,6 +30830,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No recipe with this key. */
             404: {
                 headers: {
@@ -30734,6 +30926,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `from` or `to` is malformed, or `to` is before `from`. */
             422: {
                 headers: {
@@ -30800,6 +30993,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `from` or `to` is malformed, or `to` is before `from`. */
             422: {
                 headers: {
@@ -30866,6 +31060,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `from` or `to` is malformed, or `to` is before `from`. */
             422: {
                 headers: {
@@ -30957,6 +31152,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `from` or `to` is malformed, `to` is before `from`, or a `dimensions` pair is malformed. */
             422: {
                 headers: {
@@ -31037,6 +31233,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description A date filter is malformed, or an upper bound is before its lower bound. */
             422: {
                 headers: {
@@ -31151,6 +31348,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -31196,6 +31394,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -31255,6 +31454,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -31324,6 +31524,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -31409,6 +31610,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -31511,6 +31713,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No dunning run with this id in this account and mode. */
             404: {
                 headers: {
@@ -31606,6 +31809,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description No dunning run with this id in this account and mode (`dunning_run not found`), or its invoice is gone (`invoice not found`). */
             404: {
                 headers: {
@@ -31709,6 +31913,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -31770,6 +31975,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -31844,6 +32050,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description `validation_error`, with `param` naming the field: a replaced
              *     field was sent (`final_action`, `retry_schedule`,
@@ -31915,6 +32122,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `not_found`: no policy with this id in this account and mode. */
             404: {
                 headers: {
@@ -31969,7 +32177,9 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `not_found`: no policy with this id in this account and mode. */
             404: {
                 headers: {
@@ -32108,6 +32318,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `not_found`: no policy with this id in this account and mode. */
             404: {
                 headers: {
@@ -32196,7 +32407,9 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `not_found`: no policy with this id in this account and mode. */
             404: {
                 headers: {
@@ -32298,6 +32511,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
@@ -32422,6 +32636,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description `not_found`: no customer with this ID in this account and mode. */
             404: {
                 headers: {
@@ -32533,6 +32748,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /**
              * @description `not_found`: no active override with this ID (it may already be
              *     ended).
@@ -32917,6 +33133,7 @@ export interface operations {
                     "application/json": components["schemas"]["APIKey"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /** @description The caller lacks the `apikey:write` permission (an ingest key). */
             403: {
@@ -32956,6 +33173,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["BodyNotAllowed"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -33384,6 +33602,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -33427,6 +33646,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /** @description The caller is an API key, not a dashboard session. */
             403: {
@@ -33466,6 +33686,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["BodyNotAllowed"];
             429: components["responses"]["RateLimited"];
             /** @description `smtp_error`: the SMTP server refused the email or could not be reached. The message carries its answer. */
             502: {
@@ -33531,6 +33752,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -33607,6 +33829,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description A key is missing or has the wrong prefix for the mode, or the body has an unknown field. `error.param` names the field. */
             422: {
                 headers: {
@@ -33714,6 +33937,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description Stripe is not connected for this mode. Connect it first. */
             404: {
                 headers: {
@@ -33795,6 +34019,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             /** @description Stripe is not connected for this mode */
             404: {
                 headers: {
@@ -33814,6 +34039,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["BodyNotAllowed"];
             429: components["responses"]["RateLimited"];
         };
     };

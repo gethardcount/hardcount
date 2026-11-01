@@ -43,6 +43,7 @@ import type {
   AttachStripeRefundToCreditNoteBody,
   AuditLogFilters,
   BackfillUsageEventBody,
+  BodyNotAllowedResponse,
   BootstrapBody,
   BootstrapResult,
   CheckPasswordResetToken200,
@@ -96,6 +97,7 @@ import type {
   ExportSubscriptionsCsvParams,
   ExportUsageEventsCsvParams,
   ExtendSubscriptionTrialBody,
+  ForbiddenResponse,
   GetAnalyticsMrrMovement200,
   GetAnalyticsMrrMovementParams,
   GetAnalyticsOverviewParams,
@@ -634,7 +636,7 @@ export const createCustomer = async (createCustomerBody: CreateCustomerBody, opt
 
 
 
-export const getCreateCustomerMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCreateCustomerMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCustomer>>, TError,{data: CreateCustomerBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createCustomer>>, TError,{data: CreateCustomerBody}, TContext> => {
 
@@ -663,12 +665,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateCustomerMutationResult = NonNullable<Awaited<ReturnType<typeof createCustomer>>>
     export type CreateCustomerMutationBody = CreateCustomerBody
-    export type CreateCustomerMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type CreateCustomerMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create a customer
  */
-export const useCreateCustomer = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCreateCustomer = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCustomer>>, TError,{data: CreateCustomerBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createCustomer>>,
@@ -723,7 +725,7 @@ export const getListCustomersQueryKey = (params?: ListCustomersParams,) => {
     }
 
 
-export const getListCustomersQueryOptions = <TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListCustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListCustomersQueryOptions = <TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListCustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -742,10 +744,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCustomersQueryResult = NonNullable<Awaited<ReturnType<typeof listCustomers>>>
-export type ListCustomersQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListCustomersQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListCustomersParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomers>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCustomers>>,
@@ -755,7 +757,7 @@ export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListCustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomers>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCustomers>>,
@@ -765,7 +767,7 @@ export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListCustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -773,7 +775,7 @@ export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers
  * @summary List customers
  */
 
-export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomers<TData = Awaited<ReturnType<typeof listCustomers>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListCustomersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -826,7 +828,7 @@ export const rotateCustomerCostDashboardToken = async (id: string, options?: Req
 
 
 
-export const getRotateCustomerCostDashboardTokenMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRotateCustomerCostDashboardTokenMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>, TError,{id: string}, TContext> => {
 
@@ -855,12 +857,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RotateCustomerCostDashboardTokenMutationResult = NonNullable<Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>>
 
-    export type RotateCustomerCostDashboardTokenMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type RotateCustomerCostDashboardTokenMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Rotate the customer's public cost-dashboard link
  */
-export const useRotateCustomerCostDashboardToken = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRotateCustomerCostDashboardToken = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>,
@@ -905,7 +907,7 @@ export const getGetCustomerQueryKey = (id: string,) => {
     }
 
 
-export const getGetCustomerQueryOptions = <TData = Awaited<ReturnType<typeof getCustomer>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomer>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetCustomerQueryOptions = <TData = Awaited<ReturnType<typeof getCustomer>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomer>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -924,10 +926,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetCustomerQueryResult = NonNullable<Awaited<ReturnType<typeof getCustomer>>>
-export type GetCustomerQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetCustomerQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetCustomer<TData = Awaited<ReturnType<typeof getCustomer>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomer<TData = Awaited<ReturnType<typeof getCustomer>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomer>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getCustomer>>,
@@ -937,7 +939,7 @@ export function useGetCustomer<TData = Awaited<ReturnType<typeof getCustomer>>, 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCustomer<TData = Awaited<ReturnType<typeof getCustomer>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomer<TData = Awaited<ReturnType<typeof getCustomer>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomer>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getCustomer>>,
@@ -947,7 +949,7 @@ export function useGetCustomer<TData = Awaited<ReturnType<typeof getCustomer>>, 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCustomer<TData = Awaited<ReturnType<typeof getCustomer>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomer<TData = Awaited<ReturnType<typeof getCustomer>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomer>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -955,7 +957,7 @@ export function useGetCustomer<TData = Awaited<ReturnType<typeof getCustomer>>, 
  * @summary Get a customer
  */
 
-export function useGetCustomer<TData = Awaited<ReturnType<typeof getCustomer>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomer<TData = Awaited<ReturnType<typeof getCustomer>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomer>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -1023,7 +1025,7 @@ export const updateCustomer = async (id: string,
 
 
 
-export const getUpdateCustomerMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getUpdateCustomerMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCustomer>>, TError,{id: string;data: UpdateCustomerBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateCustomer>>, TError,{id: string;data: UpdateCustomerBody}, TContext> => {
 
@@ -1052,12 +1054,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateCustomerMutationResult = NonNullable<Awaited<ReturnType<typeof updateCustomer>>>
     export type UpdateCustomerMutationBody = UpdateCustomerBody
-    export type UpdateCustomerMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type UpdateCustomerMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Update a customer
  */
-export const useUpdateCustomer = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useUpdateCustomer = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCustomer>>, TError,{id: string;data: UpdateCustomerBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateCustomer>>,
@@ -1116,7 +1118,7 @@ export const upsertCustomerBillingProfile = async (id: string,
 
 
 
-export const getUpsertCustomerBillingProfileMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getUpsertCustomerBillingProfileMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertCustomerBillingProfile>>, TError,{id: string;data: CustomerBillingProfileInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof upsertCustomerBillingProfile>>, TError,{id: string;data: CustomerBillingProfileInput}, TContext> => {
 
@@ -1145,12 +1147,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpsertCustomerBillingProfileMutationResult = NonNullable<Awaited<ReturnType<typeof upsertCustomerBillingProfile>>>
     export type UpsertCustomerBillingProfileMutationBody = CustomerBillingProfileInput
-    export type UpsertCustomerBillingProfileMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type UpsertCustomerBillingProfileMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Create or replace the customer's billing profile
  */
-export const useUpsertCustomerBillingProfile = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useUpsertCustomerBillingProfile = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertCustomerBillingProfile>>, TError,{id: string;data: CustomerBillingProfileInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof upsertCustomerBillingProfile>>,
@@ -1194,7 +1196,7 @@ export const getGetCustomerBillingProfileQueryKey = (id: string,) => {
     }
 
 
-export const getGetCustomerBillingProfileQueryOptions = <TData = Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetCustomerBillingProfileQueryOptions = <TData = Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -1213,10 +1215,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetCustomerBillingProfileQueryResult = NonNullable<Awaited<ReturnType<typeof getCustomerBillingProfile>>>
-export type GetCustomerBillingProfileQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetCustomerBillingProfileQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetCustomerBillingProfile<TData = Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomerBillingProfile<TData = Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getCustomerBillingProfile>>,
@@ -1226,7 +1228,7 @@ export function useGetCustomerBillingProfile<TData = Awaited<ReturnType<typeof g
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCustomerBillingProfile<TData = Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomerBillingProfile<TData = Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getCustomerBillingProfile>>,
@@ -1236,7 +1238,7 @@ export function useGetCustomerBillingProfile<TData = Awaited<ReturnType<typeof g
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCustomerBillingProfile<TData = Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomerBillingProfile<TData = Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -1244,7 +1246,7 @@ export function useGetCustomerBillingProfile<TData = Awaited<ReturnType<typeof g
  * @summary Get the customer's billing profile
  */
 
-export function useGetCustomerBillingProfile<TData = Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomerBillingProfile<TData = Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerBillingProfile>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -1311,7 +1313,7 @@ export const getListCustomerSentEmailsQueryKey = (id: string,
     }
 
 
-export const getListCustomerSentEmailsQueryOptions = <TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(id: string,
+export const getListCustomerSentEmailsQueryOptions = <TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(id: string,
     params?: ListCustomerSentEmailsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
@@ -1331,10 +1333,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCustomerSentEmailsQueryResult = NonNullable<Awaited<ReturnType<typeof listCustomerSentEmails>>>
-export type ListCustomerSentEmailsQueryError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse
+export type ListCustomerSentEmailsQueryError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params: undefined |  ListCustomerSentEmailsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -1345,7 +1347,7 @@ export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof list
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListCustomerSentEmailsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -1356,7 +1358,7 @@ export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof list
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListCustomerSentEmailsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -1365,7 +1367,7 @@ export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof list
  * @summary List emails sent to the customer
  */
 
-export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomerSentEmails<TData = Awaited<ReturnType<typeof listCustomerSentEmails>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListCustomerSentEmailsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerSentEmails>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -1442,7 +1444,7 @@ export const getGetCustomerUsageQueryKey = (id: string,
     }
 
 
-export const getGetCustomerUsageQueryOptions = <TData = Awaited<ReturnType<typeof getCustomerUsage>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string,
+export const getGetCustomerUsageQueryOptions = <TData = Awaited<ReturnType<typeof getCustomerUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string,
     params?: GetCustomerUsageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
@@ -1462,10 +1464,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetCustomerUsageQueryResult = NonNullable<Awaited<ReturnType<typeof getCustomerUsage>>>
-export type GetCustomerUsageQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetCustomerUsageQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetCustomerUsage<TData = Awaited<ReturnType<typeof getCustomerUsage>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomerUsage<TData = Awaited<ReturnType<typeof getCustomerUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string,
     params: undefined |  GetCustomerUsageParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerUsage>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -1476,7 +1478,7 @@ export function useGetCustomerUsage<TData = Awaited<ReturnType<typeof getCustome
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCustomerUsage<TData = Awaited<ReturnType<typeof getCustomerUsage>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomerUsage<TData = Awaited<ReturnType<typeof getCustomerUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string,
     params?: GetCustomerUsageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerUsage>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -1487,7 +1489,7 @@ export function useGetCustomerUsage<TData = Awaited<ReturnType<typeof getCustome
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCustomerUsage<TData = Awaited<ReturnType<typeof getCustomerUsage>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomerUsage<TData = Awaited<ReturnType<typeof getCustomerUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string,
     params?: GetCustomerUsageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -1496,7 +1498,7 @@ export function useGetCustomerUsage<TData = Awaited<ReturnType<typeof getCustome
  * @summary Get the customer's usage and cost for a period
  */
 
-export function useGetCustomerUsage<TData = Awaited<ReturnType<typeof getCustomerUsage>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomerUsage<TData = Awaited<ReturnType<typeof getCustomerUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string,
     params?: GetCustomerUsageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -1551,7 +1553,7 @@ export const getGetCustomerOverviewQueryKey = (customerId: string,) => {
     }
 
 
-export const getGetCustomerOverviewQueryOptions = <TData = Awaited<ReturnType<typeof getCustomerOverview>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerOverview>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetCustomerOverviewQueryOptions = <TData = Awaited<ReturnType<typeof getCustomerOverview>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerOverview>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -1570,10 +1572,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetCustomerOverviewQueryResult = NonNullable<Awaited<ReturnType<typeof getCustomerOverview>>>
-export type GetCustomerOverviewQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetCustomerOverviewQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetCustomerOverview<TData = Awaited<ReturnType<typeof getCustomerOverview>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomerOverview<TData = Awaited<ReturnType<typeof getCustomerOverview>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerOverview>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getCustomerOverview>>,
@@ -1583,7 +1585,7 @@ export function useGetCustomerOverview<TData = Awaited<ReturnType<typeof getCust
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCustomerOverview<TData = Awaited<ReturnType<typeof getCustomerOverview>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomerOverview<TData = Awaited<ReturnType<typeof getCustomerOverview>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerOverview>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getCustomerOverview>>,
@@ -1593,7 +1595,7 @@ export function useGetCustomerOverview<TData = Awaited<ReturnType<typeof getCust
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCustomerOverview<TData = Awaited<ReturnType<typeof getCustomerOverview>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomerOverview<TData = Awaited<ReturnType<typeof getCustomerOverview>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerOverview>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -1601,7 +1603,7 @@ export function useGetCustomerOverview<TData = Awaited<ReturnType<typeof getCust
  * @summary Get a customer overview
  */
 
-export function useGetCustomerOverview<TData = Awaited<ReturnType<typeof getCustomerOverview>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCustomerOverview<TData = Awaited<ReturnType<typeof getCustomerOverview>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerOverview>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -1664,7 +1666,7 @@ export const getListCustomerPaymentMethodsQueryKey = (customerId: string,
     }
 
 
-export const getListCustomerPaymentMethodsQueryOptions = <TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(customerId: string,
+export const getListCustomerPaymentMethodsQueryOptions = <TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(customerId: string,
     params?: ListCustomerPaymentMethodsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
@@ -1684,10 +1686,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCustomerPaymentMethodsQueryResult = NonNullable<Awaited<ReturnType<typeof listCustomerPaymentMethods>>>
-export type ListCustomerPaymentMethodsQueryError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse
+export type ListCustomerPaymentMethodsQueryError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  customerId: string,
     params: undefined |  ListCustomerPaymentMethodsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -1698,7 +1700,7 @@ export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  customerId: string,
     params?: ListCustomerPaymentMethodsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -1709,7 +1711,7 @@ export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  customerId: string,
     params?: ListCustomerPaymentMethodsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -1718,7 +1720,7 @@ export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof 
  * @summary List the customer's payment methods
  */
 
-export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCustomerPaymentMethods<TData = Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  customerId: string,
     params?: ListCustomerPaymentMethodsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCustomerPaymentMethods>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -1779,7 +1781,7 @@ export const sendCustomerPaymentSetupEmail = async (customerId: string,
 
 
 
-export const getSendCustomerPaymentSetupEmailMutationOptions = <TError = Error | UnauthorizedResponse,
+export const getSendCustomerPaymentSetupEmailMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendCustomerPaymentSetupEmail>>, TError,{customerId: string;data?: SendCustomerPaymentSetupEmailBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof sendCustomerPaymentSetupEmail>>, TError,{customerId: string;data?: SendCustomerPaymentSetupEmailBody}, TContext> => {
 
@@ -1808,12 +1810,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SendCustomerPaymentSetupEmailMutationResult = NonNullable<Awaited<ReturnType<typeof sendCustomerPaymentSetupEmail>>>
     export type SendCustomerPaymentSetupEmailMutationBody = SendCustomerPaymentSetupEmailBody | undefined
-    export type SendCustomerPaymentSetupEmailMutationError = Error | UnauthorizedResponse
+    export type SendCustomerPaymentSetupEmailMutationError = Error | UnauthorizedResponse | ForbiddenResponse
 
     /**
  * @summary Email the customer a link to add a payment method
  */
-export const useSendCustomerPaymentSetupEmail = <TError = Error | UnauthorizedResponse,
+export const useSendCustomerPaymentSetupEmail = <TError = Error | UnauthorizedResponse | ForbiddenResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendCustomerPaymentSetupEmail>>, TError,{customerId: string;data?: SendCustomerPaymentSetupEmailBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof sendCustomerPaymentSetupEmail>>,
@@ -1860,7 +1862,7 @@ export const createCustomerPaymentSetupSession = async (customerId: string,
 
 
 
-export const getCreateCustomerPaymentSetupSessionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCreateCustomerPaymentSetupSessionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCustomerPaymentSetupSession>>, TError,{customerId: string;data?: CreateCustomerPaymentSetupSessionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createCustomerPaymentSetupSession>>, TError,{customerId: string;data?: CreateCustomerPaymentSetupSessionBody}, TContext> => {
 
@@ -1889,12 +1891,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateCustomerPaymentSetupSessionMutationResult = NonNullable<Awaited<ReturnType<typeof createCustomerPaymentSetupSession>>>
     export type CreateCustomerPaymentSetupSessionMutationBody = CreateCustomerPaymentSetupSessionBody | undefined
-    export type CreateCustomerPaymentSetupSessionMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type CreateCustomerPaymentSetupSessionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create a link for the customer to add a payment method
  */
-export const useCreateCustomerPaymentSetupSession = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCreateCustomerPaymentSetupSession = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCustomerPaymentSetupSession>>, TError,{customerId: string;data?: CreateCustomerPaymentSetupSessionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createCustomerPaymentSetupSession>>,
@@ -1939,7 +1941,7 @@ export const detachCustomerPaymentMethod = async (customerId: string,
 
 
 
-export const getDetachCustomerPaymentMethodMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getDetachCustomerPaymentMethodMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof detachCustomerPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof detachCustomerPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext> => {
 
@@ -1968,12 +1970,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DetachCustomerPaymentMethodMutationResult = NonNullable<Awaited<ReturnType<typeof detachCustomerPaymentMethod>>>
 
-    export type DetachCustomerPaymentMethodMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type DetachCustomerPaymentMethodMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Detach a payment method
  */
-export const useDetachCustomerPaymentMethod = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useDetachCustomerPaymentMethod = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof detachCustomerPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof detachCustomerPaymentMethod>>,
@@ -2016,7 +2018,7 @@ export const setCustomerDefaultPaymentMethod = async (customerId: string,
 
 
 
-export const getSetCustomerDefaultPaymentMethodMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getSetCustomerDefaultPaymentMethodMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext> => {
 
@@ -2045,12 +2047,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SetCustomerDefaultPaymentMethodMutationResult = NonNullable<Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>>
 
-    export type SetCustomerDefaultPaymentMethodMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type SetCustomerDefaultPaymentMethodMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Make a payment method the default
  */
-export const useSetCustomerDefaultPaymentMethod = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useSetCustomerDefaultPaymentMethod = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>,
@@ -2420,7 +2422,7 @@ export const createHostedInvoiceCheckout = async (token: string, options?: Reque
 
 
 
-export const getCreateHostedInvoiceCheckoutMutationOptions = <TError = Error,
+export const getCreateHostedInvoiceCheckoutMutationOptions = <TError = InvalidBodyResponse | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext> => {
 
@@ -2449,12 +2451,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateHostedInvoiceCheckoutMutationResult = NonNullable<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>>
 
-    export type CreateHostedInvoiceCheckoutMutationError = Error
+    export type CreateHostedInvoiceCheckoutMutationError = InvalidBodyResponse | Error
 
     /**
  * @summary Start paying the invoice in Stripe Checkout
  */
-export const useCreateHostedInvoiceCheckout = <TError = Error,
+export const useCreateHostedInvoiceCheckout = <TError = InvalidBodyResponse | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createHostedInvoiceCheckout>>,
@@ -2684,7 +2686,7 @@ export const createMeter = async (createMeterBody: CreateMeterBody, options?: Re
 
 
 
-export const getCreateMeterMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCreateMeterMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createMeter>>, TError,{data: CreateMeterBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createMeter>>, TError,{data: CreateMeterBody}, TContext> => {
 
@@ -2713,12 +2715,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateMeterMutationResult = NonNullable<Awaited<ReturnType<typeof createMeter>>>
     export type CreateMeterMutationBody = CreateMeterBody
-    export type CreateMeterMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type CreateMeterMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create a meter
  */
-export const useCreateMeter = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCreateMeter = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createMeter>>, TError,{data: CreateMeterBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createMeter>>,
@@ -2771,7 +2773,7 @@ export const getListMetersQueryKey = (params?: ListMetersParams,) => {
     }
 
 
-export const getListMetersQueryOptions = <TData = Awaited<ReturnType<typeof listMeters>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListMetersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMeters>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListMetersQueryOptions = <TData = Awaited<ReturnType<typeof listMeters>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListMetersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMeters>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -2790,10 +2792,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListMetersQueryResult = NonNullable<Awaited<ReturnType<typeof listMeters>>>
-export type ListMetersQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListMetersQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListMeters<TData = Awaited<ReturnType<typeof listMeters>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListMeters<TData = Awaited<ReturnType<typeof listMeters>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListMetersParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMeters>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listMeters>>,
@@ -2803,7 +2805,7 @@ export function useListMeters<TData = Awaited<ReturnType<typeof listMeters>>, TE
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListMeters<TData = Awaited<ReturnType<typeof listMeters>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListMeters<TData = Awaited<ReturnType<typeof listMeters>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListMetersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMeters>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listMeters>>,
@@ -2813,7 +2815,7 @@ export function useListMeters<TData = Awaited<ReturnType<typeof listMeters>>, TE
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListMeters<TData = Awaited<ReturnType<typeof listMeters>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListMeters<TData = Awaited<ReturnType<typeof listMeters>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListMetersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMeters>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -2821,7 +2823,7 @@ export function useListMeters<TData = Awaited<ReturnType<typeof listMeters>>, TE
  * @summary List meters
  */
 
-export function useListMeters<TData = Awaited<ReturnType<typeof listMeters>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListMeters<TData = Awaited<ReturnType<typeof listMeters>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListMetersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMeters>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -2876,7 +2878,7 @@ export const updateMeter = async (id: string,
 
 
 
-export const getUpdateMeterMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getUpdateMeterMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMeter>>, TError,{id: string;data: UpdateMeterBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateMeter>>, TError,{id: string;data: UpdateMeterBody}, TContext> => {
 
@@ -2905,12 +2907,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateMeterMutationResult = NonNullable<Awaited<ReturnType<typeof updateMeter>>>
     export type UpdateMeterMutationBody = UpdateMeterBody
-    export type UpdateMeterMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type UpdateMeterMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Update a meter
  */
-export const useUpdateMeter = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useUpdateMeter = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMeter>>, TError,{id: string;data: UpdateMeterBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateMeter>>,
@@ -2954,7 +2956,7 @@ export const getGetMeterQueryKey = (id: string,) => {
     }
 
 
-export const getGetMeterQueryOptions = <TData = Awaited<ReturnType<typeof getMeter>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMeter>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetMeterQueryOptions = <TData = Awaited<ReturnType<typeof getMeter>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMeter>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -2973,10 +2975,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetMeterQueryResult = NonNullable<Awaited<ReturnType<typeof getMeter>>>
-export type GetMeterQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetMeterQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetMeter<TData = Awaited<ReturnType<typeof getMeter>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetMeter<TData = Awaited<ReturnType<typeof getMeter>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMeter>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getMeter>>,
@@ -2986,7 +2988,7 @@ export function useGetMeter<TData = Awaited<ReturnType<typeof getMeter>>, TError
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetMeter<TData = Awaited<ReturnType<typeof getMeter>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetMeter<TData = Awaited<ReturnType<typeof getMeter>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMeter>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getMeter>>,
@@ -2996,7 +2998,7 @@ export function useGetMeter<TData = Awaited<ReturnType<typeof getMeter>>, TError
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetMeter<TData = Awaited<ReturnType<typeof getMeter>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetMeter<TData = Awaited<ReturnType<typeof getMeter>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMeter>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -3004,7 +3006,7 @@ export function useGetMeter<TData = Awaited<ReturnType<typeof getMeter>>, TError
  * @summary Get a meter
  */
 
-export function useGetMeter<TData = Awaited<ReturnType<typeof getMeter>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetMeter<TData = Awaited<ReturnType<typeof getMeter>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMeter>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -3080,7 +3082,7 @@ export const createCreditNote = async (createCreditNoteBody: CreateCreditNoteBod
 
 
 
-export const getCreateCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCreateCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCreditNote>>, TError,{data: CreateCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createCreditNote>>, TError,{data: CreateCreditNoteBody}, TContext> => {
 
@@ -3109,12 +3111,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateCreditNoteMutationResult = NonNullable<Awaited<ReturnType<typeof createCreditNote>>>
     export type CreateCreditNoteMutationBody = CreateCreditNoteBody
-    export type CreateCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type CreateCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create a credit note
  */
-export const useCreateCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCreateCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCreditNote>>, TError,{data: CreateCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createCreditNote>>,
@@ -3168,7 +3170,7 @@ export const getListCreditNotesQueryKey = (params?: ListCreditNotesParams,) => {
     }
 
 
-export const getListCreditNotesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListCreditNotesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -3187,10 +3189,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCreditNotesQueryResult = NonNullable<Awaited<ReturnType<typeof listCreditNotes>>>
-export type ListCreditNotesQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListCreditNotesQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListCreditNotesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCreditNotes>>,
@@ -3200,7 +3202,7 @@ export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditN
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCreditNotes>>,
@@ -3210,7 +3212,7 @@ export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditN
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -3218,7 +3220,7 @@ export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditN
  * @summary List credit notes
  */
 
-export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditNotes<TData = Awaited<ReturnType<typeof listCreditNotes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListCreditNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditNotes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -3290,7 +3292,7 @@ export const getGetCreditGrantsQueryKey = (customerId: string,
     }
 
 
-export const getGetCreditGrantsQueryOptions = <TData = Awaited<ReturnType<typeof getCreditGrants>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(customerId: string,
+export const getGetCreditGrantsQueryOptions = <TData = Awaited<ReturnType<typeof getCreditGrants>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(customerId: string,
     params?: GetCreditGrantsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditGrants>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
@@ -3310,10 +3312,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetCreditGrantsQueryResult = NonNullable<Awaited<ReturnType<typeof getCreditGrants>>>
-export type GetCreditGrantsQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetCreditGrantsQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetCreditGrants<TData = Awaited<ReturnType<typeof getCreditGrants>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditGrants<TData = Awaited<ReturnType<typeof getCreditGrants>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string,
     params: undefined |  GetCreditGrantsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditGrants>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -3324,7 +3326,7 @@ export function useGetCreditGrants<TData = Awaited<ReturnType<typeof getCreditGr
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCreditGrants<TData = Awaited<ReturnType<typeof getCreditGrants>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditGrants<TData = Awaited<ReturnType<typeof getCreditGrants>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string,
     params?: GetCreditGrantsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditGrants>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -3335,7 +3337,7 @@ export function useGetCreditGrants<TData = Awaited<ReturnType<typeof getCreditGr
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCreditGrants<TData = Awaited<ReturnType<typeof getCreditGrants>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditGrants<TData = Awaited<ReturnType<typeof getCreditGrants>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string,
     params?: GetCreditGrantsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditGrants>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -3344,7 +3346,7 @@ export function useGetCreditGrants<TData = Awaited<ReturnType<typeof getCreditGr
  * @summary List a customer's credit grants
  */
 
-export function useGetCreditGrants<TData = Awaited<ReturnType<typeof getCreditGrants>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditGrants<TData = Awaited<ReturnType<typeof getCreditGrants>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string,
     params?: GetCreditGrantsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditGrants>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -3401,7 +3403,7 @@ export const adjustCredits = async (adjustCreditsBody: AdjustCreditsBody, option
 
 
 
-export const getAdjustCreditsMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getAdjustCreditsMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adjustCredits>>, TError,{data: AdjustCreditsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof adjustCredits>>, TError,{data: AdjustCreditsBody}, TContext> => {
 
@@ -3430,12 +3432,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AdjustCreditsMutationResult = NonNullable<Awaited<ReturnType<typeof adjustCredits>>>
     export type AdjustCreditsMutationBody = AdjustCreditsBody
-    export type AdjustCreditsMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type AdjustCreditsMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Add or remove credit
  */
-export const useAdjustCredits = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useAdjustCredits = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adjustCredits>>, TError,{data: AdjustCreditsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof adjustCredits>>,
@@ -3491,7 +3493,7 @@ export const getListCreditBalancesQueryKey = (params?: ListCreditBalancesParams,
     }
 
 
-export const getListCreditBalancesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListCreditBalancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListCreditBalancesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListCreditBalancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -3510,10 +3512,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCreditBalancesQueryResult = NonNullable<Awaited<ReturnType<typeof listCreditBalances>>>
-export type ListCreditBalancesQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListCreditBalancesQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListCreditBalancesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCreditBalances>>,
@@ -3523,7 +3525,7 @@ export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCred
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListCreditBalancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCreditBalances>>,
@@ -3533,7 +3535,7 @@ export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCred
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListCreditBalancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -3541,7 +3543,7 @@ export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCred
  * @summary List credit balances
  */
 
-export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListCreditBalancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -3606,7 +3608,7 @@ export const getListCreditLedgerEntriesQueryKey = (customerId: string,
     }
 
 
-export const getListCreditLedgerEntriesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(customerId: string,
+export const getListCreditLedgerEntriesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(customerId: string,
     params?: ListCreditLedgerEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
@@ -3626,10 +3628,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCreditLedgerEntriesQueryResult = NonNullable<Awaited<ReturnType<typeof listCreditLedgerEntries>>>
-export type ListCreditLedgerEntriesQueryError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse
+export type ListCreditLedgerEntriesQueryError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  customerId: string,
     params: undefined |  ListCreditLedgerEntriesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -3640,7 +3642,7 @@ export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof lis
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  customerId: string,
     params?: ListCreditLedgerEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -3651,7 +3653,7 @@ export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof lis
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  customerId: string,
     params?: ListCreditLedgerEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -3660,7 +3662,7 @@ export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof lis
  * @summary List a customer's credit ledger
  */
 
-export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditLedgerEntries<TData = Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  customerId: string,
     params?: ListCreditLedgerEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditLedgerEntries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -3717,7 +3719,7 @@ export const createWebhookEndpoint = async (createWebhookEndpointBody: CreateWeb
 
 
 
-export const getCreateWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCreateWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createWebhookEndpoint>>, TError,{data: CreateWebhookEndpointBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createWebhookEndpoint>>, TError,{data: CreateWebhookEndpointBody}, TContext> => {
 
@@ -3746,12 +3748,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateWebhookEndpointMutationResult = NonNullable<Awaited<ReturnType<typeof createWebhookEndpoint>>>
     export type CreateWebhookEndpointMutationBody = CreateWebhookEndpointBody
-    export type CreateWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type CreateWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create a webhook endpoint
  */
-export const useCreateWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCreateWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createWebhookEndpoint>>, TError,{data: CreateWebhookEndpointBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createWebhookEndpoint>>,
@@ -3805,7 +3807,7 @@ export const getListWebhookEndpointsQueryKey = (params?: ListWebhookEndpointsPar
     }
 
 
-export const getListWebhookEndpointsQueryOptions = <TData = Awaited<ReturnType<typeof listWebhookEndpoints>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListWebhookEndpointsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpoints>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListWebhookEndpointsQueryOptions = <TData = Awaited<ReturnType<typeof listWebhookEndpoints>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListWebhookEndpointsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpoints>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -3824,10 +3826,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListWebhookEndpointsQueryResult = NonNullable<Awaited<ReturnType<typeof listWebhookEndpoints>>>
-export type ListWebhookEndpointsQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListWebhookEndpointsQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListWebhookEndpoints<TData = Awaited<ReturnType<typeof listWebhookEndpoints>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListWebhookEndpoints<TData = Awaited<ReturnType<typeof listWebhookEndpoints>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListWebhookEndpointsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpoints>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listWebhookEndpoints>>,
@@ -3837,7 +3839,7 @@ export function useListWebhookEndpoints<TData = Awaited<ReturnType<typeof listWe
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListWebhookEndpoints<TData = Awaited<ReturnType<typeof listWebhookEndpoints>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListWebhookEndpoints<TData = Awaited<ReturnType<typeof listWebhookEndpoints>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListWebhookEndpointsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpoints>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listWebhookEndpoints>>,
@@ -3847,7 +3849,7 @@ export function useListWebhookEndpoints<TData = Awaited<ReturnType<typeof listWe
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListWebhookEndpoints<TData = Awaited<ReturnType<typeof listWebhookEndpoints>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListWebhookEndpoints<TData = Awaited<ReturnType<typeof listWebhookEndpoints>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListWebhookEndpointsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpoints>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -3855,7 +3857,7 @@ export function useListWebhookEndpoints<TData = Awaited<ReturnType<typeof listWe
  * @summary List webhook endpoints
  */
 
-export function useListWebhookEndpoints<TData = Awaited<ReturnType<typeof listWebhookEndpoints>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListWebhookEndpoints<TData = Awaited<ReturnType<typeof listWebhookEndpoints>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListWebhookEndpointsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpoints>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -3907,7 +3909,7 @@ export const getGetWebhookEndpointQueryKey = (id: string,) => {
     }
 
 
-export const getGetWebhookEndpointQueryOptions = <TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpoint>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetWebhookEndpointQueryOptions = <TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpoint>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -3926,10 +3928,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetWebhookEndpointQueryResult = NonNullable<Awaited<ReturnType<typeof getWebhookEndpoint>>>
-export type GetWebhookEndpointQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetWebhookEndpointQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpoint>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getWebhookEndpoint>>,
@@ -3939,7 +3941,7 @@ export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebho
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpoint>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getWebhookEndpoint>>,
@@ -3949,7 +3951,7 @@ export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebho
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpoint>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -3957,7 +3959,7 @@ export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebho
  * @summary Get a webhook endpoint
  */
 
-export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetWebhookEndpoint<TData = Awaited<ReturnType<typeof getWebhookEndpoint>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpoint>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -4011,7 +4013,7 @@ export const updateWebhookEndpoint = async (id: string,
 
 
 
-export const getUpdateWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getUpdateWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateWebhookEndpoint>>, TError,{id: string;data: UpdateWebhookEndpointBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateWebhookEndpoint>>, TError,{id: string;data: UpdateWebhookEndpointBody}, TContext> => {
 
@@ -4040,12 +4042,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateWebhookEndpointMutationResult = NonNullable<Awaited<ReturnType<typeof updateWebhookEndpoint>>>
     export type UpdateWebhookEndpointMutationBody = UpdateWebhookEndpointBody
-    export type UpdateWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type UpdateWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Update a webhook endpoint
  */
-export const useUpdateWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useUpdateWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateWebhookEndpoint>>, TError,{id: string;data: UpdateWebhookEndpointBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateWebhookEndpoint>>,
@@ -4087,7 +4089,7 @@ export const deleteWebhookEndpoint = async (id: string, options?: RequestInit): 
 
 
 
-export const getDeleteWebhookEndpointMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getDeleteWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteWebhookEndpoint>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteWebhookEndpoint>>, TError,{id: string}, TContext> => {
 
@@ -4116,12 +4118,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteWebhookEndpointMutationResult = NonNullable<Awaited<ReturnType<typeof deleteWebhookEndpoint>>>
 
-    export type DeleteWebhookEndpointMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type DeleteWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Delete a webhook endpoint
  */
-export const useDeleteWebhookEndpoint = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useDeleteWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteWebhookEndpoint>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteWebhookEndpoint>>,
@@ -4163,7 +4165,7 @@ export const rotateWebhookEndpointSecret = async (id: string, options?: RequestI
 
 
 
-export const getRotateWebhookEndpointSecretMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRotateWebhookEndpointSecretMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>, TError,{id: string}, TContext> => {
 
@@ -4192,12 +4194,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RotateWebhookEndpointSecretMutationResult = NonNullable<Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>>
 
-    export type RotateWebhookEndpointSecretMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type RotateWebhookEndpointSecretMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Rotate a webhook endpoint's signing secret
  */
-export const useRotateWebhookEndpointSecret = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRotateWebhookEndpointSecret = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>,
@@ -4254,7 +4256,7 @@ export const getListWebhookEndpointDeliveriesQueryKey = (id: string,
     }
 
 
-export const getListWebhookEndpointDeliveriesQueryOptions = <TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(id: string,
+export const getListWebhookEndpointDeliveriesQueryOptions = <TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(id: string,
     params?: ListWebhookEndpointDeliveriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
@@ -4274,10 +4276,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListWebhookEndpointDeliveriesQueryResult = NonNullable<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>>
-export type ListWebhookEndpointDeliveriesQueryError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse
+export type ListWebhookEndpointDeliveriesQueryError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params: undefined |  ListWebhookEndpointDeliveriesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -4288,7 +4290,7 @@ export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<type
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListWebhookEndpointDeliveriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -4299,7 +4301,7 @@ export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<type
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListWebhookEndpointDeliveriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -4308,7 +4310,7 @@ export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<type
  * @summary List an endpoint's deliveries
  */
 
-export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListWebhookEndpointDeliveries<TData = Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListWebhookEndpointDeliveriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEndpointDeliveries>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -4362,7 +4364,7 @@ export const replayWebhookDelivery = async (id: string,
 
 
 
-export const getReplayWebhookDeliveryMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getReplayWebhookDeliveryMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replayWebhookDelivery>>, TError,{id: string;deliveryID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof replayWebhookDelivery>>, TError,{id: string;deliveryID: string}, TContext> => {
 
@@ -4391,12 +4393,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ReplayWebhookDeliveryMutationResult = NonNullable<Awaited<ReturnType<typeof replayWebhookDelivery>>>
 
-    export type ReplayWebhookDeliveryMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type ReplayWebhookDeliveryMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Resend one delivery to its endpoint
  */
-export const useReplayWebhookDelivery = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useReplayWebhookDelivery = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replayWebhookDelivery>>, TError,{id: string;deliveryID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof replayWebhookDelivery>>,
@@ -4450,7 +4452,7 @@ export const getGetWebhookEndpointStatsQueryKey = (params?: GetWebhookEndpointSt
     }
 
 
-export const getGetWebhookEndpointStatsQueryOptions = <TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: GetWebhookEndpointStatsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetWebhookEndpointStatsQueryOptions = <TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: GetWebhookEndpointStatsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -4469,10 +4471,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetWebhookEndpointStatsQueryResult = NonNullable<Awaited<ReturnType<typeof getWebhookEndpointStats>>>
-export type GetWebhookEndpointStatsQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type GetWebhookEndpointStatsQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  GetWebhookEndpointStatsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getWebhookEndpointStats>>,
@@ -4482,7 +4484,7 @@ export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof get
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: GetWebhookEndpointStatsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getWebhookEndpointStats>>,
@@ -4492,7 +4494,7 @@ export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof get
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: GetWebhookEndpointStatsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -4500,7 +4502,7 @@ export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof get
  * @summary Get delivery counts per webhook endpoint
  */
 
-export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useGetWebhookEndpointStats<TData = Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: GetWebhookEndpointStatsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWebhookEndpointStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -4561,7 +4563,7 @@ export const getListWebhookEventsQueryKey = (params?: ListWebhookEventsParams,) 
     }
 
 
-export const getListWebhookEventsQueryOptions = <TData = Awaited<ReturnType<typeof listWebhookEvents>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListWebhookEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListWebhookEventsQueryOptions = <TData = Awaited<ReturnType<typeof listWebhookEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListWebhookEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -4580,10 +4582,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListWebhookEventsQueryResult = NonNullable<Awaited<ReturnType<typeof listWebhookEvents>>>
-export type ListWebhookEventsQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListWebhookEventsQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListWebhookEvents<TData = Awaited<ReturnType<typeof listWebhookEvents>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListWebhookEvents<TData = Awaited<ReturnType<typeof listWebhookEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListWebhookEventsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEvents>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listWebhookEvents>>,
@@ -4593,7 +4595,7 @@ export function useListWebhookEvents<TData = Awaited<ReturnType<typeof listWebho
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListWebhookEvents<TData = Awaited<ReturnType<typeof listWebhookEvents>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListWebhookEvents<TData = Awaited<ReturnType<typeof listWebhookEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListWebhookEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEvents>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listWebhookEvents>>,
@@ -4603,7 +4605,7 @@ export function useListWebhookEvents<TData = Awaited<ReturnType<typeof listWebho
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListWebhookEvents<TData = Awaited<ReturnType<typeof listWebhookEvents>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListWebhookEvents<TData = Awaited<ReturnType<typeof listWebhookEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListWebhookEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -4611,7 +4613,7 @@ export function useListWebhookEvents<TData = Awaited<ReturnType<typeof listWebho
  * @summary List webhook events
  */
 
-export function useListWebhookEvents<TData = Awaited<ReturnType<typeof listWebhookEvents>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListWebhookEvents<TData = Awaited<ReturnType<typeof listWebhookEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListWebhookEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -4772,7 +4774,7 @@ export const replayWebhookEvent = async (id: string, options?: RequestInit): Pro
 
 
 
-export const getReplayWebhookEventMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getReplayWebhookEventMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replayWebhookEvent>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof replayWebhookEvent>>, TError,{id: string}, TContext> => {
 
@@ -4801,12 +4803,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ReplayWebhookEventMutationResult = NonNullable<Awaited<ReturnType<typeof replayWebhookEvent>>>
 
-    export type ReplayWebhookEventMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type ReplayWebhookEventMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Replay an event to all matching endpoints
  */
-export const useReplayWebhookEvent = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useReplayWebhookEvent = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replayWebhookEvent>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof replayWebhookEvent>>,
@@ -5135,7 +5137,7 @@ export const createPlan = async (createPlanBody: CreatePlanBody, options?: Reque
 
 
 
-export const getCreatePlanMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCreatePlanMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPlan>>, TError,{data: CreatePlanBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPlan>>, TError,{data: CreatePlanBody}, TContext> => {
 
@@ -5164,12 +5166,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreatePlanMutationResult = NonNullable<Awaited<ReturnType<typeof createPlan>>>
     export type CreatePlanMutationBody = CreatePlanBody
-    export type CreatePlanMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type CreatePlanMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create a plan
  */
-export const useCreatePlan = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCreatePlan = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPlan>>, TError,{data: CreatePlanBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPlan>>,
@@ -5221,7 +5223,7 @@ export const getListPlansQueryKey = (params?: ListPlansParams,) => {
     }
 
 
-export const getListPlansQueryOptions = <TData = Awaited<ReturnType<typeof listPlans>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListPlansParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlans>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListPlansQueryOptions = <TData = Awaited<ReturnType<typeof listPlans>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListPlansParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlans>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -5240,10 +5242,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListPlansQueryResult = NonNullable<Awaited<ReturnType<typeof listPlans>>>
-export type ListPlansQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListPlansQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListPlans<TData = Awaited<ReturnType<typeof listPlans>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListPlans<TData = Awaited<ReturnType<typeof listPlans>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListPlansParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlans>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listPlans>>,
@@ -5253,7 +5255,7 @@ export function useListPlans<TData = Awaited<ReturnType<typeof listPlans>>, TErr
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListPlans<TData = Awaited<ReturnType<typeof listPlans>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListPlans<TData = Awaited<ReturnType<typeof listPlans>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListPlansParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlans>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listPlans>>,
@@ -5263,7 +5265,7 @@ export function useListPlans<TData = Awaited<ReturnType<typeof listPlans>>, TErr
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListPlans<TData = Awaited<ReturnType<typeof listPlans>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListPlans<TData = Awaited<ReturnType<typeof listPlans>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListPlansParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlans>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -5271,7 +5273,7 @@ export function useListPlans<TData = Awaited<ReturnType<typeof listPlans>>, TErr
  * @summary List plans
  */
 
-export function useListPlans<TData = Awaited<ReturnType<typeof listPlans>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListPlans<TData = Awaited<ReturnType<typeof listPlans>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListPlansParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlans>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -5322,7 +5324,7 @@ export const getGetPlanQueryKey = (id: string,) => {
     }
 
 
-export const getGetPlanQueryOptions = <TData = Awaited<ReturnType<typeof getPlan>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPlan>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetPlanQueryOptions = <TData = Awaited<ReturnType<typeof getPlan>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPlan>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -5341,10 +5343,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetPlanQueryResult = NonNullable<Awaited<ReturnType<typeof getPlan>>>
-export type GetPlanQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetPlanQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetPlan<TData = Awaited<ReturnType<typeof getPlan>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetPlan<TData = Awaited<ReturnType<typeof getPlan>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPlan>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getPlan>>,
@@ -5354,7 +5356,7 @@ export function useGetPlan<TData = Awaited<ReturnType<typeof getPlan>>, TError =
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetPlan<TData = Awaited<ReturnType<typeof getPlan>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetPlan<TData = Awaited<ReturnType<typeof getPlan>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPlan>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getPlan>>,
@@ -5364,7 +5366,7 @@ export function useGetPlan<TData = Awaited<ReturnType<typeof getPlan>>, TError =
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetPlan<TData = Awaited<ReturnType<typeof getPlan>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetPlan<TData = Awaited<ReturnType<typeof getPlan>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPlan>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -5372,7 +5374,7 @@ export function useGetPlan<TData = Awaited<ReturnType<typeof getPlan>>, TError =
  * @summary Get a plan
  */
 
-export function useGetPlan<TData = Awaited<ReturnType<typeof getPlan>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetPlan<TData = Awaited<ReturnType<typeof getPlan>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPlan>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -5428,7 +5430,7 @@ export const updatePlan = async (id: string,
 
 
 
-export const getUpdatePlanMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getUpdatePlanMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlan>>, TError,{id: string;data: UpdatePlanBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updatePlan>>, TError,{id: string;data: UpdatePlanBody}, TContext> => {
 
@@ -5457,12 +5459,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdatePlanMutationResult = NonNullable<Awaited<ReturnType<typeof updatePlan>>>
     export type UpdatePlanMutationBody = UpdatePlanBody
-    export type UpdatePlanMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type UpdatePlanMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Update a plan
  */
-export const useUpdatePlan = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useUpdatePlan = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlan>>, TError,{id: string;data: UpdatePlanBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updatePlan>>,
@@ -5517,7 +5519,7 @@ export const getListPlanPricesQueryKey = (id: string,
     }
 
 
-export const getListPlanPricesQueryOptions = <TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(id: string,
+export const getListPlanPricesQueryOptions = <TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(id: string,
     params?: ListPlanPricesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
@@ -5537,10 +5539,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListPlanPricesQueryResult = NonNullable<Awaited<ReturnType<typeof listPlanPrices>>>
-export type ListPlanPricesQueryError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse
+export type ListPlanPricesQueryError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params: undefined |  ListPlanPricesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -5551,7 +5553,7 @@ export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPric
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListPlanPricesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -5562,7 +5564,7 @@ export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPric
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListPlanPricesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -5571,7 +5573,7 @@ export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPric
  * @summary List a plan's prices
  */
 
-export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListPlanPricesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -5627,7 +5629,7 @@ export const addPlanPrice = async (id: string,
 
 
 
-export const getAddPlanPriceMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getAddPlanPriceMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addPlanPrice>>, TError,{id: string;data: PriceInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof addPlanPrice>>, TError,{id: string;data: PriceInput}, TContext> => {
 
@@ -5656,12 +5658,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AddPlanPriceMutationResult = NonNullable<Awaited<ReturnType<typeof addPlanPrice>>>
     export type AddPlanPriceMutationBody = PriceInput
-    export type AddPlanPriceMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type AddPlanPriceMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Add a price to a plan
  */
-export const useAddPlanPrice = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useAddPlanPrice = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addPlanPrice>>, TError,{id: string;data: PriceInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof addPlanPrice>>,
@@ -5709,7 +5711,7 @@ export const updatePlanPrice = async (id: string,
 
 
 
-export const getUpdatePlanPriceMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getUpdatePlanPriceMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlanPrice>>, TError,{id: string;priceId: string;data: PriceShape}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updatePlanPrice>>, TError,{id: string;priceId: string;data: PriceShape}, TContext> => {
 
@@ -5738,12 +5740,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdatePlanPriceMutationResult = NonNullable<Awaited<ReturnType<typeof updatePlanPrice>>>
     export type UpdatePlanPriceMutationBody = PriceShape
-    export type UpdatePlanPriceMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type UpdatePlanPriceMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Change a price's rate
  */
-export const useUpdatePlanPrice = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useUpdatePlanPrice = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlanPrice>>, TError,{id: string;priceId: string;data: PriceShape}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updatePlanPrice>>,
@@ -5790,7 +5792,7 @@ export const removePlanPrice = async (id: string,
 
 
 
-export const getRemovePlanPriceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRemovePlanPriceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removePlanPrice>>, TError,{id: string;priceId: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof removePlanPrice>>, TError,{id: string;priceId: string}, TContext> => {
 
@@ -5819,12 +5821,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RemovePlanPriceMutationResult = NonNullable<Awaited<ReturnType<typeof removePlanPrice>>>
 
-    export type RemovePlanPriceMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type RemovePlanPriceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Remove a price from a plan
  */
-export const useRemovePlanPrice = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRemovePlanPrice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removePlanPrice>>, TError,{id: string;priceId: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof removePlanPrice>>,
@@ -5879,7 +5881,7 @@ export const createSubscription = async (createSubscriptionBody: CreateSubscript
 
 
 
-export const getCreateSubscriptionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCreateSubscriptionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSubscription>>, TError,{data: CreateSubscriptionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createSubscription>>, TError,{data: CreateSubscriptionBody}, TContext> => {
 
@@ -5908,12 +5910,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateSubscriptionMutationResult = NonNullable<Awaited<ReturnType<typeof createSubscription>>>
     export type CreateSubscriptionMutationBody = CreateSubscriptionBody
-    export type CreateSubscriptionMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type CreateSubscriptionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create a subscription
  */
-export const useCreateSubscription = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCreateSubscription = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSubscription>>, TError,{data: CreateSubscriptionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createSubscription>>,
@@ -5966,7 +5968,7 @@ export const getListSubscriptionsQueryKey = (params?: ListSubscriptionsParams,) 
     }
 
 
-export const getListSubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListSubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -5985,10 +5987,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListSubscriptionsQueryResult = NonNullable<Awaited<ReturnType<typeof listSubscriptions>>>
-export type ListSubscriptionsQueryError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListSubscriptionsQueryError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListSubscriptionsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listSubscriptions>>,
@@ -5998,7 +6000,7 @@ export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubsc
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listSubscriptions>>,
@@ -6008,7 +6010,7 @@ export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubsc
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -6016,7 +6018,7 @@ export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubsc
  * @summary List subscriptions
  */
 
-export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -6068,7 +6070,7 @@ export const activateSubscription = async (id: string, options?: RequestInit): P
 
 
 
-export const getActivateSubscriptionMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getActivateSubscriptionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateSubscription>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof activateSubscription>>, TError,{id: string}, TContext> => {
 
@@ -6097,12 +6099,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ActivateSubscriptionMutationResult = NonNullable<Awaited<ReturnType<typeof activateSubscription>>>
 
-    export type ActivateSubscriptionMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type ActivateSubscriptionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Activate a draft subscription
  */
-export const useActivateSubscription = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useActivateSubscription = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateSubscription>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof activateSubscription>>,
@@ -6165,7 +6167,7 @@ export const retrySubscriptionBilling = async (id: string, options?: RequestInit
 
 
 
-export const getRetrySubscriptionBillingMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRetrySubscriptionBillingMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retrySubscriptionBilling>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof retrySubscriptionBilling>>, TError,{id: string}, TContext> => {
 
@@ -6194,12 +6196,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RetrySubscriptionBillingMutationResult = NonNullable<Awaited<ReturnType<typeof retrySubscriptionBilling>>>
 
-    export type RetrySubscriptionBillingMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type RetrySubscriptionBillingMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Retry a subscription's failed billing
  */
-export const useRetrySubscriptionBilling = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRetrySubscriptionBilling = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retrySubscriptionBilling>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof retrySubscriptionBilling>>,
@@ -6244,7 +6246,7 @@ export const getGetSubscriptionQueryKey = (id: string,) => {
     }
 
 
-export const getGetSubscriptionQueryOptions = <TData = Awaited<ReturnType<typeof getSubscription>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSubscription>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetSubscriptionQueryOptions = <TData = Awaited<ReturnType<typeof getSubscription>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSubscription>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -6263,10 +6265,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetSubscriptionQueryResult = NonNullable<Awaited<ReturnType<typeof getSubscription>>>
-export type GetSubscriptionQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetSubscriptionQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetSubscription<TData = Awaited<ReturnType<typeof getSubscription>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetSubscription<TData = Awaited<ReturnType<typeof getSubscription>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSubscription>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getSubscription>>,
@@ -6276,7 +6278,7 @@ export function useGetSubscription<TData = Awaited<ReturnType<typeof getSubscrip
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetSubscription<TData = Awaited<ReturnType<typeof getSubscription>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetSubscription<TData = Awaited<ReturnType<typeof getSubscription>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSubscription>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getSubscription>>,
@@ -6286,7 +6288,7 @@ export function useGetSubscription<TData = Awaited<ReturnType<typeof getSubscrip
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetSubscription<TData = Awaited<ReturnType<typeof getSubscription>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetSubscription<TData = Awaited<ReturnType<typeof getSubscription>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSubscription>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -6294,7 +6296,7 @@ export function useGetSubscription<TData = Awaited<ReturnType<typeof getSubscrip
  * @summary Get a subscription
  */
 
-export function useGetSubscription<TData = Awaited<ReturnType<typeof getSubscription>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetSubscription<TData = Awaited<ReturnType<typeof getSubscription>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSubscription>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -6349,7 +6351,7 @@ export const cancelSubscription = async (id: string, options?: RequestInit): Pro
 
 
 
-export const getCancelSubscriptionMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCancelSubscriptionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelSubscription>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof cancelSubscription>>, TError,{id: string}, TContext> => {
 
@@ -6378,12 +6380,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CancelSubscriptionMutationResult = NonNullable<Awaited<ReturnType<typeof cancelSubscription>>>
 
-    export type CancelSubscriptionMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type CancelSubscriptionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Cancel a subscription now
  */
-export const useCancelSubscription = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCancelSubscription = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelSubscription>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof cancelSubscription>>,
@@ -6437,7 +6439,7 @@ export const scheduleSubscriptionCancel = async (id: string,
 
 
 
-export const getScheduleSubscriptionCancelMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getScheduleSubscriptionCancelMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string;data: ScheduleSubscriptionCancelBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string;data: ScheduleSubscriptionCancelBody}, TContext> => {
 
@@ -6466,12 +6468,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ScheduleSubscriptionCancelMutationResult = NonNullable<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>>
     export type ScheduleSubscriptionCancelMutationBody = ScheduleSubscriptionCancelBody
-    export type ScheduleSubscriptionCancelMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type ScheduleSubscriptionCancelMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Schedule a cancel
  */
-export const useScheduleSubscriptionCancel = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useScheduleSubscriptionCancel = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string;data: ScheduleSubscriptionCancelBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof scheduleSubscriptionCancel>>,
@@ -6515,7 +6517,7 @@ export const clearSubscriptionScheduledCancel = async (id: string, options?: Req
 
 
 
-export const getClearSubscriptionScheduledCancelMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getClearSubscriptionScheduledCancelMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>, TError,{id: string}, TContext> => {
 
@@ -6544,12 +6546,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ClearSubscriptionScheduledCancelMutationResult = NonNullable<Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>>
 
-    export type ClearSubscriptionScheduledCancelMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type ClearSubscriptionScheduledCancelMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Clear a scheduled cancel
  */
-export const useClearSubscriptionScheduledCancel = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useClearSubscriptionScheduledCancel = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>,
@@ -6608,7 +6610,7 @@ export const pauseSubscriptionCollection = async (id: string,
 
 
 
-export const getPauseSubscriptionCollectionMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getPauseSubscriptionCollectionMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pauseSubscriptionCollection>>, TError,{id: string;data: PauseSubscriptionCollectionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof pauseSubscriptionCollection>>, TError,{id: string;data: PauseSubscriptionCollectionBody}, TContext> => {
 
@@ -6637,12 +6639,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PauseSubscriptionCollectionMutationResult = NonNullable<Awaited<ReturnType<typeof pauseSubscriptionCollection>>>
     export type PauseSubscriptionCollectionMutationBody = PauseSubscriptionCollectionBody
-    export type PauseSubscriptionCollectionMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type PauseSubscriptionCollectionMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Pause collection
  */
-export const usePauseSubscriptionCollection = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const usePauseSubscriptionCollection = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pauseSubscriptionCollection>>, TError,{id: string;data: PauseSubscriptionCollectionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof pauseSubscriptionCollection>>,
@@ -6686,7 +6688,7 @@ export const resumeSubscriptionCollection = async (id: string, options?: Request
 
 
 
-export const getResumeSubscriptionCollectionMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getResumeSubscriptionCollectionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeSubscriptionCollection>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof resumeSubscriptionCollection>>, TError,{id: string}, TContext> => {
 
@@ -6715,12 +6717,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ResumeSubscriptionCollectionMutationResult = NonNullable<Awaited<ReturnType<typeof resumeSubscriptionCollection>>>
 
-    export type ResumeSubscriptionCollectionMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type ResumeSubscriptionCollectionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Resume collection
  */
-export const useResumeSubscriptionCollection = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useResumeSubscriptionCollection = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeSubscriptionCollection>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof resumeSubscriptionCollection>>,
@@ -6764,7 +6766,7 @@ export const endSubscriptionTrial = async (id: string, options?: RequestInit): P
 
 
 
-export const getEndSubscriptionTrialMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getEndSubscriptionTrialMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endSubscriptionTrial>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof endSubscriptionTrial>>, TError,{id: string}, TContext> => {
 
@@ -6793,12 +6795,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type EndSubscriptionTrialMutationResult = NonNullable<Awaited<ReturnType<typeof endSubscriptionTrial>>>
 
-    export type EndSubscriptionTrialMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type EndSubscriptionTrialMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary End a trial now
  */
-export const useEndSubscriptionTrial = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useEndSubscriptionTrial = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endSubscriptionTrial>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof endSubscriptionTrial>>,
@@ -6842,7 +6844,7 @@ export const extendSubscriptionTrial = async (id: string,
 
 
 
-export const getExtendSubscriptionTrialMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getExtendSubscriptionTrialMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof extendSubscriptionTrial>>, TError,{id: string;data: ExtendSubscriptionTrialBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof extendSubscriptionTrial>>, TError,{id: string;data: ExtendSubscriptionTrialBody}, TContext> => {
 
@@ -6871,12 +6873,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ExtendSubscriptionTrialMutationResult = NonNullable<Awaited<ReturnType<typeof extendSubscriptionTrial>>>
     export type ExtendSubscriptionTrialMutationBody = ExtendSubscriptionTrialBody
-    export type ExtendSubscriptionTrialMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type ExtendSubscriptionTrialMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Extend a trial
  */
-export const useExtendSubscriptionTrial = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useExtendSubscriptionTrial = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof extendSubscriptionTrial>>, TError,{id: string;data: ExtendSubscriptionTrialBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof extendSubscriptionTrial>>,
@@ -6928,7 +6930,7 @@ export const setSubscriptionBillingThresholds = async (id: string,
 
 
 
-export const getSetSubscriptionBillingThresholdsMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getSetSubscriptionBillingThresholdsMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSubscriptionBillingThresholds>>, TError,{id: string;data: SetSubscriptionBillingThresholdsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof setSubscriptionBillingThresholds>>, TError,{id: string;data: SetSubscriptionBillingThresholdsBody}, TContext> => {
 
@@ -6957,12 +6959,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SetSubscriptionBillingThresholdsMutationResult = NonNullable<Awaited<ReturnType<typeof setSubscriptionBillingThresholds>>>
     export type SetSubscriptionBillingThresholdsMutationBody = SetSubscriptionBillingThresholdsBody
-    export type SetSubscriptionBillingThresholdsMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type SetSubscriptionBillingThresholdsMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Set billing thresholds
  */
-export const useSetSubscriptionBillingThresholds = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useSetSubscriptionBillingThresholds = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSubscriptionBillingThresholds>>, TError,{id: string;data: SetSubscriptionBillingThresholdsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setSubscriptionBillingThresholds>>,
@@ -7001,7 +7003,7 @@ export const clearSubscriptionBillingThresholds = async (id: string, options?: R
 
 
 
-export const getClearSubscriptionBillingThresholdsMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getClearSubscriptionBillingThresholdsMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionBillingThresholds>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionBillingThresholds>>, TError,{id: string}, TContext> => {
 
@@ -7030,12 +7032,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ClearSubscriptionBillingThresholdsMutationResult = NonNullable<Awaited<ReturnType<typeof clearSubscriptionBillingThresholds>>>
 
-    export type ClearSubscriptionBillingThresholdsMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type ClearSubscriptionBillingThresholdsMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Clear billing thresholds
  */
-export const useClearSubscriptionBillingThresholds = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useClearSubscriptionBillingThresholds = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionBillingThresholds>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof clearSubscriptionBillingThresholds>>,
@@ -7087,7 +7089,7 @@ export const addSubscriptionItem = async (id: string,
 
 
 
-export const getAddSubscriptionItemMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getAddSubscriptionItemMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addSubscriptionItem>>, TError,{id: string;data: AddSubscriptionItemBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof addSubscriptionItem>>, TError,{id: string;data: AddSubscriptionItemBody}, TContext> => {
 
@@ -7116,12 +7118,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AddSubscriptionItemMutationResult = NonNullable<Awaited<ReturnType<typeof addSubscriptionItem>>>
     export type AddSubscriptionItemMutationBody = AddSubscriptionItemBody
-    export type AddSubscriptionItemMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type AddSubscriptionItemMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Add an item to a subscription
  */
-export const useAddSubscriptionItem = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useAddSubscriptionItem = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addSubscriptionItem>>, TError,{id: string;data: AddSubscriptionItemBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof addSubscriptionItem>>,
@@ -7189,7 +7191,7 @@ export const updateSubscriptionItem = async (id: string,
 
 
 
-export const getUpdateSubscriptionItemMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getUpdateSubscriptionItemMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSubscriptionItem>>, TError,{id: string;itemID: string;data: UpdateSubscriptionItemBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateSubscriptionItem>>, TError,{id: string;itemID: string;data: UpdateSubscriptionItemBody}, TContext> => {
 
@@ -7218,12 +7220,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateSubscriptionItemMutationResult = NonNullable<Awaited<ReturnType<typeof updateSubscriptionItem>>>
     export type UpdateSubscriptionItemMutationBody = UpdateSubscriptionItemBody
-    export type UpdateSubscriptionItemMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type UpdateSubscriptionItemMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Change a subscription item
  */
-export const useUpdateSubscriptionItem = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useUpdateSubscriptionItem = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSubscriptionItem>>, TError,{id: string;itemID: string;data: UpdateSubscriptionItemBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateSubscriptionItem>>,
@@ -7273,7 +7275,7 @@ export const removeSubscriptionItem = async (id: string,
 
 
 
-export const getRemoveSubscriptionItemMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRemoveSubscriptionItemMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeSubscriptionItem>>, TError,{id: string;itemID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof removeSubscriptionItem>>, TError,{id: string;itemID: string}, TContext> => {
 
@@ -7302,12 +7304,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RemoveSubscriptionItemMutationResult = NonNullable<Awaited<ReturnType<typeof removeSubscriptionItem>>>
 
-    export type RemoveSubscriptionItemMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type RemoveSubscriptionItemMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Remove a subscription item
  */
-export const useRemoveSubscriptionItem = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRemoveSubscriptionItem = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeSubscriptionItem>>, TError,{id: string;itemID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof removeSubscriptionItem>>,
@@ -7352,7 +7354,7 @@ export const cancelSubscriptionItemPendingChange = async (id: string,
 
 
 
-export const getCancelSubscriptionItemPendingChangeMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCancelSubscriptionItemPendingChangeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelSubscriptionItemPendingChange>>, TError,{id: string;itemID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof cancelSubscriptionItemPendingChange>>, TError,{id: string;itemID: string}, TContext> => {
 
@@ -7381,12 +7383,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CancelSubscriptionItemPendingChangeMutationResult = NonNullable<Awaited<ReturnType<typeof cancelSubscriptionItemPendingChange>>>
 
-    export type CancelSubscriptionItemPendingChangeMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type CancelSubscriptionItemPendingChangeMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Cancel a scheduled plan change
  */
-export const useCancelSubscriptionItemPendingChange = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCancelSubscriptionItemPendingChange = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelSubscriptionItemPendingChange>>, TError,{id: string;itemID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof cancelSubscriptionItemPendingChange>>,
@@ -7436,7 +7438,7 @@ export const getGetSubscriptionTimelineQueryKey = (id: string,) => {
     }
 
 
-export const getGetSubscriptionTimelineQueryOptions = <TData = Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetSubscriptionTimelineQueryOptions = <TData = Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -7455,10 +7457,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetSubscriptionTimelineQueryResult = NonNullable<Awaited<ReturnType<typeof getSubscriptionTimeline>>>
-export type GetSubscriptionTimelineQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetSubscriptionTimelineQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetSubscriptionTimeline<TData = Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetSubscriptionTimeline<TData = Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getSubscriptionTimeline>>,
@@ -7468,7 +7470,7 @@ export function useGetSubscriptionTimeline<TData = Awaited<ReturnType<typeof get
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetSubscriptionTimeline<TData = Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetSubscriptionTimeline<TData = Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getSubscriptionTimeline>>,
@@ -7478,7 +7480,7 @@ export function useGetSubscriptionTimeline<TData = Awaited<ReturnType<typeof get
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetSubscriptionTimeline<TData = Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetSubscriptionTimeline<TData = Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -7486,7 +7488,7 @@ export function useGetSubscriptionTimeline<TData = Awaited<ReturnType<typeof get
  * @summary Get a subscription's activity timeline
  */
 
-export function useGetSubscriptionTimeline<TData = Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetSubscriptionTimeline<TData = Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -7635,7 +7637,7 @@ export const getListUsageEventsQueryKey = (params?: ListUsageEventsParams,) => {
     }
 
 
-export const getListUsageEventsQueryOptions = <TData = Awaited<ReturnType<typeof listUsageEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(params?: ListUsageEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUsageEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListUsageEventsQueryOptions = <TData = Awaited<ReturnType<typeof listUsageEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(params?: ListUsageEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUsageEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -7654,10 +7656,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListUsageEventsQueryResult = NonNullable<Awaited<ReturnType<typeof listUsageEvents>>>
-export type ListUsageEventsQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type ListUsageEventsQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useListUsageEvents<TData = Awaited<ReturnType<typeof listUsageEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useListUsageEvents<TData = Awaited<ReturnType<typeof listUsageEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params: undefined |  ListUsageEventsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUsageEvents>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listUsageEvents>>,
@@ -7667,7 +7669,7 @@ export function useListUsageEvents<TData = Awaited<ReturnType<typeof listUsageEv
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListUsageEvents<TData = Awaited<ReturnType<typeof listUsageEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useListUsageEvents<TData = Awaited<ReturnType<typeof listUsageEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListUsageEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUsageEvents>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listUsageEvents>>,
@@ -7677,7 +7679,7 @@ export function useListUsageEvents<TData = Awaited<ReturnType<typeof listUsageEv
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListUsageEvents<TData = Awaited<ReturnType<typeof listUsageEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useListUsageEvents<TData = Awaited<ReturnType<typeof listUsageEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListUsageEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUsageEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -7685,7 +7687,7 @@ export function useListUsageEvents<TData = Awaited<ReturnType<typeof listUsageEv
  * @summary List usage events
  */
 
-export function useListUsageEvents<TData = Awaited<ReturnType<typeof listUsageEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useListUsageEvents<TData = Awaited<ReturnType<typeof listUsageEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListUsageEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUsageEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -7834,7 +7836,7 @@ export const backfillUsageEvent = async (backfillUsageEventBody: BackfillUsageEv
 
 
 
-export const getBackfillUsageEventMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getBackfillUsageEventMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof backfillUsageEvent>>, TError,{data: BackfillUsageEventBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof backfillUsageEvent>>, TError,{data: BackfillUsageEventBody}, TContext> => {
 
@@ -7863,12 +7865,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type BackfillUsageEventMutationResult = NonNullable<Awaited<ReturnType<typeof backfillUsageEvent>>>
     export type BackfillUsageEventMutationBody = BackfillUsageEventBody
-    export type BackfillUsageEventMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type BackfillUsageEventMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Backfill a past usage event
  */
-export const useBackfillUsageEvent = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useBackfillUsageEvent = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof backfillUsageEvent>>, TError,{data: BackfillUsageEventBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof backfillUsageEvent>>,
@@ -7919,7 +7921,7 @@ export const getListHeldUsageQueryKey = () => {
     }
 
 
-export const getListHeldUsageQueryOptions = <TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = UnauthorizedResponse | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListHeldUsageQueryOptions = <TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -7938,10 +7940,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListHeldUsageQueryResult = NonNullable<Awaited<ReturnType<typeof listHeldUsage>>>
-export type ListHeldUsageQueryError = UnauthorizedResponse | RateLimitedResponse
+export type ListHeldUsageQueryError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
 
-export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listHeldUsage>>,
@@ -7951,7 +7953,7 @@ export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listHeldUsage>>,
@@ -7961,7 +7963,7 @@ export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -7969,7 +7971,7 @@ export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage
  * @summary List held usage
  */
 
-export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -8026,7 +8028,7 @@ export const releaseHeldUsage = async (releaseHeldUsageBody: ReleaseHeldUsageBod
 
 
 
-export const getReleaseHeldUsageMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getReleaseHeldUsageMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof releaseHeldUsage>>, TError,{data: ReleaseHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof releaseHeldUsage>>, TError,{data: ReleaseHeldUsageBody}, TContext> => {
 
@@ -8055,12 +8057,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ReleaseHeldUsageMutationResult = NonNullable<Awaited<ReturnType<typeof releaseHeldUsage>>>
     export type ReleaseHeldUsageMutationBody = ReleaseHeldUsageBody
-    export type ReleaseHeldUsageMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type ReleaseHeldUsageMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Release held usage
  */
-export const useReleaseHeldUsage = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useReleaseHeldUsage = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof releaseHeldUsage>>, TError,{data: ReleaseHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof releaseHeldUsage>>,
@@ -8101,7 +8103,7 @@ export const discardHeldUsage = async (discardHeldUsageBody: DiscardHeldUsageBod
 
 
 
-export const getDiscardHeldUsageMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getDiscardHeldUsageMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardHeldUsage>>, TError,{data: DiscardHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof discardHeldUsage>>, TError,{data: DiscardHeldUsageBody}, TContext> => {
 
@@ -8130,12 +8132,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DiscardHeldUsageMutationResult = NonNullable<Awaited<ReturnType<typeof discardHeldUsage>>>
     export type DiscardHeldUsageMutationBody = DiscardHeldUsageBody
-    export type DiscardHeldUsageMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type DiscardHeldUsageMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Discard held usage
  */
-export const useDiscardHeldUsage = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useDiscardHeldUsage = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardHeldUsage>>, TError,{data: DiscardHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof discardHeldUsage>>,
@@ -8194,7 +8196,7 @@ export const getAggregateUsageEventsQueryKey = (params?: AggregateUsageEventsPar
     }
 
 
-export const getAggregateUsageEventsQueryOptions = <TData = Awaited<ReturnType<typeof aggregateUsageEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(params?: AggregateUsageEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof aggregateUsageEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getAggregateUsageEventsQueryOptions = <TData = Awaited<ReturnType<typeof aggregateUsageEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(params?: AggregateUsageEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof aggregateUsageEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -8213,10 +8215,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type AggregateUsageEventsQueryResult = NonNullable<Awaited<ReturnType<typeof aggregateUsageEvents>>>
-export type AggregateUsageEventsQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type AggregateUsageEventsQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useAggregateUsageEvents<TData = Awaited<ReturnType<typeof aggregateUsageEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useAggregateUsageEvents<TData = Awaited<ReturnType<typeof aggregateUsageEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params: undefined |  AggregateUsageEventsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof aggregateUsageEvents>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof aggregateUsageEvents>>,
@@ -8226,7 +8228,7 @@ export function useAggregateUsageEvents<TData = Awaited<ReturnType<typeof aggreg
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useAggregateUsageEvents<TData = Awaited<ReturnType<typeof aggregateUsageEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useAggregateUsageEvents<TData = Awaited<ReturnType<typeof aggregateUsageEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: AggregateUsageEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof aggregateUsageEvents>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof aggregateUsageEvents>>,
@@ -8236,7 +8238,7 @@ export function useAggregateUsageEvents<TData = Awaited<ReturnType<typeof aggreg
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useAggregateUsageEvents<TData = Awaited<ReturnType<typeof aggregateUsageEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useAggregateUsageEvents<TData = Awaited<ReturnType<typeof aggregateUsageEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: AggregateUsageEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof aggregateUsageEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -8244,7 +8246,7 @@ export function useAggregateUsageEvents<TData = Awaited<ReturnType<typeof aggreg
  * @summary Get usage totals
  */
 
-export function useAggregateUsageEvents<TData = Awaited<ReturnType<typeof aggregateUsageEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useAggregateUsageEvents<TData = Awaited<ReturnType<typeof aggregateUsageEvents>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: AggregateUsageEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof aggregateUsageEvents>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -8309,7 +8311,7 @@ export const getListInvoicesQueryKey = (params?: ListInvoicesParams,) => {
     }
 
 
-export const getListInvoicesQueryOptions = <TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListInvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListInvoicesQueryOptions = <TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListInvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -8328,10 +8330,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListInvoicesQueryResult = NonNullable<Awaited<ReturnType<typeof listInvoices>>>
-export type ListInvoicesQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListInvoicesQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListInvoicesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoices>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listInvoices>>,
@@ -8341,7 +8343,7 @@ export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListInvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoices>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listInvoices>>,
@@ -8351,7 +8353,7 @@ export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListInvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -8359,7 +8361,7 @@ export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>
  * @summary List invoices
  */
 
-export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoices<TData = Awaited<ReturnType<typeof listInvoices>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListInvoicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -8427,7 +8429,7 @@ export const createInvoice = async (invoiceCreateRequest: InvoiceCreateRequest, 
 
 
 
-export const getCreateInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCreateInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInvoice>>, TError,{data: InvoiceCreateRequest}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createInvoice>>, TError,{data: InvoiceCreateRequest}, TContext> => {
 
@@ -8456,12 +8458,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateInvoiceMutationResult = NonNullable<Awaited<ReturnType<typeof createInvoice>>>
     export type CreateInvoiceMutationBody = InvoiceCreateRequest
-    export type CreateInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type CreateInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create a draft invoice
  */
-export const useCreateInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCreateInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInvoice>>, TError,{data: InvoiceCreateRequest}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createInvoice>>,
@@ -8515,7 +8517,7 @@ export const createInvoicePreview = async (createInvoicePreviewBody: CreateInvoi
 
 
 
-export const getCreateInvoicePreviewMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCreateInvoicePreviewMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInvoicePreview>>, TError,{data: CreateInvoicePreviewBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createInvoicePreview>>, TError,{data: CreateInvoicePreviewBody}, TContext> => {
 
@@ -8544,12 +8546,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateInvoicePreviewMutationResult = NonNullable<Awaited<ReturnType<typeof createInvoicePreview>>>
     export type CreateInvoicePreviewMutationBody = CreateInvoicePreviewBody
-    export type CreateInvoicePreviewMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type CreateInvoicePreviewMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Preview a customer's next invoice
  */
-export const useCreateInvoicePreview = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCreateInvoicePreview = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInvoicePreview>>, TError,{data: CreateInvoicePreviewBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createInvoicePreview>>,
@@ -8595,7 +8597,7 @@ export const getGetInvoiceQueryKey = (id: string,) => {
     }
 
 
-export const getGetInvoiceQueryOptions = <TData = Awaited<ReturnType<typeof getInvoice>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoice>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetInvoiceQueryOptions = <TData = Awaited<ReturnType<typeof getInvoice>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoice>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -8614,10 +8616,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetInvoiceQueryResult = NonNullable<Awaited<ReturnType<typeof getInvoice>>>
-export type GetInvoiceQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetInvoiceQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetInvoice<TData = Awaited<ReturnType<typeof getInvoice>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetInvoice<TData = Awaited<ReturnType<typeof getInvoice>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoice>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getInvoice>>,
@@ -8627,7 +8629,7 @@ export function useGetInvoice<TData = Awaited<ReturnType<typeof getInvoice>>, TE
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetInvoice<TData = Awaited<ReturnType<typeof getInvoice>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetInvoice<TData = Awaited<ReturnType<typeof getInvoice>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoice>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getInvoice>>,
@@ -8637,7 +8639,7 @@ export function useGetInvoice<TData = Awaited<ReturnType<typeof getInvoice>>, TE
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetInvoice<TData = Awaited<ReturnType<typeof getInvoice>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetInvoice<TData = Awaited<ReturnType<typeof getInvoice>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoice>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -8645,7 +8647,7 @@ export function useGetInvoice<TData = Awaited<ReturnType<typeof getInvoice>>, TE
  * @summary Get an invoice with its line items
  */
 
-export function useGetInvoice<TData = Awaited<ReturnType<typeof getInvoice>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetInvoice<TData = Awaited<ReturnType<typeof getInvoice>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoice>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -8700,7 +8702,7 @@ export const getGetInvoicePdfQueryKey = (id: string,) => {
     }
 
 
-export const getGetInvoicePdfQueryOptions = <TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetInvoicePdfQueryOptions = <TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -8719,10 +8721,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetInvoicePdfQueryResult = NonNullable<Awaited<ReturnType<typeof getInvoicePdf>>>
-export type GetInvoicePdfQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetInvoicePdfQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePdf>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getInvoicePdf>>,
@@ -8732,7 +8734,7 @@ export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePdf>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getInvoicePdf>>,
@@ -8742,7 +8744,7 @@ export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -8750,7 +8752,7 @@ export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf
  * @summary Download an invoice PDF
  */
 
-export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetInvoicePdf<TData = Awaited<ReturnType<typeof getInvoicePdf>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -8811,7 +8813,7 @@ export const sendInvoice = async (id: string,
 
 
 
-export const getSendInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getSendInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendInvoice>>, TError,{id: string;data: SendInvoiceBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof sendInvoice>>, TError,{id: string;data: SendInvoiceBody}, TContext> => {
 
@@ -8840,12 +8842,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SendInvoiceMutationResult = NonNullable<Awaited<ReturnType<typeof sendInvoice>>>
     export type SendInvoiceMutationBody = SendInvoiceBody
-    export type SendInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type SendInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Email an invoice to the customer
  */
-export const useSendInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useSendInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendInvoice>>, TError,{id: string;data: SendInvoiceBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof sendInvoice>>,
@@ -8887,7 +8889,7 @@ export const addInvoiceLineItem = async (id: string,
 
 
 
-export const getAddInvoiceLineItemMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getAddInvoiceLineItemMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addInvoiceLineItem>>, TError,{id: string;data: InvoiceLineItemInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof addInvoiceLineItem>>, TError,{id: string;data: InvoiceLineItemInput}, TContext> => {
 
@@ -8916,12 +8918,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AddInvoiceLineItemMutationResult = NonNullable<Awaited<ReturnType<typeof addInvoiceLineItem>>>
     export type AddInvoiceLineItemMutationBody = InvoiceLineItemInput
-    export type AddInvoiceLineItemMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type AddInvoiceLineItemMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Add a line item to a draft invoice
  */
-export const useAddInvoiceLineItem = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useAddInvoiceLineItem = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addInvoiceLineItem>>, TError,{id: string;data: InvoiceLineItemInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof addInvoiceLineItem>>,
@@ -8978,7 +8980,7 @@ export const voidInvoice = async (id: string, options?: RequestInit): Promise<In
 
 
 
-export const getVoidInvoiceMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getVoidInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof voidInvoice>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof voidInvoice>>, TError,{id: string}, TContext> => {
 
@@ -9007,12 +9009,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type VoidInvoiceMutationResult = NonNullable<Awaited<ReturnType<typeof voidInvoice>>>
 
-    export type VoidInvoiceMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type VoidInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Void an invoice
  */
-export const useVoidInvoice = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useVoidInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof voidInvoice>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof voidInvoice>>,
@@ -9059,7 +9061,7 @@ export const resendInvoiceSetupLink = async (id: string, options?: RequestInit):
 
 
 
-export const getResendInvoiceSetupLinkMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getResendInvoiceSetupLinkMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resendInvoiceSetupLink>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof resendInvoiceSetupLink>>, TError,{id: string}, TContext> => {
 
@@ -9088,12 +9090,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ResendInvoiceSetupLinkMutationResult = NonNullable<Awaited<ReturnType<typeof resendInvoiceSetupLink>>>
 
-    export type ResendInvoiceSetupLinkMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type ResendInvoiceSetupLinkMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Resend the payment-method setup link
  */
-export const useResendInvoiceSetupLink = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useResendInvoiceSetupLink = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resendInvoiceSetupLink>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof resendInvoiceSetupLink>>,
@@ -9165,7 +9167,7 @@ export const markInvoiceUncollectible = async (id: string, options?: RequestInit
 
 
 
-export const getMarkInvoiceUncollectibleMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getMarkInvoiceUncollectibleMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markInvoiceUncollectible>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof markInvoiceUncollectible>>, TError,{id: string}, TContext> => {
 
@@ -9194,12 +9196,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type MarkInvoiceUncollectibleMutationResult = NonNullable<Awaited<ReturnType<typeof markInvoiceUncollectible>>>
 
-    export type MarkInvoiceUncollectibleMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type MarkInvoiceUncollectibleMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Write off an invoice as uncollectible
  */
-export const useMarkInvoiceUncollectible = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useMarkInvoiceUncollectible = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markInvoiceUncollectible>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof markInvoiceUncollectible>>,
@@ -9252,7 +9254,7 @@ export const recordInvoicePayment = async (id: string,
 
 
 
-export const getRecordInvoicePaymentMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRecordInvoicePaymentMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordInvoicePayment>>, TError,{id: string;data?: RecordInvoicePaymentBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof recordInvoicePayment>>, TError,{id: string;data?: RecordInvoicePaymentBody}, TContext> => {
 
@@ -9281,12 +9283,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RecordInvoicePaymentMutationResult = NonNullable<Awaited<ReturnType<typeof recordInvoicePayment>>>
     export type RecordInvoicePaymentMutationBody = RecordInvoicePaymentBody | undefined
-    export type RecordInvoicePaymentMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type RecordInvoicePaymentMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Record a payment made outside Stripe
  */
-export const useRecordInvoicePayment = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRecordInvoicePayment = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordInvoicePayment>>, TError,{id: string;data?: RecordInvoicePaymentBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof recordInvoicePayment>>,
@@ -9328,7 +9330,7 @@ export const rotateInvoicePublicToken = async (id: string, options?: RequestInit
 
 
 
-export const getRotateInvoicePublicTokenMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRotateInvoicePublicTokenMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateInvoicePublicToken>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof rotateInvoicePublicToken>>, TError,{id: string}, TContext> => {
 
@@ -9357,12 +9359,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RotateInvoicePublicTokenMutationResult = NonNullable<Awaited<ReturnType<typeof rotateInvoicePublicToken>>>
 
-    export type RotateInvoicePublicTokenMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type RotateInvoicePublicTokenMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Replace the hosted invoice link
  */
-export const useRotateInvoicePublicToken = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRotateInvoicePublicToken = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateInvoicePublicToken>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof rotateInvoicePublicToken>>,
@@ -9418,7 +9420,7 @@ export const collectInvoicePayment = async (id: string, options?: RequestInit): 
 
 
 
-export const getCollectInvoicePaymentMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCollectInvoicePaymentMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof collectInvoicePayment>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof collectInvoicePayment>>, TError,{id: string}, TContext> => {
 
@@ -9447,12 +9449,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CollectInvoicePaymentMutationResult = NonNullable<Awaited<ReturnType<typeof collectInvoicePayment>>>
 
-    export type CollectInvoicePaymentMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type CollectInvoicePaymentMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Charge a finalized invoice now
  */
-export const useCollectInvoicePayment = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCollectInvoicePayment = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof collectInvoicePayment>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof collectInvoicePayment>>,
@@ -9511,7 +9513,7 @@ export const refundInvoice = async (id: string,
 
 
 
-export const getRefundInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRefundInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refundInvoice>>, TError,{id: string;data: RefundInvoiceBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof refundInvoice>>, TError,{id: string;data: RefundInvoiceBody}, TContext> => {
 
@@ -9540,12 +9542,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RefundInvoiceMutationResult = NonNullable<Awaited<ReturnType<typeof refundInvoice>>>
     export type RefundInvoiceMutationBody = RefundInvoiceBody
-    export type RefundInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type RefundInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Refund a paid invoice
  */
-export const useRefundInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRefundInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refundInvoice>>, TError,{id: string;data: RefundInvoiceBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof refundInvoice>>,
@@ -9610,7 +9612,7 @@ export const getGetInvoicePaymentTimelineQueryKey = (id: string,) => {
     }
 
 
-export const getGetInvoicePaymentTimelineQueryOptions = <TData = Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetInvoicePaymentTimelineQueryOptions = <TData = Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -9629,10 +9631,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetInvoicePaymentTimelineQueryResult = NonNullable<Awaited<ReturnType<typeof getInvoicePaymentTimeline>>>
-export type GetInvoicePaymentTimelineQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetInvoicePaymentTimelineQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetInvoicePaymentTimeline<TData = Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetInvoicePaymentTimeline<TData = Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getInvoicePaymentTimeline>>,
@@ -9642,7 +9644,7 @@ export function useGetInvoicePaymentTimeline<TData = Awaited<ReturnType<typeof g
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetInvoicePaymentTimeline<TData = Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetInvoicePaymentTimeline<TData = Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getInvoicePaymentTimeline>>,
@@ -9652,7 +9654,7 @@ export function useGetInvoicePaymentTimeline<TData = Awaited<ReturnType<typeof g
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetInvoicePaymentTimeline<TData = Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetInvoicePaymentTimeline<TData = Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -9660,7 +9662,7 @@ export function useGetInvoicePaymentTimeline<TData = Awaited<ReturnType<typeof g
  * @summary Get the invoice activity timeline
  */
 
-export function useGetInvoicePaymentTimeline<TData = Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetInvoicePaymentTimeline<TData = Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInvoicePaymentTimeline>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -9728,7 +9730,7 @@ export const getListInvoiceDisputesQueryKey = (id: string,
     }
 
 
-export const getListInvoiceDisputesQueryOptions = <TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(id: string,
+export const getListInvoiceDisputesQueryOptions = <TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(id: string,
     params?: ListInvoiceDisputesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
@@ -9748,10 +9750,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListInvoiceDisputesQueryResult = NonNullable<Awaited<ReturnType<typeof listInvoiceDisputes>>>
-export type ListInvoiceDisputesQueryError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse
+export type ListInvoiceDisputesQueryError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params: undefined |  ListInvoiceDisputesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -9762,7 +9764,7 @@ export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInv
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListInvoiceDisputesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -9773,7 +9775,7 @@ export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInv
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListInvoiceDisputesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -9782,7 +9784,7 @@ export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInv
  * @summary List the card disputes on an invoice
  */
 
-export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListInvoiceDisputesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -9850,7 +9852,7 @@ export const getListInvoiceStripeRefundsQueryKey = (id: string,
     }
 
 
-export const getListInvoiceStripeRefundsQueryOptions = <TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(id: string,
+export const getListInvoiceStripeRefundsQueryOptions = <TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(id: string,
     params?: ListInvoiceStripeRefundsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
@@ -9870,10 +9872,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListInvoiceStripeRefundsQueryResult = NonNullable<Awaited<ReturnType<typeof listInvoiceStripeRefunds>>>
-export type ListInvoiceStripeRefundsQueryError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse
+export type ListInvoiceStripeRefundsQueryError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params: undefined |  ListInvoiceStripeRefundsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -9884,7 +9886,7 @@ export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof li
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListInvoiceStripeRefundsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -9895,7 +9897,7 @@ export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof li
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListInvoiceStripeRefundsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -9904,7 +9906,7 @@ export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof li
  * @summary List the refunds made in Stripe on an invoice
  */
 
-export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListInvoiceStripeRefunds<TData = Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListInvoiceStripeRefundsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceStripeRefunds>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -9958,7 +9960,7 @@ export const dismissInvoiceStripeRefund = async (id: string,
 
 
 
-export const getDismissInvoiceStripeRefundMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getDismissInvoiceStripeRefundMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>, TError,{id: string;stripeRefundId: string;data: DismissInvoiceStripeRefundBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>, TError,{id: string;stripeRefundId: string;data: DismissInvoiceStripeRefundBody}, TContext> => {
 
@@ -9987,12 +9989,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DismissInvoiceStripeRefundMutationResult = NonNullable<Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>>
     export type DismissInvoiceStripeRefundMutationBody = DismissInvoiceStripeRefundBody
-    export type DismissInvoiceStripeRefundMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type DismissInvoiceStripeRefundMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Dismiss a refund made in Stripe
  */
-export const useDismissInvoiceStripeRefund = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useDismissInvoiceStripeRefund = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>, TError,{id: string;stripeRefundId: string;data: DismissInvoiceStripeRefundBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>,
@@ -10039,7 +10041,7 @@ export const getGetCreditNoteStatsQueryKey = () => {
     }
 
 
-export const getGetCreditNoteStatsQueryOptions = <TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = UnauthorizedResponse | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNoteStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetCreditNoteStatsQueryOptions = <TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNoteStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -10058,10 +10060,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetCreditNoteStatsQueryResult = NonNullable<Awaited<ReturnType<typeof getCreditNoteStats>>>
-export type GetCreditNoteStatsQueryError = UnauthorizedResponse | RateLimitedResponse
+export type GetCreditNoteStatsQueryError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
 
-export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNoteStats>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getCreditNoteStats>>,
@@ -10071,7 +10073,7 @@ export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCredi
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNoteStats>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getCreditNoteStats>>,
@@ -10081,7 +10083,7 @@ export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCredi
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNoteStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -10089,7 +10091,7 @@ export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCredi
  * @summary Get credit note totals
  */
 
-export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNoteStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -10141,7 +10143,7 @@ export const sendCreditNote = async (id: string,
 
 
 
-export const getSendCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getSendCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendCreditNote>>, TError,{id: string;data: SendCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof sendCreditNote>>, TError,{id: string;data: SendCreditNoteBody}, TContext> => {
 
@@ -10170,12 +10172,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SendCreditNoteMutationResult = NonNullable<Awaited<ReturnType<typeof sendCreditNote>>>
     export type SendCreditNoteMutationBody = SendCreditNoteBody
-    export type SendCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type SendCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Email a credit note to the customer
  */
-export const useSendCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useSendCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendCreditNote>>, TError,{id: string;data: SendCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof sendCreditNote>>,
@@ -10220,7 +10222,7 @@ export const getGetCreditNoteQueryKey = (id: string,) => {
     }
 
 
-export const getGetCreditNoteQueryOptions = <TData = Awaited<ReturnType<typeof getCreditNote>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNote>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetCreditNoteQueryOptions = <TData = Awaited<ReturnType<typeof getCreditNote>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNote>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -10239,10 +10241,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetCreditNoteQueryResult = NonNullable<Awaited<ReturnType<typeof getCreditNote>>>
-export type GetCreditNoteQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetCreditNoteQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetCreditNote<TData = Awaited<ReturnType<typeof getCreditNote>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditNote<TData = Awaited<ReturnType<typeof getCreditNote>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNote>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getCreditNote>>,
@@ -10252,7 +10254,7 @@ export function useGetCreditNote<TData = Awaited<ReturnType<typeof getCreditNote
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCreditNote<TData = Awaited<ReturnType<typeof getCreditNote>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditNote<TData = Awaited<ReturnType<typeof getCreditNote>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNote>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getCreditNote>>,
@@ -10262,7 +10264,7 @@ export function useGetCreditNote<TData = Awaited<ReturnType<typeof getCreditNote
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCreditNote<TData = Awaited<ReturnType<typeof getCreditNote>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditNote<TData = Awaited<ReturnType<typeof getCreditNote>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNote>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -10270,7 +10272,7 @@ export function useGetCreditNote<TData = Awaited<ReturnType<typeof getCreditNote
  * @summary Get a credit note
  */
 
-export function useGetCreditNote<TData = Awaited<ReturnType<typeof getCreditNote>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditNote<TData = Awaited<ReturnType<typeof getCreditNote>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNote>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -10338,7 +10340,7 @@ export const issueCreditNote = async (id: string, options?: RequestInit): Promis
 
 
 
-export const getIssueCreditNoteMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getIssueCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof issueCreditNote>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof issueCreditNote>>, TError,{id: string}, TContext> => {
 
@@ -10367,12 +10369,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type IssueCreditNoteMutationResult = NonNullable<Awaited<ReturnType<typeof issueCreditNote>>>
 
-    export type IssueCreditNoteMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type IssueCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Issue a draft credit note
  */
-export const useIssueCreditNote = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useIssueCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof issueCreditNote>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof issueCreditNote>>,
@@ -10420,7 +10422,7 @@ export const attachStripeRefundToCreditNote = async (id: string,
 
 
 
-export const getAttachStripeRefundToCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getAttachStripeRefundToCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>, TError,{id: string;data: AttachStripeRefundToCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>, TError,{id: string;data: AttachStripeRefundToCreditNoteBody}, TContext> => {
 
@@ -10449,12 +10451,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AttachStripeRefundToCreditNoteMutationResult = NonNullable<Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>>
     export type AttachStripeRefundToCreditNoteMutationBody = AttachStripeRefundToCreditNoteBody
-    export type AttachStripeRefundToCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type AttachStripeRefundToCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Attach a refund made in Stripe to a credit note
  */
-export const useAttachStripeRefundToCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useAttachStripeRefundToCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>, TError,{id: string;data: AttachStripeRefundToCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>,
@@ -10501,7 +10503,7 @@ export const retryCreditNoteRefund = async (id: string, options?: RequestInit): 
 
 
 
-export const getRetryCreditNoteRefundMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRetryCreditNoteRefundMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryCreditNoteRefund>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof retryCreditNoteRefund>>, TError,{id: string}, TContext> => {
 
@@ -10530,12 +10532,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RetryCreditNoteRefundMutationResult = NonNullable<Awaited<ReturnType<typeof retryCreditNoteRefund>>>
 
-    export type RetryCreditNoteRefundMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type RetryCreditNoteRefundMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Retry a failed credit-note refund
  */
-export const useRetryCreditNoteRefund = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRetryCreditNoteRefund = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryCreditNoteRefund>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof retryCreditNoteRefund>>,
@@ -10575,7 +10577,7 @@ export const voidCreditNote = async (id: string, options?: RequestInit): Promise
 
 
 
-export const getVoidCreditNoteMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getVoidCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof voidCreditNote>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof voidCreditNote>>, TError,{id: string}, TContext> => {
 
@@ -10604,12 +10606,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type VoidCreditNoteMutationResult = NonNullable<Awaited<ReturnType<typeof voidCreditNote>>>
 
-    export type VoidCreditNoteMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type VoidCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Void a draft credit note
  */
-export const useVoidCreditNote = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useVoidCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof voidCreditNote>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof voidCreditNote>>,
@@ -10657,7 +10659,7 @@ export const getGetCreditNotePdfQueryKey = (id: string,) => {
     }
 
 
-export const getGetCreditNotePdfQueryOptions = <TData = Awaited<ReturnType<typeof getCreditNotePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNotePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetCreditNotePdfQueryOptions = <TData = Awaited<ReturnType<typeof getCreditNotePdf>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNotePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -10676,10 +10678,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetCreditNotePdfQueryResult = NonNullable<Awaited<ReturnType<typeof getCreditNotePdf>>>
-export type GetCreditNotePdfQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetCreditNotePdfQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetCreditNotePdf<TData = Awaited<ReturnType<typeof getCreditNotePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditNotePdf<TData = Awaited<ReturnType<typeof getCreditNotePdf>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNotePdf>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getCreditNotePdf>>,
@@ -10689,7 +10691,7 @@ export function useGetCreditNotePdf<TData = Awaited<ReturnType<typeof getCreditN
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCreditNotePdf<TData = Awaited<ReturnType<typeof getCreditNotePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditNotePdf<TData = Awaited<ReturnType<typeof getCreditNotePdf>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNotePdf>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getCreditNotePdf>>,
@@ -10699,7 +10701,7 @@ export function useGetCreditNotePdf<TData = Awaited<ReturnType<typeof getCreditN
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCreditNotePdf<TData = Awaited<ReturnType<typeof getCreditNotePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditNotePdf<TData = Awaited<ReturnType<typeof getCreditNotePdf>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNotePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -10707,7 +10709,7 @@ export function useGetCreditNotePdf<TData = Awaited<ReturnType<typeof getCreditN
  * @summary Download credit note PDF
  */
 
-export function useGetCreditNotePdf<TData = Awaited<ReturnType<typeof getCreditNotePdf>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditNotePdf<TData = Awaited<ReturnType<typeof getCreditNotePdf>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNotePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -10794,7 +10796,7 @@ export const finalizeInvoice = async (id: string, options?: RequestInit): Promis
 
 
 
-export const getFinalizeInvoiceMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getFinalizeInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeInvoice>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof finalizeInvoice>>, TError,{id: string}, TContext> => {
 
@@ -10823,12 +10825,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type FinalizeInvoiceMutationResult = NonNullable<Awaited<ReturnType<typeof finalizeInvoice>>>
 
-    export type FinalizeInvoiceMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type FinalizeInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Finalize a draft invoice
  */
-export const useFinalizeInvoice = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useFinalizeInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeInvoice>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof finalizeInvoice>>,
@@ -10883,7 +10885,7 @@ export const retryInvoiceTax = async (id: string, options?: RequestInit): Promis
 
 
 
-export const getRetryInvoiceTaxMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRetryInvoiceTaxMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryInvoiceTax>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof retryInvoiceTax>>, TError,{id: string}, TContext> => {
 
@@ -10912,12 +10914,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RetryInvoiceTaxMutationResult = NonNullable<Awaited<ReturnType<typeof retryInvoiceTax>>>
 
-    export type RetryInvoiceTaxMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type RetryInvoiceTaxMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Retry tax calculation on a draft invoice
  */
-export const useRetryInvoiceTax = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRetryInvoiceTax = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryInvoiceTax>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof retryInvoiceTax>>,
@@ -11050,7 +11052,7 @@ export const logout = async ( options?: RequestInit): Promise<void> => {
 
 
 
-export const getLogoutMutationOptions = <TError = RateLimitedResponse | Error,
+export const getLogoutMutationOptions = <TError = InvalidBodyResponse | BodyNotAllowedResponse | RateLimitedResponse | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext> => {
 
@@ -11079,12 +11081,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type LogoutMutationResult = NonNullable<Awaited<ReturnType<typeof logout>>>
 
-    export type LogoutMutationError = RateLimitedResponse | Error
+    export type LogoutMutationError = InvalidBodyResponse | BodyNotAllowedResponse | RateLimitedResponse | Error
 
     /**
  * @summary Sign out of the dashboard
  */
-export const useLogout = <TError = RateLimitedResponse | Error,
+export const useLogout = <TError = InvalidBodyResponse | BodyNotAllowedResponse | RateLimitedResponse | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof logout>>,
@@ -11875,7 +11877,7 @@ export const revokeMemberInvitation = async (id: string, options?: RequestInit):
 
 
 
-export const getRevokeMemberInvitationMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRevokeMemberInvitationMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeMemberInvitation>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof revokeMemberInvitation>>, TError,{id: string}, TContext> => {
 
@@ -11904,12 +11906,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RevokeMemberInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof revokeMemberInvitation>>>
 
-    export type RevokeMemberInvitationMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type RevokeMemberInvitationMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Revoke an invitation
  */
-export const useRevokeMemberInvitation = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRevokeMemberInvitation = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeMemberInvitation>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof revokeMemberInvitation>>,
@@ -11953,7 +11955,7 @@ export const removeMember = async (userID: string, options?: RequestInit): Promi
 
 
 
-export const getRemoveMemberMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRemoveMemberMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeMember>>, TError,{userID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof removeMember>>, TError,{userID: string}, TContext> => {
 
@@ -11982,12 +11984,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RemoveMemberMutationResult = NonNullable<Awaited<ReturnType<typeof removeMember>>>
 
-    export type RemoveMemberMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type RemoveMemberMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Remove a member from the account
  */
-export const useRemoveMember = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRemoveMember = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeMember>>, TError,{userID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof removeMember>>,
@@ -12144,7 +12146,7 @@ export const runBilling = async ( options?: RequestInit): Promise<RunBilling200 
 
 
 
-export const getRunBillingMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRunBillingMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runBilling>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof runBilling>>, TError,void, TContext> => {
 
@@ -12173,12 +12175,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RunBillingMutationResult = NonNullable<Awaited<ReturnType<typeof runBilling>>>
 
-    export type RunBillingMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type RunBillingMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Run billing now
  */
-export const useRunBilling = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRunBilling = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runBilling>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof runBilling>>,
@@ -12234,7 +12236,7 @@ export const getListProviderCostsQueryKey = (params?: ListProviderCostsParams,) 
     }
 
 
-export const getListProviderCostsQueryOptions = <TData = Awaited<ReturnType<typeof listProviderCosts>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListProviderCostsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProviderCosts>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListProviderCostsQueryOptions = <TData = Awaited<ReturnType<typeof listProviderCosts>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListProviderCostsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProviderCosts>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -12253,10 +12255,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListProviderCostsQueryResult = NonNullable<Awaited<ReturnType<typeof listProviderCosts>>>
-export type ListProviderCostsQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListProviderCostsQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListProviderCosts<TData = Awaited<ReturnType<typeof listProviderCosts>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListProviderCosts<TData = Awaited<ReturnType<typeof listProviderCosts>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListProviderCostsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProviderCosts>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listProviderCosts>>,
@@ -12266,7 +12268,7 @@ export function useListProviderCosts<TData = Awaited<ReturnType<typeof listProvi
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListProviderCosts<TData = Awaited<ReturnType<typeof listProviderCosts>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListProviderCosts<TData = Awaited<ReturnType<typeof listProviderCosts>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListProviderCostsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProviderCosts>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listProviderCosts>>,
@@ -12276,7 +12278,7 @@ export function useListProviderCosts<TData = Awaited<ReturnType<typeof listProvi
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListProviderCosts<TData = Awaited<ReturnType<typeof listProviderCosts>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListProviderCosts<TData = Awaited<ReturnType<typeof listProviderCosts>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListProviderCostsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProviderCosts>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -12284,7 +12286,7 @@ export function useListProviderCosts<TData = Awaited<ReturnType<typeof listProvi
  * @summary List provider cost rates
  */
 
-export function useListProviderCosts<TData = Awaited<ReturnType<typeof listProviderCosts>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListProviderCosts<TData = Awaited<ReturnType<typeof listProviderCosts>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListProviderCostsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProviderCosts>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -12333,7 +12335,7 @@ export const upsertProviderCost = async (upsertProviderCostBody: UpsertProviderC
 
 
 
-export const getUpsertProviderCostMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getUpsertProviderCostMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertProviderCost>>, TError,{data: UpsertProviderCostBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof upsertProviderCost>>, TError,{data: UpsertProviderCostBody}, TContext> => {
 
@@ -12362,12 +12364,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpsertProviderCostMutationResult = NonNullable<Awaited<ReturnType<typeof upsertProviderCost>>>
     export type UpsertProviderCostMutationBody = UpsertProviderCostBody
-    export type UpsertProviderCostMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type UpsertProviderCostMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create or update a provider cost rate
  */
-export const useUpsertProviderCost = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useUpsertProviderCost = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertProviderCost>>, TError,{data: UpsertProviderCostBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof upsertProviderCost>>,
@@ -12408,7 +12410,7 @@ export const deleteProviderCost = async (id: string, options?: RequestInit): Pro
 
 
 
-export const getDeleteProviderCostMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getDeleteProviderCostMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProviderCost>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteProviderCost>>, TError,{id: string}, TContext> => {
 
@@ -12437,12 +12439,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteProviderCostMutationResult = NonNullable<Awaited<ReturnType<typeof deleteProviderCost>>>
 
-    export type DeleteProviderCostMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type DeleteProviderCostMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Delete a provider cost rate
  */
-export const useDeleteProviderCost = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useDeleteProviderCost = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProviderCost>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteProviderCost>>,
@@ -12509,7 +12511,7 @@ export const getGetCustomerMarginQueryKey = (id: string,
     }
 
 
-export const getGetCustomerMarginQueryOptions = <TData = Awaited<ReturnType<typeof getCustomerMargin>>, TError = Error | UnauthorizedResponse | RateLimitedResponse>(id: string,
+export const getGetCustomerMarginQueryOptions = <TData = Awaited<ReturnType<typeof getCustomerMargin>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(id: string,
     params?: GetCustomerMarginParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerMargin>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
@@ -12529,10 +12531,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetCustomerMarginQueryResult = NonNullable<Awaited<ReturnType<typeof getCustomerMargin>>>
-export type GetCustomerMarginQueryError = Error | UnauthorizedResponse | RateLimitedResponse
+export type GetCustomerMarginQueryError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
 
-export function useGetCustomerMargin<TData = Awaited<ReturnType<typeof getCustomerMargin>>, TError = Error | UnauthorizedResponse | RateLimitedResponse>(
+export function useGetCustomerMargin<TData = Awaited<ReturnType<typeof getCustomerMargin>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  id: string,
     params: undefined |  GetCustomerMarginParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerMargin>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -12543,7 +12545,7 @@ export function useGetCustomerMargin<TData = Awaited<ReturnType<typeof getCustom
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCustomerMargin<TData = Awaited<ReturnType<typeof getCustomerMargin>>, TError = Error | UnauthorizedResponse | RateLimitedResponse>(
+export function useGetCustomerMargin<TData = Awaited<ReturnType<typeof getCustomerMargin>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  id: string,
     params?: GetCustomerMarginParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerMargin>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -12554,7 +12556,7 @@ export function useGetCustomerMargin<TData = Awaited<ReturnType<typeof getCustom
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCustomerMargin<TData = Awaited<ReturnType<typeof getCustomerMargin>>, TError = Error | UnauthorizedResponse | RateLimitedResponse>(
+export function useGetCustomerMargin<TData = Awaited<ReturnType<typeof getCustomerMargin>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  id: string,
     params?: GetCustomerMarginParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerMargin>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -12563,7 +12565,7 @@ export function useGetCustomerMargin<TData = Awaited<ReturnType<typeof getCustom
  * @summary Get a customer's margin report
  */
 
-export function useGetCustomerMargin<TData = Awaited<ReturnType<typeof getCustomerMargin>>, TError = Error | UnauthorizedResponse | RateLimitedResponse>(
+export function useGetCustomerMargin<TData = Awaited<ReturnType<typeof getCustomerMargin>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  id: string,
     params?: GetCustomerMarginParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCustomerMargin>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -12613,7 +12615,7 @@ export const grantCredits = async (grantCreditsBody: GrantCreditsBody, options?:
 
 
 
-export const getGrantCreditsMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getGrantCreditsMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof grantCredits>>, TError,{data: GrantCreditsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof grantCredits>>, TError,{data: GrantCreditsBody}, TContext> => {
 
@@ -12642,12 +12644,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type GrantCreditsMutationResult = NonNullable<Awaited<ReturnType<typeof grantCredits>>>
     export type GrantCreditsMutationBody = GrantCreditsBody
-    export type GrantCreditsMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type GrantCreditsMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Grant credit to a customer
  */
-export const useGrantCredits = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useGrantCredits = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof grantCredits>>, TError,{data: GrantCreditsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof grantCredits>>,
@@ -12694,7 +12696,7 @@ export const getGetCreditBalanceQueryKey = (customerId: string,) => {
     }
 
 
-export const getGetCreditBalanceQueryOptions = <TData = Awaited<ReturnType<typeof getCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditBalance>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetCreditBalanceQueryOptions = <TData = Awaited<ReturnType<typeof getCreditBalance>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditBalance>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -12713,10 +12715,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetCreditBalanceQueryResult = NonNullable<Awaited<ReturnType<typeof getCreditBalance>>>
-export type GetCreditBalanceQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetCreditBalanceQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetCreditBalance<TData = Awaited<ReturnType<typeof getCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditBalance<TData = Awaited<ReturnType<typeof getCreditBalance>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditBalance>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getCreditBalance>>,
@@ -12726,7 +12728,7 @@ export function useGetCreditBalance<TData = Awaited<ReturnType<typeof getCreditB
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCreditBalance<TData = Awaited<ReturnType<typeof getCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditBalance<TData = Awaited<ReturnType<typeof getCreditBalance>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditBalance>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getCreditBalance>>,
@@ -12736,7 +12738,7 @@ export function useGetCreditBalance<TData = Awaited<ReturnType<typeof getCreditB
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetCreditBalance<TData = Awaited<ReturnType<typeof getCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditBalance<TData = Awaited<ReturnType<typeof getCreditBalance>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditBalance>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -12744,7 +12746,7 @@ export function useGetCreditBalance<TData = Awaited<ReturnType<typeof getCreditB
  * @summary Get a customer's credit balance
  */
 
-export function useGetCreditBalance<TData = Awaited<ReturnType<typeof getCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetCreditBalance<TData = Awaited<ReturnType<typeof getCreditBalance>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditBalance>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -12809,7 +12811,7 @@ export const getGetLiveCreditBalanceQueryKey = (customerId: string,) => {
     }
 
 
-export const getGetLiveCreditBalanceQueryOptions = <TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLiveCreditBalance>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetLiveCreditBalanceQueryOptions = <TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLiveCreditBalance>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -12828,10 +12830,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetLiveCreditBalanceQueryResult = NonNullable<Awaited<ReturnType<typeof getLiveCreditBalance>>>
-export type GetLiveCreditBalanceQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetLiveCreditBalanceQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLiveCreditBalance>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getLiveCreditBalance>>,
@@ -12841,7 +12843,7 @@ export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiv
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLiveCreditBalance>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getLiveCreditBalance>>,
@@ -12851,7 +12853,7 @@ export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiv
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLiveCreditBalance>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -12859,7 +12861,7 @@ export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiv
  * @summary Get a customer's live credit balance
  */
 
-export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLiveCreditBalance>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -13214,7 +13216,7 @@ export const deleteTestClock = async (id: string, options?: RequestInit): Promis
 
 
 
-export const getDeleteTestClockMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getDeleteTestClockMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTestClock>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteTestClock>>, TError,{id: string}, TContext> => {
 
@@ -13243,12 +13245,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteTestClockMutationResult = NonNullable<Awaited<ReturnType<typeof deleteTestClock>>>
 
-    export type DeleteTestClockMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type DeleteTestClockMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Delete a test clock and its simulated data
  */
-export const useDeleteTestClock = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useDeleteTestClock = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTestClock>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteTestClock>>,
@@ -13512,7 +13514,7 @@ export const retryTestClockAdvance = async (id: string, options?: RequestInit): 
 
 
 
-export const getRetryTestClockAdvanceMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRetryTestClockAdvanceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryTestClockAdvance>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof retryTestClockAdvance>>, TError,{id: string}, TContext> => {
 
@@ -13541,12 +13543,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RetryTestClockAdvanceMutationResult = NonNullable<Awaited<ReturnType<typeof retryTestClockAdvance>>>
 
-    export type RetryTestClockAdvanceMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type RetryTestClockAdvanceMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Retry a failed test clock advance
  */
-export const useRetryTestClockAdvance = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRetryTestClockAdvance = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryTestClockAdvance>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof retryTestClockAdvance>>,
@@ -13719,7 +13721,7 @@ export const getListRecipesQueryKey = (params?: ListRecipesParams,) => {
     }
 
 
-export const getListRecipesQueryOptions = <TData = Awaited<ReturnType<typeof listRecipes>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListRecipesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListRecipesQueryOptions = <TData = Awaited<ReturnType<typeof listRecipes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListRecipesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -13738,10 +13740,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListRecipesQueryResult = NonNullable<Awaited<ReturnType<typeof listRecipes>>>
-export type ListRecipesQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListRecipesQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListRecipesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listRecipes>>,
@@ -13751,7 +13753,7 @@ export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListRecipesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listRecipes>>,
@@ -13761,7 +13763,7 @@ export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListRecipesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -13769,7 +13771,7 @@ export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, 
  * @summary List recipes
  */
 
-export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListRecipes<TData = Awaited<ReturnType<typeof listRecipes>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListRecipesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -13829,7 +13831,7 @@ export const getListRecipeInstancesQueryKey = (params?: ListRecipeInstancesParam
     }
 
 
-export const getListRecipeInstancesQueryOptions = <TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListRecipeInstancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListRecipeInstancesQueryOptions = <TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListRecipeInstancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -13848,10 +13850,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListRecipeInstancesQueryResult = NonNullable<Awaited<ReturnType<typeof listRecipeInstances>>>
-export type ListRecipeInstancesQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListRecipeInstancesQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListRecipeInstancesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listRecipeInstances>>,
@@ -13861,7 +13863,7 @@ export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRec
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListRecipeInstancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listRecipeInstances>>,
@@ -13871,7 +13873,7 @@ export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRec
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListRecipeInstancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -13879,7 +13881,7 @@ export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRec
  * @summary List installed recipes
  */
 
-export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListRecipeInstancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRecipeInstances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -13932,7 +13934,7 @@ export const getGetRecipeQueryKey = (key: string,) => {
     }
 
 
-export const getGetRecipeQueryOptions = <TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(key: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRecipe>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetRecipeQueryOptions = <TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(key: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRecipe>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -13951,10 +13953,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetRecipeQueryResult = NonNullable<Awaited<ReturnType<typeof getRecipe>>>
-export type GetRecipeQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetRecipeQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  key: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRecipe>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getRecipe>>,
@@ -13964,7 +13966,7 @@ export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TErr
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  key: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRecipe>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getRecipe>>,
@@ -13974,7 +13976,7 @@ export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TErr
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  key: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRecipe>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -13982,7 +13984,7 @@ export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TErr
  * @summary Get a recipe
  */
 
-export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  key: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRecipe>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -14030,7 +14032,7 @@ export const previewRecipe = async (key: string,
 
 
 
-export const getPreviewRecipeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getPreviewRecipeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewRecipe>>, TError,{key: string;data?: PreviewRecipeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof previewRecipe>>, TError,{key: string;data?: PreviewRecipeBody}, TContext> => {
 
@@ -14059,12 +14061,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PreviewRecipeMutationResult = NonNullable<Awaited<ReturnType<typeof previewRecipe>>>
     export type PreviewRecipeMutationBody = PreviewRecipeBody | undefined
-    export type PreviewRecipeMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type PreviewRecipeMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Preview a recipe
  */
-export const usePreviewRecipe = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const usePreviewRecipe = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewRecipe>>, TError,{key: string;data?: PreviewRecipeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof previewRecipe>>,
@@ -14117,7 +14119,7 @@ export const instantiateRecipe = async (key: string,
 
 
 
-export const getInstantiateRecipeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getInstantiateRecipeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof instantiateRecipe>>, TError,{key: string;data?: InstantiateRecipeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof instantiateRecipe>>, TError,{key: string;data?: InstantiateRecipeBody}, TContext> => {
 
@@ -14146,12 +14148,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type InstantiateRecipeMutationResult = NonNullable<Awaited<ReturnType<typeof instantiateRecipe>>>
     export type InstantiateRecipeMutationBody = InstantiateRecipeBody | undefined
-    export type InstantiateRecipeMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type InstantiateRecipeMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Install a recipe
  */
-export const useInstantiateRecipe = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useInstantiateRecipe = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof instantiateRecipe>>, TError,{key: string;data?: InstantiateRecipeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof instantiateRecipe>>,
@@ -14216,7 +14218,7 @@ export const getExportCustomersCsvQueryKey = (params?: ExportCustomersCsvParams,
     }
 
 
-export const getExportCustomersCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportCustomersCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(params?: ExportCustomersCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportCustomersCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getExportCustomersCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportCustomersCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(params?: ExportCustomersCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportCustomersCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -14235,10 +14237,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ExportCustomersCsvQueryResult = NonNullable<Awaited<ReturnType<typeof exportCustomersCsv>>>
-export type ExportCustomersCsvQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type ExportCustomersCsvQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useExportCustomersCsv<TData = Awaited<ReturnType<typeof exportCustomersCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportCustomersCsv<TData = Awaited<ReturnType<typeof exportCustomersCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params: undefined |  ExportCustomersCsvParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportCustomersCsv>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof exportCustomersCsv>>,
@@ -14248,7 +14250,7 @@ export function useExportCustomersCsv<TData = Awaited<ReturnType<typeof exportCu
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useExportCustomersCsv<TData = Awaited<ReturnType<typeof exportCustomersCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportCustomersCsv<TData = Awaited<ReturnType<typeof exportCustomersCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ExportCustomersCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportCustomersCsv>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof exportCustomersCsv>>,
@@ -14258,7 +14260,7 @@ export function useExportCustomersCsv<TData = Awaited<ReturnType<typeof exportCu
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useExportCustomersCsv<TData = Awaited<ReturnType<typeof exportCustomersCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportCustomersCsv<TData = Awaited<ReturnType<typeof exportCustomersCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ExportCustomersCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportCustomersCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -14266,7 +14268,7 @@ export function useExportCustomersCsv<TData = Awaited<ReturnType<typeof exportCu
  * @summary Export customers as CSV
  */
 
-export function useExportCustomersCsv<TData = Awaited<ReturnType<typeof exportCustomersCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportCustomersCsv<TData = Awaited<ReturnType<typeof exportCustomersCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ExportCustomersCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportCustomersCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -14338,7 +14340,7 @@ export const getExportInvoicesCsvQueryKey = (params?: ExportInvoicesCsvParams,) 
     }
 
 
-export const getExportInvoicesCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportInvoicesCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(params?: ExportInvoicesCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportInvoicesCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getExportInvoicesCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportInvoicesCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(params?: ExportInvoicesCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportInvoicesCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -14357,10 +14359,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ExportInvoicesCsvQueryResult = NonNullable<Awaited<ReturnType<typeof exportInvoicesCsv>>>
-export type ExportInvoicesCsvQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type ExportInvoicesCsvQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useExportInvoicesCsv<TData = Awaited<ReturnType<typeof exportInvoicesCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportInvoicesCsv<TData = Awaited<ReturnType<typeof exportInvoicesCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params: undefined |  ExportInvoicesCsvParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportInvoicesCsv>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof exportInvoicesCsv>>,
@@ -14370,7 +14372,7 @@ export function useExportInvoicesCsv<TData = Awaited<ReturnType<typeof exportInv
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useExportInvoicesCsv<TData = Awaited<ReturnType<typeof exportInvoicesCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportInvoicesCsv<TData = Awaited<ReturnType<typeof exportInvoicesCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ExportInvoicesCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportInvoicesCsv>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof exportInvoicesCsv>>,
@@ -14380,7 +14382,7 @@ export function useExportInvoicesCsv<TData = Awaited<ReturnType<typeof exportInv
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useExportInvoicesCsv<TData = Awaited<ReturnType<typeof exportInvoicesCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportInvoicesCsv<TData = Awaited<ReturnType<typeof exportInvoicesCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ExportInvoicesCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportInvoicesCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -14388,7 +14390,7 @@ export function useExportInvoicesCsv<TData = Awaited<ReturnType<typeof exportInv
  * @summary Export invoices as CSV
  */
 
-export function useExportInvoicesCsv<TData = Awaited<ReturnType<typeof exportInvoicesCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportInvoicesCsv<TData = Awaited<ReturnType<typeof exportInvoicesCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ExportInvoicesCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportInvoicesCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -14457,7 +14459,7 @@ export const getExportSubscriptionsCsvQueryKey = (params?: ExportSubscriptionsCs
     }
 
 
-export const getExportSubscriptionsCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(params?: ExportSubscriptionsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getExportSubscriptionsCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(params?: ExportSubscriptionsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -14476,10 +14478,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ExportSubscriptionsCsvQueryResult = NonNullable<Awaited<ReturnType<typeof exportSubscriptionsCsv>>>
-export type ExportSubscriptionsCsvQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type ExportSubscriptionsCsvQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useExportSubscriptionsCsv<TData = Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportSubscriptionsCsv<TData = Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params: undefined |  ExportSubscriptionsCsvParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof exportSubscriptionsCsv>>,
@@ -14489,7 +14491,7 @@ export function useExportSubscriptionsCsv<TData = Awaited<ReturnType<typeof expo
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useExportSubscriptionsCsv<TData = Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportSubscriptionsCsv<TData = Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ExportSubscriptionsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof exportSubscriptionsCsv>>,
@@ -14499,7 +14501,7 @@ export function useExportSubscriptionsCsv<TData = Awaited<ReturnType<typeof expo
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useExportSubscriptionsCsv<TData = Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportSubscriptionsCsv<TData = Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ExportSubscriptionsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -14507,7 +14509,7 @@ export function useExportSubscriptionsCsv<TData = Awaited<ReturnType<typeof expo
  * @summary Export subscriptions as CSV
  */
 
-export function useExportSubscriptionsCsv<TData = Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportSubscriptionsCsv<TData = Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ExportSubscriptionsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportSubscriptionsCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -14578,7 +14580,7 @@ export const getExportUsageEventsCsvQueryKey = (params?: ExportUsageEventsCsvPar
     }
 
 
-export const getExportUsageEventsCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError = Error | UnauthorizedResponse | RateLimitedResponse>(params: ExportUsageEventsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getExportUsageEventsCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(params: ExportUsageEventsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -14597,10 +14599,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ExportUsageEventsCsvQueryResult = NonNullable<Awaited<ReturnType<typeof exportUsageEventsCsv>>>
-export type ExportUsageEventsCsvQueryError = Error | UnauthorizedResponse | RateLimitedResponse
+export type ExportUsageEventsCsvQueryError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
 
-export function useExportUsageEventsCsv<TData = Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError = Error | UnauthorizedResponse | RateLimitedResponse>(
+export function useExportUsageEventsCsv<TData = Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params: ExportUsageEventsCsvParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof exportUsageEventsCsv>>,
@@ -14610,7 +14612,7 @@ export function useExportUsageEventsCsv<TData = Awaited<ReturnType<typeof export
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useExportUsageEventsCsv<TData = Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError = Error | UnauthorizedResponse | RateLimitedResponse>(
+export function useExportUsageEventsCsv<TData = Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params: ExportUsageEventsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof exportUsageEventsCsv>>,
@@ -14620,7 +14622,7 @@ export function useExportUsageEventsCsv<TData = Awaited<ReturnType<typeof export
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useExportUsageEventsCsv<TData = Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError = Error | UnauthorizedResponse | RateLimitedResponse>(
+export function useExportUsageEventsCsv<TData = Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params: ExportUsageEventsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -14628,7 +14630,7 @@ export function useExportUsageEventsCsv<TData = Awaited<ReturnType<typeof export
  * @summary Export usage events as CSV
  */
 
-export function useExportUsageEventsCsv<TData = Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError = Error | UnauthorizedResponse | RateLimitedResponse>(
+export function useExportUsageEventsCsv<TData = Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params: ExportUsageEventsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportUsageEventsCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -14704,7 +14706,7 @@ export const getExportAuditLogCsvQueryKey = (params?: ExportAuditLogCsvParams,) 
     }
 
 
-export const getExportAuditLogCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportAuditLogCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(params?: ExportAuditLogCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getExportAuditLogCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportAuditLogCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(params?: ExportAuditLogCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -14723,10 +14725,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ExportAuditLogCsvQueryResult = NonNullable<Awaited<ReturnType<typeof exportAuditLogCsv>>>
-export type ExportAuditLogCsvQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type ExportAuditLogCsvQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useExportAuditLogCsv<TData = Awaited<ReturnType<typeof exportAuditLogCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportAuditLogCsv<TData = Awaited<ReturnType<typeof exportAuditLogCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params: undefined |  ExportAuditLogCsvParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogCsv>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof exportAuditLogCsv>>,
@@ -14736,7 +14738,7 @@ export function useExportAuditLogCsv<TData = Awaited<ReturnType<typeof exportAud
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useExportAuditLogCsv<TData = Awaited<ReturnType<typeof exportAuditLogCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportAuditLogCsv<TData = Awaited<ReturnType<typeof exportAuditLogCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ExportAuditLogCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogCsv>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof exportAuditLogCsv>>,
@@ -14746,7 +14748,7 @@ export function useExportAuditLogCsv<TData = Awaited<ReturnType<typeof exportAud
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useExportAuditLogCsv<TData = Awaited<ReturnType<typeof exportAuditLogCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportAuditLogCsv<TData = Awaited<ReturnType<typeof exportAuditLogCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ExportAuditLogCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -14754,7 +14756,7 @@ export function useExportAuditLogCsv<TData = Awaited<ReturnType<typeof exportAud
  * @summary Export the audit log as CSV
  */
 
-export function useExportAuditLogCsv<TData = Awaited<ReturnType<typeof exportAuditLogCsv>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useExportAuditLogCsv<TData = Awaited<ReturnType<typeof exportAuditLogCsv>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ExportAuditLogCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogCsv>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -14826,7 +14828,7 @@ export const getGetAnalyticsOverviewQueryKey = (params?: GetAnalyticsOverviewPar
     }
 
 
-export const getGetAnalyticsOverviewQueryOptions = <TData = Awaited<ReturnType<typeof getAnalyticsOverview>>, TError = UnauthorizedResponse | RateLimitedResponse>(params?: GetAnalyticsOverviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsOverview>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetAnalyticsOverviewQueryOptions = <TData = Awaited<ReturnType<typeof getAnalyticsOverview>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(params?: GetAnalyticsOverviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsOverview>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -14845,10 +14847,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetAnalyticsOverviewQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalyticsOverview>>>
-export type GetAnalyticsOverviewQueryError = UnauthorizedResponse | RateLimitedResponse
+export type GetAnalyticsOverviewQueryError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
 
-export function useGetAnalyticsOverview<TData = Awaited<ReturnType<typeof getAnalyticsOverview>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsOverview<TData = Awaited<ReturnType<typeof getAnalyticsOverview>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params: undefined |  GetAnalyticsOverviewParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsOverview>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getAnalyticsOverview>>,
@@ -14858,7 +14860,7 @@ export function useGetAnalyticsOverview<TData = Awaited<ReturnType<typeof getAna
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetAnalyticsOverview<TData = Awaited<ReturnType<typeof getAnalyticsOverview>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsOverview<TData = Awaited<ReturnType<typeof getAnalyticsOverview>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: GetAnalyticsOverviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsOverview>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getAnalyticsOverview>>,
@@ -14868,7 +14870,7 @@ export function useGetAnalyticsOverview<TData = Awaited<ReturnType<typeof getAna
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetAnalyticsOverview<TData = Awaited<ReturnType<typeof getAnalyticsOverview>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsOverview<TData = Awaited<ReturnType<typeof getAnalyticsOverview>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: GetAnalyticsOverviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsOverview>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -14876,7 +14878,7 @@ export function useGetAnalyticsOverview<TData = Awaited<ReturnType<typeof getAna
  * @summary Get headline billing metrics
  */
 
-export function useGetAnalyticsOverview<TData = Awaited<ReturnType<typeof getAnalyticsOverview>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsOverview<TData = Awaited<ReturnType<typeof getAnalyticsOverview>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: GetAnalyticsOverviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsOverview>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -14941,7 +14943,7 @@ export const getGetAnalyticsRevenueChartQueryKey = (params?: GetAnalyticsRevenue
     }
 
 
-export const getGetAnalyticsRevenueChartQueryOptions = <TData = Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError = UnauthorizedResponse | RateLimitedResponse>(params?: GetAnalyticsRevenueChartParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetAnalyticsRevenueChartQueryOptions = <TData = Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(params?: GetAnalyticsRevenueChartParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -14960,10 +14962,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetAnalyticsRevenueChartQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalyticsRevenueChart>>>
-export type GetAnalyticsRevenueChartQueryError = UnauthorizedResponse | RateLimitedResponse
+export type GetAnalyticsRevenueChartQueryError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
 
-export function useGetAnalyticsRevenueChart<TData = Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsRevenueChart<TData = Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params: undefined |  GetAnalyticsRevenueChartParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getAnalyticsRevenueChart>>,
@@ -14973,7 +14975,7 @@ export function useGetAnalyticsRevenueChart<TData = Awaited<ReturnType<typeof ge
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetAnalyticsRevenueChart<TData = Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsRevenueChart<TData = Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: GetAnalyticsRevenueChartParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getAnalyticsRevenueChart>>,
@@ -14983,7 +14985,7 @@ export function useGetAnalyticsRevenueChart<TData = Awaited<ReturnType<typeof ge
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetAnalyticsRevenueChart<TData = Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsRevenueChart<TData = Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: GetAnalyticsRevenueChartParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -14991,7 +14993,7 @@ export function useGetAnalyticsRevenueChart<TData = Awaited<ReturnType<typeof ge
  * @summary Get revenue over time
  */
 
-export function useGetAnalyticsRevenueChart<TData = Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsRevenueChart<TData = Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: GetAnalyticsRevenueChartParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsRevenueChart>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -15064,7 +15066,7 @@ export const getGetAnalyticsMrrMovementQueryKey = (params?: GetAnalyticsMrrMovem
     }
 
 
-export const getGetAnalyticsMrrMovementQueryOptions = <TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | RateLimitedResponse>(params?: GetAnalyticsMrrMovementParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetAnalyticsMrrMovementQueryOptions = <TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(params?: GetAnalyticsMrrMovementParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -15083,10 +15085,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetAnalyticsMrrMovementQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>>
-export type GetAnalyticsMrrMovementQueryError = UnauthorizedResponse | RateLimitedResponse
+export type GetAnalyticsMrrMovementQueryError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
 
-export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params: undefined |  GetAnalyticsMrrMovementParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getAnalyticsMrrMovement>>,
@@ -15096,7 +15098,7 @@ export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof get
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: GetAnalyticsMrrMovementParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getAnalyticsMrrMovement>>,
@@ -15106,7 +15108,7 @@ export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof get
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: GetAnalyticsMrrMovementParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -15114,7 +15116,7 @@ export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof get
  * @summary Get MRR movement over time
  */
 
-export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: GetAnalyticsMrrMovementParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -15178,7 +15180,7 @@ export const getGetAnalyticsUsageQueryKey = (params?: GetAnalyticsUsageParams,) 
     }
 
 
-export const getGetAnalyticsUsageQueryOptions = <TData = Awaited<ReturnType<typeof getAnalyticsUsage>>, TError = UnauthorizedResponse | RateLimitedResponse>(params?: GetAnalyticsUsageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetAnalyticsUsageQueryOptions = <TData = Awaited<ReturnType<typeof getAnalyticsUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(params?: GetAnalyticsUsageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -15197,10 +15199,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetAnalyticsUsageQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalyticsUsage>>>
-export type GetAnalyticsUsageQueryError = UnauthorizedResponse | RateLimitedResponse
+export type GetAnalyticsUsageQueryError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
 
-export function useGetAnalyticsUsage<TData = Awaited<ReturnType<typeof getAnalyticsUsage>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsUsage<TData = Awaited<ReturnType<typeof getAnalyticsUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params: undefined |  GetAnalyticsUsageParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsUsage>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getAnalyticsUsage>>,
@@ -15210,7 +15212,7 @@ export function useGetAnalyticsUsage<TData = Awaited<ReturnType<typeof getAnalyt
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetAnalyticsUsage<TData = Awaited<ReturnType<typeof getAnalyticsUsage>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsUsage<TData = Awaited<ReturnType<typeof getAnalyticsUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: GetAnalyticsUsageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsUsage>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getAnalyticsUsage>>,
@@ -15220,7 +15222,7 @@ export function useGetAnalyticsUsage<TData = Awaited<ReturnType<typeof getAnalyt
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetAnalyticsUsage<TData = Awaited<ReturnType<typeof getAnalyticsUsage>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsUsage<TData = Awaited<ReturnType<typeof getAnalyticsUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: GetAnalyticsUsageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -15228,7 +15230,7 @@ export function useGetAnalyticsUsage<TData = Awaited<ReturnType<typeof getAnalyt
  * @summary Get usage over time
  */
 
-export function useGetAnalyticsUsage<TData = Awaited<ReturnType<typeof getAnalyticsUsage>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetAnalyticsUsage<TData = Awaited<ReturnType<typeof getAnalyticsUsage>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
  params?: GetAnalyticsUsageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -15290,7 +15292,7 @@ export const getListDunningRunsQueryKey = (params?: ListDunningRunsParams,) => {
     }
 
 
-export const getListDunningRunsQueryOptions = <TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListDunningRunsQueryOptions = <TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -15309,10 +15311,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListDunningRunsQueryResult = NonNullable<Awaited<ReturnType<typeof listDunningRuns>>>
-export type ListDunningRunsQueryError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListDunningRunsQueryError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListDunningRunsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listDunningRuns>>,
@@ -15322,7 +15324,7 @@ export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunning
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listDunningRuns>>,
@@ -15332,7 +15334,7 @@ export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunning
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -15340,7 +15342,7 @@ export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunning
  * @summary List dunning runs
  */
 
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -15395,7 +15397,7 @@ export const getGetDunningRunQueryKey = (id: string,) => {
     }
 
 
-export const getGetDunningRunQueryOptions = <TData = Awaited<ReturnType<typeof getDunningRun>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningRun>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetDunningRunQueryOptions = <TData = Awaited<ReturnType<typeof getDunningRun>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningRun>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -15414,10 +15416,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetDunningRunQueryResult = NonNullable<Awaited<ReturnType<typeof getDunningRun>>>
-export type GetDunningRunQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetDunningRunQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetDunningRun<TData = Awaited<ReturnType<typeof getDunningRun>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetDunningRun<TData = Awaited<ReturnType<typeof getDunningRun>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningRun>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getDunningRun>>,
@@ -15427,7 +15429,7 @@ export function useGetDunningRun<TData = Awaited<ReturnType<typeof getDunningRun
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetDunningRun<TData = Awaited<ReturnType<typeof getDunningRun>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetDunningRun<TData = Awaited<ReturnType<typeof getDunningRun>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningRun>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getDunningRun>>,
@@ -15437,7 +15439,7 @@ export function useGetDunningRun<TData = Awaited<ReturnType<typeof getDunningRun
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetDunningRun<TData = Awaited<ReturnType<typeof getDunningRun>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetDunningRun<TData = Awaited<ReturnType<typeof getDunningRun>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningRun>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -15445,7 +15447,7 @@ export function useGetDunningRun<TData = Awaited<ReturnType<typeof getDunningRun
  * @summary Get a dunning run with its events
  */
 
-export function useGetDunningRun<TData = Awaited<ReturnType<typeof getDunningRun>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetDunningRun<TData = Awaited<ReturnType<typeof getDunningRun>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningRun>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -15504,7 +15506,7 @@ export const resolveDunningRun = async (id: string,
 
 
 
-export const getResolveDunningRunMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getResolveDunningRunMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveDunningRun>>, TError,{id: string;data: ResolveDunningRunBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof resolveDunningRun>>, TError,{id: string;data: ResolveDunningRunBody}, TContext> => {
 
@@ -15533,12 +15535,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ResolveDunningRunMutationResult = NonNullable<Awaited<ReturnType<typeof resolveDunningRun>>>
     export type ResolveDunningRunMutationBody = ResolveDunningRunBody
-    export type ResolveDunningRunMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type ResolveDunningRunMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Resolve a dunning run
  */
-export const useResolveDunningRun = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useResolveDunningRun = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveDunningRun>>, TError,{id: string;data: ResolveDunningRunBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof resolveDunningRun>>,
@@ -15586,7 +15588,7 @@ export const getGetDunningStatsQueryKey = () => {
     }
 
 
-export const getGetDunningStatsQueryOptions = <TData = Awaited<ReturnType<typeof getDunningStats>>, TError = UnauthorizedResponse | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetDunningStatsQueryOptions = <TData = Awaited<ReturnType<typeof getDunningStats>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -15605,10 +15607,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetDunningStatsQueryResult = NonNullable<Awaited<ReturnType<typeof getDunningStats>>>
-export type GetDunningStatsQueryError = UnauthorizedResponse | RateLimitedResponse
+export type GetDunningStatsQueryError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
 
-export function useGetDunningStats<TData = Awaited<ReturnType<typeof getDunningStats>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetDunningStats<TData = Awaited<ReturnType<typeof getDunningStats>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningStats>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getDunningStats>>,
@@ -15618,7 +15620,7 @@ export function useGetDunningStats<TData = Awaited<ReturnType<typeof getDunningS
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetDunningStats<TData = Awaited<ReturnType<typeof getDunningStats>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetDunningStats<TData = Awaited<ReturnType<typeof getDunningStats>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningStats>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getDunningStats>>,
@@ -15628,7 +15630,7 @@ export function useGetDunningStats<TData = Awaited<ReturnType<typeof getDunningS
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetDunningStats<TData = Awaited<ReturnType<typeof getDunningStats>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetDunningStats<TData = Awaited<ReturnType<typeof getDunningStats>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -15636,7 +15638,7 @@ export function useGetDunningStats<TData = Awaited<ReturnType<typeof getDunningS
  * @summary Get dunning totals
  */
 
-export function useGetDunningStats<TData = Awaited<ReturnType<typeof getDunningStats>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetDunningStats<TData = Awaited<ReturnType<typeof getDunningStats>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -15697,7 +15699,7 @@ export const getListDunningPoliciesQueryKey = (params?: ListDunningPoliciesParam
     }
 
 
-export const getListDunningPoliciesQueryOptions = <TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListDunningPoliciesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListDunningPoliciesQueryOptions = <TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListDunningPoliciesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -15716,10 +15718,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListDunningPoliciesQueryResult = NonNullable<Awaited<ReturnType<typeof listDunningPolicies>>>
-export type ListDunningPoliciesQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListDunningPoliciesQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListDunningPoliciesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listDunningPolicies>>,
@@ -15729,7 +15731,7 @@ export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDun
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListDunningPoliciesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listDunningPolicies>>,
@@ -15739,7 +15741,7 @@ export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDun
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListDunningPoliciesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -15747,7 +15749,7 @@ export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDun
  * @summary List dunning policies
  */
 
-export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListDunningPoliciesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -15806,7 +15808,7 @@ export const createDunningPolicy = async (dunningPolicyInput: DunningPolicyInput
 
 
 
-export const getCreateDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCreateDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext> => {
 
@@ -15835,12 +15837,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof createDunningPolicy>>>
     export type CreateDunningPolicyMutationBody = DunningPolicyInput
-    export type CreateDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type CreateDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create a dunning policy
  */
-export const useCreateDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCreateDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createDunningPolicy>>,
@@ -15884,7 +15886,7 @@ export const getGetDunningPolicyQueryKey = (id: string,) => {
     }
 
 
-export const getGetDunningPolicyQueryOptions = <TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetDunningPolicyQueryOptions = <TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -15903,10 +15905,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetDunningPolicyQueryResult = NonNullable<Awaited<ReturnType<typeof getDunningPolicy>>>
-export type GetDunningPolicyQueryError = UnauthorizedResponse | Error | RateLimitedResponse
+export type GetDunningPolicyQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getDunningPolicy>>,
@@ -15916,7 +15918,7 @@ export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunning
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getDunningPolicy>>,
@@ -15926,7 +15928,7 @@ export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunning
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -15934,7 +15936,7 @@ export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunning
  * @summary Get a dunning policy
  */
 
-export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
+export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -15987,7 +15989,7 @@ export const updateDunningPolicy = async (id: string,
 
 
 
-export const getUpdateDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getUpdateDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDunningPolicy>>, TError,{id: string;data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateDunningPolicy>>, TError,{id: string;data: DunningPolicyInput}, TContext> => {
 
@@ -16016,12 +16018,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof updateDunningPolicy>>>
     export type UpdateDunningPolicyMutationBody = DunningPolicyInput
-    export type UpdateDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type UpdateDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Replace a dunning policy's settings
  */
-export const useUpdateDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useUpdateDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDunningPolicy>>, TError,{id: string;data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateDunningPolicy>>,
@@ -16062,7 +16064,7 @@ export const deleteDunningPolicy = async (id: string, options?: RequestInit): Pr
 
 
 
-export const getDeleteDunningPolicyMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getDeleteDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDunningPolicy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteDunningPolicy>>, TError,{id: string}, TContext> => {
 
@@ -16091,12 +16093,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof deleteDunningPolicy>>>
 
-    export type DeleteDunningPolicyMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type DeleteDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Delete a dunning policy
  */
-export const useDeleteDunningPolicy = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useDeleteDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDunningPolicy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteDunningPolicy>>,
@@ -16137,7 +16139,7 @@ export const setDefaultDunningPolicy = async (id: string, options?: RequestInit)
 
 
 
-export const getSetDefaultDunningPolicyMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getSetDefaultDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setDefaultDunningPolicy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof setDefaultDunningPolicy>>, TError,{id: string}, TContext> => {
 
@@ -16166,12 +16168,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SetDefaultDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof setDefaultDunningPolicy>>>
 
-    export type SetDefaultDunningPolicyMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type SetDefaultDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Make a dunning policy the default
  */
-export const useSetDefaultDunningPolicy = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useSetDefaultDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setDefaultDunningPolicy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setDefaultDunningPolicy>>,
@@ -16225,7 +16227,7 @@ export const createPriceOverride = async (createPriceOverrideBody: CreatePriceOv
 
 
 
-export const getCreatePriceOverrideMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getCreatePriceOverrideMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPriceOverride>>, TError,{data: CreatePriceOverrideBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPriceOverride>>, TError,{data: CreatePriceOverrideBody}, TContext> => {
 
@@ -16254,12 +16256,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreatePriceOverrideMutationResult = NonNullable<Awaited<ReturnType<typeof createPriceOverride>>>
     export type CreatePriceOverrideMutationBody = CreatePriceOverrideBody
-    export type CreatePriceOverrideMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type CreatePriceOverrideMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Create a customer price override
  */
-export const useCreatePriceOverride = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useCreatePriceOverride = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPriceOverride>>, TError,{data: CreatePriceOverrideBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPriceOverride>>,
@@ -16311,7 +16313,7 @@ export const getListPriceOverridesQueryKey = (params?: ListPriceOverridesParams,
     }
 
 
-export const getListPriceOverridesQueryOptions = <TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListPriceOverridesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriceOverrides>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListPriceOverridesQueryOptions = <TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListPriceOverridesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriceOverrides>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -16330,10 +16332,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListPriceOverridesQueryResult = NonNullable<Awaited<ReturnType<typeof listPriceOverrides>>>
-export type ListPriceOverridesQueryError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse
+export type ListPriceOverridesQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params: undefined |  ListPriceOverridesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriceOverrides>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listPriceOverrides>>,
@@ -16343,7 +16345,7 @@ export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPric
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListPriceOverridesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriceOverrides>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listPriceOverrides>>,
@@ -16353,7 +16355,7 @@ export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPric
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListPriceOverridesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriceOverrides>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -16361,7 +16363,7 @@ export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPric
  * @summary List active price overrides
  */
 
-export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListPriceOverrides<TData = Awaited<ReturnType<typeof listPriceOverrides>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
  params?: ListPriceOverridesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPriceOverrides>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -16412,7 +16414,7 @@ export const deletePriceOverride = async (id: string, options?: RequestInit): Pr
 
 
 
-export const getDeletePriceOverrideMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getDeletePriceOverrideMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePriceOverride>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deletePriceOverride>>, TError,{id: string}, TContext> => {
 
@@ -16441,12 +16443,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeletePriceOverrideMutationResult = NonNullable<Awaited<ReturnType<typeof deletePriceOverride>>>
 
-    export type DeletePriceOverrideMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type DeletePriceOverrideMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary End a customer price override
  */
-export const useDeletePriceOverride = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useDeletePriceOverride = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePriceOverride>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deletePriceOverride>>,
@@ -16781,7 +16783,7 @@ export const revokeApiKey = async (id: string, options?: RequestInit): Promise<A
 
 
 
-export const getRevokeApiKeyMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRevokeApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeApiKey>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof revokeApiKey>>, TError,{id: string}, TContext> => {
 
@@ -16810,12 +16812,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RevokeApiKeyMutationResult = NonNullable<Awaited<ReturnType<typeof revokeApiKey>>>
 
-    export type RevokeApiKeyMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type RevokeApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Revoke an API key
  */
-export const useRevokeApiKey = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRevokeApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeApiKey>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof revokeApiKey>>,
@@ -17145,7 +17147,7 @@ export const getGetEmailSettingsQueryKey = () => {
     }
 
 
-export const getGetEmailSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = UnauthorizedResponse | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetEmailSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -17164,10 +17166,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetEmailSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getEmailSettings>>>
-export type GetEmailSettingsQueryError = UnauthorizedResponse | RateLimitedResponse
+export type GetEmailSettingsQueryError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
 
-export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getEmailSettings>>,
@@ -17177,7 +17179,7 @@ export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSe
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getEmailSettings>>,
@@ -17187,7 +17189,7 @@ export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSe
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -17195,7 +17197,7 @@ export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSe
  * @summary Get the email setup status
  */
 
-export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -17245,7 +17247,7 @@ export const sendTestEmail = async ( options?: RequestInit): Promise<SendTestEma
 
 
 
-export const getSendTestEmailMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getSendTestEmailMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendTestEmail>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof sendTestEmail>>, TError,void, TContext> => {
 
@@ -17274,12 +17276,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SendTestEmailMutationResult = NonNullable<Awaited<ReturnType<typeof sendTestEmail>>>
 
-    export type SendTestEmailMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type SendTestEmailMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Send a test email
  */
-export const useSendTestEmail = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useSendTestEmail = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendTestEmail>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof sendTestEmail>>,
@@ -17334,7 +17336,7 @@ export const connectStripe = async (connectStripeBody: ConnectStripeBody, option
 
 
 
-export const getConnectStripeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getConnectStripeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectStripe>>, TError,{data: ConnectStripeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof connectStripe>>, TError,{data: ConnectStripeBody}, TContext> => {
 
@@ -17363,12 +17365,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ConnectStripeMutationResult = NonNullable<Awaited<ReturnType<typeof connectStripe>>>
     export type ConnectStripeMutationBody = ConnectStripeBody
-    export type ConnectStripeMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type ConnectStripeMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Connect a Stripe account
  */
-export const useConnectStripe = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useConnectStripe = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectStripe>>, TError,{data: ConnectStripeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof connectStripe>>,
@@ -17417,7 +17419,7 @@ export const getListStripeConnectionsQueryKey = () => {
     }
 
 
-export const getListStripeConnectionsQueryOptions = <TData = Awaited<ReturnType<typeof listStripeConnections>>, TError = UnauthorizedResponse | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStripeConnections>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListStripeConnectionsQueryOptions = <TData = Awaited<ReturnType<typeof listStripeConnections>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStripeConnections>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -17436,10 +17438,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListStripeConnectionsQueryResult = NonNullable<Awaited<ReturnType<typeof listStripeConnections>>>
-export type ListStripeConnectionsQueryError = UnauthorizedResponse | RateLimitedResponse
+export type ListStripeConnectionsQueryError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
 
-export function useListStripeConnections<TData = Awaited<ReturnType<typeof listStripeConnections>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useListStripeConnections<TData = Awaited<ReturnType<typeof listStripeConnections>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStripeConnections>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listStripeConnections>>,
@@ -17449,7 +17451,7 @@ export function useListStripeConnections<TData = Awaited<ReturnType<typeof listS
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListStripeConnections<TData = Awaited<ReturnType<typeof listStripeConnections>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useListStripeConnections<TData = Awaited<ReturnType<typeof listStripeConnections>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStripeConnections>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listStripeConnections>>,
@@ -17459,7 +17461,7 @@ export function useListStripeConnections<TData = Awaited<ReturnType<typeof listS
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListStripeConnections<TData = Awaited<ReturnType<typeof listStripeConnections>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useListStripeConnections<TData = Awaited<ReturnType<typeof listStripeConnections>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStripeConnections>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -17467,7 +17469,7 @@ export function useListStripeConnections<TData = Awaited<ReturnType<typeof listS
  * @summary List Stripe connections
  */
 
-export function useListStripeConnections<TData = Awaited<ReturnType<typeof listStripeConnections>>, TError = UnauthorizedResponse | RateLimitedResponse>(
+export function useListStripeConnections<TData = Awaited<ReturnType<typeof listStripeConnections>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStripeConnections>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -17519,7 +17521,7 @@ export const setStripeWebhookSecret = async (mode: 'test' | 'live',
 
 
 
-export const getSetStripeWebhookSecretMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getSetStripeWebhookSecretMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setStripeWebhookSecret>>, TError,{mode: 'test' | 'live';data: SetStripeWebhookSecretBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof setStripeWebhookSecret>>, TError,{mode: 'test' | 'live';data: SetStripeWebhookSecretBody}, TContext> => {
 
@@ -17548,12 +17550,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SetStripeWebhookSecretMutationResult = NonNullable<Awaited<ReturnType<typeof setStripeWebhookSecret>>>
     export type SetStripeWebhookSecretMutationBody = SetStripeWebhookSecretBody
-    export type SetStripeWebhookSecretMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type SetStripeWebhookSecretMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Set the Stripe webhook signing secret
  */
-export const useSetStripeWebhookSecret = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useSetStripeWebhookSecret = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setStripeWebhookSecret>>, TError,{mode: 'test' | 'live';data: SetStripeWebhookSecretBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setStripeWebhookSecret>>,
@@ -17597,7 +17599,7 @@ export const disconnectStripe = async (mode: 'test' | 'live', options?: RequestI
 
 
 
-export const getDisconnectStripeMutationOptions = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const getDisconnectStripeMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectStripe>>, TError,{mode: 'test' | 'live'}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof disconnectStripe>>, TError,{mode: 'test' | 'live'}, TContext> => {
 
@@ -17626,12 +17628,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DisconnectStripeMutationResult = NonNullable<Awaited<ReturnType<typeof disconnectStripe>>>
 
-    export type DisconnectStripeMutationError = Error | UnauthorizedResponse | RateLimitedResponse
+    export type DisconnectStripeMutationError = Error | UnauthorizedResponse | ForbiddenResponse | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Disconnect Stripe for one mode
  */
-export const useDisconnectStripe = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
+export const useDisconnectStripe = <TError = Error | UnauthorizedResponse | ForbiddenResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectStripe>>, TError,{mode: 'test' | 'live'}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof disconnectStripe>>,

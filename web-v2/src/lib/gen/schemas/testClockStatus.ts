@@ -12,8 +12,8 @@
  */
 
 /**
- * `ready`: it can be advanced or deleted. `advancing`: billing is
- * catching up to the new time. `internal_failure`: the last advance
+ * `ready`: it can be advanced. `advancing`: billing is catching up
+ * to the new time. `internal_failure`: the last advance
  * failed partway; resume it with `POST /v1/test-clocks/{id}/retry-advance`.
  */
 export type TestClockStatus = typeof TestClockStatus[keyof typeof TestClockStatus];

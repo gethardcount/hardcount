@@ -8865,8 +8865,8 @@ type TestClock struct {
 	// Name Your name for the clock. Empty when you gave none.
 	Name string `json:"name"`
 
-	// Status `ready`: it can be advanced or deleted. `advancing`: billing is
-	// catching up to the new time. `internal_failure`: the last advance
+	// Status `ready`: it can be advanced. `advancing`: billing is catching up
+	// to the new time. `internal_failure`: the last advance
 	// failed partway; resume it with `POST /v1/test-clocks/{id}/retry-advance`.
 	Status TestClockStatus `json:"status"`
 
@@ -8877,8 +8877,8 @@ type TestClock struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// TestClockStatus `ready`: it can be advanced or deleted. `advancing`: billing is
-// catching up to the new time. `internal_failure`: the last advance
+// TestClockStatus `ready`: it can be advanced. `advancing`: billing is catching up
+// to the new time. `internal_failure`: the last advance
 // failed partway; resume it with `POST /v1/test-clocks/{id}/retry-advance`.
 type TestClockStatus string
 
@@ -9524,6 +9524,18 @@ type Limit = int
 
 // Offset defines model for Offset.
 type Offset = int
+
+// BodyNotAllowed The body of an error answer. `error.type` is the broad class,
+// `error.code` is the exact reason for your code to branch on, and
+// `error.message` is a sentence for a person. Quote
+// `error.request_id` when you ask for help.
+type BodyNotAllowed = Error
+
+// Forbidden The body of an error answer. `error.type` is the broad class,
+// `error.code` is the exact reason for your code to branch on, and
+// `error.message` is a sentence for a person. Quote
+// `error.request_id` when you ask for help.
+type Forbidden = Error
 
 // InvalidBody The body of an error answer. `error.type` is the broad class,
 // `error.code` is the exact reason for your code to branch on, and

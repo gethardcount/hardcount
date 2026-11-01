@@ -231,6 +231,36 @@ components:
               code: rate_limited
               message: too many requests — please retry after the rate limit resets
               request_id: req_dbjg652q3gpgqfoq5cd0
+    Forbidden:
+      description: |
+        The credential is valid but may not call this route. A usage-only
+        key (`hc_ingest_…`) can only send usage and call `GET /v1/whoami`;
+        use a secret key.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              type: authentication_error
+              code: forbidden
+              message: "insufficient permissions: this key type does not have customer:read access"
+              request_id: req_dbjg652q3gpgqfoq5cd0
+    BodyNotAllowed:
+      description: |
+        This route takes no body, and the request sent one with a field.
+        `param` names the field. Send no body, `{}` or `null`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              type: invalid_request_error
+              code: validation_error
+              message: unknown field "at_period_end"
+              request_id: req_dbjg652q3gpgqfoq5cd0
+              param: at_period_end
     InvalidBody:
       description: |
         The body is not one valid JSON value, it is empty where the
@@ -9329,8 +9359,8 @@ components:
           type: string
           enum: [ready, advancing, internal_failure]
           description: |
-            `ready`: it can be advanced or deleted. `advancing`: billing is
-            catching up to the new time. `internal_failure`: the last advance
+            `ready`: it can be advanced. `advancing`: billing is catching up
+            to the new time. `internal_failure`: the last advance
             failed partway; resume it with `POST /v1/test-clocks/{id}/retry-advance`.
         created_at:
           type: string
@@ -9771,6 +9801,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "409":
           description: |
             A customer with this `external_id` already exists in this account
@@ -9894,6 +9926,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -9949,6 +9983,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this ID in this account and mode.
           content:
@@ -10014,6 +10050,8 @@ paths:
                 updated_at: "2026-10-15T09:12:44Z"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this ID in this account and mode.
           content:
@@ -10136,6 +10174,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: |
             No customer with this ID in this account and mode
@@ -10274,6 +10314,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this ID in this account and mode.
           content:
@@ -10356,6 +10398,8 @@ paths:
                 updated_at: "2026-10-15T09:12:44Z"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: |
             The customer has no billing profile yet, or the customer does not
@@ -10433,6 +10477,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this ID in this account and mode.
           content:
@@ -10538,6 +10584,8 @@ paths:
                       hc_mtr_dajr122q3gpgqfoq5c10: "1200000"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this ID in this account and mode.
           content:
@@ -10658,6 +10706,8 @@ paths:
                       amount_cents: 3650
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this ID in this account and mode.
           content:
@@ -10727,6 +10777,8 @@ paths:
                 total: 2
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this ID in this account and mode.
           content:
@@ -10818,6 +10870,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this ID in this account and mode.
           content:
@@ -10971,6 +11025,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: |
             No customer with this ID in this account and mode. The message
@@ -11062,6 +11118,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No such payment method for this customer, or it is already detached.
           content:
@@ -11138,6 +11196,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No such active payment method for this customer.
           content:
@@ -11665,6 +11725,8 @@ paths:
                     description: Stripe Checkout URL.
               example:
                 url: https://checkout.stripe.com/c/pay/cs_test_a1B2c3D4e5F6g7H8i9J0kLmNoPqRsTuVwXyZ
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "404":
           description: Unknown token, or the invoice is a draft.
           content:
@@ -11983,6 +12045,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "409":
           description: |
             A meter with this `event_name` already exists in this account and
@@ -12055,6 +12119,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -12123,6 +12189,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No meter with this ID in this account and mode.
           content:
@@ -12198,6 +12266,8 @@ paths:
                 updated_at: "2026-09-15T09:00:00Z"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: |
             `not_found`: no meter with this ID in this account and mode.
@@ -12391,6 +12461,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this `invoice_id` in this account and mode. The message says `credit_note not found`.
           content:
@@ -12555,6 +12627,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -12620,6 +12694,8 @@ paths:
                     other_remaining_cents: 0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this ID in this account and mode.
           content:
@@ -12719,6 +12795,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this `customer_id` in this account and mode.
           content:
@@ -12789,6 +12867,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -12876,6 +12956,8 @@ paths:
                 total: 2
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this ID in this account and mode.
           content:
@@ -12960,6 +13042,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: |
             `url` is missing, is not `https://`, cannot be looked up, or
@@ -13019,6 +13103,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -13057,6 +13143,8 @@ paths:
                 updated_at: "2026-10-02T10:00:00Z"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No endpoint with this id in this mode, or it was deleted.
           content:
@@ -13139,6 +13227,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No endpoint with this id in this mode, or it was deleted.
           content:
@@ -13201,8 +13291,12 @@ paths:
                     description: Always `deleted`.
               example:
                 status: deleted
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No endpoint with this id in this mode, or it was already deleted.
           content:
@@ -13215,6 +13309,8 @@ paths:
                   code: not_found
                   message: endpoint not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "422":
+          $ref: "#/components/responses/BodyNotAllowed"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -13247,8 +13343,12 @@ paths:
               example:
                 secret: whsec_1f8a3c6e9b2d5f7a0c4e8b1d3f6a9c2e5b7d0f4a8c1e3b6d
                 secondary_valid_until: "2026-11-04T10:00:00Z"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No endpoint with this id in this mode.
           content:
@@ -13261,6 +13361,8 @@ paths:
                   code: not_found
                   message: webhook endpoint not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "422":
+          $ref: "#/components/responses/BodyNotAllowed"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -13314,6 +13416,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No endpoint with this id in this mode, or it was deleted.
           content:
@@ -13370,8 +13474,12 @@ paths:
                 replay_of: hc_whevt_dbj84biq3gpgqfoq5c8g
                 delivery_id: hc_whd_dbj84bqq3gpgqfoq5c9k
                 status: queued
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No such delivery in this mode, the delivery belongs to another endpoint, or the endpoint was deleted.
           content:
@@ -13396,6 +13504,8 @@ paths:
                   code: invalid_state
                   message: endpoint is paused — resume it before replaying deliveries
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "422":
+          $ref: "#/components/responses/BodyNotAllowed"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -13436,6 +13546,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -13488,6 +13600,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -13627,6 +13741,8 @@ paths:
                 event_id: hc_whevt_dbj84biq3gpgqfoq5c9r
                 replay_of: hc_whevt_dbj84biq3gpgqfoq5c8g
                 status: queued
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -13653,6 +13769,8 @@ paths:
                   code: not_found
                   message: webhook event not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "422":
+          $ref: "#/components/responses/BodyNotAllowed"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -14056,6 +14174,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "409":
           description: |
             Nothing is created. `already_exists`: a plan with this `code`
@@ -14151,6 +14271,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -14204,6 +14326,8 @@ paths:
                 live_subscription_count: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: |
             `not_found`: no plan with this ID in this account and mode.
@@ -14332,6 +14456,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: |
             `not_found`: no plan with this ID in this account and mode.
@@ -14454,6 +14580,8 @@ paths:
                 total: 2
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: |
             `not_found`: no plan with this ID in this account and mode.
@@ -14542,6 +14670,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: |
             `not_found`: no plan with this ID in this account and mode.
@@ -14666,6 +14796,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: |
             `not_found`: no such plan (`plan not found`), or no such price on
@@ -14752,6 +14884,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: |
             `not_found`: no such plan (`plan not found`), or no such price on
@@ -14916,6 +15050,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this `customer_id` in this account and mode (code `not_found`).
           content:
@@ -15095,6 +15231,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -15154,8 +15292,12 @@ paths:
                 next_billing_at: "2026-11-01T00:00:00Z"
                 created_at: "2026-09-28T16:20:00Z"
                 updated_at: "2026-10-01T09:12:44Z"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No subscription with this ID in this account and mode.
           content:
@@ -15301,8 +15443,12 @@ paths:
                   updated_at: "2026-11-01T01:42:10Z"
                 invoices_generated: 1
                 still_due: false
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No subscription with this ID in this account and mode.
           content:
@@ -15396,6 +15542,8 @@ paths:
                 updated_at: "2026-10-01T09:12:44Z"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No subscription with this ID in this account and mode (code `not_found`).
           content:
@@ -15469,8 +15617,12 @@ paths:
                 next_billing_at: "2026-11-01T00:00:00Z"
                 created_at: "2026-10-01T09:12:44Z"
                 updated_at: "2026-10-20T16:45:00Z"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No subscription with this ID in this account and mode.
           content:
@@ -15609,6 +15761,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No subscription with this ID in this account and mode.
           content:
@@ -15709,8 +15863,12 @@ paths:
                 next_billing_at: "2026-11-01T00:00:00Z"
                 created_at: "2026-10-01T09:12:44Z"
                 updated_at: "2026-10-22T08:10:00Z"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No subscription with this ID in this account and mode.
           content:
@@ -15862,6 +16020,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No subscription with this ID in this account and mode.
           content:
@@ -15958,8 +16118,12 @@ paths:
                 next_billing_at: "2026-11-01T00:00:00Z"
                 created_at: "2026-10-01T09:12:44Z"
                 updated_at: "2026-10-24T11:00:00Z"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No subscription with this ID in this account and mode.
           content:
@@ -16059,8 +16223,12 @@ paths:
                 next_billing_at: "2026-11-01T00:00:00Z"
                 created_at: "2026-10-01T09:12:44Z"
                 updated_at: "2026-10-08T10:00:00Z"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No subscription with this ID in this account and mode.
           content:
@@ -16186,6 +16354,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No subscription with this ID in this account and mode.
           content:
@@ -16353,6 +16523,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No subscription with this ID in this account and mode.
           content:
@@ -16444,8 +16616,12 @@ paths:
                 next_billing_at: "2026-11-01T00:00:00Z"
                 created_at: "2026-10-01T09:12:44Z"
                 updated_at: "2026-10-06T09:00:00Z"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No subscription with this ID in this account and mode.
           content:
@@ -16553,6 +16729,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No subscription with this ID in this account and mode.
           content:
@@ -16718,6 +16896,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: |
             No subscription with this ID in this account and mode (message
@@ -16811,8 +16991,12 @@ paths:
       responses:
         "204":
           description: Item removed.
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: |
             No subscription with this ID in this account and mode (message
@@ -16901,8 +17085,12 @@ paths:
                 quantity: 1
                 created_at: "2026-10-01T09:12:44Z"
                 updated_at: "2026-10-18T13:05:00Z"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: The item is not found or is not on this subscription.
           content:
@@ -17024,6 +17212,8 @@ paths:
                 truncated: false
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No subscription with this ID in this account and mode.
           content:
@@ -17306,6 +17496,8 @@ paths:
                 total: 4210
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: "`validation_error`: a malformed `dimensions` pair, a `from` or `to` that cannot be parsed, `to` before `from`, or a `limit` or `offset` out of range (param names the field)."
           content:
@@ -17668,6 +17860,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: |
             `validation_error`: a missing, empty or whitespace-only
@@ -17756,6 +17950,8 @@ paths:
                 total_rows: 12
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -17819,6 +18015,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: |
             `validation_error`: `external_customer_id` is missing; no
@@ -17884,6 +18082,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: "`validation_error`: `external_customer_id` is missing, or the body has an unknown field (`param` names it; the body must use only the fields listed here)."
           content:
@@ -17977,6 +18177,8 @@ paths:
                         value: "395500"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: "`validation_error`: a malformed `dimensions` pair, an unknown `tz`, a `from` or `to` that cannot be parsed, or `to` before `from`."
           content:
@@ -18149,6 +18351,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -18242,6 +18446,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer, or no subscription, with this id in this account and mode (code `not_found`).
           content:
@@ -18406,6 +18612,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer, or no subscription, with this id in this account and mode.
           content:
@@ -18555,6 +18763,8 @@ paths:
                     created_at: "2026-11-01T00:05:00Z"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -18597,6 +18807,8 @@ paths:
                 format: binary
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -18683,6 +18895,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -18781,6 +18995,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -18904,8 +19120,12 @@ paths:
                 updated_at: "2026-11-05T09:12:00Z"
                 billing_reason: manual
                 is_simulated: false
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -18991,8 +19211,12 @@ paths:
                     description: Always `sent`, meaning the email is queued.
               example:
                 status: sent
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -19146,8 +19370,12 @@ paths:
                 updated_at: "2026-12-20T10:00:00Z"
                 billing_reason: manual
                 is_simulated: false
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -19293,6 +19521,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -19415,8 +19645,12 @@ paths:
                 updated_at: "2026-11-06T14:00:00Z"
                 billing_reason: subscription_cycle
                 is_simulated: false
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -19540,8 +19774,12 @@ paths:
                 updated_at: "2026-11-03T10:00:02Z"
                 billing_reason: manual
                 is_simulated: false
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -19735,6 +19973,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -19889,6 +20129,8 @@ paths:
                 truncated: false
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -19952,6 +20194,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -20017,6 +20261,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -20102,6 +20348,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode, or no refund with this Stripe id on it.
           content:
@@ -20172,6 +20420,8 @@ paths:
                     out_of_band_cents: 0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -20235,6 +20485,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No credit note with this id in this account and mode.
           content:
@@ -20340,6 +20592,8 @@ paths:
                 updated_at: "2026-11-03T10:15:02Z"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No credit note with this id in this account and mode.
           content:
@@ -20441,8 +20695,12 @@ paths:
                 created_at: "2026-11-04T08:00:00Z"
                 recorded_at: "2026-11-04T08:00:00Z"
                 updated_at: "2026-11-04T08:05:00Z"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No credit note with this id in this account and mode.
           content:
@@ -20573,6 +20831,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No credit note with this id in this account and mode.
           content:
@@ -20686,8 +20946,12 @@ paths:
                 created_at: "2026-11-03T10:15:00Z"
                 recorded_at: "2026-11-03T10:15:00Z"
                 updated_at: "2026-11-03T12:00:04Z"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No credit note with this id in this account and mode.
           content:
@@ -20802,8 +21066,12 @@ paths:
                 created_at: "2026-11-04T08:00:00Z"
                 recorded_at: "2026-11-04T08:00:00Z"
                 updated_at: "2026-11-04T09:00:00Z"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No credit note with this id in this account and mode.
           content:
@@ -20873,6 +21141,8 @@ paths:
                 format: binary
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No credit note with this id in this account and mode.
           content:
@@ -21005,8 +21275,12 @@ paths:
                 updated_at: "2026-11-02T16:00:02Z"
                 billing_reason: manual
                 is_simulated: false
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -21157,8 +21431,12 @@ paths:
                 updated_at: "2026-12-01T09:30:00Z"
                 billing_reason: subscription_cycle
                 is_simulated: false
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No invoice with this id in this account and mode.
           content:
@@ -21381,6 +21659,10 @@ paths:
       responses:
         "204":
           description: Signed out, or there was nothing to sign out.
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "422":
+          $ref: "#/components/responses/BodyNotAllowed"
         "429":
           $ref: "#/components/responses/RateLimited"
         "500":
@@ -22045,6 +22327,8 @@ paths:
       responses:
         "204":
           description: Invitation revoked
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -22071,6 +22355,8 @@ paths:
                   code: not_found
                   message: invitation not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "422":
+          $ref: "#/components/responses/BodyNotAllowed"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -22100,6 +22386,8 @@ paths:
       responses:
         "204":
           description: Member removed and their sessions ended
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -22138,6 +22426,8 @@ paths:
                   code: invalid_state
                   message: you cannot remove yourself — another member must remove you
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "422":
+          $ref: "#/components/responses/BodyNotAllowed"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -22285,8 +22575,12 @@ paths:
                 invoices_generated: 2
                 errors:
                   - "subscription hc_sub_dauq502q3gpgqfoq5c2k: billing failed"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: |
             The request has a body with a field (`param` names it). This
@@ -22357,6 +22651,8 @@ paths:
                 total: 2
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -22439,6 +22735,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: |
             `validation_error`: a required field is missing (`param` then
@@ -22485,6 +22783,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No rate with this ID in this account and mode.
           content:
@@ -22596,6 +22896,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this ID in this account and mode.
           content:
@@ -22717,6 +23019,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this `customer_id` in this account and mode.
           content:
@@ -22793,6 +23097,8 @@ paths:
                     total_deducted: 0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this ID in this account and mode.
           content:
@@ -22852,6 +23158,8 @@ paths:
                 computed_at: "2026-10-20T12:00:00Z"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No customer with this ID in this account and mode.
           content:
@@ -23133,6 +23441,8 @@ paths:
                     description: Always `deleted`.
               example:
                 status: deleted
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -23451,6 +23761,8 @@ paths:
                   credits_expired: 0
                   dunning_advanced: 0
                   had_errors: true
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -23729,6 +24041,8 @@ paths:
                 total: 3
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -23784,6 +24098,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -23907,6 +24223,8 @@ paths:
                   prices: 5
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No recipe with this key.
           content:
@@ -24023,6 +24341,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No recipe with this key.
           content:
@@ -24131,6 +24451,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No recipe with this key.
           content:
@@ -24220,6 +24542,8 @@ paths:
                 type: string
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: "`from` or `to` is malformed, or `to` is before `from`."
           content:
@@ -24289,6 +24613,8 @@ paths:
                 type: string
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: "`from` or `to` is malformed, or `to` is before `from`."
           content:
@@ -24355,6 +24681,8 @@ paths:
                 type: string
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: "`from` or `to` is malformed, or `to` is before `from`."
           content:
@@ -24452,6 +24780,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: "`from` or `to` is malformed, `to` is before `from`, or a `dimensions` pair is malformed."
           content:
@@ -24560,6 +24890,8 @@ paths:
                 type: string
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: A date filter is malformed, or an upper bound is before its lower bound.
           content:
@@ -24664,6 +24996,8 @@ paths:
                   net: 4900
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -24713,6 +25047,8 @@ paths:
                     invoice_count: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -24784,6 +25120,8 @@ paths:
                   net: 5000
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -24858,6 +25196,8 @@ paths:
                   quantity: "12500000"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -24934,6 +25274,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -25026,6 +25368,8 @@ paths:
                 degraded: []
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No dunning run with this id in this account and mode.
           content:
@@ -25111,6 +25455,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No dunning run with this id in this account and mode (`dunning_run not found`), or its invoice is gone (`invoice not found`).
           content:
@@ -25185,6 +25531,8 @@ paths:
                     amount_cents: 25950
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -25232,6 +25580,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -25293,6 +25643,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: |
             `validation_error`, with `param` naming the field: a replaced
@@ -25348,6 +25700,8 @@ paths:
                 updated_at: "2026-09-15T12:00:00Z"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: "`not_found`: no policy with this id in this account and mode."
           content:
@@ -25418,6 +25772,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: "`not_found`: no policy with this id in this account and mode."
           content:
@@ -25476,8 +25832,12 @@ paths:
                     description: Always `deleted`.
               example:
                 status: deleted
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: "`not_found`: no policy with this id in this account and mode."
           content:
@@ -25554,8 +25914,12 @@ paths:
                     description: Always `default_updated`.
               example:
                 status: default_updated
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: "`not_found`: no policy with this id in this account and mode."
           content:
@@ -25720,6 +26084,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: |
             `not_found`: no customer with this ID in this account and mode.
@@ -25819,6 +26185,8 @@ paths:
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -25869,6 +26237,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: |
             `not_found`: no active override with this ID (it may already be
@@ -26206,6 +26576,8 @@ paths:
                 created_at: "2026-10-01T08:15:00Z"
                 revoked_at: "2026-11-01T09:12:30Z"
                 last_used_at: "2026-11-01T09:10:05Z"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -26232,6 +26604,8 @@ paths:
                   code: not_found
                   message: api key not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "422":
+          $ref: "#/components/responses/BodyNotAllowed"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -26607,6 +26981,8 @@ paths:
                 can_send_invites: true
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -26639,6 +27015,8 @@ paths:
                     description: The address the test email went to, the signed-in member's own.
               example:
                 sent_to: maya@northwind.example
+        "400":
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -26665,6 +27043,8 @@ paths:
                   code: email_not_configured
                   message: "This server can't send email: SMTP_HOST is not set. Set the SMTP_* variables and restart the server."
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "422":
+          $ref: "#/components/responses/BodyNotAllowed"
         "429":
           $ref: "#/components/responses/RateLimited"
         "502":
@@ -26758,6 +27138,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           description: A key is missing or has the wrong prefix for the mode, or the body has an unknown field. `error.param` names the field.
           content:
@@ -26816,6 +27198,8 @@ paths:
                     updated_at: "2026-10-01T08:30:02Z"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -26890,6 +27274,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: Stripe is not connected for this mode. Connect it first.
           content:
@@ -26957,6 +27343,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: Stripe is not connected for this mode
           content:
@@ -26969,6 +27357,8 @@ paths:
                   code: not_found
                   message: stripe_credentials not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "422":
+          $ref: "#/components/responses/BodyNotAllowed"
         "429":
           $ref: "#/components/responses/RateLimited"
 
