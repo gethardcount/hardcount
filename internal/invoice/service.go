@@ -2590,7 +2590,7 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 			return domain.InvoiceLineItem{}, errs.Invalid("commit_granted_cents", "must be greater than 0")
 		}
 		if *input.CommitGrantedCents > 100_000_000 { // matches the credit grant cap; raise on first DP ask (ADR-078)
-			return domain.InvoiceLineItem{}, errs.Invalid("commit_granted_cents", "cannot exceed 1,000,000")
+			return domain.InvoiceLineItem{}, errs.Invalid("commit_granted_cents", "cannot exceed 100000000 (1,000,000.00 in that currency)")
 		}
 		if domain.InvoiceLineItemType(lineType) != domain.LineTypeAddOn {
 			return domain.InvoiceLineItem{}, errs.Invalid("commit_granted_cents", "commit purchase lines must be add_on lines")

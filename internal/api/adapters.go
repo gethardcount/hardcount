@@ -1772,6 +1772,10 @@ func (a *memberUserDirectoryAdapter) AttachTenant(ctx context.Context, userID, t
 	return a.store.AttachTenant(ctx, userID, tenantID, role)
 }
 
+func (a *memberUserDirectoryAdapter) ValidatePassword(plaintext string) error {
+	return user.ValidatePassword(plaintext)
+}
+
 // memberTenantNamerAdapter resolves the workspace display name for
 // invite emails and the accept page.
 type memberTenantNamerAdapter struct {

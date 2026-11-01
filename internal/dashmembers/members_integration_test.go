@@ -79,6 +79,9 @@ func (a userDirAdapter) CreateUser(ctx context.Context, email, plaintext, tenant
 func (a userDirAdapter) AttachTenant(ctx context.Context, userID, tenantID, role string) error {
 	return a.store.AttachTenant(ctx, userID, tenantID, role)
 }
+func (a userDirAdapter) ValidatePassword(plaintext string) error {
+	return user.ValidatePassword(plaintext)
+}
 
 // --- harness --------------------------------------------------------------
 
@@ -495,5 +498,40 @@ func TestConcurrentAccept(t *testing.T) {
 	}
 	if len(members) != 2 {
 		t.Fatalf("member count after race: got %d, want 2 (no duplicate join)", len(members))
+	}
+}
+
+// TestAcceptInvite_RejectedPasswordKeepsTheInvite: a new account's password
+// is checked before the invitation is used up. Before, the token was claimed
+// first and the password checked in CreateUser, so a password that is too
+// short, too long or on the breached list burned the invitation: the invitee
+// saw "too short", fixed it, and got "this invitation is no longer valid".
+//
+// Mutation: move the ValidatePassword call after AcceptInvitation, and the
+// retry with a good password is refused.
+func TestAcceptInvite_RejectedPasswordKeepsTheInvite(t *testing.T) {
+	h := newHarness(t, "Team Retry Password")
+	ctx := context.Background()
+
+	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "retry@example.com"); err != nil {
+		t.Fatalf("invite: %v", err)
+	}
+	token := h.email.lastToken(t)
+
+	for _, bad := range []string{"short", strings.Repeat("x", 73)} {
+		_, err := h.svc.AcceptInvite(ctx, token, bad)
+		if !errors.Is(err, errs.ErrValidation) || errs.Field(err) != "password" {
+			t.Fatalf("accept with %d-char password: err = %v, want a password validation error", len(bad), err)
+		}
+	}
+	if _, err := h.svc.PreviewInvite(ctx, token); err != nil {
+		t.Fatalf("the invitation must still be pending after a rejected password: %v", err)
+	}
+	res, err := h.svc.AcceptInvite(ctx, token, testPassword)
+	if err != nil {
+		t.Fatalf("accept with a good password after a rejected one: %v", err)
+	}
+	if !res.NewAccount || !res.MintSession {
+		t.Errorf("accept result = %+v, want a new account with a session", res)
 	}
 }

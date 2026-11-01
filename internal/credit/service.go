@@ -70,6 +70,12 @@ func (s *Service) SetResolver(r clock.Resolver) {
 // writing. When unwired (narrow unit tests) the read is skipped.
 func (s *Service) SetCustomerReader(r CustomerReader) { s.customers = r }
 
+// grantCapMessage refuses a credit inflow above 100,000,000 cents, the
+// fat-finger cap every grant path shares. The field counts cents, so the
+// message names the cap in cents and in the currency's main unit; it said
+// "cannot exceed 1,000,000", which read as a hundredth of the cap.
+const grantCapMessage = "cannot exceed 100000000 (1,000,000.00 in that currency)"
+
 // requireCustomer confirms the customer exists in the caller's tenant and
 // mode. The ledger's foreign key to customers is on the id alone and
 // foreign-key checks do not apply row-level security, so without this read
@@ -158,7 +164,7 @@ func (s *Service) Grant(ctx context.Context, tenantID string, input GrantInput) 
 		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", "must be greater than 0")
 	}
 	if input.AmountCents > 100_000_000 { // $1M cap
-		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", "cannot exceed 1,000,000")
+		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", grantCapMessage)
 	}
 	desc := strings.TrimSpace(input.Description)
 	if desc == "" {
@@ -267,7 +273,7 @@ func (s *Service) GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenan
 		return domain.CreditLedgerEntry{}, errs.Invalid("commit_granted_cents", "must be greater than 0")
 	}
 	if amountCents > 100_000_000 { // $1M cap, matches Grant; raise on first DP ask (ADR-078)
-		return domain.CreditLedgerEntry{}, errs.Invalid("commit_granted_cents", "cannot exceed 1,000,000")
+		return domain.CreditLedgerEntry{}, errs.Invalid("commit_granted_cents", grantCapMessage)
 	}
 	// A commit whose expiry already passed would grant dead-on-arrival
 	// credits the next sweep silently retires — the customer pays and
@@ -357,7 +363,7 @@ func (s *Service) GrantTx(ctx context.Context, tx *sql.Tx, tenantID string, inpu
 		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", "must be greater than 0")
 	}
 	if input.AmountCents > 100_000_000 {
-		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", "cannot exceed 1,000,000")
+		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", grantCapMessage)
 	}
 	desc := strings.TrimSpace(input.Description)
 	if desc == "" {
@@ -472,7 +478,7 @@ func (s *Service) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID
 		return domain.CreditReturn{}, errs.Invalid("amount_cents", "must be greater than 0")
 	}
 	if input.AmountCents > 100_000_000 {
-		return domain.CreditReturn{}, errs.Invalid("amount_cents", "cannot exceed 1,000,000")
+		return domain.CreditReturn{}, errs.Invalid("amount_cents", grantCapMessage)
 	}
 	desc := strings.TrimSpace(input.Description)
 	if desc == "" {
@@ -835,7 +841,7 @@ func (s *Service) Adjust(ctx context.Context, tenantID string, input AdjustInput
 	// adjustments are naturally bounded by the balance check in
 	// AdjustAtomic — no cap needed there.
 	if input.AmountCents > 100_000_000 {
-		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", "cannot exceed 1,000,000")
+		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", grantCapMessage)
 	}
 	desc := strings.TrimSpace(input.Description)
 	if desc == "" {

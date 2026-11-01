@@ -36,6 +36,10 @@ type UserDirectory interface {
 	// and attaches the tenant with the role — the bootstrap-owner path's
 	// exact primitive.
 	CreateUser(ctx context.Context, email, plaintext, tenantID, role string) (domain.User, error)
+	// ValidatePassword runs CreateUser's password rules without creating
+	// anything, so the accept flow refuses a bad password before it uses up
+	// the invitation.
+	ValidatePassword(plaintext string) error
 	// AttachTenant adds a membership for an EXISTING user.
 	AttachTenant(ctx context.Context, userID, tenantID, role string) error
 }
@@ -352,6 +356,14 @@ func (s *Service) AcceptInvite(ctx context.Context, token, password string) (Acc
 	isNew := errors.Is(lookupErr, errs.ErrNotFound)
 	if lookupErr != nil && !isNew {
 		return AcceptResult{}, lookupErr
+	}
+	// A new account's password is checked before the token is claimed: a
+	// password refused after the claim (too short, too long, breached) used
+	// up the invitation, and the invitee's retry was "no longer valid".
+	if isNew {
+		if err := s.users.ValidatePassword(password); err != nil {
+			return AcceptResult{}, err
+		}
 	}
 
 	// Claim the token BEFORE the side effects — the CAS is the
