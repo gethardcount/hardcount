@@ -11150,10 +11150,10 @@ type ListInvoicesParams struct {
 	PaymentStatus string `form:"payment_status,omitempty" json:"payment_status,omitempty"`
 
 	// Search Case-insensitive substring match on the invoice number, or on
-	// the customer's name or email only when customer data is not
-	// encrypted. With `HARDCOUNT_ENCRYPTION_KEY` set (required in
-	// production), the name and email are stored encrypted, so only
-	// the invoice number matches.
+	// the customer's name or email, also when customer data is
+	// encrypted (`HARDCOUNT_ENCRYPTION_KEY`). Names and emails are
+	// matched among the 5,000 customers created last in this mode; an
+	// invoice of an older customer is still found by its number.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
 	// From Lower bound on created_at, inclusive. RFC3339 instant or

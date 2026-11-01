@@ -11,15 +11,30 @@ import (
 // string + positional args — same style as order_by_test.go.
 
 func TestBuildInvWhere_Search(t *testing.T) {
-	where, args := buildInvWhere(ListFilter{Search: "INV-2026"})
-	// The number, or the customer's name or email, all on the one pattern.
-	for _, frag := range []string{"invoice_number ILIKE $1", "c.id = invoices.customer_id", "c.display_name ILIKE $1", "c.email ILIKE $1"} {
+	where, args := buildInvWhere(ListFilter{Search: "INV-2026", SearchCustomerIDs: []string{"cus_a", "cus_b"}})
+	// The number on the pattern, or one of the customers matched by name or
+	// email. The customers' encrypted columns are not in the SQL: an ILIKE
+	// there compared ciphertext.
+	for _, frag := range []string{"invoice_number ILIKE $1", "customer_id = ANY($2)"} {
 		if !strings.Contains(where, frag) {
 			t.Fatalf("search clause missing %q in %q", frag, where)
 		}
 	}
-	if len(args) != 1 || args[0] != "%INV-2026%" {
-		t.Fatalf("want single pattern arg %%INV-2026%%, got %v", args)
+	for _, gone := range []string{"display_name", "email"} {
+		if strings.Contains(where, gone) {
+			t.Fatalf("search clause still reads customers.%s: %q", gone, where)
+		}
+	}
+	if len(args) != 2 || args[0] != "%INV-2026%" {
+		t.Fatalf("want [pattern ids], got %v", args)
+	}
+	if ids, ok := args[1].([]string); !ok || len(ids) != 2 || ids[0] != "cus_a" || ids[1] != "cus_b" {
+		t.Fatalf("want the matched customer ids as the second arg, got %v", args[1])
+	}
+	// No customer matched: an empty array, so only the number can match.
+	_, args = buildInvWhere(ListFilter{Search: "INV-2026"})
+	if ids, ok := args[1].([]string); !ok || ids == nil || len(ids) != 0 {
+		t.Fatalf("want an empty, non-nil id array with no matched customer, got %#v", args[1])
 	}
 }
 
@@ -28,7 +43,7 @@ func TestBuildInvWhere_SearchEscapesLikeMeta(t *testing.T) {
 	// every invoice.
 	_, args := buildInvWhere(ListFilter{Search: `100%_\`})
 	want := `%100\%\_\\%`
-	if len(args) != 1 || args[0] != want {
+	if len(args) != 2 || args[0] != want {
 		t.Fatalf("want escaped pattern %q, got %v", want, args)
 	}
 }
@@ -77,14 +92,14 @@ func TestBuildInvWhere_ComposedPlaceholderNumbering(t *testing.T) {
 		Overdue:       true,
 		IDs:           []string{"inv_a", "inv_b"},
 	})
-	// 1 customer + 1 status + 1 payment_status + 1 search + 1 from +
-	// 4 overdue + 2 ids = 11 args.
-	if len(args) != 11 {
-		t.Fatalf("want 11 args, got %d: %v", len(args), args)
+	// 1 customer + 1 status + 1 payment_status + 2 search (pattern and
+	// matched customers) + 1 from + 4 overdue + 2 ids = 12 args.
+	if len(args) != 12 {
+		t.Fatalf("want 12 args, got %d: %v", len(args), args)
 	}
 	// The highest placeholder must equal the arg count.
-	if !strings.Contains(where, "$11") || strings.Contains(where, "$12") {
-		t.Fatalf("placeholder numbering does not end at $11: %q", where)
+	if !strings.Contains(where, "$12") || strings.Contains(where, "$13") {
+		t.Fatalf("placeholder numbering does not end at $12: %q", where)
 	}
 	if !strings.Contains(where, "customer_id = $1") {
 		t.Fatalf("first clause should bind customer_id to $1: %q", where)

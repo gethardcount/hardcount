@@ -181,6 +181,7 @@ type Service struct {
 	customerReader CustomerReader
 	dunningReader  DunningRunReader
 	subPauseReader SubscriptionPauseReader
+	customerSearch CustomerSearcher
 	commitGrants   CommitGrantReader
 	paymentPages   PaymentPageReader
 	cardRefusals   CardRefusalReader
@@ -518,6 +519,22 @@ type SubscriptionPauseReader interface {
 // since a stuck draft is the state operators complain about.
 func (s *Service) SetSubscriptionPauseReader(r SubscriptionPauseReader) {
 	s.subPauseReader = r
+}
+
+// CustomerSearcher finds the customers an invoice search names: the ids of
+// the customers whose name or email contains q, case-insensitive. The
+// customer store matches after decrypting, because both columns are
+// encrypted at rest and SQL cannot match them. Satisfied by
+// *customer.PostgresStore (SearchIDsByNameOrEmail).
+type CustomerSearcher interface {
+	SearchIDsByNameOrEmail(ctx context.Context, tenantID, q string) ([]string, error)
+}
+
+// SetCustomerSearcher wires the customer lookup behind invoice search
+// (List with a Search). Without it, a search matches the invoice number
+// only; the router always wires it.
+func (s *Service) SetCustomerSearcher(c CustomerSearcher) {
+	s.customerSearch = c
 }
 
 // CommitGrantReader is the narrow prepaid-commit lookup the attention
@@ -1586,6 +1603,16 @@ func (s *Service) invoiceLocation(ctx context.Context, tenantID string) *time.Lo
 }
 
 func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.Invoice, int, error) {
+	// A search matches the invoice number, or the customer's name or email.
+	// The customers are matched first, by the customer store (see
+	// CustomerSearcher); the invoice query takes their ids.
+	if strings.TrimSpace(filter.Search) != "" && s.customerSearch != nil {
+		ids, err := s.customerSearch.SearchIDsByNameOrEmail(ctx, filter.TenantID, filter.Search)
+		if err != nil {
+			return nil, 0, fmt.Errorf("search customers by name or email: %w", err)
+		}
+		filter.SearchCustomerIDs = ids
+	}
 	invs, total, err := s.store.List(ctx, filter)
 	if err != nil {
 		return nil, 0, err
