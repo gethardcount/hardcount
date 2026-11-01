@@ -33,7 +33,7 @@ Hardcount uses two database users. The admin user runs migrations; the limited u
 | `DB_CONN_MAX_LIFETIME_MIN` | Minutes before a connection is closed and replaced. | `30` |
 | `DB_CONN_MAX_IDLE_TIME_SEC` | Seconds an idle connection is kept. | `120` |
 | `DB_PING_TIMEOUT_SEC` | Seconds the start-up connection check waits for Postgres. | `5` |
-| `DB_QUERY_TIMEOUT_MS` | Milliseconds an account lookup or change may run: creating, reading, listing or updating accounts (tenants). Other queries have no limit of their own; a request's end with the request's 30-second limit. | `5000`. Below 100 logs a warning. |
+| `DB_QUERY_TIMEOUT_MS` | Milliseconds one account lookup may run: reading the account's name for a team invite email or invite page. Other queries have no limit of their own: a request's queries stop when the request's time limit ends, 30 seconds for most routes. For a limit on every query, see [Timeouts on the limited user](ops/postgres-requirements.md#timeouts-on-the-limited-user). | `5000`. Below 100 logs a warning. |
 | `RUN_MIGRATIONS_ON_BOOT` | Apply new migrations when the server starts. Accepts `true`, `false`, `yes`, `no`, `1`, `0`. | `false`: then run `hardcount migrate` first, because the server refuses to start while a migration is missing. Any other value stops start-up. |
 | `MIGRATION_LOCK_TIMEOUT` | How long one migration waits for a table lock before it stops. A Go duration such as `30s`, or `0` for no limit. Read by `hardcount migrate`, `hardcount-bootstrap`, and the server when `RUN_MIGRATIONS_ON_BOOT` is on. | `5s`. Any other value stops the migration. |
 
@@ -45,17 +45,25 @@ Every whole-number setting above stops start-up when its value is not a whole nu
 |---|---|---|
 | `APP_ENV` | `local`, `staging` or `production`. Outside local: responses carry HSTS, `APP_DATABASE_URL` is required, the bootstrap token needs 16 characters, and `SHUTDOWN_DRAIN_DELAY` defaults to `5s`. In staging and production the sign-in cookie is also `Secure`, so sign-in needs HTTPS. Production adds the checks marked "production" on this page. In local, background billing runs every 5 minutes instead of every hour. | `local`. A value that starts with `prod` but is not `production`, such as `prod`, stops start-up. Any other unknown value logs a warning and runs as not local and not production. |
 | `PORT` | The HTTP port the server listens on. | `8080`. A value that is not a port number logs a warning. |
-| `TRUST_PROXY` | Addresses of your proxy or load balancer: IPs or CIDRs, comma-separated, or `none` for no proxy. Hardcount then takes the client address from their `X-Forwarded-For`. It does not read `X-Real-IP`. Why it matters: [Self-host](self-host.md#settings). | Unset: the direct peer is the client, with a warning. Production: required. An entry that is not an IP or CIDR stops start-up in every environment. |
+| `TRUST_PROXY` | Addresses of your proxy or load balancer: IPs or CIDRs, comma-separated, or `none` for no proxy. Hardcount then takes the client address from their `X-Forwarded-For`. It does not read `X-Real-IP`. [Why it matters](#why-trust_proxy-matters). | Unset: the direct peer is the client, with a warning. Production: required. An entry that is not an IP or CIDR stops start-up in every environment. |
 | `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call the API, comma-separated and each in full, such as `https://app.example.com`. A listed origin may send the sign-in cookie. `*` alone allows any site, without the cookie. | `http://localhost:3000,http://localhost:5173,http://localhost:5174`, in every environment. An entry with a `*` inside it, or `*` beside other origins, stops start-up. |
 | `HARDCOUNT_COOKIE_DOMAIN` | The `Domain` of the sign-in cookie, such as `.example.com` when the API and dashboard are on sibling subdomains. | Unset: the cookie is for the API's host only. |
 | `HARDCOUNT_API_BASE_URL` | The public address of the API, so a copied cost-dashboard link is a full address. | Unset: the link is a path, and start-up logs a warning. |
 | `REDIS_URL` | Redis, used for rate limiting only. | Production: required, and an unreachable Redis stops start-up. Elsewhere: unset logs nothing, and unreachable logs a warning. Either way rate limits are then off, except sign-in's, which each copy counts on its own. |
 | `HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN` | API and dashboard requests a minute for each API key, or for each account's dashboard users together in each mode (test or live). One dashboard page sends about 10 requests. | `1000`. A value that is not a whole number of 1 or more stops start-up. |
 | `HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN` | Requests a minute from each client address to sign-in, password reset, invites (`/v1/auth`) and `POST /v1/bootstrap`. It slows password guessing. | `100`. A value that is not a whole number of 1 or more stops start-up. |
-| `HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC` | Usage events and LiteLLM callbacks a second, for each API key. | `1000`. A value that is not a whole number of 1 or more stops start-up. |
+| `HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC` | Requests a second to the usage routes (`/v1/usage-events…` and `/v1/integrations/litellm…`), for each API key. A request counts once, whatever it holds: one event, a batch of up to 1,000 events, or one LiteLLM send. | `1000`. A value that is not a whole number of 1 or more stops start-up. |
 | `SHUTDOWN_DRAIN_DELAY` | On shutdown, how long a copy keeps serving after `/health/ready` turns to 503, so a load balancer stops sending it traffic first. A Go duration. See [High availability](ops/high-availability.md). | Outside local: `5s`. Local: `0`. A value that does not parse, or is negative, stops start-up. |
 
 Public addresses (`DASHBOARD_BASE_URL`, `CUSTOMER_PORTAL_URL`, `HOSTED_INVOICE_BASE_URL`, `PAYMENT_UPDATE_URL`, `PAYMENT_UPDATE_RETURN_URL`, `HARDCOUNT_API_BASE_URL`): in staging and production, one that starts with `http://` logs a warning, because the sign-in cookie there needs HTTPS.
+
+If Redis goes down after start-up in production, API and dashboard requests answer 429 until it is back. Usage keeps being accepted, and each copy counts sign-ins on its own. More: [Redis going down after boot](ops/runbook/replica-will-not-start.md#redis-going-down-after-boot).
+
+### Why `TRUST_PROXY` matters
+
+Without it, every request behind a load balancer appears to come from the load balancer. All users then share one rate limit, the audit log shows the load balancer's address, and 5 wrong passwords for an email, from anyone, make every new browser wait to sign in with it.
+
+To check it, sign in, switch the dashboard to test mode and open the audit log. The newest `login` entry shows the address Hardcount saw. It should be yours, not the load balancer's.
 
 ## Security and keys
 
@@ -110,11 +118,11 @@ The OpenTelemetry library reads these itself, and also its other standard `OTEL_
 
 ## First account
 
-`hardcount-bootstrap` (`make bootstrap`) reads these once, when it creates an account. The server does not read them.
+`hardcount-bootstrap` (`make bootstrap`) reads these once, when it creates an account on a local development database. The server does not read them. On a server, create the first account with `POST /v1/bootstrap` instead: [step 2 of Production on one VM](production-one-vm.md#2-create-your-account-and-first-login).
 
 | Setting | What it does | Default |
 |---|---|---|
-| `HARDCOUNT_BOOTSTRAP_EMAIL` | The dashboard owner's email. | `admin@hardcount.local` |
+| `HARDCOUNT_BOOTSTRAP_EMAIL` | The dashboard owner's email: one address with a dot in the domain, such as `you@example.com`. | `admin@hardcount.local` |
 | `HARDCOUNT_BOOTSTRAP_PASSWORD` | The owner's password. | Unset: one is generated and printed once. |
 | `HARDCOUNT_BOOTSTRAP_TENANT` | The account's name. | Unset: the command-line arguments, or `Demo Tenant` without any. |
 
@@ -135,9 +143,26 @@ These are read by Docker Compose from [`deploy/compose/.env`](../deploy/compose/
 
 How Compose differs from running the binary:
 
-- **Compose passes only the names `docker-compose.yml` lists.** `HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN`, `HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN`, `HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC`, `SHUTDOWN_DRAIN_DELAY`, `DB_SSLMODE` and the `DB_HOST` set are not listed, so setting them in `.env` does nothing. Add them to the `hardcount-api` service's `environment` to use them.
+- **Compose passes only the names `docker-compose.yml` lists.** A name it does not list does nothing in `.env`. `DB_SSLMODE` and the `DB_HOST` set are not listed: the stack's own Postgres needs neither. To pass another name, use the [override file](#your-own-changes-the-override-file).
 - **Some values are fixed.** `PORT` is `8080`, `RUN_MIGRATIONS_ON_BOOT` is `true`, and `DATABASE_URL` and `APP_DATABASE_URL` point at the in-stack Postgres. A `DATABASE_URL` in `.env` is ignored.
 - **Some defaults differ.** `APP_ENV` is `production`, `REDIS_URL` is `redis://redis:6379`, `TRUST_PROXY` is `172.16.0.0/12,192.168.0.0/16`, and `SMTP_FROM` is `billing@example.com`. `quickstart.sh` sets `APP_ENV=local`.
+
+### Your own changes: the override file
+
+Put your changes to the stack in `deploy/compose/docker-compose.override.yml`, never in `docker-compose.yml`. Compose reads the override file by itself and merges it into `docker-compose.yml`, and git leaves it alone. A release can change `docker-compose.yml`. Then `git checkout` of that release refuses to run over your edits, and the [upgrade](upgrades.md#upgrade-on-one-vm) stops.
+
+For example, to pass `OTEL_EXPORTER_OTLP_HEADERS` from `.env` (`docker-compose.yml` does not list it):
+
+```yaml
+services:
+  hardcount-api:
+    environment:
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+```
+
+Then run `docker compose config` in `deploy/compose`.
+
+**You see:** the setting under `hardcount-api`, in its `environment`. Run `docker compose up -d` to start the API with it.
 
 ## Development and tests only
 

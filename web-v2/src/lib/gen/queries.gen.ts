@@ -17384,8 +17384,6 @@ export const getConnectStripeUrl = () => {
 }
 
 /**
- * Used by the dashboard; not part of the integration API.
- *
  * Saves your own Stripe keys for one mode (`livemode` in the body
  * picks the mode, not the caller's mode). Calling it again for the
  * same mode replaces the keys; a webhook secret saved before is kept
@@ -17580,8 +17578,6 @@ export const getSetStripeWebhookSecretUrl = (mode: 'test' | 'live',) => {
 }
 
 /**
- * Used by the dashboard; not part of the integration API.
- *
  * Saves the `whsec_` signing secret for a mode that is already
  * connected, without entering the API keys again. Hardcount does not call
  * Stripe here; the secret is checked on each incoming webhook.

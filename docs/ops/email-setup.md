@@ -24,7 +24,7 @@ Hardcount sends about 20 to 30 emails a minute, and you cannot change that. Emai
    SMTP_TLS=starttls         # starttls (default) | implicit | none
    ```
 
-   `SMTP_TLS` is how the connection is encrypted: `starttls` for port 587, `implicit` for port 465. `none` sends in plain text: use it only for a local test inbox, never in production, where Hardcount refuses to send with it.
+   `SMTP_TLS` is how the connection is encrypted: `starttls` for port 587, `implicit` for port 465. `none` sends in plain text: use it only for a local test inbox, never in production, where Hardcount refuses to send with it. Any other value, such as `tls`, stops start-up.
 
 2. Set the web addresses that the links in emails point to. With the one-VM install, all of them use your dashboard's address.
 
@@ -203,7 +203,7 @@ Mailpit is a local email catcher with a web inbox. It comes with the source code
 
 Hardcount in a container, such as the quick start or the Compose stack, cannot use these settings as they are:
 
-- **`localhost` is the container itself**, not your computer, so `SMTP_HOST=localhost` reaches no Mailpit. With Docker Desktop (macOS, Windows), `SMTP_HOST=host.docker.internal` reaches the Mailpit on your computer. On Linux, first add `extra_hosts: ["host.docker.internal:host-gateway"]` to the `hardcount-api` service in the Compose file, or use a test inbox such as Mailtrap instead.
+- **`localhost` is the container itself**, not your computer, so `SMTP_HOST=localhost` reaches no Mailpit. With Docker Desktop (macOS, Windows), `SMTP_HOST=host.docker.internal` reaches the Mailpit on your computer. On Linux, first add `extra_hosts: ["host.docker.internal:host-gateway"]` to the `hardcount-api` service in `deploy/compose/docker-compose.override.yml` ([the override file](../settings.md#your-own-changes-the-override-file)), or use a test inbox such as Mailtrap instead.
 - **`SMTP_TLS=none` works only outside production.** The quick start runs with `APP_ENV=local`. The Compose stack runs with `APP_ENV=production` unless you set it, and then Hardcount refuses to send in plain text.
 
 ## Common mistakes

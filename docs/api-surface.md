@@ -15,7 +15,7 @@ Every call needs three things:
   start with `/v1/`.
 - **An API key** in the header `Authorization: Bearer <key>`. Use a secret
   key from your server. A gateway that only sends usage, such as LiteLLM,
-  gets a usage-only key. See [API keys](api-keys.md#key-types).
+  gets a usage-only key. See [Key types](api/authentication.md#key-types).
 - **`Content-Type: application/json`** on calls that send a body.
 
 Send an `Idempotency-Key` header on every `POST`, `PUT` and `PATCH` you may
@@ -183,7 +183,7 @@ A subscription puts a customer on a plan.
 | `DELETE` | `/v1/subscriptions/{id}/items/{itemID}` | Remove a plan from the subscription |
 | `PUT` | `/v1/subscriptions/{id}/pause-collection` | Keep the billing cycle, but leave new invoices as drafts |
 | `DELETE` | `/v1/subscriptions/{id}/pause-collection` | Resume collection |
-| `POST` | `/v1/subscriptions/{id}/extend-trial` | Move `trial_end_at` later |
+| `POST` | `/v1/subscriptions/{id}/extend-trial` | Move the trial end later: send `{"trial_end": "<RFC 3339 time>"}` |
 | `POST` | `/v1/subscriptions/{id}/end-trial` | End the trial now |
 | `POST` | `/v1/subscriptions/{id}/schedule-cancel` | Cancel later: send `{"at_period_end": true}`, or a `cancel_at` time |
 | `DELETE` | `/v1/subscriptions/{id}/scheduled-cancel` | Remove a scheduled cancel |
@@ -237,16 +237,33 @@ with a test key.
 | `GET` | `/v1/test-clocks/{id}` | Read the clock, with its `status` |
 | `POST` | `/v1/test-clocks/{id}/advance` | Move the clock forward to `frozen_time`, at most 1 year at a time, and bill what falls due |
 
-1. Put a customer on the clock: send its ID as `test_clock_id` when you
-   create the customer, with `POST /v1/customers`. Its subscriptions and
-   usage then follow the clock's time.
-2. Move the clock:
+1. Create a clock that starts at the current time, and save its ID:
 
    ```bash
-   curl -s -X POST "$HARDCOUNT/v1/test-clocks/$CLOCK_ID/advance" \
-     -H "Authorization: Bearer $HARDCOUNT_KEY" \
-     -H "Content-Type: application/json" \
-     -d '{"frozen_time": "2026-12-01T00:00:00Z"}' | jq -r .status
+   CLOCK_ID=$(jq -n --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+       '{name: "demo", frozen_time: $now}' \
+     | curl -s -X POST "$HARDCOUNT/v1/test-clocks" \
+       -H "Authorization: Bearer $HARDCOUNT_KEY" \
+       -H "Content-Type: application/json" \
+       -d @- | jq -r .id)
+   echo "$CLOCK_ID"
+   ```
+
+   **You see:** the clock's ID, `hc_tclk_…`.
+
+2. Put a customer on the clock: send its ID as `test_clock_id` when you
+   create the customer, with `POST /v1/customers`. Its subscriptions and
+   usage then follow the clock's time.
+3. Move the clock 32 days past its start, beyond the end of a monthly
+   period. The first `date` form is for macOS, the second for Linux:
+
+   ```bash
+   LATER=$(date -u -v+32d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+32 days" +%Y-%m-%dT%H:%M:%SZ)
+   jq -n --arg t "$LATER" '{frozen_time: $t}' \
+     | curl -s -X POST "$HARDCOUNT/v1/test-clocks/$CLOCK_ID/advance" \
+       -H "Authorization: Bearer $HARDCOUNT_KEY" \
+       -H "Content-Type: application/json" \
+       -d @- | jq -r .status
    ```
 
    The call answers at once, while Hardcount bills in the background.
@@ -256,20 +273,19 @@ with a test key.
    advancing
    ```
 
-3. Read the clock with `GET /v1/test-clocks/{id}` every second or two until
+4. Read the clock with `GET /v1/test-clocks/{id}` every second or two until
    its `status` is `ready`. Then the invoices are built. A `status` of
    `internal_failure` means the billing stopped;
    `POST /v1/test-clocks/{id}/retry-advance` tries again.
 
 [First invoice](first-invoice.md#steps) walks through this end to end.
 
-### Payment retries, webhooks and the audit log
+### Payment retries and webhooks
 
 | Method | Path | What it does |
 |---|---|---|
 | `GET` | `/v1/dunning/runs` | List dunning runs (Hardcount retrying a failed payment and emailing the customer) |
 | `POST` | `/v1/webhook-endpoints/endpoints` | Register a URL in your app that Hardcount calls when something happens. See [Webhooks](webhooks.md). |
-| `GET` | `/v1/audit-log` | Search the audit log: who changed what, and when. Hardcount cannot edit or delete entries. |
 
 ## Sending usage safely
 

@@ -68,7 +68,7 @@ curl -s -X POST "$HARDCOUNT/v1/meters" \
 
 First create a usage-only key for the proxy. It can send usage and nothing
 else, so the key in the proxy's config cannot refund, void or read your
-data ([key types](../api-keys.md#key-types)). In the dashboard, open **API
+data ([key types](../api/authentication.md#key-types)). In the dashboard, open **API
 keys**, click **Create API key** and pick **Usage only**. Or:
 
 ```bash

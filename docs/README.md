@@ -14,32 +14,35 @@ the [quick start](quick-start.md).
   [Meters and prices](concepts/meters-and-prices.md) ·
   [Subscriptions](concepts/subscriptions.md) ·
   [Invoices](concepts/invoices.md) · [Credits](concepts/credits.md) ·
-  [Payments](concepts/payments.md) · [Tax](ops/tax-calculation.md) ·
-  [Test clocks](concepts/test-clocks.md) · [Margin](concepts/margin.md) ·
-  [Glossary](glossary.md).
-- **Guides:** [Bill for AI tokens by model](guides/bill-for-ai-tokens.md) ·
-  [AI pricing reference](ai-pricing.md) ·
+  [Payments](concepts/payments.md) · [Test clocks](concepts/test-clocks.md) ·
+  [Margin](concepts/margin.md) · [Glossary](glossary.md).
+- **Guides:** [AI pricing reference](ai-pricing.md) ·
+  [Bill for AI tokens by model](guides/bill-for-ai-tokens.md) ·
   [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md) ·
   [Send usage from LiteLLM](integrations/litellm.md) ·
+  [Receive webhooks](guides/receive-webhooks.md) ·
   [Connect Stripe](guides/connect-stripe.md) ·
   [Test a billing change](guides/test-a-billing-change.md) ·
-  [Receive webhooks](guides/receive-webhooks.md) ·
-  [Set up email](ops/email-setup.md) · [Manage API keys](api-keys.md).
+  [Manage API keys](api-keys.md) · [Set up tax](ops/tax-calculation.md).
 - **API reference:** [The Hardcount API](api-surface.md) ·
   [Authentication and keys](api/authentication.md) ·
   [Errors](api/errors.md) · [Idempotency](api/idempotency.md) ·
-  [Rate limits](api/rate-limits.md) · [Pagination](api/pagination.md) ·
+  [Pagination](api/pagination.md) · [Versioning](versioning.md) ·
+  [Rate limits](api/rate-limits.md) ·
   [Timing and limits](api/timing-and-limits.md) ·
   [Two calls in four languages](api/two-calls.md) ·
-  [Webhooks](webhooks.md) · [Webhook events](api/webhook-events.md) ·
-  [Versioning](versioning.md) ·
-  [Every route: the OpenAPI file](../api/openapi.yaml).
+  [Every endpoint](../api/openapi.yaml)
+  ([the OpenAPI file](https://raw.githubusercontent.com/gethardcount/hardcount/main/api/openapi.yaml)) ·
+  [Webhooks](webhooks.md) · [Webhook events](api/webhook-events.md).
 - **Self-host:** [Overview](self-host.md) ·
   [Production on one VM](production-one-vm.md) ·
+  [The Compose files](../deploy/compose/README.md) ·
   [High availability](ops/high-availability.md) ·
   [Settings](settings.md) · [Postgres](ops/postgres-requirements.md) ·
   [Backups](ops/backup-considerations.md) · [Upgrades](upgrades.md) ·
   [How much traffic it handles](scale.md) ·
+  [Monitoring](ops/runbook/monitoring.md) ·
+  [Set up email](ops/email-setup.md) ·
   [Card payment failure handling](payments.md) ·
   [Runbook](ops/runbook/index.md).
 - **Internals:** [Architecture](architecture.md) ·
@@ -47,9 +50,9 @@ the [quick start](quick-start.md).
   Benchmarks: [correctness under failure](benchmarks/failure-correctness.md)
   and [sustained throughput](benchmarks/sustained-throughput.md) ·
   [Design decisions](adr/README.md) · [Records](dev/records/README.md).
-
-The project: [What's in the box](features.md) ·
-[Why Hardcount exists](why-hardcount.md) ·
-[How Hardcount compares](comparison.md) · [Roadmap](roadmap.md) ·
-[CHANGELOG](../CHANGELOG.md). Changing Hardcount itself? Contributor docs
-are in [docs/dev/](dev/README.md).
+- **Project:** [What's in the box](features.md) ·
+  [How Hardcount compares](comparison.md) · [Roadmap](roadmap.md) ·
+  [CHANGELOG](../CHANGELOG.md).
+- **Contribute** (changing Hardcount itself):
+  [Guides for contributors](dev/README.md) ·
+  [Contributing](../CONTRIBUTING.md).

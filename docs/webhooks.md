@@ -68,7 +68,7 @@ it on one line, and its key order may differ):
   Each endpoint belongs to one mode; see
   [Test mode and live mode](#test-mode-and-live-mode).
 - This shape is new in v0.9.0. v0.9.0 installs fresh, so no event in it
-  has an older shape ([old key → new key](../CHANGELOG.md)).
+  has an older shape ([old key → new key](../CHANGELOG.md#090---2026-10-28)).
 
 Headers:
 

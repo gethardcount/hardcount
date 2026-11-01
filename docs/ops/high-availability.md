@@ -40,7 +40,7 @@ A few features still assume one copy: the dashboard's live webhook stream, test-
 
 2. Set `TRUST_PROXY` on every copy to the address range (CIDR) of the load balancer. Separate several ranges with commas.
 
-   Why it matters: [Self-host → Settings](../self-host.md#settings). Set `TRUST_PROXY=none` only when the copies take client connections directly, with no proxy in front.
+   [Why it matters](../settings.md#why-trust_proxy-matters). Set `TRUST_PROXY=none` only when the copies take client connections directly, with no proxy in front.
 
    **You see:** the copy starts. In `production`, a copy with `TRUST_PROXY` unset refuses to start with `TRUST_PROXY is required in production`.
 
@@ -52,7 +52,9 @@ A few features still assume one copy: the dashboard's live webhook stream, test-
 
 5. Set the load balancer's timeouts. Its read or idle timeout must be above 35 seconds, the server's write timeout. Then a slow request gets the server's own 504, not a dropped connection. The Compose stack's nginx uses 40s. The dashboard's live webhook log (`/v1/webhook_events/stream`) is a long-lived stream: turn response buffering off for that path and allow it at least an hour, or the log stops updating.
 
-6. Check the database connections. Each copy opens up to `DB_MAX_OPEN_CONNS` connections (default 20), plus a few while it starts. Copies × `DB_MAX_OPEN_CONNS` must stay below your Postgres `max_connections`.
+6. Set the load balancer's request body limit. Allow bodies above 32 MB on `POST /v1/integrations/litellm/spend`, where LiteLLM sends its batches; 1 MB is enough on every other route. The Compose stack's nginx uses `client_max_body_size 33m` for that route. A lower limit turns full batches away with `413`, and LiteLLM does not send them again, so that usage is never billed ([LiteLLM size limit](../integrations/litellm.md#keep-each-send-under-the-size-limit)).
+
+7. Check the database connections. Each copy opens up to `DB_MAX_OPEN_CONNS` connections (default 20), plus a few while it starts. Copies × `DB_MAX_OPEN_CONNS` must stay below your Postgres `max_connections`.
 
 ## Health checks
 

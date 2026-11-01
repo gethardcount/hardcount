@@ -125,7 +125,7 @@ it. Every limit, its headers and the `429` answer:
   that customer again. That is when the next request passes.
 - **More than about 1,000 customers to poll each minute?** Poll less often,
   or raise `HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN` on your Hardcount server
-  ([Settings](settings.md)).
+  ([Change a limit](api/rate-limits.md#change-a-limit)).
 - **In production, the limit needs Redis.** While Redis is down, every
   read answers `429` with `Retry-After: 60`. The poller below then waits,
   and keeps each customer's last figure.

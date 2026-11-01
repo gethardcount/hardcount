@@ -41,53 +41,9 @@ A migration is a versioned script that changes the database schema. Hardcount ap
 
 ## Settings
 
-Every setting, with its default and what it does, is in the [Settings reference](settings.md).
+Hardcount reads its settings from environment variables. On the Compose stack, set them in `deploy/compose/.env`, which starts from [`deploy/compose/.env.example`](../deploy/compose/.env.example); from source, start from the repository's [`.env.example`](../.env.example).
 
-Hardcount reads its settings from environment variables. The tables below list the main ones. The repository's [`.env.example`](../.env.example) is for running from source. The Compose stack reads its own [`deploy/compose/.env.example`](../deploy/compose/.env.example).
-
-**Required**
-
-| Variable | What it is |
-|---|---|
-| `DATABASE_URL` | Postgres connection URL for the admin user |
-| `APP_DATABASE_URL` | Postgres connection URL for the limited user. Required in `staging` and `production`. |
-| `HARDCOUNT_ENCRYPTION_KEY` | Encrypts stored personal data. 64 hex characters. Required in `production`. |
-| `REDIS_URL` | Redis, for rate limiting. Required in `production`. If Redis goes down later in production, API and dashboard requests answer 429 until it is back (usage ingest keeps working, and sign-in counts on each copy): [Redis going down after boot](ops/runbook/replica-will-not-start.md#redis-going-down-after-boot). |
-| `TRUST_PROXY` | The addresses of your proxy or load balancer, comma-separated. Hardcount then trusts the client address they forward in `X-Forwarded-For`; it does not read `X-Real-IP`. Use `none` if there is no proxy. Required in `production`. Hardcount refuses to start if an entry is not an IP address or CIDR. |
-
-Why `TRUST_PROXY` is required: without it, every request behind a load balancer appears to come from the load balancer. All users then share one rate limit, the audit log shows the load balancer's address, and 5 wrong passwords for an email, from anyone, make every new browser wait to sign in with it.
-
-To check it, sign in, switch the dashboard to test mode and open the audit log. The newest `login` entry shows the address Hardcount saw. It should be yours, not the load balancer's.
-
-**Read once, by `hardcount-bootstrap`** (`make bootstrap`), which creates the first account on a local development database. On a server, create the first account with `POST /v1/bootstrap` instead: [step 2 of Production on one VM](production-one-vm.md#2-create-your-account-and-first-login).
-
-| Variable | What it is |
-|---|---|
-| `HARDCOUNT_BOOTSTRAP_EMAIL` | The dashboard owner's email: one address with a dot in the domain, such as `you@example.com`. Default `admin@hardcount.local`. |
-| `HARDCOUNT_BOOTSTRAP_PASSWORD` | The owner's password. If unset, one is generated and printed once. |
-| `HARDCOUNT_BOOTSTRAP_TENANT` | The tenant's name. Default `Demo Tenant`. |
-
-**Optional**
-
-| Variable | Default | What it does |
-|---|---|---|
-| `APP_ENV` | `local` | `local`, `staging` or `production`. `staging` and `production` mark the sign-in cookie `Secure`, so sign-in needs HTTPS (or `http://localhost` in Chrome or Firefox), and turn on the start-up checks on this page. Another value that starts with `prod`, such as `prod`, stops start-up; any other value starts with a warning and counts as not production. |
-| `RUN_MIGRATIONS_ON_BOOT` | `false` | Apply database upgrades at start-up. With `false`, run `hardcount migrate` before starting a new release. A value other than `true` or `false` (or `yes`, `no`, `1`, `0`) stops start-up. |
-| `MIGRATION_LOCK_TIMEOUT` | `5s` | How long a database upgrade waits for a table lock before it stops. A duration such as `30s`, or `0` for no limit. Any other value stops the upgrade. |
-| `DASHBOARD_BASE_URL` | unset | The dashboard's address, for password-reset and invite links. What breaks without it: [Email setup](ops/email-setup.md#what-breaks-when-a-setting-is-missing). For local development use `http://localhost:5173`. |
-| `CUSTOMER_PORTAL_URL` | unset | The dashboard's address, with no path. Stripe returns a customer here after they save a card ([Email setup](ops/email-setup.md#what-breaks-when-a-setting-is-missing)). |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000`, `:5173` and `:5174` | Other web addresses whose pages may call the API from a browser, comma-separated, each in full, such as `https://app.example.com`. A dashboard at the API's own address, as in the Compose stack, needs none. A listed address may send the sign-in cookie, so a dashboard at another address can sign in. `*` on its own lets any site call the API with an API key, never with the sign-in cookie. Hardcount refuses to start on an entry with a `*` inside, such as `https://*.example.com`, or on `*` beside other addresses. |
-| `SMTP_HOST`, `SMTP_PORT` | `SMTP_HOST` unset, `SMTP_PORT` `587` | Your email server. If unset, Hardcount sends no email. See [email setup](ops/email-setup.md). |
-| `HARDCOUNT_BOOTSTRAP_TOKEN` | unset | Allows the `POST /v1/bootstrap` call that creates the first tenant. At least 16 characters outside `local`. |
-| `METRICS_TOKEN` | unset | The bearer token a scraper must send to read `/metrics`. If unset, `/metrics` answers 401 in `production` and is open elsewhere. |
-| `HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN` | `1000` | API and dashboard requests a minute for each API key, or for each tenant's dashboard users together in each mode. One dashboard page sends about 10 requests. A whole number of 1 or more; any other value stops start-up. |
-| `HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN` | `100` | Sign-in, password-reset, invite and bootstrap requests a minute from each client address. It slows password guessing. A whole number of 1 or more; any other value stops start-up. |
-| `HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC` | `1000` | Usage events and LiteLLM callbacks a second for each API key. A whole number of 1 or more; any other value stops start-up. |
-| `INVOICE_GRACE_PERIOD` | `1h` | How long Hardcount waits after a billing period ends before it builds the invoice, so usage that arrives late but belongs to the period is billed. A duration from `0` to `72h`, such as `30m` or `24h`. Any other value stops start-up. What the grace delays, and what closes a period at once: [Invoice timing and late usage](ops/runbook/invoice-timing-late-usage.md#why). |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Your OpenTelemetry collector's OTLP/HTTP address, such as `http://otel-collector:4318`. If unset, Hardcount sends no traces. |
-| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | all traces | Which traces to keep, using the standard OpenTelemetry values. To keep 1 in 10, set `parentbased_traceidratio` and `0.1`. |
-
-Stripe is not set here. Each tenant connects its own Stripe account in the dashboard, under Settings → Payments. The Stripe API keys and the webhook signing secret (`whsec_…`) are stored per tenant, in the database.
+Every setting, with its default and what it does: [Settings reference](settings.md).
 
 ## Repeated wrong passwords
 

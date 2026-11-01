@@ -3,18 +3,6 @@
 This page bills one test customer for AI tokens, using the API from your
 terminal. At the end, you open the invoice in the dashboard.
 
-## Words on this page
-
-| Word | Meaning |
-|---|---|
-| Plan | What you sell: a currency, a billing period such as monthly, and a price for each kind of usage. |
-| Customer | A person or company you bill. Its external ID is your own ID for it, such as the user ID in your database. |
-| Subscription | Puts a customer on a plan, and says when each billing month starts. |
-| Usage event | One "this customer used this much" record that your app sends. |
-| Idempotency key | A unique ID for one usage event. If you send the same event again with the same key, Hardcount counts it once. |
-
-Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
-
 ## Before you start
 
 You need:
@@ -55,6 +43,18 @@ keys** in the dashboard.
 Some steps send IDs that an earlier step saved, such as the customer ID.
 Those steps build the request body with `jq -n`, which puts a shell
 variable into the JSON for you.
+
+## Words on this page
+
+| Word | Meaning |
+|---|---|
+| Plan | What you sell: a currency, a billing period such as monthly, and a price for each kind of usage. |
+| Customer | A person or company you bill. Its external ID is your own ID for it, such as the user ID in your database. |
+| Subscription | Puts a customer on a plan, and says when each billing month starts. |
+| Usage event | One "this customer used this much" record that your app sends. |
+| Idempotency key | A unique ID for one usage event. If you send the same event again with the same key, Hardcount counts it once. |
+
+Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
 
 ## Steps
 

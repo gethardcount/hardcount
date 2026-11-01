@@ -74,19 +74,13 @@ mode.
 
 ## Key types
 
-| Type | Starts with | Use it for |
-|---|---|---|
-| Secret | `hc_secret_` | All API calls from your server. It can read and change everything in one account, so keep it out of browsers and out of source control. |
-| Usage only (`ingest` in the API) | `hc_ingest_` | Sending usage from LiteLLM or another gateway. It can call only `POST /v1/usage-events`, `POST /v1/usage-events/batch` and `POST /v1/integrations/litellm/spend`, plus `GET /v1/whoami`. |
+There are two: a **secret** key (`hc_secret_…`) for your own server, and a
+**usage-only** key (`hc_ingest_…`, `ingest` in the API) for LiteLLM or
+another gateway that only sends usage. What each one can call, and which
+one goes where: [Key types](api/authentication.md#key-types).
 
-A gateway keeps its key in a config file, often on another machine. Give
-it a usage-only key: if that key leaks, it can add usage but cannot refund,
-void, read your customers or make keys. Every other call with it gets
-`403` and a message such as `insufficient permissions: this key type does
-not have customer:read access`. It cannot backfill past usage or release
-held usage either: do those with a secret key or in the dashboard.
-
-A dashboard session can do everything a secret key can.
+A secret key can read and change everything in its account and mode, so
+keep it out of browsers and out of source control.
 
 ## Rotate a key
 

@@ -187,7 +187,7 @@ func (c Config) validateFatal() error {
 		return fmt.Errorf("HARDCOUNT_ENCRYPTION_KEY is required in production — refusing to start with plaintext PII storage")
 	}
 	if c.Env == "production" && c.RedisURL == "" {
-		return fmt.Errorf("REDIS_URL is required in production — the general and hosted-invoice rate limiters fail CLOSED without Redis, so every dashboard, export, bootstrap and hosted-invoice request would answer 429 while /health/ready reports ok; point REDIS_URL at a managed Redis (docs/self-host.md)")
+		return fmt.Errorf("REDIS_URL is required in production — the general and hosted-invoice rate limiters fail CLOSED without Redis, so every dashboard, export, bootstrap and hosted-invoice request would answer 429 while /health/ready reports ok; point REDIS_URL at a managed Redis (docs/settings.md)")
 	}
 	if c.Env == "production" && c.TrustProxy == "" {
 		return fmt.Errorf("TRUST_PROXY is required in production — behind a load balancer or ingress every request's client address is the balancer's, so the per-IP limits on the public pay pages (60/min) and on /v1/auth (100/min) become ONE bucket shared by every customer and operator of the install; set TRUST_PROXY to the balancer/ingress CIDR(s), or TRUST_PROXY=none if replicas accept client connections directly (docs/ops/high-availability.md)")
@@ -204,7 +204,7 @@ func (c Config) validateFatal() error {
 	// a * beside it would keep it from signing in, and the operator would
 	// not know why. Checked in every environment.
 	if _, err := ParseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS")); err != nil {
-		return fmt.Errorf("%w (docs/self-host.md)", err)
+		return fmt.Errorf("%w (docs/settings.md)", err)
 	}
 
 	// An unknown SMTP_TLS used to send with starttls behind a warning, so a

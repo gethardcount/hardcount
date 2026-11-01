@@ -4674,9 +4674,7 @@ export interface paths {
         put?: never;
         /**
          * Connect a Stripe account
-         * @description Used by the dashboard; not part of the integration API.
-         *
-         *     Saves your own Stripe keys for one mode (`livemode` in the body
+         * @description Saves your own Stripe keys for one mode (`livemode` in the body
          *     picks the mode, not the caller's mode). Calling it again for the
          *     same mode replaces the keys; a webhook secret saved before is kept
          *     when the body sends none. Key prefixes must match the mode:
@@ -4716,9 +4714,7 @@ export interface paths {
         head?: never;
         /**
          * Set the Stripe webhook signing secret
-         * @description Used by the dashboard; not part of the integration API.
-         *
-         *     Saves the `whsec_` signing secret for a mode that is already
+         * @description Saves the `whsec_` signing secret for a mode that is already
          *     connected, without entering the API keys again. Hardcount does not call
          *     Stripe here; the secret is checked on each incoming webhook.
          *     Until a secret is saved, Stripe webhooks for the mode are refused.
