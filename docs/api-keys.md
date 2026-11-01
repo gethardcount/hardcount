@@ -37,11 +37,12 @@ without the keys themselves. Every field and answer:
 ## Send it
 
 The **Quick start** box at the top of **API keys** shows the address to call.
-Put the key in the `Authorization` header as a Bearer token:
+Put the key in the `Authorization` header as a Bearer token. In the
+commands below, put your own key in place of `hc_secret_test_…`:
 
 ```bash
 export HARDCOUNT=http://localhost:8080
-export HARDCOUNT_KEY=hc_secret_test_…   # your key
+export HARDCOUNT_KEY=hc_secret_test_…
 
 curl -s "$HARDCOUNT/v1/whoami" -H "Authorization: Bearer $HARDCOUNT_KEY"
 ```

@@ -70,7 +70,8 @@ without touching the others, and each has its own
   [Rotate a key](../api-keys.md#rotate-a-key)).
 - **A usage-only key** can send usage for any customer in its mode. Usage
   can raise a bill, and a negative quantity can lower one. It cannot read
-  anything. Rotate it too.
+  anything, except an event it sends again: a repeated `idempotency_key`
+  answers with the first event. Rotate it too.
 
 A test key leaks only test data, and test mode cannot charge a real card.
 

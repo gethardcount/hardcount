@@ -30,13 +30,15 @@ them: customer `acme-1`, priced per model and token type.
 Both calls need a secret key. A usage-only key can send the event but cannot
 read the balance.
 
-Set four variables. The balance route takes Hardcount's ID for the customer
-(`hc_cus_…`), so look it up from your own ID once:
+Set four variables. Put your own test key in place of `hc_secret_test_…`.
+`CUSTOMER_REF` is your own ID for the customer. The balance route takes
+Hardcount's ID for the customer (`hc_cus_…`), so the last lines look it up
+once:
 
 ```bash
 export HARDCOUNT=http://localhost:8080
-export HARDCOUNT_KEY=hc_secret_test_…   # your test key
-export CUSTOMER_REF=acme-1               # your ID for the customer
+export HARDCOUNT_KEY=hc_secret_test_…
+export CUSTOMER_REF=acme-1
 CUSTOMER_ID=$(curl -s "$HARDCOUNT/v1/customers?external_id=$CUSTOMER_REF" \
   -H "Authorization: Bearer $HARDCOUNT_KEY" | jq -r '.data[0].id')
 export CUSTOMER_ID
@@ -62,30 +64,44 @@ error.
 
 ## curl
 
-Paste it into bash or zsh. It needs `curl`, `jq` and `uuidgen`.
+Save it as `two-calls.sh` and run `bash two-calls.sh`. It needs `curl`, `jq`
+and `uuidgen`, and works with the bash that comes with macOS.
 
 ```bash
+#!/bin/bash
+# two-calls.sh: send one usage event, then read the live credit balance.
+set -o pipefail
+
 # hc METHOD PATH [BODY]: send one request. Retry it on no answer, 429 or a
 # 5xx, with the same body each time. Print the answer's JSON.
 hc() {
-  local tmp code delay args=()
+  local tmp code delay errcode args=()
   tmp=$(mktemp -d)
   [ -n "$3" ] && args=(-H "Content-Type: application/json" -d "$3")
   for attempt in 1 2 3 4 5; do
     : > "$tmp/headers"
+    : > "$tmp/body"
     code=$(curl -s -o "$tmp/body" -D "$tmp/headers" -w '%{http_code}' --max-time 35 \
       -X "$1" "$HARDCOUNT$2" -H "Authorization: Bearer $HARDCOUNT_KEY" "${args[@]}")
     case "$code" in
-      2??) cat "$tmp/body"; echo; return 0 ;;
+      2??)
+        cat "$tmp/body"; echo
+        rm -r "$tmp"
+        return 0 ;;
       000|429|5??)
+        [ "$attempt" = 5 ] && break
         # Retry-After is the number of seconds to wait. Without it, back off.
         delay=$(awk 'tolower($1) == "retry-after:" {print $2 + 0}' "$tmp/headers")
         delay=${delay:-$((2 ** attempt))}
-        echo "$code: retrying in $delay s" >&2
+        errcode=$(jq -r '.error.code // empty' "$tmp/body" 2>/dev/null)
+        echo "$code ${errcode:-(no code)}: retrying in $delay s" >&2
         sleep "$delay" ;;
-      *) cat "$tmp/body" >&2; echo >&2; return 1 ;;   # fix the request
+      *) break ;;   # any other answer: fix the request, do not retry
     esac
   done
+  echo "$1 $2: $code" >&2
+  cat "$tmp/body" >&2; echo >&2
+  rm -r "$tmp"
   return 1
 }
 
@@ -94,7 +110,7 @@ EVENT=$(jq -n --arg ref "$CUSTOMER_REF" --arg key "$CUSTOMER_REF-$(uuidgen):inpu
   '{event_name: "tokens", external_customer_id: $ref, quantity: 1000,
     dimensions: {provider: "anthropic", model: "claude-sonnet-4.5", token_type: "input"},
     idempotency_key: $key}')
-hc POST /v1/usage-events "$EVENT" | jq -c '{id, quantity}'
+hc POST /v1/usage-events "$EVENT" | jq -c '{id, quantity}' || exit 1
 
 # 2. Read the credit the customer can spend now.
 hc GET "/v1/credits/balance/$CUSTOMER_ID/live" \
@@ -102,6 +118,8 @@ hc GET "/v1/credits/balance/$CUSTOMER_ID/live" \
 ```
 
 It prints the event's `id` and `quantity`, then the balance fields as JSON.
+On an answer it does not retry, it prints the status and the error body and
+stops.
 
 ## Node.js
 
@@ -325,7 +343,7 @@ func hc(method, path string, body, out any) (int, error) {
 		if s, err := strconv.Atoi(res.Header.Get("Retry-After")); err == nil {
 			delay = time.Duration(s) * time.Second
 		}
-		fmt.Fprintf(os.Stderr, "%d %s: retrying in %s\n", res.StatusCode, e.Error.Code, delay)
+		fmt.Fprintf(os.Stderr, "%d %s: retrying in %d s\n", res.StatusCode, e.Error.Code, int(delay.Seconds()))
 		time.Sleep(delay)
 	}
 }

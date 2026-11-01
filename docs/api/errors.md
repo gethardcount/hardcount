@@ -66,7 +66,7 @@ the API has one.
 | `code` | When | What to do |
 |---|---|---|
 | `unauthorized` | No key or session, or a wrong, revoked or expired one. Also a wrong sign-in, and a bad public cost-dashboard link. | Fix the key. The messages: [When a key is refused](authentication.md#when-a-key-is-refused). |
-| `invalid_token` | A payment-update link that is unknown, expired or already used | Ask for a new link |
+| `invalid_token` | A payment-update link that is unknown, expired or already used, or whose invoice was removed | Ask for a new link |
 
 ### 403 Forbidden
 
@@ -80,7 +80,7 @@ the API has one.
 |---|---|---|
 | `not_found` | The resource, or one the body names, does not exist in this account and mode. A bad hosted invoice link gets it too. | Check the ID and the key's mode |
 | `route_not_found` | No route has this path | Check the URL |
-| `invoice_not_found` | The invoice behind a payment-update link was removed | Ask for a new link |
+| `invoice_not_found` | The invoice behind a payment-update link was removed while the request ran | Ask for a new link |
 
 ### 405 Method Not Allowed
 
@@ -122,7 +122,7 @@ decide.
 | `code` | When | What to do |
 |---|---|---|
 | `unbilled_period` | A billing period has ended and could not be invoiced, so the change waits | Fix the billing failure (`POST /v1/subscriptions/{id}/retry-billing`), then try again |
-| `unpaid_invoice_blocks_change` | The current period's invoice is unpaid | Collect, void or write off that invoice first |
+| `unpaid_invoice_blocks_change` | A change that charges more (an upgrade, an added item, more seats) while the current period's invoice is unpaid. A written-off invoice counts as unpaid. | Collect or void that invoice first; writing it off does not lift this |
 | `funding_invoice_tax_pending` | The tax of an invoice that buys prepaid credit is not worked out yet | Try again later |
 | `item_changed` | The subscription's items changed while the request ran | Read it again, then retry |
 | `subscription_period_moved` | The subscription moved to a new billing period while the request ran, or a spend-threshold invoice already billed past now | Read it again, then retry, or schedule the change for the next period |
@@ -145,7 +145,7 @@ decide.
 | `credit_note_exceeds_invoice`, `invoice_not_open_receivable` | A credit note no longer fits the invoice, which changed while the request ran | Read the invoice, then retry with the right amount |
 | `customer_currency_conflict` | A one-off invoice's currency is not the customer's billing currency | Use the customer's currency |
 | `tax_calculation_expired` | Stripe Tax's calculation for the invoice is too old to finalize | Retry the tax, then finalize |
-| `stripe_refund_unresolved` | A refund made in Stripe for this invoice is not reviewed yet, or is still in progress | Record or dismiss it on the invoice, then retry |
+| `stripe_refund_unresolved` | Retrying a credit note's refund while a refund made in Stripe for this invoice is not recorded yet, or is still in progress at Stripe | If it is not recorded: record it, attach it or dismiss it on the invoice. If it is in progress: wait for Stripe to settle it. Then retry. |
 | `credit_block_changed` | The customer's credit changed while it was being returned | Retry |
 
 **Setup on this server**
@@ -162,8 +162,9 @@ These guard against a record being written twice, mostly by Hardcount's own
 billing run. A request rarely gets one. Do not retry; read the invoice or
 the credit ledger, and report it if the state looks wrong:
 `invoice_number_taken`, `invoice_billing_period_taken`,
-`invoice_threshold_cycle_taken`, `invoice_public_token_collision`,
-`invoice_unique_violation`, `credit_note_source_taken`,
+`invoice_threshold_cycle_taken`, `invoice_proration_source_taken`,
+`invoice_public_token_collision`, `invoice_unique_violation`,
+`credit_note_source_taken`,
 `credit_reversal_source_taken`, `credit_proration_source_taken`,
 `credit_commit_fund_taken`, `credit_unique_violation` and
 `credit_source_amount_mismatch`.
@@ -185,9 +186,9 @@ the credit ledger, and report it if the state looks wrong:
 | `customer_has_no_subscription` | An invoice preview or a usage summary for a customer with no active subscription | Send `subscription_id`, or a period with `from` and `to` |
 | `subscription_has_no_cycle` | An invoice preview for a subscription with no current billing period | Send a period |
 | `missing_email` | Email a payment-method link to a customer with no email | Add an email |
-| `note_too_long` | That email's note is over 2,000 characters | Shorten it |
+| `note_too_long` | That email's note is over 2,000 bytes | Shorten it |
 | `invalid_state` | Rotate the public link of a draft invoice | Finalize the invoice first |
-| `invalid_or_expired` | A password-reset link that is unknown, expired or used | Ask for a new link |
+| `invalid_or_expired` | The dashboard's check of a password-reset link (`GET /v1/auth/password-reset/check`) found it unknown, expired or used. Setting the password, or accepting an invite, with a bad token answers `validation_error` with `param: token` instead. | Ask for a new link |
 
 ### 429 Too Many Requests
 
@@ -197,7 +198,7 @@ Each sends a `Retry-After` header with the seconds to wait.
 |---|---|---|
 | `rate_limited` | Over a [rate limit](rate-limits.md) | Wait `Retry-After` seconds, then retry |
 | `login_throttled` | Too many failed sign-ins for an email | Wait, then sign in again |
-| `cooldown_active` | A payment-method link was emailed to this customer less than a minute ago. Counted only on a server with Redis. | Wait |
+| `cooldown_active` | Someone asked to email this customer a payment-method link less than a minute ago, even if that request then failed. Counted only on a server with Redis. | Wait a minute, then send it with a new `Idempotency-Key`: this answer is stored like any other |
 
 ### 500 Internal Server Error
 
@@ -223,7 +224,7 @@ Each sends a `Retry-After` header with the seconds to wait.
 | `authentication_unavailable` | Hardcount could not check the key or session | Retry the same request |
 | `idempotency_unavailable` | Hardcount could not record the `Idempotency-Key`, so it ran nothing | Retry with the same key after `Retry-After` (1 second) |
 | `ingest_unavailable` | The usage store did not answer. Nothing was recorded. | Send the same events again |
-| `currency_unavailable` | `POST /v1/invoices` could not read the customer's currency | Retry |
+| `currency_unavailable` | `POST /v1/invoices` could not read the customer's currency. No invoice was made. | Retry, with a new `Idempotency-Key` if you sent one |
 
 ### 504 Gateway Timeout
 
@@ -233,17 +234,30 @@ Each sends a `Retry-After` header with the seconds to wait.
 
 ## Retry after an error
 
-- **`4xx`:** do not retry the same request, except after `409` codes that
-  say so and after `429`. Fix the request first.
-- **`429`:** wait `Retry-After` seconds, then send the same request.
-- **`503`:** retry. Each `503` above runs nothing, so the same request and
-  the same keys are safe.
+- **`4xx`:** do not send the same request again, except after `409` codes
+  that say so and after `429`. Fix the request first. If it carried an
+  `Idempotency-Key`, send the fixed request with a new key: the answer was
+  stored, and the old key with a changed body answers `422`
+  `idempotency_error`.
+- **`429` `rate_limited` and `login_throttled`:** wait `Retry-After`
+  seconds, then send the same request, with the same key. Nothing ran and
+  nothing was stored. `cooldown_active` is stored: see its row above.
+- **`503` `authentication_unavailable` and `idempotency_unavailable`:** send
+  the same request with the same key. Nothing ran.
+- **`503` `ingest_unavailable`:** send the same events with the same keys.
+  Nothing was recorded.
+- **`503` `currency_unavailable`:** no invoice was made, but with an
+  `Idempotency-Key` the answer is stored. Retry with a new key.
 - **`500`, `502` and `504` on a usage route:** send the same events with
   the same keys. A key is never counted twice.
 - **`500`, `502` and `504` on another write sent with an `Idempotency-Key`:**
   the answer is stored, so a retry with the same key gets it again. Read the
   resource to see whether the change happened, and retry with a new key only
-  if it did not. See [Idempotency](idempotency.md#what-a-retry-with-the-same-key-gets).
+  if it did not. A `500` from a crash inside Hardcount is the exception: it
+  is not stored, and a retry with the same key gets `409`
+  `conflict_idempotency`, then `conflict_idempotency_unresolved` after 5
+  minutes. Treat that the same way. See
+  [Idempotency](idempotency.md#what-a-retry-with-the-same-key-gets).
 
 ## Find a request in your logs
 
@@ -292,13 +306,15 @@ larger body with `400` `invalid_request`.
 - **A replayed `Idempotency-Key`** returns the first answer's body byte for
   byte.
 - **A CSV export** that fails partway ends with a row that starts
-  `EXPORT_INCOMPLETE`. Treat that file as incomplete.
+  `EXPORT_INCOMPLETE`, or stops with no such row when the connection is
+  cut. Treat a file as complete only if your client got the whole response
+  without an error.
 - **`GET /health/ready`** answers `503` with `{"status", "checks"}`.
 - **The Postmark webhook** accepts a body that is too large or not JSON
   with `200` and `{"status": "skipped", "reason": "<reason>"}`.
 - **Plain text, not JSON**, comes from two places:
   - The HTTP server itself, before Hardcount sees the request. A request it
-    cannot parse gets `400`; headers over 8 KB get `431`; an unknown
+    cannot parse gets `400`; headers over about 12 KB get `431`; an unknown
     transfer encoding gets `501`; an unsupported HTTP version gets `505`.
     These answers have no `Hardcount-Request-Id`.
   - `/metrics`, the Prometheus route, answers a plain-text `500` if it

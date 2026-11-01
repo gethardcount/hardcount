@@ -23,11 +23,12 @@ retry. It is a unique ID, such as a UUID: make it once, and send it again on
 each retry, so a retry cannot do the work twice. Usage events carry their own
 key instead. See [Idempotency](api/idempotency.md).
 
-Create a test customer:
+Create a test customer. Put your own test key in place of
+`hc_secret_test_…`:
 
 ```bash
 export HARDCOUNT=http://localhost:8080
-export HARDCOUNT_KEY=hc_secret_test_…   # your test key
+export HARDCOUNT_KEY=hc_secret_test_…
 
 curl -s -X POST "$HARDCOUNT/v1/customers" \
   -H "Authorization: Bearer $HARDCOUNT_KEY" \

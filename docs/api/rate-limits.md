@@ -60,6 +60,9 @@ request can pass, at least 1.
 
 The setup-link email answers `cooldown_active` instead, with the message `a
 setup link was sent to this customer recently — wait before sending again`.
+It counts every request for that customer that got past the rate limit in
+the last minute, even one that then failed, for example because the
+customer has no email.
 
 Sign-in has a second, separate guard: after failed sign-ins it answers `429`
 with code `login_throttled`. See [Errors](errors.md#429-too-many-requests).
@@ -70,8 +73,11 @@ with code `login_throttled`. See [Errors](errors.md#429-too-many-requests).
 2. Send the same request again, with the same `Idempotency-Key` header or the
    same usage `idempotency_key`.
 
-A `429` ran nothing and stored nothing, so the same key is safe to send
-again. See [Idempotency](idempotency.md).
+A `429` `rate_limited` or `login_throttled` ran nothing and stored nothing,
+so the same key is safe to send again. `cooldown_active` is different: it
+is stored under the request's `Idempotency-Key` like any other answer, so
+after the minute, send the request with a new key. See
+[Idempotency](idempotency.md).
 
 To stay under the limit:
 

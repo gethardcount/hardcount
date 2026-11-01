@@ -51,39 +51,50 @@ check.
 ## Other writes: the `Idempotency-Key` header
 
 Send the header on every `POST`, `PUT` and `PATCH` you may retry, such as
-creating a customer, granting credit or issuing a credit note:
+creating a customer, granting credit or issuing a credit note. Make the key
+once, before the first try, and keep it with the job:
 
 ```bash
-IDEM_KEY=$(uuidgen)   # make it once; keep it with the job
+IDEM_KEY=$(uuidgen)
 
-curl -s -X POST "$HARDCOUNT/v1/customers" \
+curl -si -X POST "$HARDCOUNT/v1/customers" \
   -H "Authorization: Bearer $HARDCOUNT_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $IDEM_KEY" \
   -d '{"external_id": "cust_123", "display_name": "Acme Inc"}'
 ```
 
-Send the same command again, with the same `$IDEM_KEY`. **You see:** the
-first answer again, with `Idempotent-Replayed: true`. No second customer is
-made.
+Send the same `curl` command again, with the same `$IDEM_KEY`. **You see:**
+the first answer again, with the header `Idempotent-Replayed: true`. No
+second customer is made.
 
-Use a UUID, or another unique string of at most 255 characters. A key
-belongs to one account and one mode. Hardcount matches a retry on its
-method, its path and its body. The query string is not part of the match.
+- **Use a UUID,** or another unique string. Keep it to 255 characters or
+  fewer: Hardcount does not check the length, but a very long key can fail
+  to be stored.
+- **A key belongs to one account and one mode,** not to one API key. A
+  retry with another key of the same account and mode gets the same stored
+  answer.
+- **Hardcount matches a retry on its method, its path and its body,** the
+  same body byte for byte. The query string is not part of the match.
 
 ### What a retry with the same key gets
 
 | The first request | A retry with the same key gets |
 |---|---|
-| Finished with any status except `409` or `422`, including `5xx` | The first status and body, plus `Idempotent-Replayed: true`. The request does not run again. |
+| Finished with any status except `409` or `422`, including other `4xx` and `5xx` answers | The first status and body, plus `Idempotent-Replayed: true`. The request does not run again. A crash is the exception: see [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
 | Finished with `409` or `422` | A new run. These answers are not stored, so the key is free again. |
 | Is still running | Hardcount waits up to 5 seconds for it, then answers `409` `conflict_idempotency`. Retry later with the same key. |
 | Finished, but the retry's method, path or body differs | `422` `idempotency_error`. Your code reused a key for a different request. |
-| Started more than 5 minutes ago and never recorded an answer | `409` `conflict_idempotency_unresolved`. See below. |
+| Started more than 5 minutes ago and never recorded an answer | `409` `conflict_idempotency_unresolved`. See [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
 
 A replay sends the first response's status and body only. The body's
 `request_id` is the first request's. The `Hardcount-Request-Id` header is the
 new request's. No other header of the first response is sent again.
+
+**A stored `4xx` comes back too.** A `400`, a `403` for a key type that
+may not call the route, or a `404` is stored like any other answer.
+Fix the request, then send it with a new key: the fixed request has a
+different body, so the old key answers `422` `idempotency_error`.
 
 **A stored `5xx` comes back on every retry with that key.** Hardcount stores
 it on purpose: the first request may have charged a card or written data
@@ -96,8 +107,11 @@ before it failed, and running it again could do that twice. After a `5xx`:
 **Some answers come before the key is checked and are never stored.** A
 retry with the same key runs normally after them:
 
-- `401` (no key or a bad key) and `429` (rate limit).
+- `401` (no key or a bad key) and `429` `rate_limited` (the
+  [rate limit](rate-limits.md)).
 - `403` for a browser request from another site.
+- `400` for a body over 1 MB: Hardcount reads the body to match it, and
+  stops there.
 - `503` `authentication_unavailable`.
 - `503` `idempotency_unavailable`: Hardcount could not record the key, so it
   ran nothing. Retry with the same key; `Retry-After` is `1`.
@@ -105,8 +119,10 @@ retry with the same key runs normally after them:
 ### A key Hardcount could not finish
 
 If the server stops, or its database fails, between running the request and
-storing the answer, the key stays reserved. A retry then gets `409`
-`conflict_idempotency`. Once 5 minutes have passed since the first request,
+storing the answer, the key stays reserved. So does a request that crashed
+inside Hardcount: it answered `500` `internal_error`, but that answer was
+never stored. A retry then gets `409` `conflict_idempotency`. Once 5
+minutes have passed since the first request,
 it gets `409` `conflict_idempotency_unresolved`. The request never runs
 twice. Whether the first one made its change is unknown:
 
@@ -143,8 +159,8 @@ take an API key. These routes ignore it, and run every time:
    same key.
 5. On a `5xx`, or `409` `conflict_idempotency_unresolved`, read the resource
    first. Send the request with a new key only if the change is not there.
-6. On another `4xx`, do not retry: fix the request. Every code is in
-   [Errors](errors.md).
+6. On another `4xx`, do not retry as it is. Fix the request, then send it
+   with a new key. Every code is in [Errors](errors.md).
 
 Usage events are simpler. An event sent again with the same key is never
 counted twice, so after any error, send the same events with the same keys.

@@ -41,7 +41,7 @@ first run after it.
 |---|---|
 | Request body | 1 MB (1,048,576 bytes) |
 | Stripe webhook body | 64 KB (65,536 bytes) |
-| All request headers together | 8 KB |
+| All request headers together | 8 KB. The server refuses them with `431` from about 12 KB, its 8 KB limit plus Go's 4 KB margin. |
 | Events in one `POST /v1/usage-events/batch` | 1,000 |
 | Rows in one list page | 100; 50 when `limit` is not sent ([pagination](pagination.md)) |
 | Time limit of a request | 30 seconds, then `504` `timeout` ([errors](errors.md#504-gateway-timeout)) |
