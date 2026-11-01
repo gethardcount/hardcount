@@ -37,8 +37,8 @@ cp .env.example .env
 
    **You see:** a "Hardcount Bootstrap Complete" box with the dashboard sign-in
    (email `admin@hardcount.local` unless you set `HARDCOUNT_BOOTSTRAP_EMAIL`), a
-   generated password, and three API keys. Save the password: it is shown
-   only once. Copy the key under "Secret Key — TEST mode"
+   generated password, and two secret API keys, one for test mode and one
+   for live mode. Save the password: it is shown only once. Copy the key under "Secret Key — TEST mode"
    (`hc_secret_test_…`).
 
 3. **Start the API.** `make dev` reads `.env`, which points at the local

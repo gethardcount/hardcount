@@ -160,18 +160,10 @@ Emails and Stripe send people to pages in Hardcount: your customers to the invoi
 
    ```bash
    docker compose logs hardcount-api \
-     | grep -E "(HOSTED_INVOICE_BASE_URL|PAYMENT_UPDATE_URL|DASHBOARD_BASE_URL|CUSTOMER_PORTAL_URL) NOT SET"
+     | grep -E "(HOSTED_INVOICE_BASE_URL|PAYMENT_UPDATE_URL|PAYMENT_UPDATE_RETURN_URL|DASHBOARD_BASE_URL|CUSTOMER_PORTAL_URL) NOT SET"
    ```
 
-   **You see:** nothing. Each of these four settings that is still missing logs a warning that starts with its name and `NOT SET`.
-
-   `PAYMENT_UPDATE_RETURN_URL` logs no warning when it is missing, so check it in `.env`:
-
-   ```bash
-   grep '^PAYMENT_UPDATE_RETURN_URL=https://' .env
-   ```
-
-   **You see:** the line you added. Without it, a customer who adds a card from the "add a payment method" email lands on `http://localhost:5173/payment-method-added` instead of your site.
+   **You see:** nothing. Each of these five settings that is still missing logs a warning that starts with its name and `NOT SET`. Without `PAYMENT_UPDATE_RETURN_URL`, for example, a customer who adds a card from the "add a payment method" email lands on `http://localhost:5173/payment-method-added` instead of your site.
 
 ### Other start-up warnings
 

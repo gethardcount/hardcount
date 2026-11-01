@@ -1,7 +1,7 @@
 package litellm
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -135,12 +135,13 @@ type SpendRowError struct {
 	Error string `json:"error"`
 }
 
-// spend handles the LiteLLM generic_api callback. Accepts either a
-// single payload (LiteLLM's default callback shape) or a batch
-// (operator-side buffered shape).
+// spend handles the LiteLLM generic_api callback. Accepts each of
+// LiteLLM's log formats — a JSON array (json_array, the default), records
+// one a line (ndjson), one record (single) — and an operator buffer's
+// {"events": [...]} (decodeBody).
 //
 // Flow:
-//  1. Decode body; normalize single | batch to []StandardLoggingPayload
+//  1. Decode body; normalize every shape to []StandardLoggingPayload
 //  2. For each payload: MapPayload → the call's events, or a skip
 //  3. Resolve external_customer_id + event_name once for the call
 //  4. Write the call in one transaction (usage.Service.IngestCall, or
@@ -184,6 +185,13 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errEmptyBody):
 			respond.BadRequest(w, r, "empty body")
 		default:
+			// A bad record names its line, so the operator can find it in
+			// what the proxy sent. Nothing of the batch was saved.
+			var bad *recordError
+			if errors.As(err, &bad) {
+				respond.BadRequest(w, r, fmt.Sprintf("invalid JSON body at line %d (record %d); the batch was not saved", bad.line, bad.record))
+				return
+			}
 			respond.BadRequest(w, r, "invalid JSON body")
 		}
 		return
@@ -383,7 +391,7 @@ var errIngestUnavailable = errors.New("litellm: usage store unavailable")
 // Why 32 MiB: it holds a full default batch whose records average 64 KB —
 // seven times the short-prompt record, room for long prompts — and it reads in
 // about 3 s at 100 Mbit/s, inside the server's 30 s ReadTimeout. Memory does
-// not grow with the cap: decodeBody streams the array one record at a time,
+// not grow with the cap: decodeBody streams the body one record at a time,
 // and a record keeps only the fields the adapter reads, so its messages and
 // response — the part that grows with the prompt — are never held. What a
 // request holds grows with its record count (about 5 KB a record, mostly
@@ -399,69 +407,157 @@ var errEmptyBody = errors.New("empty body")
 // Accepts:
 //   - Bare array: [payload, payload, ...] — what LiteLLM's generic_api
 //     logger sends (log_format json_array, its default)
+//   - NDJSON: payloads one after another, one a line — log_format ndjson,
+//     any number of records. A record split over lines reads too.
 //   - LiteLLM's single-record shape: one payload as the top-level object
-//   - Batched shape: { "events": [...] } (used by some operator-side buffers)
+//     (log_format single), the one-record case of the above
+//   - Batched shape: { "events": [...] } (used by some operator-side buffers);
+//     a top-level object whose "events" array is not empty gives its events
 //
-// The bare array is decoded one record at a time from the body stream, so
-// the request's bytes are never held whole (see MaxBodyBytes). An object is
-// one JSON value and is decoded as one. Any error leaves nothing decoded:
-// the handler saves no row from a body it could not read to the end, and a
-// body over the router's cap fails here with its *http.MaxBytesError.
+// The body is decoded one record at a time from the stream, so its bytes are
+// never held whole (see MaxBodyBytes). Any error leaves nothing decoded: the
+// handler saves no row from a body it could not read to the end, and a body
+// over the router's cap fails here with its *http.MaxBytesError. A record
+// that is not valid JSON, or not a record, fails with a *recordError naming
+// it and its line.
 func decodeBody(r *http.Request) ([]StandardLoggingPayload, error) {
 	defer func() { _ = r.Body.Close() }()
 
-	br := bufio.NewReader(r.Body)
-	first, err := firstNonSpace(br)
+	lines := &lineCounter{r: r.Body}
+	first, err := firstNonSpace(lines)
 	if errors.Is(err, io.EOF) {
 		return nil, errEmptyBody
 	}
 	if err != nil {
 		return nil, err
 	}
-	dec := json.NewDecoder(br)
+	// The decoder reads the first byte back, then the rest of the body
+	// through the counter; nothing else buffers it.
+	d := &bodyDecoder{lines: lines, dec: json.NewDecoder(io.MultiReader(bytes.NewReader([]byte{first}), lines))}
 	if first == '[' {
-		return decodeArray(dec)
+		return d.array()
 	}
-
-	// One object: a single payload, or { "events": [...] }. The two shapes
-	// share one decode; an "events" array that is present and not empty wins.
-	var obj struct {
-		StandardLoggingPayload
-		Events []StandardLoggingPayload `json:"events"`
-	}
-	if err := dec.Decode(&obj); err != nil {
-		return nil, err
-	}
-	if err := expectEnd(dec); err != nil {
-		return nil, err
-	}
-	if len(obj.Events) > 0 {
-		return obj.Events, nil
-	}
-	return []StandardLoggingPayload{obj.StandardLoggingPayload}, nil
+	return d.objects()
 }
 
-// decodeArray reads a JSON array of payloads one element at a time. The
-// decoder's buffer holds about one record, not the whole array.
-func decodeArray(dec *json.Decoder) ([]StandardLoggingPayload, error) {
-	if _, err := dec.Token(); err != nil { // the opening [
+// bodyDecoder reads a spend body record by record, and can tell which line a
+// record that fails to decode is on.
+type bodyDecoder struct {
+	lines *lineCounter
+	dec   *json.Decoder
+}
+
+// array reads a JSON array of payloads one element at a time. The decoder's
+// buffer holds about one record, not the whole array.
+func (d *bodyDecoder) array() ([]StandardLoggingPayload, error) {
+	if _, err := d.dec.Token(); err != nil { // the opening [
 		return nil, err
 	}
 	batch := []StandardLoggingPayload{}
-	for dec.More() {
+	for record := 1; d.dec.More(); record++ {
 		var p StandardLoggingPayload
-		if err := dec.Decode(&p); err != nil {
-			return nil, err
+		if err := d.dec.Decode(&p); err != nil {
+			return nil, d.recordFailed(record, err)
 		}
 		batch = append(batch, p)
 	}
-	if _, err := dec.Token(); err != nil { // the closing ]
+	if _, err := d.dec.Token(); err != nil { // the closing ]
 		return nil, err
 	}
-	if err := expectEnd(dec); err != nil {
+	if err := expectEnd(d.dec); err != nil {
 		return nil, err
 	}
 	return batch, nil
+}
+
+// objects reads top-level JSON objects one after another until the body
+// ends: NDJSON, or a single record, or an events wrapper.
+func (d *bodyDecoder) objects() ([]StandardLoggingPayload, error) {
+	batch := []StandardLoggingPayload{}
+	for record := 1; ; record++ {
+		// A single payload or { "events": [...] } share one decode.
+		var obj struct {
+			StandardLoggingPayload
+			Events []StandardLoggingPayload `json:"events"`
+		}
+		if err := d.dec.Decode(&obj); err != nil {
+			return nil, d.recordFailed(record, err)
+		}
+		if len(obj.Events) > 0 {
+			batch = append(batch, obj.Events...)
+		} else {
+			batch = append(batch, obj.StandardLoggingPayload)
+		}
+		if !d.dec.More() {
+			break
+		}
+	}
+	// More is false at the end of the body, and also before a stray ] or }:
+	// expectEnd tells the two apart.
+	if err := expectEnd(d.dec); err != nil {
+		return nil, err
+	}
+	return batch, nil
+}
+
+// recordError is a record decodeBody could not read: its place in the body
+// (the first record is 1) and the line the fault is on.
+type recordError struct {
+	record, line int
+	err          error
+}
+
+func (e *recordError) Error() string {
+	return fmt.Sprintf("record %d, line %d: %v", e.record, e.line, e.err)
+}
+
+func (e *recordError) Unwrap() error { return e.err }
+
+// recordFailed wraps a record's decode error with the line it is on. The
+// line is counted from the newlines read so far, less those in the
+// decoder's buffer not yet decoded. A syntax error is placed at its offending byte, found
+// by scanning the undecoded bytes again from the failed record's start (the
+// decoder's own SyntaxError.Offset counts from the start of the body, less
+// the whitespace between records). A truncated record is placed at the
+// body's end, and a record whose JSON parsed but did not fit (a string id
+// given as a number) on the line it ends on. A body over the cap keeps its
+// *http.MaxBytesError, which the handler answers with 413.
+func (d *bodyDecoder) recordFailed(record int, err error) error {
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
+		return err
+	}
+	rest, _ := io.ReadAll(d.dec.Buffered())
+	decoded := d.lines.newlines - bytes.Count(rest, newline)
+	upto := 0
+	var syntax *json.SyntaxError
+	switch {
+	case errors.As(err, &syntax):
+		// rest begins where the failed record does: the decoder does not move
+		// past a value it could not scan.
+		var raw json.RawMessage
+		var again *json.SyntaxError
+		if rerr := json.NewDecoder(bytes.NewReader(rest)).Decode(&raw); errors.As(rerr, &again) && again.Offset >= 1 && again.Offset <= int64(len(rest)) {
+			upto = int(again.Offset) - 1 // the bytes before the offending one
+		}
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		upto = len(rest)
+	}
+	return &recordError{record: record, line: 1 + decoded + bytes.Count(rest[:upto], newline), err: err}
+}
+
+var newline = []byte{'\n'}
+
+// lineCounter counts the newlines read through it.
+type lineCounter struct {
+	r        io.Reader
+	newlines int
+}
+
+func (c *lineCounter) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.newlines += bytes.Count(p[:n], newline)
+	return n, err
 }
 
 // expectEnd refuses anything after the body's one JSON value, as
@@ -478,18 +574,19 @@ func expectEnd(dec *json.Decoder) error {
 	}
 }
 
-// firstNonSpace returns the body's first byte that is not JSON whitespace and
-// leaves it unread.
-func firstNonSpace(br *bufio.Reader) (byte, error) {
+// firstNonSpace reads the body up to its first byte that is not JSON
+// whitespace and returns that byte. It reads one byte at a time, so nothing
+// past it is taken from the body.
+func firstNonSpace(r io.Reader) (byte, error) {
+	var b [1]byte
 	for {
-		b, err := br.ReadByte()
-		if err != nil {
+		if _, err := io.ReadFull(r, b[:]); err != nil {
 			return 0, err
 		}
-		switch b {
+		switch b[0] {
 		case ' ', '\t', '\n', '\r':
 			continue
 		}
-		return b, br.UnreadByte()
+		return b[0], nil
 	}
 }

@@ -32,6 +32,12 @@ predates the subscription
    The subscription puts the customer on a plan, so the usage lands on an
    invoice. [The first invoice page](../first-invoice.md), steps 2 to 4,
    shows both calls.
+4. **A LiteLLM proxy that can reach Hardcount.** This page was tested with
+   LiteLLM 1.83.9, installed with `pip install 'litellm[proxy]==1.83.9'`.
+   The proxy needs your provider's API key and a `model_list` entry for each
+   model (step 2 shows one). If the proxy runs in Docker, it reaches a
+   Hardcount on the same computer at `http://host.docker.internal:8080`,
+   not `localhost` (step 2).
 
 ## 1. Load prices for your models
 
@@ -75,11 +81,18 @@ curl -s -X POST "$HARDCOUNT/v1/api-keys" \
 **You see:** the key, such as `hc_ingest_test_…`. It is shown only this
 once.
 
-Then add this to your `litellm_config.yaml`. It uses LiteLLM's `generic_api`
-callback, which sends a record of each finished call to a web address.
-Tested with LiteLLM 1.83.9.
+Then write your `litellm_config.yaml`. The `callback_settings` part uses
+LiteLLM's `generic_api` callback, which sends a record of each finished
+call to a web address. The `model_list` part is one Claude model, as an
+example.
 
 ```yaml
+model_list:
+  - model_name: claude-sonnet-4-5
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5-20250929
+      api_key: os.environ/ANTHROPIC_API_KEY
+
 litellm_settings:
   callbacks: ["hardcount"]
 
@@ -89,10 +102,22 @@ callback_settings:
     endpoint: "https://<your-hardcount-host>/v1/integrations/litellm/spend"
     headers:
       Authorization: Bearer hc_ingest_test_…   # the usage-only key
+    # LiteLLM 1.84.0 and later read these three; 1.83.9 ignores them.
+    # They do not make delivery safe: see "What LiteLLM sends again".
     max_retries: 4
     retry_delay: 5
     timeout: 10
 ```
+
+Start the proxy:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-…
+export LITELLM_MASTER_KEY=sk-…      # the key your app sends to the proxy
+litellm --config litellm_config.yaml
+```
+
+**You see:** the proxy starts on port 4000.
 
 - **`endpoint`:** your Hardcount address. On your own computer it is
   `http://localhost:8080`. If LiteLLM runs in a Docker container and Hardcount
@@ -102,36 +127,135 @@ callback_settings:
   work.
 - **`Authorization`:** the usage-only key you just created. A secret key
   also works, but it can do everything in the account.
-- **`max_retries` and `retry_delay`:** keep these. LiteLLM's default is no
-  retries, so one failed send loses the batch. Hardcount answers 503 when its
-  database is briefly out of reach, such as during a restart. Four retries
-  5, 10, 20 and 40 seconds apart cover that.
+- **`max_retries`, `retry_delay` and `timeout`:** on 1.83.9 they do
+  nothing. On later versions they cover only some failures: see
+  [What LiteLLM sends again, and what is lost](#what-litellm-sends-again-and-what-is-lost).
 
-The older form (`success_callback: ["generic"]` with
-`GENERIC_LOGGER_ENDPOINT` and `GENERIC_LOGGER_HEADERS`) still works on
-current LiteLLM, but it is the legacy form. With either form, Hardcount
-accepts a single record, a list of records (`json_array`), or
-`{"events": [...]}`.
+The older form is `success_callback: ["generic_api"]`, with the address in
+the `GENERIC_LOGGER_ENDPOINT` environment variable and the header in
+`GENERIC_LOGGER_HEADERS` (`Authorization=Bearer hc_ingest_test_…`). It
+takes no retry settings, so in every LiteLLM version it behaves like 1.83.9
+below: only a refused or dropped connection is tried once more. Use the
+form above.
+With either form, Hardcount accepts a single record, a list of records
+(`json_array`, the default), records one a line (`log_format: ndjson`, any
+number of them), or `{"events": [...]}`.
+
+### Keep each send under the size limit
+
+A send over the size limit is refused, and LiteLLM never sends a refused
+send again, so every call in it is lost.
+
+The limit is 32 MB (33,554,432 bytes) on this route, also through the nginx
+of the Compose stack and the quick start. Over it, Hardcount answers
+`413 batch_too_large` and saves nothing. If you put your own proxy in front
+of Hardcount, give this route a limit above 32 MB (in nginx,
+`client_max_body_size 33m`, as `deploy/compose/nginx.conf` does). Most
+proxies default to far less.
+
+LiteLLM sends the calls it has queued when the queue reaches
+`DEFAULT_BATCH_SIZE` calls (512 unless you set it), or every
+`DEFAULT_FLUSH_INTERVAL_SECONDS` (5 seconds). Each call's record carries
+the prompt and the reply. Even with a one-word prompt, a 1.83.9 record is
+7 to 9 KB, so a full default batch is about 4 MB.
+
+A full default batch fits while its records average under 64 KB
+(32 MB ÷ 512). With longer prompts, use one of the settings below.
+
+Two settings keep a send smaller:
+
+- **Set `DEFAULT_BATCH_SIZE`** in the proxy's environment. With 50, a send
+  of short-prompt records is at most about 450 KB (50 × 9 KB) when no send
+  is waiting to retry. A send waiting to retry lets the queue grow past that (see
+  [Calls lost when nothing failed](#calls-lost-when-nothing-failed)). A
+  smaller batch size has a cost: more sends start from a full queue, which
+  LiteLLM retries for a shorter time
+  ([What LiteLLM sends again](#what-litellm-sends-again-and-what-is-lost)).
+- **With long prompts, leave the text out.** Add
+  `turn_off_message_logging: true` under `litellm_settings`. LiteLLM then
+  puts `redacted-by-litellm` in place of the prompt and the reply. Hardcount
+  does not read either, so billing is the same. This setting applies to
+  every logging callback of the proxy, not only Hardcount's.
+
+A refused send shows in the proxy's log as `Generic API Logger Error
+sending batch`. Hardcount counts its 413 on
+`/v1/integrations/litellm/spend` in `hardcount_http_requests_total`. A 413
+from a proxy in front of Hardcount never reaches it: look for it in that
+proxy's log.
+
+### What LiteLLM sends again, and what is lost
+
+**LiteLLM's delivery to Hardcount can lose calls, in every version.**
+Compare Hardcount's usage with LiteLLM's spend log after any outage, and
+regularly, for example once a day. Send any missing calls again from the
+spend log before the period's invoice is built:
+[LiteLLM spend gap after an outage](../ops/runbook/litellm-spend-gap.md).
+
+LiteLLM starts a send in two ways: every 5 seconds from a timer, or at
+once when its queue reaches `DEFAULT_BATCH_SIZE`. What it does after a
+failed send depends on its version and on how the send started.
+
+| LiteLLM | A timeout, a connection error, or a 5xx such as 503 | A 4xx: 400, 401, 413, 429 |
+|---|---|---|
+| 1.83.9 (tested) | Lost. A refused or dropped connection is tried once more at once; nothing else is sent again. | Lost. |
+| 1.84.0 and later, with `max_retries: 4` and `retry_delay: 5`: a send from the 5-second timer | Sent again up to 4 times, after 5, 10, 20 and 40 seconds (`retry_delay` doubles each time). Lost if the last try fails. | Lost. Never sent again. |
+| 1.84.0 and later: a send started because the queue reached `DEFAULT_BATCH_SIZE` | Sent again after 5 and 15 seconds at most, then lost. This send runs as LiteLLM logging work, which LiteLLM stops after 20 seconds (`LOGGING_WORKER_MAX_TIME_PER_COROUTINE`). | Lost. Never sent again. |
+
+The queue reaches the batch size within the 5 seconds once the proxy
+handles more than about 100 calls a second with the default 512 (512
+calls in 5 seconds), or more than about 10 with `DEFAULT_BATCH_SIZE=50`.
+From there, most sends get only the shorter retries.
+
+"Lost" means LiteLLM drops the whole send from its queue, and Hardcount
+never sees those calls. While Hardcount restarts, it refuses connections.
+It answers 503 only while its database is out of reach, such as during a
+failover.
+
+The 1.84.0 rows come from LiteLLM's source, which is the same up to
+1.106.6, the newest release on 2026-10-31. Hardcount's own tests use
+records from a 1.83.9 proxy.
+
+### Calls lost when nothing failed
+
+In every version, LiteLLM empties its whole queue when a send ends, and
+keeps no copy of the calls that were not in that send:
+
+- **A call queued while a send is in flight, or waiting to retry, can be
+  dropped,** even when the send succeeds. The send's end empties the queue
+  with that call still in it, unless a later send already carried it.
+- **While a send waits to retry,** each new call past `DEFAULT_BATCH_SIZE`
+  starts another send of the whole queue, which keeps growing. Such a send
+  can pass the size limit and be refused, and a refused send is never sent
+  again.
+
+The rows that do arrive are counted once: a call sent twice comes back as
+`deduplicated`. The calls LiteLLM dropped are found only by comparing with
+its spend log, as above.
 
 ## 3. Set `user` on every call
 
 Hardcount finds the customer by LiteLLM's `user` field: it must equal the
-external ID of a customer you created in Hardcount. Set it on every call:
+external ID of a customer you created in Hardcount. Set it on every call
+your app sends to the proxy:
 
-```python
-import litellm
-
-response = litellm.completion(
-    model="claude-sonnet-4-5-20250929",
-    messages=[{"role": "user", "content": "Hello"}],
-    user="acme-1",   # the customer's external ID in Hardcount
-    metadata={
-        "team_id": "team_engineering",  # becomes a label on the usage
-    },
-)
+```bash
+curl -s http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "claude-sonnet-4-5",
+       "messages": [{"role": "user", "content": "Hello"}],
+       "user": "acme-1",
+       "metadata": {"team_id": "team_engineering"}}'
 ```
 
-The proxy logs that value as `end_user`, and Hardcount reads it from there. A
+**You see:** the model's reply as JSON. `user` is the customer's external
+ID in Hardcount. `metadata.team_id` becomes a label on the usage.
+
+With the OpenAI SDK, point `base_url` at the proxy and pass `user` in the
+same way. Calling LiteLLM as a Python library (`litellm.completion()`)
+does not go through the proxy, so the proxy config above does not apply.
+
+The proxy logs `user` as `end_user`, and Hardcount reads it from there. A
 record you build by hand can send `user` instead.
 
 A call without `user` is refused, and the refused row is lost
@@ -195,10 +319,24 @@ Each event also carries these labels (dimensions):
   `vertex_ai/claude-opus-4-6@default` become `claude-opus-5.5` and
   `claude-opus-4.6`. A Claude name matches only the model's id, or the id
   with a date or version ending. A name Hardcount does not know, such as
-  `claude-opus-4-9`, keeps its own name here, has no price until you add
-  one, and is logged as a warning
+  `anthropic/claude-opus-4-9`, keeps the name exactly as LiteLLM sent it,
+  prefix included. It has no price until you add one, and is logged as a
+  warning
   ([how to price it](../ai-pricing.md#price-a-claude-model-hardcount-does-not-know)).
-- `model_raw`: the model name exactly as LiteLLM sent it.
+  An OpenAI or embedding name matches the longest known model it starts
+  with, followed by a dash. So `gpt-4o-audio-preview` and
+  `gpt-4o-2024-05-13` are priced as `gpt-4o`, although OpenAI lists other
+  prices for them (audio tokens, an older snapshot). To charge such a name
+  its own rate, add a price that names its `model_raw`
+  ([how](../ai-pricing.md#price-one-platforms-model-name-differently)).
+- `model_raw`: the model name exactly as LiteLLM sent it. The name
+  depends on the route. On the proxy's own routes, such as
+  `/v1/chat/completions`, `/v1/messages` and `/v1/responses`, it is the
+  `model` of the `model_list` entry, such as
+  `anthropic/claude-sonnet-4-5-20250929`. On a pass-through route, such as
+  `/anthropic/v1/messages`, it is the name the client sent, with no
+  prefix, such as `claude-sonnet-4-5-20250929`. A price on `model_raw` must name each form
+  your traffic shows.
 - `context_tier`, on Claude Haiku 5.5 events only: `prompt_up_to_100k` or
   `prompt_over_100k`. Haiku 5.5 has a higher price when the prompt (input,
   cache reads and cache writes) is over 100,000 tokens. Provider costs have
@@ -285,26 +423,43 @@ Known limits:
 
 ## 5. Check that it worked
 
-Make one call through the proxy for your customer, then list the
-customer's usage:
+1. **Make one call through the proxy** for your customer, as in step 3:
 
-```bash
-CUSTOMER_ID=$(curl -s "$HARDCOUNT/v1/customers?external_id=acme-1" \
-  -H "Authorization: Bearer $HARDCOUNT_KEY" | jq -r '.data[0].id')
-curl -s "$HARDCOUNT/v1/usage-events?customer_id=$CUSTOMER_ID&limit=5" \
-  -H "Authorization: Bearer $HARDCOUNT_KEY" | jq -c '.data[] | {quantity, dimensions}'
-```
+   ```bash
+   curl -s http://localhost:4000/v1/chat/completions \
+     -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"model": "claude-sonnet-4-5",
+          "messages": [{"role": "user", "content": "Hello"}],
+          "user": "acme-1",
+          "metadata": {"team_id": "team_engineering"}}' \
+     | jq -c '.usage | {prompt_tokens, completion_tokens}'
+   ```
 
-**You see:** one line for each event, newest first, such as:
+   **You see:** the call's token counts, such as
+   `{"prompt_tokens":10,"completion_tokens":20}`.
 
-```text
-{"quantity":"200000","dimensions":{"model":"claude-sonnet-4.5","model_raw":"claude-sonnet-4-5-20250929","provider":"anthropic","token_type":"output"}}
-{"quantity":"1000000","dimensions":{"model":"claude-sonnet-4.5","model_raw":"claude-sonnet-4-5-20250929","provider":"anthropic","token_type":"input"}}
-```
+2. **Wait about 5 seconds**, so LiteLLM sends its queue to Hardcount.
+3. **List the customer's usage.** The usage list takes Hardcount's own
+   customer ID, so the first command looks it up from the external ID.
 
-The usage list takes Hardcount's own customer ID, so the first command looks
-it up from the external ID. The events also show on the **Usage** page in
-the dashboard.
+   ```bash
+   CUSTOMER_ID=$(curl -s "$HARDCOUNT/v1/customers?external_id=acme-1" \
+     -H "Authorization: Bearer $HARDCOUNT_KEY" | jq -r '.data[0].id')
+   curl -s "$HARDCOUNT/v1/usage-events?customer_id=$CUSTOMER_ID&limit=5" \
+     -H "Authorization: Bearer $HARDCOUNT_KEY" | jq -c '.data[] | {quantity, dimensions}'
+   ```
+
+   **You see:** one line for each event, newest first, with the counts from
+   step 1, such as:
+
+   ```text
+   {"quantity":"20","dimensions":{"model":"claude-sonnet-4.5","model_raw":"anthropic/claude-sonnet-4-5-20250929","provider":"anthropic","team_id":"team_engineering","token_type":"output"}}
+   {"quantity":"10","dimensions":{"model":"claude-sonnet-4.5","model_raw":"anthropic/claude-sonnet-4-5-20250929","provider":"anthropic","team_id":"team_engineering","token_type":"input"}}
+   ```
+
+   The events also show on the **Usage** page in the dashboard. Nothing
+   there after a minute? Look for `Generic API Logger` in the proxy's log.
 
 ## Response
 
@@ -357,16 +512,20 @@ at all?
 
 | Status | Meaning | What to do |
 |---|---|---|
-| 400 | The body is not valid JSON, or it is over 1 MB. The batch was not saved. | Fix the request. A batch over 1 MB gets this answer every time, so have LiteLLM send fewer records at once. |
+| 400 | The body is empty or not valid JSON. The batch was not saved. The message names the first bad record and its line, such as `invalid JSON body at line 3 (record 3)`. | Fix that record. |
+| `413 batch_too_large` | The body is over 32 MB. The batch was not saved. | Have LiteLLM send fewer records at once ([how](#keep-each-send-under-the-size-limit)). A batch this size gets this answer every time. |
+| 413, from a proxy in front | Your own proxy's body limit for this route is below 32 MB. The batch did not reach Hardcount. | Raise that proxy's limit for this route above 32 MB ([how](#keep-each-send-under-the-size-limit)). |
 | 401 | The API key is missing, wrong, revoked or expired. The batch was not saved. | Fix the `Authorization` header. |
 | 403 | The key cannot send usage. Every Hardcount key type can, so this does not happen with a key Hardcount made. The batch was not saved. | Use a usage-only or secret key. |
 | `429 rate_limited` | Too many requests. The batch was not saved. | Send the whole batch again after `Retry-After` seconds. |
 | `503 authentication_unavailable` | Hardcount could not check the API key. The batch was not saved. | Send the whole batch again. |
-| `503 ingest_unavailable` | Hardcount could not reach or write its usage store. The batch was not saved. | Send the whole batch again. |
+| `503 ingest_unavailable` | Hardcount could not reach or write its usage store. It stopped at that call: calls before it in the batch were saved, the rest were not. | Send the whole batch again. |
 
 When you send a batch again, rows that were saved before the failure come
-back as `deduplicated`. With `max_retries` set as in step 2, LiteLLM does
-this for you.
+back as `deduplicated`. LiteLLM sends a batch again only in the cases in
+[What LiteLLM sends again, and what is lost](#what-litellm-sends-again-and-what-is-lost):
+never after a 4xx, and on 1.83.9 only after a refused or dropped
+connection.
 
 ## Usage for a customer Hardcount does not know yet
 

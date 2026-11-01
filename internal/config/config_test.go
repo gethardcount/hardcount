@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log/slog"
 	"os"
 	"slices"
 	"strings"
@@ -694,6 +695,97 @@ func TestLoad_RunMigrationsOnBootMustParse(t *testing.T) {
 		t.Setenv("RUN_MIGRATIONS_ON_BOOT", bad)
 		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "RUN_MIGRATIONS_ON_BOOT=") {
 			t.Errorf("RUN_MIGRATIONS_ON_BOOT=%q must fail naming it, got: %v", bad, err)
+		}
+	}
+}
+
+// An unknown SMTP_TLS stops start-up, naming the three transports, in every
+// environment and whether or not SMTP_HOST is set. It used to log a warning
+// and send with starttls, so SMTP_TLS=tls (meant: implicit) failed every
+// send for a reason the operator could not see.
+// Mutation-verify: drop the ParseSMTPTLS check in validateFatal → Load boots.
+func TestLoad_RefusesUnknownSMTPTLS(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
+	t.Setenv("APP_DATABASE_URL", "postgres://app:app@localhost/test")
+	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("TRUST_PROXY", "none")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "")
+
+	for _, env := range []string{"production", "local"} {
+		t.Setenv("APP_ENV", env)
+		for _, host := range []string{"", "smtp.example.com"} {
+			t.Setenv("SMTP_HOST", host)
+			for _, bad := range []string{"tls", "ssl", "startls", "true", "off"} {
+				t.Setenv("SMTP_TLS", bad)
+				_, err := Load()
+				if err == nil || !strings.Contains(err.Error(), "SMTP_TLS") || !strings.Contains(err.Error(), "starttls") ||
+					!strings.Contains(err.Error(), "implicit") || !strings.Contains(err.Error(), "none") {
+					t.Errorf("APP_ENV=%s SMTP_HOST=%q SMTP_TLS=%q must refuse to boot naming the three transports, got: %v", env, host, bad, err)
+				}
+			}
+			for _, ok := range []string{"", "starttls", " Implicit ", "NONE"} {
+				t.Setenv("SMTP_TLS", ok)
+				if _, err := Load(); err != nil {
+					t.Errorf("APP_ENV=%s SMTP_TLS=%q must boot, got: %v", env, ok, err)
+				}
+			}
+		}
+	}
+}
+
+// ParseSMTPTLS feeds the boot check and the email sender.
+func TestParseSMTPTLS(t *testing.T) {
+	for raw, want := range map[string]string{
+		"": "starttls", "  ": "starttls", "starttls": "starttls", "STARTTLS": "starttls",
+		" implicit ": "implicit", "none": "none",
+	} {
+		if got, err := ParseSMTPTLS(raw); err != nil || got != want {
+			t.Errorf("ParseSMTPTLS(%q) = %q, %v; want %q", raw, got, err, want)
+		}
+	}
+	for _, raw := range []string{"tls", "ssl", "starttls,implicit", "1"} {
+		if got, err := ParseSMTPTLS(raw); err == nil {
+			t.Errorf("ParseSMTPTLS(%q) = %q, want an error", raw, got)
+		}
+	}
+}
+
+// An unknown LOG_LEVEL stops start-up, naming the levels. It used to mean
+// info without a word, so LOG_LEVEL=verbose, meant as debug, hid the very
+// lines it was set to show.
+// Mutation-verify: drop the ParseLogLevel check in validateFatal → Load boots.
+func TestLoad_RefusesUnknownLogLevel(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
+	t.Setenv("APP_ENV", "local")
+	for _, bad := range []string{"verbose", "trace", "warnings", "fatal", "2"} {
+		t.Setenv("LOG_LEVEL", bad)
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "LOG_LEVEL") || !strings.Contains(err.Error(), "debug, info") {
+			t.Errorf("LOG_LEVEL=%q must refuse to boot naming the levels, got: %v", bad, err)
+		}
+	}
+	for _, ok := range []string{"", "debug", " INFO ", "warn", "Warning", "error"} {
+		t.Setenv("LOG_LEVEL", ok)
+		if _, err := Load(); err != nil {
+			t.Errorf("LOG_LEVEL=%q must boot, got: %v", ok, err)
+		}
+	}
+}
+
+// ParseLogLevel feeds the boot check and the server's logger.
+func TestParseLogLevel(t *testing.T) {
+	for raw, want := range map[string]slog.Level{
+		"": slog.LevelInfo, "info": slog.LevelInfo, "DEBUG": slog.LevelDebug,
+		" warn ": slog.LevelWarn, "warning": slog.LevelWarn, "error": slog.LevelError,
+	} {
+		if got, err := ParseLogLevel(raw); err != nil || got != want {
+			t.Errorf("ParseLogLevel(%q) = %v, %v; want %v", raw, got, err, want)
+		}
+	}
+	for _, raw := range []string{"verbose", "err", "1"} {
+		if _, err := ParseLogLevel(raw); err == nil {
+			t.Errorf("ParseLogLevel(%q) = nil error, want a refusal", raw)
 		}
 	}
 }

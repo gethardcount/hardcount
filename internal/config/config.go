@@ -207,6 +207,21 @@ func (c Config) validateFatal() error {
 		return fmt.Errorf("%w (docs/self-host.md)", err)
 	}
 
+	// An unknown SMTP_TLS used to send with starttls behind a warning, so a
+	// value meant as implicit or none, such as tls, failed every send for a
+	// reason only that warning gave. Checked in every environment, with or
+	// without SMTP_HOST.
+	if _, err := ParseSMTPTLS(os.Getenv("SMTP_TLS")); err != nil {
+		return fmt.Errorf("%w (docs/ops/email-setup.md)", err)
+	}
+
+	// LOG_LEVEL is read by the server before Load, to build its logger
+	// (cmd/hardcount newLogger), and refused there too. Checked here so every
+	// command that loads the config treats it alike.
+	if _, err := ParseLogLevel(os.Getenv("LOG_LEVEL")); err != nil {
+		return err
+	}
+
 	if encKey != "" {
 		if len(encKey) != 64 {
 			return fmt.Errorf("HARDCOUNT_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes), got %d", len(encKey))
@@ -496,6 +511,40 @@ func ParseCORSOrigins(spec string) ([]string, error) {
 		return []string{"*"}, nil
 	}
 	return origins, nil
+}
+
+// ParseSMTPTLS reads SMTP_TLS, the email transport: starttls (STARTTLS on
+// port 587, the default when unset), implicit (TLS from the first byte, port
+// 465) or none (plain text, refused at send in production), in any case.
+// Anything else is an error. It is the one parser behind the boot check and
+// the email sender, so a value cannot pass the first and mean something else
+// to the second.
+func ParseSMTPTLS(raw string) (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	switch mode {
+	case "":
+		return "starttls", nil
+	case "starttls", "implicit", "none":
+		return mode, nil
+	}
+	return "", fmt.Errorf("SMTP_TLS=%q is not a transport: use starttls (the default, port 587), implicit (port 465) or none (plain text; refused in production)", strings.TrimSpace(raw))
+}
+
+// ParseLogLevel reads LOG_LEVEL: debug, info (the default when unset), warn
+// (or warning) or error, in any case. Anything else is an error naming them:
+// an unknown level used to mean info without a word.
+func ParseLogLevel(raw string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "info":
+		return slog.LevelInfo, nil
+	case "debug":
+		return slog.LevelDebug, nil
+	case "warn", "warning":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	}
+	return slog.LevelInfo, fmt.Errorf("LOG_LEVEL=%q is not a log level: use debug, info (the default), warn (or warning) or error", strings.TrimSpace(raw))
 }
 
 // boolEnv reads a true/false setting: unset → fallback. Any value other than

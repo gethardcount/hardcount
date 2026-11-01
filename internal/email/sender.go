@@ -19,6 +19,7 @@ import (
 
 	gomail "github.com/wneessen/go-mail"
 
+	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 )
@@ -117,17 +118,14 @@ type RecipientSuppressionChecker interface {
 // dev path exercises the same error contract as production. appEnv is
 // config.Config.Env.
 func NewSender(appEnv string) *Sender {
-	tlsMode := strings.ToLower(strings.TrimSpace(os.Getenv("SMTP_TLS")))
-	switch tlsMode {
-	case "starttls", "implicit", "none":
-		// valid
-	case "":
-		tlsMode = "starttls"
-	default:
-		// Invalid value — log and fall back to safe default. The
-		// dispatcher would otherwise silently use the wrong transport.
-		slog.Warn("SMTP_TLS unrecognized, defaulting to starttls", "got", tlsMode)
-		tlsMode = "starttls"
+	// config.Load refuses to start on an unknown SMTP_TLS, so in the server
+	// the mode is one of the three. A caller that skipped Load keeps the
+	// value it set, and deliver refuses to send with it: an unknown mode
+	// must never become a guessed transport.
+	tlsMode, err := config.ParseSMTPTLS(os.Getenv("SMTP_TLS"))
+	if err != nil {
+		slog.Error("smtp transport: every send will fail", "error", err)
+		tlsMode = strings.TrimSpace(os.Getenv("SMTP_TLS"))
 	}
 	prodEnv := appEnv == "production"
 	// One line of boot-time truth about the transport mode: strict
@@ -998,6 +996,13 @@ func (s *Sender) filterSuppressedCC(ctx context.Context, tenantID string, cc []s
 // the whole send: DATA hasn't been sent yet, so the retry is safe and
 // nothing was delivered.
 func (s *Sender) deliver(ctx context.Context, tenantID, to string, cc []string, body []byte) error {
+	switch s.tlsMode {
+	case "starttls", "implicit", "none":
+	default:
+		// Nothing below may run with a mode it does not know: an unknown one
+		// would take the plain-text dial and skip STARTTLS.
+		return fmt.Errorf("SMTP_TLS=%q is not a transport (starttls, implicit or none), so nothing was sent", s.tlsMode)
+	}
 	if s.tlsMode == "none" && s.prodEnv {
 		return fmt.Errorf("SMTP_TLS=none is forbidden in production — use starttls or implicit")
 	}

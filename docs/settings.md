@@ -73,7 +73,7 @@ Without `SMTP_HOST`, Hardcount sends no email: every send fails with "SMTP not c
 |---|---|---|
 | `SMTP_HOST` | Your email server's host name. | Unset: no email is sent, with a warning at start-up. |
 | `SMTP_PORT` | Your email server's port. | `587` |
-| `SMTP_TLS` | `starttls` (port 587), `implicit` (port 465) or `none`. | `starttls`. An unknown value logs a warning and uses `starttls`. In production, `none` makes every send fail. |
+| `SMTP_TLS` | `starttls` (port 587), `implicit` (port 465) or `none`. | `starttls`. Any other value stops start-up. In production, `none` makes every send fail. |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | Login for the email server. | Unset: Hardcount sends without logging in. |
 | `SMTP_FROM` | The sender address on every email. | `billing@hardcount.local` |
 | `HOSTED_INVOICE_BASE_URL` | Address of the hosted invoice page: the "View & pay invoice" link in emails, and where Stripe Checkout returns a customer who paid there. | Unset: emails have no invoice link, with a warning. Checkout returns to `http://localhost:5173`. |
@@ -100,7 +100,7 @@ How often background billing runs is not a setting: every hour, or every 5 minut
 
 | Setting | What it does | Default |
 |---|---|---|
-| `LOG_LEVEL` | `debug`, `info`, `warn` (or `warning`) or `error`. Logs are JSON on standard output. | `info`. An unknown value also means `info`, without a warning. |
+| `LOG_LEVEL` | `debug`, `info`, `warn` (or `warning`) or `error`. Logs are JSON on standard output. | `info`. Any other value stops start-up. |
 | `METRICS_TOKEN` | The bearer token a scraper must send to read `/metrics`. | Unset: `/metrics` is open, except in production, where it answers 401 and start-up logs a warning. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Your OpenTelemetry collector's OTLP/HTTP address, such as `http://otel-collector:4318`. Setting it turns tracing on. | Unset: no traces are sent. |
 | `OTEL_SERVICE_NAME` | The service name on every trace. | `hardcount` |
