@@ -13,6 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/crypto"
+	"github.com/gethardcount/hardcount/internal/platform/listorder"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -646,9 +647,13 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.C
 		return nil, 0, err
 	}
 
+	orderBy, err := customerOrderBy(filter.Sort, filter.SortDir)
+	if err != nil {
+		return nil, 0, err
+	}
 	query := `SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status, COALESCE(test_clock_id,''), created_at, updated_at
 		FROM customers` + where +
-		` ORDER BY ` + customerOrderBy(filter.Sort, filter.SortDir) +
+		` ORDER BY ` + orderBy +
 		` LIMIT $` + fmt.Sprintf("%d", len(args)+1) + ` OFFSET $` + fmt.Sprintf("%d", len(args)+2)
 	args = append(args, limit, filter.Offset)
 
@@ -704,9 +709,13 @@ func (s *PostgresStore) listSearch(ctx context.Context, filter ListFilter) ([]do
 	}
 
 	where, args := buildCustomerWhere(filter)
+	orderBy, err := customerOrderBy(filter.Sort, filter.SortDir)
+	if err != nil {
+		return nil, 0, err
+	}
 	query := `SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status, COALESCE(test_clock_id,''), created_at, updated_at
 		FROM customers` + where +
-		` ORDER BY ` + customerOrderBy(filter.Sort, filter.SortDir) +
+		` ORDER BY ` + orderBy +
 		` LIMIT $` + fmt.Sprintf("%d", len(args)+1)
 	args = append(args, searchScanCap)
 
@@ -1145,31 +1154,22 @@ func (s *PostgresStore) GetBillingProfile(ctx context.Context, tenantID, custome
 // use compositePaymentSetupStore (internal/api/adapters.go) which composes
 // the response from canonical sources (customers + payment_methods).
 
-// customerOrderBy validates sort + dir against a closed allow-list
-// and adds a deterministic id tie-break matching the primary
-// direction. See invoiceOrderBy for the design rationale.
-func customerOrderBy(sort, dir string) string {
-	col := customerSortColumn(sort)
-	d := "DESC"
-	if dir == "asc" {
-		d = "ASC"
-	}
-	return col + " " + d + ", id " + d
-}
+// customerSort is the customer list's ?sort keys, created_at first (the
+// default). The handler refuses any other key or dir with a 422
+// (listorder).
+var customerSort = listorder.New(
+	listorder.Key{Name: "created_at", Column: "created_at"},
+	listorder.Key{Name: "display_name", Column: "display_name"},
+	listorder.Key{Name: "name", Column: "display_name"},
+	listorder.Key{Name: "email", Column: "email"},
+	listorder.Key{Name: "external_id", Column: "external_id"},
+	listorder.Key{Name: "status", Column: "status"},
+)
 
-func customerSortColumn(key string) string {
-	switch key {
-	case "display_name", "name":
-		return "display_name"
-	case "email":
-		return "email"
-	case "external_id":
-		return "external_id"
-	case "status":
-		return "status"
-	default:
-		return "created_at"
-	}
+// customerOrderBy returns the ORDER BY clause for the customer list, with an
+// id tie-break in the same direction.
+func customerOrderBy(sort, dir string) (string, error) {
+	return customerSort.OrderBy(sort, dir, "id")
 }
 
 func buildCustomerWhere(f ListFilter) (string, []any) {

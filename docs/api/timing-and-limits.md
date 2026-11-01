@@ -45,7 +45,7 @@ first run after it.
 | Events in one `POST /v1/usage-events/batch` | 1,000 |
 | Rows in one list page | 100; 50 when `limit` is not sent ([pagination](pagination.md)) |
 | Time limit of a request | 30 seconds, then `504` `timeout` ([errors](errors.md#504-gateway-timeout)) |
-| Time the server keeps writing an answer | 35 seconds after the request arrives. This also ends a CSV export that takes longer. |
+| Time the server keeps writing an answer | 35 seconds after the request arrives. A CSV export (`/v1/exports/…`) has a 5-minute time limit, and 5 minutes and 5 seconds to write. |
 | Requests a minute or a second | See [Rate limits](rate-limits.md) |
 
 ## Keys and fields

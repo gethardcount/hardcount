@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/listorder"
 	"strings"
 	"time"
 
@@ -333,8 +334,12 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.S
 		return nil, 0, err
 	}
 
+	orderBy, err := subscriptionOrderBy(filter.Sort, filter.SortDir)
+	if err != nil {
+		return nil, 0, err
+	}
 	query := `SELECT DISTINCT ` + qualifiedSubCols("s") + ` FROM subscriptions s` + where +
-		` ORDER BY ` + subscriptionOrderBy(filter.Sort, filter.SortDir) +
+		` ORDER BY ` + orderBy +
 		` LIMIT $` + fmt.Sprintf("%d", len(args)+1) + ` OFFSET $` + fmt.Sprintf("%d", len(args)+2)
 	args = append(args, limit, filter.Offset)
 
@@ -843,9 +848,8 @@ func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, t
 // trigger (clearLiftedPauseTx; onResume writes its audit row). Rejects a
 // canceled row since collection-pause on a terminated sub has no meaning —
 // the engine wouldn't observe the row anyway, but failing loudly here keeps
-// the API honest. Active and paused (hard) are both allowed: a hard-paused
-// sub can simultaneously have pause_collection configured for the moment
-// status flips back to active.
+// the API honest. Draft, trialing and active are allowed; there is no
+// paused status.
 func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection, onResume ResumeAudit) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1233,7 +1237,7 @@ func (s *PostgresStore) ResumeLiftedPause(ctx context.Context, tenantID string, 
 // timestamp on re-runs). Used by the billing engine when the trial window
 // has elapsed during a cycle scan, and by the operator-facing EndTrial
 // service action. Returns errs.InvalidState if the row's status was not
-// 'trialing' at UPDATE time (e.g. it was already canceled or hard-paused);
+// 'trialing' at UPDATE time (e.g. it was already activated or canceled);
 // the caller distinguishes this from missing-row by querying current
 // status when no row matches.
 func (s *PostgresStore) ActivateAfterTrial(ctx context.Context, tenantID, id string, at time.Time) (domain.Subscription, error) {
@@ -1493,8 +1497,8 @@ func (s *PostgresStore) endTrialEarlyInTx(ctx context.Context, tx *sql.Tx, id st
 // newTrialEnd makes sense (in the future, after the existing
 // trial_end_at) and computes the new period via firstPeriodAfterTrial.
 // Returns errs.InvalidState if the row's status is not 'trialing' at
-// UPDATE time — distinguishes operator-already-ended / hard-paused /
-// canceled from missing-row by re-querying status when no row matches.
+// UPDATE time — distinguishes operator-already-ended / canceled from
+// missing-row by re-querying status when no row matches.
 func (s *PostgresStore) ExtendTrial(ctx context.Context, tenantID, id string, newTrialEnd, periodStart, periodEnd, nextBilling time.Time, anchorDay int) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -3517,35 +3521,23 @@ func scanItemDest(it *domain.SubscriptionItem) []any {
 	}
 }
 
-// subscriptionOrderBy validates sort + dir against a closed allow-list
-// (no SQL injection) and adds a deterministic id tie-break matching
-// the primary direction. Same pattern as invoiceOrderBy. Unknown sort
-// keys default to created_at.
-func subscriptionOrderBy(sort, dir string) string {
-	col := subscriptionSortColumn(sort)
-	d := "DESC"
-	if dir == "asc" {
-		d = "ASC"
-	}
-	return col + " " + d + ", s.id " + d
-}
+// subscriptionSort is the subscription list's ?sort keys, created_at first
+// (the default). display_name is a column on subscriptions itself (subCols),
+// not derived from customers. The handler refuses any other key or dir with
+// a 422 (listorder).
+var subscriptionSort = listorder.New(
+	listorder.Key{Name: "created_at", Column: "s.created_at"},
+	listorder.Key{Name: "next_billing_at", Column: "s.next_billing_at"},
+	listorder.Key{Name: "status", Column: "s.status"},
+	listorder.Key{Name: "display_name", Column: "s.display_name"},
+	listorder.Key{Name: "name", Column: "s.display_name"},
+	listorder.Key{Name: "trial_end_at", Column: "s.trial_end_at"},
+)
 
-func subscriptionSortColumn(key string) string {
-	switch key {
-	case "next_billing_at":
-		return "s.next_billing_at"
-	case "status":
-		return "s.status"
-	case "display_name", "name":
-		// display_name is a column on subscriptions itself (subCols),
-		// not derived from customers — the previous created_at proxy
-		// (and its JOIN-required comment) was wrong about the schema.
-		return "s.display_name"
-	case "trial_end_at":
-		return "s.trial_end_at"
-	default:
-		return "s.created_at"
-	}
+// subscriptionOrderBy returns the ORDER BY clause for the subscription list,
+// with an id tie-break in the same direction (see invoiceOrderBy).
+func subscriptionOrderBy(sort, dir string) (string, error) {
+	return subscriptionSort.OrderBy(sort, dir, "s.id")
 }
 
 func buildSubWhere(f ListFilter) (string, []any) {

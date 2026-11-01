@@ -2723,16 +2723,18 @@ func (s *Service) ClearScheduledCancel(ctx context.Context, tenantID, id string)
 
 // PauseCollectionInput carries the collection-pause intent. Behavior is
 // required and must be one of the supported modes (v1: keep_as_draft).
-// ResumesAt is optional; when set, the cycle scan auto-clears the pause
-// at the start of the period containing or after that timestamp so that
-// period bills normally. When nil, only an explicit DELETE clears it.
+// ResumesAt is optional; once it passes, the resume sweep lifts the pause,
+// dated at ResumesAt (ProcessExpiredPauseCollections, or
+// ProcessExpiredPauseCollectionsForClock on a test clock). A period that
+// ended before ResumesAt still closes first, as a draft. When nil, only an
+// explicit DELETE clears it.
 type PauseCollectionInput struct {
 	Behavior  domain.PauseCollectionBehavior `json:"behavior"`
 	ResumesAt *time.Time                     `json:"resumes_at,omitempty"`
 }
 
 // PauseCollection sets the operator's Stripe-parity collection-pause state.
-// Distinct from Pause (hard freeze on status). The cycle keeps advancing;
+// The subscription's status is not touched. The cycle keeps advancing;
 // while pause_collection is non-null the engine generates each new invoice
 // as a draft, so it is not finalized, not charged and starts no dunning run.
 // The pause is the operator's (set_by=operator), also when it replaces a
@@ -2871,8 +2873,7 @@ func (s *Service) PauseCollectionForDunning(ctx context.Context, tenantID, id, i
 // without an active pause returns unchanged, with resumed false, so the
 // caller announces nothing. A pause that had already lifted (a payment
 // released it, or its date came) is resumed as the scheduled resumer would
-// resume it, with that trigger, and resumed is false too. Distinct from
-// Resume (which flips status from paused back to active).
+// resume it, with that trigger, and resumed is false too.
 //
 // Its one caller is the operator (handler). The scheduled resumers write
 // their own row (triggered_by "schedule", or "payment" for a dunning pause

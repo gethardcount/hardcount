@@ -548,6 +548,13 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ?sort and ?dir are a closed set (subscriptionSort): anything else is a 422
+	// naming the allowed values, not the default order without a word.
+	if err := subscriptionSort.Validate(r.URL.Query().Get("sort"), r.URL.Query().Get("dir")); err != nil {
+		respond.FromError(w, r, err, "subscription")
+		return
+	}
+
 	subs, total, err := h.svc.List(r.Context(), ListFilter{
 		TenantID:   tenantID,
 		CustomerID: r.URL.Query().Get("customer_id"),
@@ -695,11 +702,14 @@ func (h *Handler) scheduleCancel(w http.ResponseWriter, r *http.Request) {
 	h.respondSub(w, r, http.StatusOK, sub)
 }
 
-// pauseCollection sets the Stripe-parity collection-pause state. Distinct
-// from POST /pause (which hard-pauses the subscription via status). Body
-// must include behavior; v1 only accepts "keep_as_draft". resumes_at is
-// optional — when set, the cycle scan auto-clears the pause at the start
-// of that period.
+// pauseCollection sets the Stripe-parity collection pause: billing goes on,
+// and each period's invoice is kept as a draft, so it is not finalized,
+// charged or dunned. It is the only pause: there is no POST /pause and no
+// paused subscription status. Body must include behavior; v1 only accepts
+// "keep_as_draft". resumes_at is optional — once it passes, the resume sweep
+// (the billing scheduler, or a test clock's catch-up) lifts the pause, dated
+// at resumes_at. A period that ended before resumes_at closes first, as a
+// draft.
 func (h *Handler) pauseCollection(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")

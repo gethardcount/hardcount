@@ -81,6 +81,7 @@ the API has one.
 | `not_found` | The resource, or one the body names, does not exist in this account and mode. A bad hosted invoice link gets it too. | Check the ID and the key's mode |
 | `route_not_found` | No route has this path | Check the URL |
 | `invoice_not_found` | The invoice behind a payment-update link was removed while the request ran | Ask for a new link |
+| `customer_not_found` | The customer behind a payment-update link no longer exists | Ask for a new link |
 
 ### 405 Method Not Allowed
 
@@ -180,7 +181,7 @@ the credit ledger, and report it if the state looks wrong:
 
 | `code` | When | What to do |
 |---|---|---|
-| `validation_error` | A field failed a rule, such as a missing `external_id`, a bad `limit`, or a field the operation does not take. A filter that takes a fixed set of values got another, such as `status` on the subscription list. `param` names it. | Fix the field |
+| `validation_error` | A field failed a rule, such as a missing `external_id`, a bad `limit`, a list `sort` or `dir` the list does not take, or a field the operation does not take. A filter that takes a fixed set of values got another, such as `status` on the subscription list. `param` names it. | Fix the field |
 | `batch_rejected` | At least one event of a usage batch failed. Nothing was stored. The body lists each failure in `errors`. | Fix the events named, then send the whole batch again |
 | `idempotency_error` | An `Idempotency-Key` was used before with a different method, path or body | Use a new key for a new request |
 | `customer_has_no_subscription` | An invoice preview or a usage summary for a customer with no active subscription | Send `subscription_id`, or a period with `from` and `to` |
@@ -225,6 +226,7 @@ Each sends a `Retry-After` header with the seconds to wait.
 | `idempotency_unavailable` | Hardcount could not record the `Idempotency-Key`, so it ran nothing | Retry with the same key after `Retry-After` (1 second) |
 | `ingest_unavailable` | The usage store did not answer. Nothing was recorded. | Send the same events again |
 | `currency_unavailable` | `POST /v1/invoices` could not read the customer's currency. No invoice was made. | Retry, with a new `Idempotency-Key` if you sent one |
+| `catchup_queue_full` | A test-clock advance or retry-advance found too many catch-ups waiting. Its catch-up did not start, and the clock is set to `internal_failure`. | Once the running catch-ups finish, send `POST /v1/test-clocks/{id}/retry-advance`. The same advance again answers `409`. |
 
 ### 504 Gateway Timeout
 

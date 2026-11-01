@@ -64,6 +64,17 @@ import (
 // the ordering is load-bearing.
 
 const (
+	// exportTimeout is how long an export may run: the /v1/exports routes'
+	// request timeout (router.go). An export streams for as long as its
+	// query does, far past the 30 s the other routes get.
+	exportTimeout = 5 * time.Minute
+
+	// exportWriteGrace is how far an export's write deadline reaches past
+	// exportTimeout, so the EXPORT_INCOMPLETE marker an export that ran out
+	// of time writes still reaches the socket. It is the margin the server's
+	// WriteTimeout keeps over the 30 s request timeout (cmd/hardcount/main.go).
+	exportWriteGrace = 5 * time.Second
+
 	// exportPageSize is the FLUSH INTERVAL — rows written to the csv.Writer
 	// between flushes to the wire. It is no longer a page size: nothing
 	// paginates any more. Every export (including audit-log.csv) walks one
@@ -153,13 +164,30 @@ func exportFilename(stem string) string {
 	return fmt.Sprintf("%s-%s.csv", stem, time.Now().UTC().Format("20060102-150405")) //tz:ok
 }
 
-// writeCSVHeaders sets the response headers for a CSV download.
-func writeCSVHeaders(w http.ResponseWriter, filename string) *csv.Writer {
+// writeCSVHeaders sets the response headers for a CSV download and gives the
+// response the write deadline an export needs (extendExportWriteDeadline).
+func writeCSVHeaders(w http.ResponseWriter, r *http.Request, filename string) *csv.Writer {
+	extendExportWriteDeadline(w, r)
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition",
 		fmt.Sprintf(`attachment; filename=%q`, filename))
 	w.Header().Set("Cache-Control", "no-store")
 	return csv.NewWriter(w)
+}
+
+// extendExportWriteDeadline moves this response's write deadline to
+// exportTimeout + exportWriteGrace from now. The server's WriteTimeout (35 s,
+// cmd/hardcount/main.go) bounds every response's writes, so without this an
+// export was cut at 35 s, mid-file, although its route allows five minutes;
+// the SSE stream lifts the same deadline (webhook sse.go). It reaches the
+// connection through the middleware's writers, which all Unwrap. A writer
+// that cannot take a deadline is logged: such an export still works, but is
+// cut at the server's WriteTimeout.
+func extendExportWriteDeadline(w http.ResponseWriter, r *http.Request) {
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(exportTimeout + exportWriteGrace)); err != nil {
+		slog.WarnContext(r.Context(), "csv export: could not extend the write deadline — an export longer than the server's WriteTimeout will be cut off",
+			"error", err)
+	}
 }
 
 // auditExport records a bulk data egress — and is the gate the export must pass
@@ -316,7 +344,7 @@ func (h *exportsHandler) exportCustomers(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	cw := writeCSVHeaders(w, filename)
+	cw := writeCSVHeaders(w, r, filename)
 	defer cw.Flush()
 
 	if err := cw.Write([]string{
@@ -375,7 +403,7 @@ func (h *exportsHandler) exportInvoices(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	cw := writeCSVHeaders(w, filename)
+	cw := writeCSVHeaders(w, r, filename)
 	defer cw.Flush()
 
 	if err := cw.Write([]string{
@@ -470,7 +498,7 @@ func (h *exportsHandler) exportSubscriptions(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	cw := writeCSVHeaders(w, filename)
+	cw := writeCSVHeaders(w, r, filename)
 	defer cw.Flush()
 
 	if err := cw.Write([]string{
@@ -573,7 +601,7 @@ func (h *exportsHandler) exportUsageEvents(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	cw := writeCSVHeaders(w, filename)
+	cw := writeCSVHeaders(w, r, filename)
 	defer cw.Flush()
 
 	// provider_cost_* columns (ADR-079; cents, ADR-130 §3): the operator-warehouse margin
@@ -718,7 +746,7 @@ func (h *exportsHandler) exportAuditLog(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	cw := writeCSVHeaders(w, filename)
+	cw := writeCSVHeaders(w, r, filename)
 	defer cw.Flush()
 
 	// sim_effective_at / test_clock_id: a simulation's rows all share one

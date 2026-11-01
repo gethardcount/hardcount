@@ -194,12 +194,11 @@ type Store interface {
 	FireScheduledCancellationWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error)
 
 	// SetPauseCollection writes the (behavior, resumes_at) pair onto the row.
-	// Distinct from the removed hard-pause (Service.Pause/PauseAtomic, dropped
-	// in PR-8 / migration 0090) — pause_collection keeps the cycle running but
-	// neuters the financial side; the row's status field is not touched.
-	// Permitted on any non-terminal status (active, paused, draft); a paused
-	// (hard) sub can also have collection paused, and clearing one without
-	// the other is supported. Service layer enforces behavior whitelist.
+	// The hard pause (Service.Pause/PauseAtomic) was removed in PR-8 /
+	// migration 0090, and no status 'paused' remains: pause_collection keeps
+	// the cycle running but neuters the financial side; the row's status
+	// field is not touched. Permitted on any status but canceled (draft,
+	// trialing, active). Service layer enforces behavior whitelist.
 	//
 	// A lifted pause still on the row (its resumes_at has passed) is
 	// resumed first, in the same transaction, with its own trigger: this

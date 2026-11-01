@@ -44,11 +44,11 @@ func TestBuildSubWhere_SearchComposesWithOtherFilters(t *testing.T) {
 // display_name is a real column on subscriptions (subCols) — the sort
 // key must map to it, not silently proxy to created_at.
 func TestSubscriptionSortColumn_DisplayName(t *testing.T) {
-	if got := subscriptionSortColumn("display_name"); got != "s.display_name" {
-		t.Fatalf("display_name sort = %q, want s.display_name", got)
+	if got, err := subscriptionOrderBy("display_name", "asc"); err != nil || got != "s.display_name ASC, s.id ASC" {
+		t.Fatalf("display_name sort = %q, %v; want s.display_name ASC, s.id ASC", got, err)
 	}
-	if got := subscriptionSortColumn("name"); got != "s.display_name" {
-		t.Fatalf("name sort = %q, want s.display_name", got)
+	if got, err := subscriptionOrderBy("name", "asc"); err != nil || got != "s.display_name ASC, s.id ASC" {
+		t.Fatalf("name sort = %q, %v; want s.display_name ASC, s.id ASC", got, err)
 	}
 }
 
