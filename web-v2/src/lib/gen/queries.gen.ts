@@ -16543,8 +16543,14 @@ export const getIngestLitellmSpendUrl = () => {
 
 /**
  * Target for LiteLLM Proxy's `generic_api` logging callback. Accepts
- * one LiteLLM log record, a JSON array of records, or
- * `{"events": [...]}`. Each record with token counts becomes up to
+ * each of LiteLLM's log formats: a JSON array of records
+ * (`log_format: json_array`, the default), records one a line
+ * (`log_format: ndjson`, any number of them), or one record
+ * (`log_format: single`). It also takes `{"events": [...]}`. LiteLLM
+ * sends every format with `Content-Type: application/json`; the route
+ * reads the body the same way whatever the `Content-Type`. The body is
+ * read one record at a time, up to 32 MB. Each record with token
+ * counts becomes up to
  * five usage events on the `tokens` meter, one per `token_type`
  * dimension: `input` (prompt tokens not
  * read from or written to the cache), `cache_read`, `cache_write_5m`,

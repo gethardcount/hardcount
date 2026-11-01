@@ -26987,8 +26987,14 @@ paths:
       summary: Receive LiteLLM spend logs
       description: |
         Target for LiteLLM Proxy's `generic_api` logging callback. Accepts
-        one LiteLLM log record, a JSON array of records, or
-        `{"events": [...]}`. Each record with token counts becomes up to
+        each of LiteLLM's log formats: a JSON array of records
+        (`log_format: json_array`, the default), records one a line
+        (`log_format: ndjson`, any number of them), or one record
+        (`log_format: single`). It also takes `{"events": [...]}`. LiteLLM
+        sends every format with `Content-Type: application/json`; the route
+        reads the body the same way whatever the `Content-Type`. The body is
+        read one record at a time, up to 32 MB. Each record with token
+        counts becomes up to
         five usage events on the `tokens` meter, one per `token_type`
         dimension: `input` (prompt tokens not
         read from or written to the cache), `cache_read`, `cache_write_5m`,
@@ -27079,9 +27085,14 @@ paths:
                 outside_subscription: 0
         "400":
           description: |
-            Code `invalid_request`: the body is empty (message `empty body`)
-            or is not valid JSON (message `invalid JSON body`). Nothing was
-            recorded.
+            Code `invalid_request`. Nothing of the batch was recorded. The
+            message says which case:
+            - `empty body`: the body is empty.
+            - `invalid JSON body at line N (record M); the batch was not
+              saved`: record M, starting on line N of the body, is not valid
+              JSON or is not a log record.
+            - `invalid JSON body`: the body is not valid JSON outside any
+              record, such as a stray `]`.
           content:
             application/json:
               schema:
@@ -27090,7 +27101,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: invalid_request
-                  message: invalid JSON body
+                  message: invalid JSON body at line 3 (record 3); the batch was not saved
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
