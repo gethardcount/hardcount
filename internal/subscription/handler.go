@@ -2387,6 +2387,9 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		}
 
 		var discountCents int64
+		// The plan's tax_code is its base fee's product tax code, as on the
+		// cycle's base lines. A plan change nets the old plan's unused time
+		// into this one line, which is taxed by the plan moved to.
 		lineItem := domain.InvoiceLineItem{
 			LineType:         domain.LineTypeBaseFee,
 			Description:      memo,
@@ -2395,6 +2398,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			AmountCents:      proratedCents,
 			TotalAmountCents: proratedCents,
 			Currency:         effectivePlan.Currency,
+			TaxCode:          effectivePlan.TaxCode,
 		}
 		lineItems := []domain.InvoiceLineItem{lineItem}
 

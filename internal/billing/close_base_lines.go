@@ -156,6 +156,7 @@ func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegm
 				AmountCents:        baseFee,
 				TotalAmountCents:   baseFee,
 				Currency:           invoiceCurrency,
+				TaxCode:            plan.TaxCode,
 				BillingPeriodStart: &baseStartCopy,
 				BillingPeriodEnd:   &baseEndCopy,
 			}})

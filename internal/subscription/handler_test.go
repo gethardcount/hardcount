@@ -370,6 +370,8 @@ type prorationTaxApplierMock struct {
 	// a negative credit line, which Stripe Tax rejects).
 	receivedLineCount int
 	receivedNegative  bool
+	// receivedTaxCodes is each line's tax_code as sent to the provider.
+	receivedTaxCodes []string
 }
 
 func (m *prorationTaxApplierMock) CommitTax(_ context.Context, _, invoiceID, calculationID string) error {
@@ -386,6 +388,7 @@ func (m *prorationTaxApplierMock) ApplyTaxToLineItems(_ context.Context, _, _, _
 		if li.AmountCents < 0 {
 			m.receivedNegative = true
 		}
+		m.receivedTaxCodes = append(m.receivedTaxCodes, li.TaxCode)
 	}
 	if m.err != nil {
 		return ProrationTaxResult{}, m.err
@@ -493,6 +496,39 @@ func TestUpdateItem_ProrationAppliesTax(t *testing.T) {
 	if resp.Proration.AmountCents != wantTotal {
 		t.Errorf("proration.amount_cents: got %d, want %d (the invoice TOTAL incl. tax, not the net delta)",
 			resp.Proration.AmountCents, wantTotal)
+	}
+}
+
+// TestUpdateItem_ProrationTaxedByPlanTaxCode: a plan's tax_code is its base
+// fee's product tax code. The upgrade's proration line was sent to the tax
+// provider with no code, so Stripe Tax priced it by the account's
+// default_product_tax_code instead of the plan's.
+//
+// Mutation: drop TaxCode from the proration line and the code sent is "".
+func TestUpdateItem_ProrationTaxedByPlanTaxCode(t *testing.T) {
+	ctx := context.Background()
+	tenantID := "t1"
+	store := newMemStore()
+	subID, itemID := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
+	svc := NewService(store, nil)
+	plans := &plansMock{plans: map[string]domain.Plan{
+		"plan_old": {ID: "plan_old", Name: "Basic", BaseAmountCents: 1000, Currency: "USD", BaseBillTiming: domain.BillInAdvance, TaxCode: "txcd_10103001"},
+		"plan_new": {ID: "plan_new", Name: "Pro", BaseAmountCents: 3000, Currency: "USD", BaseBillTiming: domain.BillInAdvance, TaxCode: "txcd_10103000"},
+	}}
+	invoices := &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}
+	taxMock := &prorationTaxApplierMock{}
+	h := NewHandler(svc)
+	h.SetProrationDeps(plans, invoices)
+	h.SetProrationTaxApplier(taxMock)
+
+	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
+	rr := httptest.NewRecorder()
+	h.updateItem(rr, updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
+	}
+	if len(taxMock.receivedTaxCodes) != 1 || taxMock.receivedTaxCodes[0] != "txcd_10103000" {
+		t.Fatalf("tax codes sent = %q, want [txcd_10103000] (the plan moved to)", taxMock.receivedTaxCodes)
 	}
 }
 

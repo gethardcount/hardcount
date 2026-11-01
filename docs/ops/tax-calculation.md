@@ -35,7 +35,7 @@ If Stripe Tax fails, the invoice waits; Hardcount never falls back to a guessed 
 
 1. Connect Stripe under **Settings → Payments**, in each mode you use. Test mode and live mode use separate Stripe keys, so connect both.
 2. In your Stripe account, add your tax registrations.
-3. Choose **Stripe Tax** and save. You can also set a **Default product tax code**, which Stripe uses for a plan that does not name its own. Left empty, Hardcount saves `txcd_10103001`, Stripe's code for software as a service bought by a business.
+3. Choose **Stripe Tax** and save. You can also set a **Default product tax code**. Stripe uses it for usage, and for the base fee of a plan that does not name its own `tax_code`. Left empty, Hardcount saves `txcd_10103001`, Stripe's code for software as a service bought by a business.
 4. Make sure each customer has a full address, at least the country. Stripe Tax cannot work out tax without it.
 
    **You see:** the next invoice has a tax line that matches Stripe's calculation.
