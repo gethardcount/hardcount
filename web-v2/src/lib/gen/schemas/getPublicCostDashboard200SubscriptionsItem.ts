@@ -12,9 +12,14 @@
  */
 
 export type GetPublicCostDashboard200SubscriptionsItem = {
+  /** The subscription's ID. */
   id: string;
+  /** The plan's name. */
   plan_name: string;
+  /** The plan's currency, such as `USD`. */
   currency: string;
+  /** Start of the subscription's current billing period. */
   current_period_start: string;
+  /** End of the subscription's current billing period, exclusive. */
   current_period_end: string;
 };

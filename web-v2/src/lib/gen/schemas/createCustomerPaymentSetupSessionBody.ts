@@ -14,7 +14,9 @@
 export type CreateCustomerPaymentSetupSessionBody = {
   /**
      * Where Stripe sends the customer afterwards. Defaults to
-     * the dashboard's setup-complete page.
+     * `/payment-method-added` on the server's
+     * `CUSTOMER_PORTAL_URL` (`http://localhost:5173` when that
+     * is unset).
      */
   return_url?: string;
 };

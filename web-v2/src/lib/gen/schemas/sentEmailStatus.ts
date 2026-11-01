@@ -12,7 +12,10 @@
  */
 
 /**
- * Hardcount's send state. `dispatched` means the mail server accepted it.
+ * Hardcount's send state. `pending`: queued. `dispatched`: the
+ * mail server accepted it. `failed`: it could not be sent.
+ * `skipped`: Hardcount did not send it, because the invoice was
+ * already paid, voided or uncollectible, or no longer exists.
  */
 export type SentEmailStatus = typeof SentEmailStatus[keyof typeof SentEmailStatus];
 

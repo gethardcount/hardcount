@@ -12,6 +12,8 @@
  */
 
 export type PriceWriteEndedOverridesItem = {
+  /** The ended override's ID. */
   id: string;
+  /** The customer the override was for. */
   customer_id: string;
 };

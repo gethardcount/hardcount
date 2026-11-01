@@ -16,13 +16,16 @@ import type { SubscriptionItemProrationType } from './subscriptionItemProrationT
  * What Hardcount did to settle the rest of the period for an item change.
  */
 export interface SubscriptionItemProration {
+  /** The plan the item was on before the change. The same as `new_plan_id` for a quantity change. */
   old_plan_id: string;
+  /** The plan the item is on after the change. */
   new_plan_id: string;
   /** Share of the full billing cycle that was left, from 0 to 1. */
   proration_factor: number;
   /**
-     * Gross amount, tax included: the invoice total (`invoice`), or
-     * the whole credit for unused time (`credit` and `adjustment`).
+     * Gross amount, tax included, in the currency's minor unit (cents
+     * for USD): the invoice total (`invoice`), or the whole credit for
+     * unused time (`credit` and `adjustment`).
      * `credited_to_balance_cents`, `reduced_open_invoices_cents` and
      * `held_on_draft_invoices_cents` say where the credit went.
      */
@@ -38,24 +41,26 @@ export interface SubscriptionItemProration {
   invoice_id?: string;
   /**
      * The part of the credit added to the customer's balance, tax
-     * included. On a paid invoice, all of its part. On an open invoice
-     * paid partly with credits, the part above what it still asks for:
-     * those credits go back to the balance. A part on an invoice whose
-     * payment is still processing counts here; if that payment fails,
-     * it reduces the invoice instead. 0 when `type` is `invoice`.
+     * included, in the currency's minor unit. On a paid invoice, all
+     * of its part. On an open invoice paid partly with credits, the
+     * part above what it still asks for: those credits go back to the
+     * balance. A part on an invoice whose payment is still processing
+     * counts here; if that payment fails, it reduces the invoice
+     * instead. 0 when `type` is `invoice`.
      */
   credited_to_balance_cents: number;
   /**
      * The part of the credit taken off the amount due on open
-     * invoices, tax included. 0 when `type` is `invoice`.
+     * invoices, tax included, in the currency's minor unit. 0 when
+     * `type` is `invoice`.
      */
   reduced_open_invoices_cents: number;
   /**
-     * The part of the credit on draft invoices, tax included. It is
-     * held until the draft is finalized, then applied by how the
-     * invoice stands: if paid, to the customer's balance; if still
-     * open, off what it asks for first, as above. 0 when `type` is
-     * `invoice`.
+     * The part of the credit on draft invoices, tax included, in the
+     * currency's minor unit. It is held until the draft is finalized,
+     * then applied by how the invoice stands: if paid, to the
+     * customer's balance; if still open, off what it asks for first,
+     * as above. 0 when `type` is `invoice`.
      */
   held_on_draft_invoices_cents: number;
 }

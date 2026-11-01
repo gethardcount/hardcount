@@ -11,6 +11,11 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * What happens to the invoices built during the pause. Only
+ * `keep_as_draft`: they stay drafts, so they are not finalized,
+ * charged or dunned.
+ */
 export type SubscriptionPauseCollectionBehavior = typeof SubscriptionPauseCollectionBehavior[keyof typeof SubscriptionPauseCollectionBehavior];
 
 

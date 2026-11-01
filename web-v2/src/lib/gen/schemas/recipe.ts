@@ -15,15 +15,23 @@ import type { RecipeOverride } from './recipeOverride';
 import type { RecipePlan } from './recipePlan';
 
 /**
- * A recipe template as served by list/detail: the full parsed YAML, its meters and its plans with their prices, not just display metadata. A recipe creates nothing else.
+ * A ready-made pricing setup built into Hardcount: its meters, and its plans with their prices, with every overridable value at its default. Installing it creates those objects. A recipe creates nothing else.
  */
 export interface Recipe {
+  /** The recipe's key, used in the recipe routes, such as `replicate_style`. */
   key: string;
+  /** The recipe's version. */
   version: string;
+  /** The recipe's display name. */
   name: string;
+  /** A short description of what the recipe sets up. */
   summary: string;
+  /** A longer description. Absent when the recipe has none. */
   description?: string;
+  /** The values you can set before installing. */
   overridable: RecipeOverride[];
+  /** The meters the recipe creates or reuses. */
   meters: RecipeMeter[];
+  /** The plans the recipe creates, with their prices. */
   plans: RecipePlan[];
 }

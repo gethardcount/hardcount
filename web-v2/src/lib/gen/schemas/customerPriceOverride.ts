@@ -16,24 +16,42 @@ import type { PriceTier } from './priceTier';
 /**
  * A customer's negotiated rate for one plan price. It keeps applying
  * when the price's rate changes, and ends when the price is removed.
- * It takes the plan's currency.
+ * It takes the plan's currency. The `/v1/price-overrides` routes
+ * create, list and end overrides. Every shape field is always sent:
+ * the ones the mode does not use are `"0"`, `0` or `[]`.
  */
 export interface CustomerPriceOverride {
+  /** The override's ID, `hc_cpo_` and 20 characters. */
   id: string;
+  /** The account the override belongs to. */
   tenant_id?: string;
+  /** The customer who pays this rate. */
   customer_id: string;
   /** The plan price this override replaces the rate of, for this customer. */
   price_id: string;
-  /** As on PriceShape. */
+  /** How the override bills a quantity; see PriceShape. */
   mode: CustomerPriceOverrideMode;
-  /** Price per unit in cents, as a decimal string. */
+  /**
+     * Price per unit, as a decimal string of cents. `"0"` unless `mode`
+     * is `per_unit`.
+     */
   unit_amount_cents: string;
   /** Empty (`[]`) unless `mode` is `graduated`. */
   tiers: PriceTier[];
+  /** The units in one package. 0 unless `mode` is `package`. */
   package_size: number;
-  /** Price of one package in cents, as a decimal string. */
+  /**
+     * Price of one package, as a decimal string of cents. `"0"` unless
+     * `mode` is `package`.
+     */
   package_amount_cents: string;
+  /** Your note on why the customer has this rate. Absent when none was given. */
   reason?: string;
+  /**
+     * True until the override is ended: by `DELETE
+     * /v1/price-overrides/{id}`, by a new override for the same
+     * customer and price, or by the removal of the price.
+     */
   active: boolean;
   /**
      * When the override starts, in the customer's time: wall time, or
@@ -44,5 +62,6 @@ export interface CustomerPriceOverride {
   created_at: string;
   /** When the override ended, in the customer's time. Absent while it is active. */
   deactivated_at?: string;
+  /** When the override was last written. */
   updated_at: string;
 }

@@ -11,4 +11,8 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Facts Hardcount records on the entry, such as which grants a
+ * draw took its credit from. Absent when empty.
+ */
 export type CreditLedgerEntryMetadata = { [key: string]: unknown };

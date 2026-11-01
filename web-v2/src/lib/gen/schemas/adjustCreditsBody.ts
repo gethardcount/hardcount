@@ -12,10 +12,15 @@
  */
 
 export type AdjustCreditsBody = {
+  /** The customer whose credit to change (`hc_cus_…`). */
   customer_id: string;
   /** ISO 4217 code of the balance to change. Case-insensitive; stored uppercase. */
   currency: string;
-  /** Positive adds credit, negative removes it. Not zero. */
+  /**
+     * Positive adds credit, negative removes it, in the
+     * currency's minor unit (cents for USD). Not zero.
+     */
   amount_cents: number;
+  /** Why you change the balance. Shown on the ledger entry. Must not be blank. */
   description: string;
 };

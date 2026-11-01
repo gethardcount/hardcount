@@ -18,6 +18,9 @@ import type { ListSubscriptionsStatus } from './listSubscriptionsStatus';
 import type { OffsetParameter } from './offsetParameter';
 
 export type ListSubscriptionsParams = {
+/**
+ * Only this customer's subscriptions (`hc_cus_…`).
+ */
 customer_id?: string;
 /**
  * Filter to subscriptions with a live item on this plan.
@@ -47,9 +50,13 @@ collection?: ListSubscriptionsCollection;
  */
 search?: string;
 /**
- * One of display_name, status, next_billing_at, trial_end_at, created_at (default).
+ * One of display_name, status, next_billing_at, trial_end_at,
+ * created_at (default). Any other value sorts by created_at.
  */
 sort?: string;
+/**
+ * Sort direction, `asc` or `desc` (the default). Any other value sorts descending.
+ */
 dir?: ListSubscriptionsDir;
 /**
  * Rows per page, from 1 to 100. Default 50. Any other value, or one

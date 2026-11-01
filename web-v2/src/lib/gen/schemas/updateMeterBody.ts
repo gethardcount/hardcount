@@ -13,7 +13,10 @@
 import type { UpdateMeterBodyAggregation } from './updateMeterBodyAggregation';
 
 export type UpdateMeterBody = {
+  /** The new display name, at most 255 characters. It cannot be empty. */
   name?: string;
+  /** The new unit. Empty sets it to `unit`. */
   unit?: string;
+  /** The new aggregation. Refused once the meter has a usage event. */
   aggregation?: UpdateMeterBodyAggregation;
 };

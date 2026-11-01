@@ -13,11 +13,13 @@
 
 export type GetCustomerUsageParams = {
 /**
- * Start of the window. RFC 3339 instant or `YYYY-MM-DD` (start of that day, UTC).
+ * Start of the window. An RFC 3339 instant, or `YYYY-MM-DD` for the
+ * start of that day in UTC.
  */
 from?: string;
 /**
- * End of the window, exclusive. RFC 3339 instant or `YYYY-MM-DD` (23:59:59.999999 UTC that day, so the day is included).
+ * End of the window, exclusive. An RFC 3339 instant, or `YYYY-MM-DD`
+ * for 23:59:59.999999 UTC that day, so the day is included.
  */
 to?: string;
 };

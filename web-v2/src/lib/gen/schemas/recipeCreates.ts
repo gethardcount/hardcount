@@ -12,10 +12,15 @@
  */
 
 /**
- * Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
+ * How many objects a recipe makes when installed, by kind. A recipe makes only meters, plans and prices.
  */
 export interface RecipeCreates {
+  /**
+     * The meters the recipe declares. An install reuses a matching meter
+     * instead of making a new one.
+     */
   meters: number;
+  /** The plans an install creates. */
   plans: number;
   /** The prices the install puts on its plans. */
   prices: number;

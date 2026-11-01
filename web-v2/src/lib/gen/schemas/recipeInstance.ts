@@ -14,17 +14,28 @@ import type { RecipeCreatedObjects } from './recipeCreatedObjects';
 import type { RecipeInstanceOverrides } from './recipeInstanceOverrides';
 
 /**
- * The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses.
+ * The record that a recipe was installed in this account and mode, and what the install made. A recipe is installed once per mode; installing it again returns this record. Its fields are `recipe_key` and `recipe_version`, not the recipe's own `key` and `version`.
  */
 export interface RecipeInstance {
+  /** The install's ID, `hc_rec_` and 24 hex characters. */
   id: string;
-  /** Omitted when empty. */
+  /** The account the recipe was installed in. */
   tenant_id?: string;
+  /** The `key` of the recipe installed. */
   recipe_key: string;
+  /** The recipe's `version` at the install. */
   recipe_version: string;
+  /**
+     * The overrides the install was sent, as sent (`{}` when none).
+     * Defaults are not filled in.
+     */
   overrides: RecipeInstanceOverrides;
   created_objects: RecipeCreatedObjects;
+  /** When the recipe was installed. */
   created_at: string;
-  /** Operator email or API key ID. Omitted when empty. */
+  /**
+     * The ID of the API key that installed the recipe. Absent for an
+     * install from a dashboard session.
+     */
   created_by?: string;
 }

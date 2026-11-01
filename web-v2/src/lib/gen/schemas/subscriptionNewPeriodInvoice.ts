@@ -17,7 +17,9 @@ import type { SubscriptionNewPeriodInvoiceStatus } from './subscriptionNewPeriod
  * interval created for the new period it starts.
  */
 export interface SubscriptionNewPeriodInvoice {
+  /** The invoice's ID (`hc_inv_…`). */
   id: string;
+  /** The invoice's number, as printed on it. */
   invoice_number: string;
   /**
      * `draft` when the invoice was not issued yet: collection is
@@ -26,9 +28,11 @@ export interface SubscriptionNewPeriodInvoice {
      */
   status: SubscriptionNewPeriodInvoiceStatus;
   /**
-     * The invoice total when the change created it. On a `draft`
-     * whose tax could not be calculated yet, it has no tax in it.
+     * The invoice total when the change created it, in the
+     * currency's minor unit (cents for USD). On a `draft` whose tax
+     * could not be calculated yet, it has no tax in it.
      */
   total_amount_cents: number;
+  /** The invoice's currency, uppercase (for example `USD`). */
   currency: string;
 }

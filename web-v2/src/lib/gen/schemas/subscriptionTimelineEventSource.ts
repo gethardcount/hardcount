@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Where the row comes from. Always `audit`, the audit log.
+ */
 export type SubscriptionTimelineEventSource = typeof SubscriptionTimelineEventSource[keyof typeof SubscriptionTimelineEventSource];
 
 

@@ -12,18 +12,37 @@
  */
 import type { MeterAggregation } from './meterAggregation';
 
+/**
+ * A meter counts one kind of usage: every usage event that sends its
+ * `event_name`. A meter has no price of its own. Plans price it
+ * (`/v1/plans/{id}/prices`). Create, list, get and update meters
+ * under `/v1/meters`.
+ */
 export interface Meter {
+  /** The meter's ID, `hc_mtr_` and 20 characters. */
   id: string;
+  /** The account the meter belongs to. */
   tenant_id?: string;
-  /** The `event_name` usage events send for this meter. */
+  /**
+     * The `event_name` usage events send for this meter. Letters,
+     * digits, `-` and `_`, at most 100 characters. Unique in the
+     * account and mode, and fixed after create.
+     */
   event_name: string;
+  /** The meter's display name, at most 255 characters. */
   name: string;
+  /**
+     * The unit of the quantity, such as `tokens` or `seconds`.
+     * `unit` when none was given.
+     */
   unit: string;
   /**
      * How the meter rolls its events into one quantity per billing
-     * period. Every price of the meter bills under it. `last`
-     * is the latest event by timestamp, then by id. Fixed once the
-     * meter has a usage event (see `has_usage`).
+     * period: `sum` adds the quantities, `count` counts the events,
+     * `max` takes the highest quantity, and `last` takes the latest
+     * event's quantity, by timestamp, then by id. Every price of the
+     * meter bills under it. Fixed once the meter has a usage event
+     * (see `has_usage`).
      */
   aggregation: MeterAggregation;
   /**
@@ -34,6 +53,8 @@ export interface Meter {
      * or update that succeeded leaves it out if it could not be read.
      */
   has_usage?: boolean;
+  /** When the meter was created. */
   created_at: string;
+  /** When the meter was last changed. */
   updated_at: string;
 }

@@ -12,7 +12,12 @@
  */
 import type { UsageAggregateByMeterItem } from './usageAggregateByMeterItem';
 
+/**
+ * Totals over every usage event that matches the filters of
+ * `GET /v1/usage-events/aggregate`, with one row per meter.
+ */
 export interface UsageAggregate {
+  /** Number of matching events. */
   total_events: number;
   /**
      * Sum of all matching quantities across meters, as a decimal

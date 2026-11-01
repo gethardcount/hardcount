@@ -26,21 +26,27 @@ export type CreateUsageEventBatchBodyItem = {
      * other value, fails validation.
      */
   quantity: number | string;
+  /** Scalar labels of the event, at most 16. A price takes an event whose labels include the price's `dimension_match`. */
   dimensions?: CreateUsageEventBatchBodyItemDimensions;
   /**
      * Your unique ID for this event. Pick it once, before the
      * first send, and send the same key on every retry of the
-     * event. Keys are unique per tenant and mode (live or
+     * event. Keys are unique per account and mode (live or
      * test), forever. An event whose key was already used is
      * not stored again: the first event wins and the new body
      * is discarded. So never reuse a key for a different
      * event, such as a batch index or a timestamp that can
      * repeat, or that usage is lost. Empty or whitespace-only
-     * keys are refused with 422, and so are keys longer than
+     * keys fail validation, and so do keys longer than
      * 255 characters. This is the only dedup key: the usage
      * routes ignore the `Idempotency-Key` header.
      * @maxLength 255
      */
   idempotency_key: string;
+  /**
+     * When the usage happened, as an RFC 3339 string. Leave
+     * it out to use the time Hardcount receives the batch.
+     * The same rules as for `POST /v1/usage-events` apply.
+     */
   timestamp?: string;
 };

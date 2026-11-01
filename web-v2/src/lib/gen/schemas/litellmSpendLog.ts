@@ -37,16 +37,30 @@ export interface LitellmSpendLog {
      * skipped, and a skipped record that carries tokens is logged.
      */
   call_type?: string;
+  /**
+     * The model the call used, as LiteLLM names it. Each event
+     * carries it as the `model_raw` dimension, and as `model` the
+     * model family name when Hardcount recognises it (the name as
+     * sent otherwise).
+     */
   model?: string;
+  /** The provider LiteLLM sent the call to, such as `openai`. Each event carries it as the `provider` dimension. */
   custom_llm_provider?: string;
   /** The customer's external_id. */
   user?: string;
   /** Where LiteLLM Proxy puts the caller's `user`. Used when `user` is empty. */
   end_user?: string;
+  /**
+     * The call's token counts. When it is absent, Hardcount reads
+     * `metadata.usage_object`, then the top-level `prompt_tokens` and
+     * `completion_tokens`.
+     */
   usage?: LitellmSpendLogUsage;
   /** Used when there is no `usage` object. */
   prompt_tokens?: number;
+  /** Output tokens. Used when there is no `usage` object. */
   completion_tokens?: number;
+  /** Accepted but not used. */
   total_tokens?: number;
   /** Accepted but not stored. */
   response_cost?: number;

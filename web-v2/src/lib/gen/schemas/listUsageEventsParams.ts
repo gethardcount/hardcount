@@ -14,14 +14,20 @@ import type { LimitParameter } from './limitParameter';
 import type { OffsetParameter } from './offsetParameter';
 
 export type ListUsageEventsParams = {
+/**
+ * Only this customer's events (`hc_cus_…`, the Hardcount ID, not your external ID).
+ */
 customer_id?: string;
+/**
+ * Only this meter's events (`hc_mtr_…`).
+ */
 meter_id?: string;
 /**
  * Comma-separated key=value pairs matched against the event's
- * dimensions via JSONB containment (multiple pairs AND).
- * Values that parse as JSON booleans/numbers are matched
- * typed ("cached=true", "attempt=2"); everything else as a
- * string. Malformed pairs → 422. Example:
+ * dimensions; every pair must match. Values that read as JSON
+ * booleans or numbers match typed values ("cached=true",
+ * "attempt=2"); everything else matches as a string. A malformed
+ * pair is refused with 422. Example:
  * `model=gpt-4o,token_type=input`.
  */
 dimensions?: string;

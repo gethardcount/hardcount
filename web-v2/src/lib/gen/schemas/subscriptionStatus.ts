@@ -11,6 +11,23 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Where the subscription is in its life.
+ *
+ * - `draft`: created with `status: draft`. It has no billing
+ *   period and bills nothing until you activate it with
+ *   `POST /v1/subscriptions/{id}/activate`.
+ * - `trialing`: in a free trial until `trial_end_at`. Usage in
+ *   the trial is not billed. When the trial ends, Hardcount makes
+ *   the subscription `active` and its first paid period starts.
+ *   If a cancel is scheduled for the trial end, it becomes
+ *   `canceled` instead, with no charge.
+ * - `active`: billing. Each period is invoiced when it ends.
+ * - `canceled`: ended at `canceled_at`. It bills nothing more,
+ *   and no route makes it `active` again.
+ *
+ * A paused collection is not a status: see `pause_collection`.
+ */
 export type SubscriptionStatus = typeof SubscriptionStatus[keyof typeof SubscriptionStatus];
 
 

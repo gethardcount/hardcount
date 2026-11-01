@@ -11,6 +11,10 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `archived` blocks new subscriptions for the customer.
+ * `active` lifts that.
+ */
 export type UpdateCustomerBodyStatus = typeof UpdateCustomerBodyStatus[keyof typeof UpdateCustomerBodyStatus];
 
 

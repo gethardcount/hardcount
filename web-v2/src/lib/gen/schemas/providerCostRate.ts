@@ -12,16 +12,45 @@
  */
 import type { ProviderCostRateCurrency } from './providerCostRateCurrency';
 
+/**
+ * What you pay an upstream AI provider per token, for one provider,
+ * model and token type. When a usage event with matching `provider`,
+ * `model` and `token_type` labels arrives, Hardcount stamps this cost
+ * on it, unless the event already brings a cost the provider
+ * reported. The margin report adds the stamps up. Editing or deleting
+ * a rate changes only events that arrive later. The
+ * `/v1/provider-costs` routes manage rates.
+ */
 export interface ProviderCostRate {
+  /** The rate's ID, `hc_pcr_` and 24 hex characters. */
   id: string;
+  /** The account the rate belongs to. */
   tenant_id?: string;
+  /**
+     * The provider, in lower case, such as `anthropic`. It must equal
+     * the `provider` label of the usage events it costs.
+     */
   provider: string;
+  /**
+     * The model, such as `claude-sonnet-4.5`. An event matches on its
+     * `model_raw` label first, then on its `model` label.
+     */
   model: string;
+  /**
+     * The kind of token, in lower case, such as `input`, `output` or
+     * `cache_read`. It must equal the `token_type` label of the usage
+     * events it costs.
+     */
   token_type: string;
-  /** US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens). */
+  /**
+     * US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per
+     * 1,000,000 tokens).
+     */
   unit_cost_cents: string;
   /** Always USD. Cost and margin count every rate in US cents. */
   currency: ProviderCostRateCurrency;
+  /** When the rate was first set. */
   created_at: string;
+  /** When the rate was last set. */
   updated_at: string;
 }

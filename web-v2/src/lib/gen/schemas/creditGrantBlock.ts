@@ -14,7 +14,8 @@ import type { CreditGrantBlockGrantKind } from './creditGrantBlockGrantKind';
 
 /**
  * One block of credit on a customer's balance (a grant or a positive
- * adjustment) and how much of it is left.
+ * adjustment) and how much of it is left. Amounts are in the
+ * currency's minor unit (cents for USD).
  */
 export interface CreditGrantBlock {
   /** The ledger entry that added the credit. */
@@ -25,31 +26,36 @@ export interface CreditGrantBlock {
   currency: string;
   /** Absent for unclassified credit. */
   grant_kind?: CreditGrantBlockGrantKind;
+  /** The description of the ledger entry that added the credit. */
   description: string;
-  /** The credit the block started with. */
+  /** The credit the block started with, in the currency's minor unit. */
   amount_cents: number;
   /**
-     * Everything drawn from the block: used by invoices, expired,
-     * retired and deducted.
+     * Everything drawn from the block, in the currency's minor unit:
+     * used by invoices, expired, retired and deducted.
      */
   consumed_cents: number;
+  /** Credit left in the block, `amount_cents` minus `consumed_cents`, in the currency's minor unit. */
   remaining_cents: number;
-  /** The part that expired unused. */
+  /** The part that expired unused, in the currency's minor unit. */
   expired_cents: number;
   /**
      * Commit credit taken back when the invoice that paid for it was
-     * voided, or refunded by a credit note.
+     * voided, or refunded by a credit note, in the currency's minor
+     * unit.
      */
   retired_cents: number;
-  /** The part an operator removed with a negative adjustment. */
+  /** The part an operator removed with a negative adjustment, in the currency's minor unit. */
   deducted_cents: number;
   /**
      * The credit can be drawn up to and including this instant; a
      * period invoice draws it when its period ends at or before it.
      * The dashboard sends the local midnight after the picked day.
+     * Absent when the credit does not expire.
      */
   expires_at?: string;
   /** For a `commit` block, the invoice that paid for it. */
   source_invoice_id?: string;
+  /** When the block was added. */
   created_at: string;
 }

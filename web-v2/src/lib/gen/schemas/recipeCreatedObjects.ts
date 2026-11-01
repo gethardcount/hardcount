@@ -12,10 +12,13 @@
  */
 
 /**
- * Per-role map of entity IDs a recipe apply produced (including ADOPTED meters — apply reconnects to an existing meter rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
+ * The IDs of the objects an install made, by kind. `meter_ids` also holds a meter the install reused rather than made. Each list is absent when empty.
  */
 export interface RecipeCreatedObjects {
+  /** The meters the install made or reused. */
   meter_ids?: string[];
+  /** The plans the install made. */
   plan_ids?: string[];
+  /** The prices the install put on its plans. */
   price_ids?: string[];
 }

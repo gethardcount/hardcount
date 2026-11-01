@@ -11,6 +11,10 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * An archived plan takes no new subscriptions and no plan change
+ * onto it. Subscriptions already on it keep billing.
+ */
 export type PlanStatus = typeof PlanStatus[keyof typeof PlanStatus];
 
 

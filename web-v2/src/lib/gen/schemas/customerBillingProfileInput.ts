@@ -13,31 +13,55 @@
 import type { CustomerBillingProfileInputTaxStatus } from './customerBillingProfileInputTaxStatus';
 
 /**
- * The billing details printed on invoices and used for tax. The
- * whole profile is replaced on every write.
+ * The billing details printed on invoices and used for tax: the body
+ * of `PUT /v1/customers/{id}/billing-profile`. The whole profile is
+ * replaced on every write, so a field you leave out is stored empty.
  */
 export interface CustomerBillingProfileInput {
+  /** The customer's legal name, printed in the invoice's Bill to block. */
   legal_name?: string;
   /** 7 to 20 characters of digits, spaces, `+`, `-`, `(`, `)`. */
   phone?: string;
+  /** First line of the billing address. */
   address_line1?: string;
+  /** Second line of the billing address. */
   address_line2?: string;
+  /** City of the billing address. */
   city?: string;
+  /** State, province or region of the billing address, where the country has one. */
   state?: string;
+  /** Postal code of the billing address, where the country has one. */
   postal_code?: string;
-  /** ISO 3166 alpha-2 code, such as `US` or `IN`. */
+  /** ISO 3166 alpha-2 code, such as `US` or `IN`. Stored in upper case. */
   country?: string;
   /**
      * ISO 4217 code, such as `USD`. When set, invoices for this
-     * customer use it instead of the plan currency.
+     * customer use it instead of the plan currency. Stored in upper
+     * case. Zero-decimal currencies such as JPY are refused.
      */
   currency?: string;
-  /** Defaults to `standard`. */
+  /**
+     * `standard`: tax is worked out as usual. `exempt`: no tax, and
+     * the invoice shows `tax_exempt_reason`. `reverse_charge`: no tax,
+     * and the invoice tells the buyer to account for it. Defaults to
+     * `standard`.
+     */
   tax_status?: CustomerBillingProfileInputTaxStatus;
-  /** Required when `tax_status` is `exempt`. */
+  /**
+     * Why the customer pays no tax, such as a reseller certificate.
+     * Required when `tax_status` is `exempt`.
+     */
   tax_exempt_reason?: string;
-  /** Buyer tax ID. Required when `tax_status` is `reverse_charge`. */
+  /**
+     * The buyer's tax ID, stored in upper case. Required when
+     * `tax_status` is `reverse_charge`. For `eu_vat`, `in_gst` and
+     * `au_abn` its format is checked.
+     */
   tax_id?: string;
-  /** Tax ID kind, stored as its Stripe code (for example `eu_vat`, `in_gst`). */
+  /**
+     * The kind of tax ID, as its Stripe code (for example `eu_vat`,
+     * `in_gst`, `au_abn`). `vat`, `gstin` and `abn` are read as those
+     * codes.
+     */
   tax_id_type?: string;
 }

@@ -13,6 +13,7 @@
 import type { UsageAggregateByMeterItemDailyItem } from './usageAggregateByMeterItemDailyItem';
 
 export type UsageAggregateByMeterItem = {
+  /** The meter (`hc_mtr_…`). */
   meter_id: string;
   /** Plain sum of reported quantities, as a decimal string. */
   total: string;
@@ -29,6 +30,7 @@ export type UsageAggregateByMeterItem = {
      * Billing applies them per billing period.
      */
   value: string;
+  /** Number of matching events on this meter. */
   events: number;
   /** Distinct customers with events on this meter. */
   customers: number;

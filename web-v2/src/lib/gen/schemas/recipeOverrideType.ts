@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The JSON type the value must have. `int` takes any JSON number.
+ */
 export type RecipeOverrideType = typeof RecipeOverrideType[keyof typeof RecipeOverrideType];
 
 

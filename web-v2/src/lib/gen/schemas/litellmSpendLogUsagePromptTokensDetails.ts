@@ -12,8 +12,20 @@
  */
 import type { LitellmSpendLogUsagePromptTokensDetailsCacheCreationTokenDetails } from './litellmSpendLogUsagePromptTokensDetailsCacheCreationTokenDetails';
 
+/**
+ * The breakdown of `prompt_tokens`, as LiteLLM reports it.
+ */
 export type LitellmSpendLogUsagePromptTokensDetails = {
+  /**
+     * Prompt tokens read from the provider's cache. They become
+     * the `cache_read` event, taken out of `input`.
+     */
   cached_tokens?: number;
+  /**
+     * Prompt tokens written to the provider's cache. Hardcount
+     * takes the larger of this and
+     * `cache_creation_input_tokens`.
+     */
   cache_creation_tokens?: number;
   /**
      * Anthropic's cache writes by cache lifetime. They become

@@ -12,12 +12,25 @@
  */
 
 export type GetPublicCostDashboard200CreditsItem = {
+  /** The currency of this entry. */
   currency: string;
+  /**
+     * The credit balance in this currency, in its minor
+     * unit (cents for USD).
+     */
   balance_cents: number;
+  /** Usage no invoice has billed yet, in minor units. */
   unbilled_usage_cents: number;
-  /** What is left of the customer's prepaid commit. */
+  /**
+     * What is left of the customer's prepaid commit, in
+     * minor units.
+     */
   commit_remaining_cents: number;
-  /** What is left of promotional credit. */
+  /** What is left of promotional credit, in minor units. */
   promotional_remaining_cents: number;
+  /**
+     * The balance minus unbilled usage, never below
+     * zero, in minor units.
+     */
   estimated_remaining_cents: number;
 };

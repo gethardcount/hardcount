@@ -13,14 +13,19 @@
 import type { RecipeOverrideType } from './recipeOverrideType';
 
 /**
- * One override key declared in a recipe's `overridable` list. Drives validation at instantiate time and the override form in the dashboard's preview dialog.
+ * One value of a recipe you can set before you install it, such as the currency or the plan's name. The recipe's `overridable` list holds them; preview and install check `overrides` against them.
  */
 export interface RecipeOverride {
+  /** The name to use in `overrides`, such as `currency`. */
   key: string;
+  /** The JSON type the value must have. `int` takes any JSON number. */
   type: RecipeOverrideType;
   /** Default value applied when the override is not supplied. */
   default: unknown;
+  /** The only values allowed. Absent when any value of the type is allowed. */
   enum?: string[];
+  /** The most bytes a string value may have. Absent when there is no limit. */
   max_length?: number;
+  /** A regular expression a string value must match. Absent when there is none. */
   pattern?: string;
 }

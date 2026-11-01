@@ -14,9 +14,11 @@ import type { PriceShapeMode } from './priceShapeMode';
 import type { PriceTier } from './priceTier';
 
 /**
- * How a price bills a quantity. Send only the mode's fields: a field the
- * mode does not use must be 0 or left out (`tiers`: `[]` or left out),
- * or the request is refused with 422 and `param` naming it.
+ * How a price bills a quantity: its mode and the mode's fields. It is
+ * the body of `PATCH /v1/plans/{id}/prices/{price_id}` and part of
+ * every price you add. Send only the mode's fields: a field the mode
+ * does not use must be 0 or left out (`tiers`: `[]` or left out), or
+ * the request is refused with 422 and `param` naming it.
  */
 export interface PriceShape {
   /** `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one. */
@@ -25,7 +27,7 @@ export interface PriceShape {
   unit_amount_cents?: string;
   /** Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0). */
   tiers?: PriceTier[];
-  /** Used when `mode` is `package`. Must be above 0. */
+  /** Used when `mode` is `package`. The units in one package, above 0. */
   package_size?: number;
   /** Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`. */
   package_amount_cents?: string;

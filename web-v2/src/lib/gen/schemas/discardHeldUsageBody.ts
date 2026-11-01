@@ -12,6 +12,7 @@
  */
 
 export type DiscardHeldUsageBody = {
+  /** The external ID the rows were held under. */
   external_customer_id: string;
   /** Discard only the rows with this `event_name`. Omit for all. */
   event_name?: string;

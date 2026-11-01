@@ -13,11 +13,20 @@
 import type { GetPublicCostDashboard200UsageItemPricesItem } from './getPublicCostDashboard200UsageItemPricesItem';
 
 export type GetPublicCostDashboard200UsageItem = {
+  /** The `event_name` usage events send for the meter. */
   event_name: string;
+  /** The meter's display name. */
   meter_name: string;
+  /** The meter's unit, such as `tokens`. */
   unit: string;
+  /** The currency of the plan whose prices took the usage. */
   currency: string;
+  /** The usage the prices took this period, as a decimal string. */
   total_quantity: string;
+  /**
+     * What the usage costs, in the currency's minor unit
+     * (cents for USD).
+     */
   total_amount_cents: number;
   /** One row per price that took usage this period. */
   prices: GetPublicCostDashboard200UsageItemPricesItem[];

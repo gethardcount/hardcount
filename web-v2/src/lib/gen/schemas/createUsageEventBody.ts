@@ -31,7 +31,7 @@ export type CreateUsageEventBody = {
   /**
      * Your unique ID for this event. Pick it once, before the
      * first send, and send the same key on every retry of the
-     * event. Keys are unique per tenant and mode (live or
+     * event. Keys are unique per account and mode (live or
      * test), forever. An event whose key was already used is
      * not stored again: the first event wins and the new body
      * is discarded. So never reuse a key for a different
@@ -43,5 +43,15 @@ export type CreateUsageEventBody = {
      * @maxLength 255
      */
   idempotency_key: string;
+  /**
+     * When the usage happened, as an RFC 3339 string. Leave it
+     * out to use the time Hardcount receives the event (the
+     * clock's time for a customer on a test clock). It may be
+     * at most 5 minutes ahead of that time. Any past time is
+     * accepted, but an event in a period that is already
+     * invoiced is stored and not billed (`billing_status:
+     * after_close`). A value that is not an RFC 3339 string is
+     * refused with 422 and `param: timestamp`.
+     */
   timestamp?: string;
 };

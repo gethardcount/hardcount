@@ -25,10 +25,16 @@
  * rate.
  */
 export type LitellmSpendLogCostBreakdown = {
+  /** The cost of the whole prompt, in dollars, cache reads and writes included. */
   input_cost?: number;
+  /** The cost of the output tokens, in dollars. */
   output_cost?: number;
+  /** The part of `input_cost` spent on cache reads, in dollars. */
   cache_read_cost?: number;
+  /** LiteLLM's cost of the cache writes, in dollars, priced at the 5-minute rate. */
   cache_creation_cost?: number;
+  /** Accepted but not used. */
   tool_usage_cost?: number;
+  /** Accepted but not used. */
   total_cost?: number;
 };

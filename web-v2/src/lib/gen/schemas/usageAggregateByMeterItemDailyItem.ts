@@ -12,6 +12,7 @@
  */
 
 export type UsageAggregateByMeterItemDailyItem = {
+  /** The calendar day, `YYYY-MM-DD`, in `tz`. */
   date: string;
   /** The day's usage under the meter's aggregation. */
   value: string;

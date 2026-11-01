@@ -15,30 +15,86 @@ import type { CreditLedgerEntryGrantKind } from './creditLedgerEntryGrantKind';
 import type { CreditLedgerEntryMetadata } from './creditLedgerEntryMetadata';
 import type { ItemChangeType } from './itemChangeType';
 
+/**
+ * One entry in a customer's credit ledger: credit added (`grant`, or a
+ * positive `adjustment`), drawn by an invoice (`usage`), removed (a
+ * negative `adjustment`) or written off (`expiry`). Returned by
+ * `POST /v1/credits/grant` and `POST /v1/credits/adjust`, and listed
+ * by `GET /v1/credits/ledger/{customer_id}`.
+ */
 export interface CreditLedgerEntry {
+  /** The entry's ID (`hc_ccl_…`). */
   id: string;
+  /** The account the entry belongs to. */
   tenant_id?: string;
+  /** The customer whose credit the entry changes (`hc_cus_…`). */
   customer_id: string;
+  /**
+     * - `grant`: credit added, by you with `POST /v1/credits/grant` or
+     *   by Hardcount (a prepaid-commit invoice when it is finalized, a
+     *   credit note, or a void or credit note that gave drawn credit
+     *   back).
+     * - `usage`: credit an invoice drew.
+     * - `expiry`: the unused rest of a grant, written off once its
+     *   `expires_at` passed.
+     * - `adjustment`: credit added or removed with
+     *   `POST /v1/credits/adjust`, or commit credit taken back when its
+     *   invoice was voided or refunded.
+     */
   entry_type: CreditLedgerEntryEntryType;
   /** The entry's currency, uppercase. Credit pays only invoices in its own currency. */
   currency: string;
-  /** Positive adds credit, negative removes it. */
+  /**
+     * Positive adds credit, negative removes it, in the currency's
+     * minor unit (cents for USD).
+     */
   amount_cents: number;
-  /** The customer's credit balance in this entry's currency after it, in cents. */
+  /**
+     * The customer's credit balance in this entry's currency after it,
+     * in the currency's minor unit (cents for USD).
+     */
   balance_after: number;
+  /**
+     * What the entry is for: the description you gave a grant or
+     * adjustment, "Applied to invoice" and the invoice number on a
+     * `usage` entry, or "Expired grant" and the grant's ID on an
+     * `expiry` entry.
+     */
   description: string;
+  /**
+     * The invoice the entry comes from: the invoice a `usage` entry
+     * was drawn by, the voided or credited invoice that gave credit
+     * back, or the commit invoice that funded a grant. Absent when no
+     * invoice caused the entry.
+     */
   invoice_id?: string;
   /**
      * On a grant, its expiry. The credit can be drawn up to and
      * including this instant; a period invoice draws it when its
      * period ends at or before it. The dashboard sends the local
-     * midnight after the picked day.
+     * midnight after the picked day. Absent when the credit does not
+     * expire.
      */
   expires_at?: string;
+  /**
+     * Facts Hardcount records on the entry, such as which grants a
+     * draw took its credit from. Absent when empty.
+     */
   metadata?: CreditLedgerEntryMetadata;
+  /** When the entry was written. For a customer on a test clock, the clock's time. */
   created_at: string;
-  /** For entries that add credit, how much has been used or expired. */
+  /**
+     * For entries that add credit, how much has been used or expired,
+     * in the currency's minor unit. Absent when nothing has.
+     */
   consumed_cents?: number;
+  /**
+     * On a grant, what the credit cost the customer. `commit`:
+     * prepaid credit granted when a commit invoice was finalized; that
+     * invoice is `source_invoice_id`. `promotional`:
+     * free credit you marked so; invoices draw it before any other
+     * credit. Absent for other credit.
+     */
   grant_kind?: CreditLedgerEntryGrantKind;
   /** For a `commit` grant, the invoice that paid for it. */
   source_invoice_id?: string;
@@ -48,7 +104,9 @@ export interface CreditLedgerEntry {
      * change that produced it.
      */
   source_subscription_id?: string;
+  /** On a proration credit, the subscription item whose change produced it. */
   source_subscription_item_id?: string;
+  /** On a proration credit, when the change that produced it happened. */
   source_plan_changed_at?: string;
   source_change_type?: ItemChangeType;
   /** The credit note that granted this credit to the balance. */

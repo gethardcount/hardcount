@@ -13,9 +13,11 @@
 
 /**
  * How the meter rolls its events into one quantity per billing
- * period. Every price of the meter bills under it. `last`
- * is the latest event by timestamp, then by id. Fixed once the
- * meter has a usage event (see `has_usage`).
+ * period: `sum` adds the quantities, `count` counts the events,
+ * `max` takes the highest quantity, and `last` takes the latest
+ * event's quantity, by timestamp, then by id. Every price of the
+ * meter bills under it. Fixed once the meter has a usage event
+ * (see `has_usage`).
  */
 export type MeterAggregation = typeof MeterAggregation[keyof typeof MeterAggregation];
 

@@ -12,6 +12,10 @@
  */
 
 /**
- * Quantity per meter ID for that day, as a decimal string.
+ * Quantity per meter ID for that day, as a decimal string:
+ * the sum of the day's event quantities, including usage
+ * no price takes. So the days need not add up to a meter's
+ * `total_quantity`, which uses the meter's aggregation.
+ * Empty on a day with no usage.
  */
 export type CustomerUsageBucketsItemPerMeter = {[key: string]: string};

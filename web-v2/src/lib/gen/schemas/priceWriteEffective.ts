@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * When the write applies, as explained above.
+ */
 export type PriceWriteEffective = typeof PriceWriteEffective[keyof typeof PriceWriteEffective];
 
 

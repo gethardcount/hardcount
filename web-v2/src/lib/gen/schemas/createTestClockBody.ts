@@ -12,7 +12,11 @@
  */
 
 export type CreateTestClockBody = {
-  /** @maxLength 200 */
+  /**
+     * Your name for the clock. Optional; at most 200 characters.
+     * @maxLength 200
+     */
   name?: string;
+  /** The clock's starting time, RFC 3339. Any instant, past or future. */
   frozen_time: string;
 };

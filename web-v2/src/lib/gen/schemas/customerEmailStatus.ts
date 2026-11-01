@@ -12,7 +12,11 @@
  */
 
 /**
- * Deliverability of `email`, learned from bounce and complaint reports.
+ * Whether `email` receives mail, learned from bounce and spam
+ * reports. `unknown` until a report arrives. `bounced` or
+ * `complained` after one, and Hardcount then stops emailing the
+ * address. Changing `email` sets it back to `unknown`. Hardcount
+ * does not set `ok` today.
  */
 export type CustomerEmailStatus = typeof CustomerEmailStatus[keyof typeof CustomerEmailStatus];
 

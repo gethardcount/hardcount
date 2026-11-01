@@ -17,40 +17,139 @@ import type { SubscriptionItem } from './subscriptionItem';
 import type { SubscriptionPauseCollection } from './subscriptionPauseCollection';
 import type { SubscriptionStatus } from './subscriptionStatus';
 
+/**
+ * A customer's subscription: the plans it bills (its `items`), its
+ * status and its current billing period. Every route under
+ * `/v1/subscriptions` that returns a subscription returns this
+ * object, with its items.
+ *
+ * A subscription bills in one currency, the currency of its plans.
+ * All its items share one billing interval and one base-fee timing.
+ * Hardcount invoices each period when it ends.
+ */
 export interface Subscription {
+  /** The subscription's ID (`hc_sub_…`). */
   id: string;
+  /** The account the subscription belongs to. */
   tenant_id?: string;
+  /**
+     * Your code for the subscription: letters, digits, hyphens and
+     * underscores. Unique in your account and mode (live or test).
+     */
   code: string;
+  /** The subscription's name, as shown in the dashboard. */
   display_name: string;
+  /** The customer the subscription bills (`hc_cus_…`). */
   customer_id: string;
   /** The subscription's priced lines. Each item names its plan. */
   items?: SubscriptionItem[];
+  /**
+     * Where the subscription is in its life.
+     *
+     * - `draft`: created with `status: draft`. It has no billing
+     *   period and bills nothing until you activate it with
+     *   `POST /v1/subscriptions/{id}/activate`.
+     * - `trialing`: in a free trial until `trial_end_at`. Usage in
+     *   the trial is not billed. When the trial ends, Hardcount makes
+     *   the subscription `active` and its first paid period starts.
+     *   If a cancel is scheduled for the trial end, it becomes
+     *   `canceled` instead, with no charge.
+     * - `active`: billing. Each period is invoiced when it ends.
+     * - `canceled`: ended at `canceled_at`. It bills nothing more,
+     *   and no route makes it `active` again.
+     *
+     * A paused collection is not a status: see `pause_collection`.
+     */
   status: SubscriptionStatus;
+  /**
+     * How monthly periods line up. `calendar`: every period ends on
+     * the 1st of a month, in your account's billing time zone, so the
+     * first period runs from the start day to the next 1st.
+     * `anniversary`: each period starts on the day of the month the
+     * subscription started (the last day of a shorter month). A plan
+     * billed yearly always bills from its start date, whatever this
+     * says.
+     */
   billing_time: SubscriptionBillingTime;
+  /** When the trial started. Absent when the subscription had no trial. */
   trial_start_at?: string;
+  /**
+     * When the trial ends, or ended. The first paid period starts at
+     * the beginning of that day in your account's billing time zone.
+     * Absent when the subscription had no trial.
+     */
   trial_end_at?: string;
+  /**
+     * When the subscription started: when it was created, or, for a
+     * draft, when it was activated. Absent on a draft.
+     */
   started_at?: string;
+  /**
+     * When the subscription became `active`: at creation without a
+     * trial, at activation of a draft, or when its trial ended.
+     * Absent on a draft and while it trials.
+     */
   activated_at?: string;
   /** When the subscription was canceled. Absent until then. */
   canceled_at?: string;
-  /** A scheduled cancel time, if one is set. */
+  /**
+     * The instant a cancel is scheduled for, when it was scheduled
+     * with `cancel_at`. Absent when none is set, and after the
+     * subscription is canceled.
+     */
   cancel_at?: string;
-  /** True when the subscription cancels at the end of the current period. */
+  /**
+     * True when the subscription cancels at the end of the current
+     * period, or, while it trials, at the end of the trial. False
+     * after the subscription is canceled.
+     */
   cancel_at_period_end: boolean;
-  /** When a scheduled cancel takes effect. Absent when no cancel is scheduled. */
+  /**
+     * When a scheduled cancel takes effect: `cancel_at` when set;
+     * otherwise, with `cancel_at_period_end`, `trial_end_at` while
+     * the subscription trials and `current_billing_period_end`
+     * after. Absent when no cancel is scheduled.
+     */
   cancel_effective_at?: string;
   pause_collection?: SubscriptionPauseCollection;
   billing_thresholds?: SubscriptionBillingThresholds;
+  /**
+     * Start of the current billing period, at the beginning of a day
+     * in your account's billing time zone. While the subscription
+     * trials, it is the start of the first paid period, which begins
+     * when the trial ends. Absent on a draft.
+     */
   current_billing_period_start?: string;
-  /** End of the current period (exclusive). */
+  /**
+     * End of the current period (exclusive): the start of the next
+     * one. While the subscription trials, the end of the first paid
+     * period. Absent on a draft.
+     */
   current_billing_period_end?: string;
-  /** The current period as text, with the last day included, in the tenant's billing time zone. */
+  /**
+     * The current period as text, with the last day included, in your
+     * account's billing time zone, for example "Oct 1, 2026 – Oct 31,
+     * 2026". Absent when the subscription has no current period, and
+     * when the time zone could not be read.
+     */
   current_billing_period_display?: string;
+  /**
+     * When the current period's invoice is due to be built: the end
+     * of the current period. The billing run builds it once the
+     * invoice grace after that time has passed. Absent on a draft.
+     */
   next_billing_at?: string;
   /** Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions. */
   billing_anchor_day?: number;
+  /**
+     * The test clock the subscription runs on (test mode only),
+     * taken from its customer when it was created. Absent when the
+     * customer is not on a test clock.
+     */
   test_clock_id?: string;
   billing_failure?: BillingFailure;
+  /** When the subscription was created. For a customer on a test clock, the clock's time. */
   created_at: string;
+  /** When the subscription last changed. */
   updated_at: string;
 }

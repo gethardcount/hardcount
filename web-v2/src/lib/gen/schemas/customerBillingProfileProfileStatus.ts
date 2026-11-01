@@ -13,7 +13,8 @@
 
 /**
  * Set by the server. `ready` when legal name, address line
- * 1, city and country are all set.
+ * 1, city and country are all set, so the invoice can print
+ * a full Bill to block. Otherwise `incomplete`.
  */
 export type CustomerBillingProfileProfileStatus = typeof CustomerBillingProfileProfileStatus[keyof typeof CustomerBillingProfileProfileStatus];
 

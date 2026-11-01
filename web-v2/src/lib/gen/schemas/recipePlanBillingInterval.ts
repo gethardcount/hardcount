@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * How often a subscription to the plan is billed.
+ */
 export type RecipePlanBillingInterval = typeof RecipePlanBillingInterval[keyof typeof RecipePlanBillingInterval];
 
 

@@ -63,6 +63,7 @@ import type {
   CreatePublicPaymentUpdateCheckout201,
   CreateSubscriptionBody,
   CreateTestClockBody,
+  CreateUsageEventBatch422,
   CreateUsageEventBatchBodyItem,
   CreateUsageEventBody,
   CreateWebhookEndpointBody,
@@ -607,7 +608,14 @@ export const getCreateCustomerUrl = () => {
 }
 
 /**
- * @summary Create customer
+ * Creates a customer in the mode of your API key. `external_id` must be
+ * unique in the account and mode. To run the customer on a test clock
+ * (test mode only), send `test_clock_id`; it cannot change later. The
+ * create is written to the audit log.
+ *
+ * `dunning_policy_id` is not a create field: assign a policy with
+ * `PATCH /v1/customers/{id}`.
+ * @summary Create a customer
  */
 export const createCustomer = async (createCustomerBody: CreateCustomerBody, options?: RequestInit): Promise<Customer> => {
 
@@ -624,7 +632,7 @@ export const createCustomer = async (createCustomerBody: CreateCustomerBody, opt
 
 
 
-export const getCreateCustomerMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | void | Error | RateLimitedResponse,
+export const getCreateCustomerMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCustomer>>, TError,{data: CreateCustomerBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createCustomer>>, TError,{data: CreateCustomerBody}, TContext> => {
 
@@ -653,12 +661,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateCustomerMutationResult = NonNullable<Awaited<ReturnType<typeof createCustomer>>>
     export type CreateCustomerMutationBody = CreateCustomerBody
-    export type CreateCustomerMutationError = InvalidBodyResponse | UnauthorizedResponse | void | Error | RateLimitedResponse
+    export type CreateCustomerMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Create customer
+ * @summary Create a customer
  */
-export const useCreateCustomer = <TError = InvalidBodyResponse | UnauthorizedResponse | void | Error | RateLimitedResponse,
+export const useCreateCustomer = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCustomer>>, TError,{data: CreateCustomerBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createCustomer>>,
@@ -685,6 +693,10 @@ export const getListCustomersUrl = (params?: ListCustomersParams,) => {
 }
 
 /**
+ * Customers in the mode of your API key, newest first unless you choose
+ * a sort. The list answer leaves out `additional_emails`,
+ * `email_status`, `dunning_policy_id` and `stripe_customer_id`: get one
+ * customer for those.
  * @summary List customers
  */
 export const listCustomers = async (params?: ListCustomersParams, options?: RequestInit): Promise<ListCustomers200> => {
@@ -786,13 +798,16 @@ export const getRotateCustomerCostDashboardTokenUrl = (id: string,) => {
 }
 
 /**
- * Mints a fresh `hc_pcd_…` token and writes it to the customer
- * row. The previous token is invalidated immediately (read-only
- * public surface; no grace window). The plaintext token is the
- * sole credential for `GET /v1/public/cost-dashboard/{token}`
- * and is shown ONCE — Hardcount never returns it again after this
- * response. Audit log records the rotation without the token.
- * @summary Rotate the public cost-dashboard token (ADR-032)
+ * Makes a new public cost-dashboard token for the customer and returns
+ * it with the page's address. The token is the only credential for
+ * `GET /v1/public/cost-dashboard/{token}`, so anyone with the link can
+ * read the customer's usage and cost. The previous token stops working
+ * at once.
+ *
+ * Hardcount keeps only a hash of the token, so this answer is the only
+ * time you see it: copy it now. The rotation is written to the audit
+ * log, without the token. Send no body.
+ * @summary Rotate the customer's public cost-dashboard link
  */
 export const rotateCustomerCostDashboardToken = async (id: string, options?: RequestInit): Promise<RotateCustomerCostDashboardToken200> => {
 
@@ -809,7 +824,7 @@ export const rotateCustomerCostDashboardToken = async (id: string, options?: Req
 
 
 
-export const getRotateCustomerCostDashboardTokenMutationOptions = <TError = UnauthorizedResponse | void | RateLimitedResponse,
+export const getRotateCustomerCostDashboardTokenMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>, TError,{id: string}, TContext> => {
 
@@ -838,12 +853,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RotateCustomerCostDashboardTokenMutationResult = NonNullable<Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>>
 
-    export type RotateCustomerCostDashboardTokenMutationError = UnauthorizedResponse | void | RateLimitedResponse
+    export type RotateCustomerCostDashboardTokenMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Rotate the public cost-dashboard token (ADR-032)
+ * @summary Rotate the customer's public cost-dashboard link
  */
-export const useRotateCustomerCostDashboardToken = <TError = UnauthorizedResponse | void | RateLimitedResponse,
+export const useRotateCustomerCostDashboardToken = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>,
@@ -863,7 +878,8 @@ export const getGetCustomerUrl = (id: string,) => {
 }
 
 /**
- * @summary Get customer
+ * One customer, with every field it has.
+ * @summary Get a customer
  */
 export const getCustomer = async (id: string, options?: RequestInit): Promise<Customer> => {
 
@@ -934,7 +950,7 @@ export function useGetCustomer<TData = Awaited<ReturnType<typeof getCustomer>>, 
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Get customer
+ * @summary Get a customer
  */
 
 export function useGetCustomer<TData = Awaited<ReturnType<typeof getCustomer>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
@@ -964,29 +980,30 @@ export const getUpdateCustomerUrl = (id: string,) => {
 }
 
 /**
- * Changes only the fields you send. An empty `display_name` or
- * `email` is ignored, so you cannot clear the email here.
+ * Changes only the fields you send. An empty `display_name` or `email`
+ * is ignored, so you cannot clear the email here.
  *
- * - `status: archived` is refused with 409 `invalid_state` while
- *   the customer has a subscription that still bills. Cancel those
- *   subscriptions first. Archiving does not stop dunning on unpaid
- *   invoices.
+ * - `status: archived` is refused with 409 `invalid_state` while the
+ *   customer has an active or trialing subscription, which still bills.
+ *   Cancel those subscriptions first. Archiving does not stop dunning
+ *   (the retries of failed payments) on unpaid invoices.
  * - `dunning_policy_id` set to `""` removes the assignment, so the
- *   tenant's default policy applies. A set ID must be a policy in
- *   this tenant and mode, or the call returns 404. The change
- *   applies to the next dunning run, not to runs already started.
- * - `additional_emails` replaces the whole CC list; `[]` clears
- *   it. Entries are lowercased, deduplicated, capped at 10 and may
- *   not equal the primary email.
- * - A new `email` that is already on the CC list is refused with
- *   422 unless you send a new `additional_emails` too. Changing the
- *   email resets its bounce state.
+ *   account's default policy applies. A set ID must be a policy in this
+ *   account and mode, or the call returns 404. The change applies to the
+ *   next dunning run, not to runs already started.
+ * - `additional_emails` replaces the whole CC list; `[]` clears it.
+ *   Entries are lowercased, deduplicated, capped at 10 and may not equal
+ *   the primary email.
+ * - A new `email` that is already on the CC list is refused with 422
+ *   unless you send a new `additional_emails` too. Changing the email
+ *   sets `email_status` back to `unknown`, after the answer is built:
+ *   the answer still shows the earlier `email_status`.
  *
- * Name and email changes are copied to the linked Stripe customer
- * when there is one. A Stripe failure is logged and does not fail
- * the call. The change is written to the audit log (it records that
- * the email changed, not the address).
- * @summary Update customer
+ * Name and email changes are copied to the linked Stripe customer when
+ * there is one. A Stripe failure is logged and does not fail the call.
+ * The change is written to the audit log (it records that the email
+ * changed, not the address).
+ * @summary Update a customer
  */
 export const updateCustomer = async (id: string,
     updateCustomerBody: UpdateCustomerBody, options?: RequestInit): Promise<Customer> => {
@@ -1036,7 +1053,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateCustomerMutationError = Error | UnauthorizedResponse | RateLimitedResponse
 
     /**
- * @summary Update customer
+ * @summary Update a customer
  */
 export const useUpdateCustomer = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCustomer>>, TError,{id: string;data: UpdateCustomerBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -1058,28 +1075,27 @@ export const getUpsertCustomerBillingProfileUrl = (id: string,) => {
 }
 
 /**
- * Writes the whole profile. Fields you leave out are stored empty,
- * so send every field you want to keep. `profile_status` is worked
- * out by the server: `ready` when legal name, address line 1, city
- * and country are all set, otherwise `incomplete`.
+ * Writes the whole profile. Fields you leave out are stored empty, so
+ * send every field you want to keep. `profile_status` is worked out by
+ * the server: `ready` when legal name, address line 1, city and country
+ * are all set, otherwise `incomplete`.
  *
- * Checks, each answered with 422 and `param` set to the field:
- * `country` must be an ISO 3166 alpha-2 code; `currency` must be a
- * supported ISO 4217 code (zero-decimal currencies such as JPY are
- * refused); `phone` is 7 to 20 digits, spaces or `+-()`; `tax_id`
- * must match `tax_id_type` when the type is a known one;
- * `tax_status: exempt` needs `tax_exempt_reason`;
- * `tax_status: reverse_charge` needs `tax_id`. Country and currency
- * are stored in upper case.
+ * Checks, each answered with 422 and `param` set to the field: `country`
+ * must be an ISO 3166 alpha-2 code; `currency` must be a supported ISO
+ * 4217 code (zero-decimal currencies such as JPY are refused); `phone`
+ * is 7 to 20 digits, spaces or `+-()`; `tax_id` must match `tax_id_type`
+ * when the type is `eu_vat`, `in_gst` or `au_abn`; `tax_status: exempt`
+ * needs `tax_exempt_reason`; `tax_status: reverse_charge` needs
+ * `tax_id`. Country, currency and tax ID are stored in upper case.
  *
- * A currency that differs from the plan currency of a subscription
- * that still bills is refused with 409 `invalid_state`, because
+ * A currency that differs from the plan currency of a draft, trialing or
+ * active subscription is refused with 409 `invalid_state`, because
  * invoices would show plan prices in the new currency without
  * conversion.
  *
  * After saving, the profile is copied to the linked Stripe customer
- * (best effort), and draft invoices whose tax failed on bad
- * customer data are retried. The change is written to the audit log.
+ * (best effort), and draft invoices whose tax failed on bad customer
+ * data are retried. The change is written to the audit log.
  * @summary Create or replace the customer's billing profile
  */
 export const upsertCustomerBillingProfile = async (id: string,
@@ -1261,11 +1277,12 @@ export const getListCustomerSentEmailsUrl = (id: string,
 }
 
 /**
- * Billing emails tied to this customer's invoices from the last 30
- * days, newest first: invoice, payment receipt, payment failed,
- * payment setup request, dunning, and credit note emails. Emails
- * not tied to an invoice (such as a setup link sent from the
- * payment-methods page) are not listed.
+ * Billing emails tied to this customer's invoices from the last 30 days,
+ * newest first: invoice, payment receipt, payment failed, payment setup
+ * request, payment reminder, final notice, and credit note emails.
+ * Emails not tied to an invoice (such as a link sent with
+ * `POST /v1/customers/{customer_id}/payment-methods/send-setup-email`)
+ * are not listed.
  * @summary List emails sent to the customer
  */
 export const listCustomerSentEmails = async (id: string,
@@ -1382,23 +1399,21 @@ export const getGetCustomerUsageUrl = (id: string,
 }
 
 /**
- * Usage per meter on the customer's active and trialing
- * subscriptions, priced the same way the invoice prices it. With no
- * `from` and `to`, the period is the current billing cycle of the
- * subscription whose cycle started last, as of the customer's current
- * time (the test clock's time for a customer on a test clock). A
- * trialing subscription's cycle starts when its trial ends, so it is
- * not picked before then, unless no subscription's cycle has started.
- * Send both or neither.
+ * Usage per meter on the customer's active and trialing subscriptions,
+ * priced the same way the invoice prices it. Send both `from` and `to`,
+ * or neither.
  *
- * Errors: 404 if the customer does not exist. 422 when only one of
- * `from`/`to` is sent, when `from` is not before `to`, when the
- * window is longer than one year, or (code
- * `customer_has_no_subscription`) when no period is sent and the
- * customer has no subscription with a current cycle.
+ * With neither, each subscription is rated over its own current billing
+ * period, and `period` runs from the earliest start to the latest end of
+ * those periods. Which cycle is current is read at the customer's
+ * current time (the test clock's time for a customer on a test clock). A
+ * trialing subscription's first cycle starts when its trial ends.
  *
- * Decimal quantities are returned as strings. If the daily series
- * fails to load, `buckets` is empty and `warnings` says so.
+ * With both, the window is `[from, to)`, at most one year long, and the
+ * amounts are an estimate at each subscription's current prices.
+ *
+ * Decimal quantities are returned as strings. If the daily series fails
+ * to load, `buckets` is empty and `warnings` says so.
  * @summary Get the customer's usage and cost for a period
  */
 export const getCustomerUsage = async (id: string,
@@ -1507,10 +1522,9 @@ export const getGetCustomerOverviewUrl = (customerId: string,) => {
 }
 
 /**
- * The customer's active subscriptions (up to 50), the 5 newest
- * invoices, and the amount still owed on unpaid invoices. A failed
- * read inside the overview returns an empty part or a zero balance
- * rather than an error.
+ * The customer's active subscriptions (up to 50), the 5 newest invoices,
+ * and the amount still owed on unpaid invoices. A failed read inside the
+ * overview returns an empty part or a zero balance rather than an error.
  * @summary Get a customer overview
  */
 export const getCustomerOverview = async (customerId: string, options?: RequestInit): Promise<CustomerOverview> => {
@@ -1620,8 +1634,8 @@ export const getListCustomerPaymentMethodsUrl = (customerId: string,
 }
 
 /**
- * Saved payment methods that are not detached, default first, then
- * newest. At most 100. `total` is the number returned.
+ * Saved cards that are not detached, default first, then newest. Paged
+ * with `limit` and `offset`; `total` counts every saved card.
  * @summary List the customer's payment methods
  */
 export const listCustomerPaymentMethods = async (customerId: string,
@@ -1730,19 +1744,21 @@ export const getSendCustomerPaymentSetupEmailUrl = (customerId: string,) => {
 }
 
 /**
- * Creates a Stripe Checkout setup link (as `setup-session` does)
- * and queues an email with it to the customer's primary email. The
- * link is never sent to the CC list. The card details go from the
- * customer's browser to Stripe; Hardcount does not see them. The card
- * is saved when Stripe reports the setup succeeded.
+ * Creates a Stripe Checkout setup link (as `setup-session` does) and
+ * queues an email with it to the customer's primary email. The link is
+ * never sent to the CC list. The card details go from the customer's
+ * browser to Stripe; Hardcount does not see them. The card is saved when
+ * Stripe reports the setup succeeded.
  *
  * At most one call per customer per minute when the server has Redis
  * configured. The minute starts at any call whose body is accepted,
- * including one that then fails, so a second call within it returns
- * 429 `cooldown_active` with a `Retry-After` header. Without Redis
- * there is no cooldown.
+ * including one that then fails, so a second call within it returns 429
+ * `cooldown_active` with a `Retry-After` header. Without Redis there is
+ * no cooldown.
  *
- * The send is written to the audit log.
+ * On a server with no SMTP set up, the call answers 409
+ * `email_not_configured` and creates no link. The send is written to the
+ * audit log.
  * @summary Email the customer a link to add a payment method
  */
 export const sendCustomerPaymentSetupEmail = async (customerId: string,
@@ -1815,13 +1831,15 @@ export const getCreateCustomerPaymentSetupSessionUrl = (customerId: string,) => 
 }
 
 /**
- * Returns a Stripe Checkout URL in setup mode (card only, no
- * charge) for you to give to the customer. Creates the Stripe
- * customer on first use. When the customer finishes, Stripe sends
- * them to `return_url` with `?status=success` or `?status=cancel`
- * added. The card is saved when Stripe reports the setup succeeded.
+ * Returns a Stripe Checkout URL in setup mode (card only, no charge) for
+ * you to give to the customer. Creates the Stripe customer on first use.
+ * When the customer finishes, Stripe sends them to `return_url` with
+ * `?status=success` or `?status=cancel` added. The card is saved when
+ * Stripe reports the setup succeeded.
+ *
  * The link is written to the audit log; if the audit row cannot be
- * written, no link is returned.
+ * written, no link is returned. A Stripe failure answers 500
+ * `internal_error`.
  * @summary Create a link for the customer to add a payment method
  */
 export const createCustomerPaymentSetupSession = async (customerId: string,
@@ -1896,10 +1914,11 @@ export const getDetachCustomerPaymentMethodUrl = (customerId: string,
 
 /**
  * Detaches the card in Stripe and marks it detached in Hardcount. If it
- * was the default, the newest remaining card becomes the default in
- * the same step, and that change is copied to Stripe (best effort).
- * Both changes are written to the audit log. A Stripe error on the
- * detach returns 500 and leaves the card attached.
+ * was the default, the newest remaining card becomes the default in the
+ * same step, and that change is copied to Stripe (best effort). Both
+ * changes are written to the audit log. A Stripe error on the detach,
+ * including Stripe not being connected for this mode, returns 500 and
+ * leaves the card attached. Send no body.
  * @summary Detach a payment method
  */
 export const detachCustomerPaymentMethod = async (customerId: string,
@@ -1918,7 +1937,7 @@ export const detachCustomerPaymentMethod = async (customerId: string,
 
 
 
-export const getDetachCustomerPaymentMethodMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getDetachCustomerPaymentMethodMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof detachCustomerPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof detachCustomerPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext> => {
 
@@ -1947,12 +1966,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DetachCustomerPaymentMethodMutationResult = NonNullable<Awaited<ReturnType<typeof detachCustomerPaymentMethod>>>
 
-    export type DetachCustomerPaymentMethodMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type DetachCustomerPaymentMethodMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Detach a payment method
  */
-export const useDetachCustomerPaymentMethod = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useDetachCustomerPaymentMethod = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof detachCustomerPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof detachCustomerPaymentMethod>>,
@@ -1974,9 +1993,9 @@ export const getSetCustomerDefaultPaymentMethodUrl = (customerId: string,
 
 /**
  * Makes this card the one Hardcount charges and clears the flag on the
- * others. The change is copied to the Stripe customer (best effort;
- * a Stripe failure is recorded on the audit row and does not fail
- * the call).
+ * others. The change is copied to the Stripe customer (best effort; a
+ * Stripe failure is recorded on the audit row and does not fail the
+ * call). Send no body.
  * @summary Make a payment method the default
  */
 export const setCustomerDefaultPaymentMethod = async (customerId: string,
@@ -1995,7 +2014,7 @@ export const setCustomerDefaultPaymentMethod = async (customerId: string,
 
 
 
-export const getSetCustomerDefaultPaymentMethodMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getSetCustomerDefaultPaymentMethodMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext> => {
 
@@ -2024,12 +2043,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SetCustomerDefaultPaymentMethodMutationResult = NonNullable<Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>>
 
-    export type SetCustomerDefaultPaymentMethodMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type SetCustomerDefaultPaymentMethodMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Make a payment method the default
  */
-export const useSetCustomerDefaultPaymentMethod = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useSetCustomerDefaultPaymentMethod = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>,
@@ -2049,17 +2068,22 @@ export const getGetPublicCostDashboardUrl = (token: string,) => {
 }
 
 /**
- * Unauthenticated. The `hc_pcd_…` token in the URL is the sole
- * credential — partners embed via iframe / fetch from their own
- * app without an API key. Sanitized projection: customer_id,
- * tenant_id, livemode, billing_period, subscriptions, usage[],
- * totals, projected_total_cents, credits. PII (email, display_name, external_id,
- * metadata, billing_profile) is NEVER on this response. Wrong
- * prefix or unknown token → 401 (anti-enumeration). No active
- * sub → 200 with `billing_period.source = "no_subscription"`:
- * `subscriptions`, `usage` and `totals` are empty, and `credits`
- * still lists the customer's credit balance.
- * @summary Public cost-dashboard projection (ADR-032)
+ * Public: no API key. The `hc_pcd_` token in the URL is the only
+ * credential, so you can embed the page or fetch it from your own app.
+ * Make the token with
+ * `POST /v1/customers/{id}/rotate-cost-dashboard-token`.
+ *
+ * The answer holds the customer's usage and cost for the current billing
+ * period and its credit balance. It never holds the customer's name,
+ * email, external ID or billing profile, your provider costs, or usage
+ * that no price takes.
+ *
+ * A token with the wrong prefix or no customer gets 401, the same answer
+ * for both. A customer with no active or trialing subscription gets 200
+ * with `billing_period.source` `no_subscription`: `subscriptions`,
+ * `usage` and `totals` are empty, and `credits` still lists the credit
+ * balance. Limited to 60 requests a minute per IP address.
+ * @summary Get a customer's public cost dashboard
  */
 export const getPublicCostDashboard = async (token: string, options?: RequestInit): Promise<GetPublicCostDashboard200> => {
 
@@ -2083,7 +2107,7 @@ export const getGetPublicCostDashboardQueryKey = (token: string,) => {
     }
 
 
-export const getGetPublicCostDashboardQueryOptions = <TData = Awaited<ReturnType<typeof getPublicCostDashboard>>, TError = void>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicCostDashboard>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetPublicCostDashboardQueryOptions = <TData = Awaited<ReturnType<typeof getPublicCostDashboard>>, TError = Error | RateLimitedResponse>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicCostDashboard>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -2102,10 +2126,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetPublicCostDashboardQueryResult = NonNullable<Awaited<ReturnType<typeof getPublicCostDashboard>>>
-export type GetPublicCostDashboardQueryError = void
+export type GetPublicCostDashboardQueryError = Error | RateLimitedResponse
 
 
-export function useGetPublicCostDashboard<TData = Awaited<ReturnType<typeof getPublicCostDashboard>>, TError = void>(
+export function useGetPublicCostDashboard<TData = Awaited<ReturnType<typeof getPublicCostDashboard>>, TError = Error | RateLimitedResponse>(
  token: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicCostDashboard>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getPublicCostDashboard>>,
@@ -2115,7 +2139,7 @@ export function useGetPublicCostDashboard<TData = Awaited<ReturnType<typeof getP
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetPublicCostDashboard<TData = Awaited<ReturnType<typeof getPublicCostDashboard>>, TError = void>(
+export function useGetPublicCostDashboard<TData = Awaited<ReturnType<typeof getPublicCostDashboard>>, TError = Error | RateLimitedResponse>(
  token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicCostDashboard>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getPublicCostDashboard>>,
@@ -2125,15 +2149,15 @@ export function useGetPublicCostDashboard<TData = Awaited<ReturnType<typeof getP
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetPublicCostDashboard<TData = Awaited<ReturnType<typeof getPublicCostDashboard>>, TError = void>(
+export function useGetPublicCostDashboard<TData = Awaited<ReturnType<typeof getPublicCostDashboard>>, TError = Error | RateLimitedResponse>(
  token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicCostDashboard>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Public cost-dashboard projection (ADR-032)
+ * @summary Get a customer's public cost dashboard
  */
 
-export function useGetPublicCostDashboard<TData = Awaited<ReturnType<typeof getPublicCostDashboard>>, TError = void>(
+export function useGetPublicCostDashboard<TData = Awaited<ReturnType<typeof getPublicCostDashboard>>, TError = Error | RateLimitedResponse>(
  token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicCostDashboard>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -2445,11 +2469,14 @@ export const getGetPublicPaymentUpdateUrl = (token: string,) => {
 }
 
 /**
- * Unauthenticated. The token from the payment-update email is the only
- * credential. It is valid for 24 hours, and starting checkout uses it
- * up. Share the page link with customers instead of calling this
- * route.
- * @summary Data behind the payment-update page
+ * Public: no API key. The token from the link in a payment setup email
+ * is the only credential. Hardcount sends that email when an invoice has
+ * no payment method to charge; the link is the server's
+ * `PAYMENT_UPDATE_URL` with `?token=` and the token. The token is valid
+ * for 24 hours, and starting checkout uses it up. Share the page link
+ * with customers instead of calling this route. Limited to 60 requests a
+ * minute per IP address.
+ * @summary Get what the payment-update page shows
  */
 export const getPublicPaymentUpdate = async (token: string, options?: RequestInit): Promise<PublicPaymentUpdate> => {
 
@@ -2473,7 +2500,7 @@ export const getGetPublicPaymentUpdateQueryKey = (token: string,) => {
     }
 
 
-export const getGetPublicPaymentUpdateQueryOptions = <TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetPublicPaymentUpdateQueryOptions = <TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | RateLimitedResponse>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -2492,10 +2519,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetPublicPaymentUpdateQueryResult = NonNullable<Awaited<ReturnType<typeof getPublicPaymentUpdate>>>
-export type GetPublicPaymentUpdateQueryError = Error | void
+export type GetPublicPaymentUpdateQueryError = Error | RateLimitedResponse
 
 
-export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(
+export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | RateLimitedResponse>(
  token: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getPublicPaymentUpdate>>,
@@ -2505,7 +2532,7 @@ export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getP
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(
+export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | RateLimitedResponse>(
  token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getPublicPaymentUpdate>>,
@@ -2515,15 +2542,15 @@ export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getP
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(
+export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | RateLimitedResponse>(
  token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Data behind the payment-update page
+ * @summary Get what the payment-update page shows
  */
 
-export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(
+export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | RateLimitedResponse>(
  token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -2550,11 +2577,15 @@ export const getCreatePublicPaymentUpdateCheckoutUrl = (token: string,) => {
 }
 
 /**
- * Returns a Stripe Checkout URL in setup mode (card only, no charge).
- * Creates the Stripe customer if there is none. This call uses up the
- * token. If Stripe fails to create the session, the token works again.
- * Stripe sends the customer to the payment-method-added page with
- * `?status=success` or `?status=cancel`. Writes an audit row.
+ * Public: no API key. Returns a Stripe Checkout URL in setup mode (card
+ * only, no charge) for the customer behind the token. Creates the Stripe
+ * customer if there is none. This call uses up the token. If Stripe
+ * fails to create the session, the token works again.
+ *
+ * Stripe sends the customer to the server's `PAYMENT_UPDATE_RETURN_URL`
+ * (`http://localhost:5173/payment-method-added` when that is unset) with
+ * `?status=success` or `?status=cancel` added. The card is saved when
+ * Stripe reports the setup succeeded. Writes an audit row. Send no body.
  * @summary Start adding a card in Stripe Checkout
  */
 export const createPublicPaymentUpdateCheckout = async (token: string, options?: RequestInit): Promise<CreatePublicPaymentUpdateCheckout201> => {
@@ -2572,7 +2603,7 @@ export const createPublicPaymentUpdateCheckout = async (token: string, options?:
 
 
 
-export const getCreatePublicPaymentUpdateCheckoutMutationOptions = <TError = Error | void,
+export const getCreatePublicPaymentUpdateCheckoutMutationOptions = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>, TError,{token: string}, TContext> => {
 
@@ -2601,12 +2632,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreatePublicPaymentUpdateCheckoutMutationResult = NonNullable<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>>
 
-    export type CreatePublicPaymentUpdateCheckoutMutationError = Error | void
+    export type CreatePublicPaymentUpdateCheckoutMutationError = InvalidBodyResponse | Error | RateLimitedResponse
 
     /**
  * @summary Start adding a card in Stripe Checkout
  */
-export const useCreatePublicPaymentUpdateCheckout = <TError = Error | void,
+export const useCreatePublicPaymentUpdateCheckout = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>,
@@ -2626,7 +2657,12 @@ export const getCreateMeterUrl = () => {
 }
 
 /**
- * @summary Create meter
+ * Creates a meter. `event_name` is what your usage events send for it,
+ * and it cannot change later. `unit` defaults to `unit` and
+ * `aggregation` to `sum`. A meter only counts: put its prices on a plan
+ * (`POST /v1/plans/{id}/prices`). The create is written to the audit
+ * log.
+ * @summary Create a meter
  */
 export const createMeter = async (createMeterBody: CreateMeterBody, options?: RequestInit): Promise<Meter> => {
 
@@ -2643,7 +2679,7 @@ export const createMeter = async (createMeterBody: CreateMeterBody, options?: Re
 
 
 
-export const getCreateMeterMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | RateLimitedResponse,
+export const getCreateMeterMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createMeter>>, TError,{data: CreateMeterBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createMeter>>, TError,{data: CreateMeterBody}, TContext> => {
 
@@ -2672,12 +2708,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateMeterMutationResult = NonNullable<Awaited<ReturnType<typeof createMeter>>>
     export type CreateMeterMutationBody = CreateMeterBody
-    export type CreateMeterMutationError = InvalidBodyResponse | UnauthorizedResponse | RateLimitedResponse
+    export type CreateMeterMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Create meter
+ * @summary Create a meter
  */
-export const useCreateMeter = <TError = InvalidBodyResponse | UnauthorizedResponse | RateLimitedResponse,
+export const useCreateMeter = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createMeter>>, TError,{data: CreateMeterBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createMeter>>,
@@ -2704,6 +2740,8 @@ export const getListMetersUrl = (params?: ListMetersParams,) => {
 }
 
 /**
+ * Meters in the mode of your API key, newest first. The list leaves out
+ * `has_usage`.
  * @summary List meters
  */
 export const listMeters = async (params?: ListMetersParams, options?: RequestInit): Promise<ListMeters200> => {
@@ -2805,17 +2843,17 @@ export const getUpdateMeterUrl = (id: string,) => {
 }
 
 /**
- * Fields omitted are left unchanged. A meter only counts: its prices
- * are on the plans (`/v1/plans/{id}/prices`).
+ * Fields omitted are left unchanged. A meter only counts: its prices are
+ * on the plans (`/v1/plans/{id}/prices`).
  *
- * `aggregation` can change until the meter has a usage event, then
- * it is fixed: a change is refused with 409 `meter_has_usage`. Usage
- * events are counted under the aggregation the meter has; to count
- * differently, make a new meter with another event name. Held usage
- * for its `event_name` does not fix it: it is counted under the
- * meter's aggregation once released. `name` and `unit` can always
- * change, at once.
- * @summary Update meter
+ * `aggregation` can change until the meter has a usage event, then it is
+ * fixed: a change is refused with 409 `meter_has_usage`. Usage events
+ * are counted under the aggregation the meter has; to count differently,
+ * make a new meter with another event name. Held usage for its
+ * `event_name` does not fix it: it is counted under the meter's
+ * aggregation once released. `name` and `unit` can always change, at
+ * once. The change is written to the audit log.
+ * @summary Update a meter
  */
 export const updateMeter = async (id: string,
     updateMeterBody: UpdateMeterBody, options?: RequestInit): Promise<Meter> => {
@@ -2833,7 +2871,7 @@ export const updateMeter = async (id: string,
 
 
 
-export const getUpdateMeterMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | void | Error | RateLimitedResponse,
+export const getUpdateMeterMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMeter>>, TError,{id: string;data: UpdateMeterBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateMeter>>, TError,{id: string;data: UpdateMeterBody}, TContext> => {
 
@@ -2862,12 +2900,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateMeterMutationResult = NonNullable<Awaited<ReturnType<typeof updateMeter>>>
     export type UpdateMeterMutationBody = UpdateMeterBody
-    export type UpdateMeterMutationError = InvalidBodyResponse | UnauthorizedResponse | void | Error | RateLimitedResponse
+    export type UpdateMeterMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Update meter
+ * @summary Update a meter
  */
-export const useUpdateMeter = <TError = InvalidBodyResponse | UnauthorizedResponse | void | Error | RateLimitedResponse,
+export const useUpdateMeter = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMeter>>, TError,{id: string;data: UpdateMeterBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateMeter>>,
@@ -2887,7 +2925,7 @@ export const getGetMeterUrl = (id: string,) => {
 }
 
 /**
- * @summary Get meter
+ * @summary Get a meter
  */
 export const getMeter = async (id: string, options?: RequestInit): Promise<Meter> => {
 
@@ -2958,7 +2996,7 @@ export function useGetMeter<TData = Awaited<ReturnType<typeof getMeter>>, TError
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Get meter
+ * @summary Get a meter
  */
 
 export function useGetMeter<TData = Awaited<ReturnType<typeof getMeter>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
@@ -3199,7 +3237,7 @@ export const getGetCreditGrantsUrl = (customerId: string,
  * `deducted_cents`, the part an operator deduction (a negative
  * adjustment) drew from this grant. The credit invoices actually used
  * is `consumed_cents - expired_cents - retired_cents - deducted_cents`.
- * @summary Per-grant burndown + kind subtotals
+ * @summary List a customer's credit grants
  */
 export const getCreditGrants = async (customerId: string,
     params?: GetCreditGrantsParams, options?: RequestInit): Promise<CreditGrants> => {
@@ -3276,7 +3314,7 @@ export function useGetCreditGrants<TData = Awaited<ReturnType<typeof getCreditGr
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Per-grant burndown + kind subtotals
+ * @summary List a customer's credit grants
  */
 
 export function useGetCreditGrants<TData = Awaited<ReturnType<typeof getCreditGrants>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
@@ -3309,8 +3347,9 @@ export const getAdjustCreditsUrl = () => {
 /**
  * Writes one `adjustment` entry to the customer's credit ledger in
  * `currency`. A positive amount adds credit in that currency; a
- * negative amount removes credit in that currency only. Audit action
- * is `credit.adjustment` or `credit.deduction`.
+ * negative amount removes credit in that currency only. The audit
+ * log records it as
+ * `credit.adjustment` or `credit.deduction`.
  *
  * Errors (422, `param` names the field): `customer_id`, `currency` or
  * `description` missing; `currency` not supported (an unknown code or
@@ -3401,7 +3440,7 @@ export const getListCreditBalancesUrl = (params?: ListCreditBalancesParams,) => 
  * `total_granted` is the sum of every credit added in that currency
  * (grants, positive adjustments, and what a void or credit note gave
  * back as new credit).
- * @summary List credit balances for all customers
+ * @summary List credit balances
  */
 export const listCreditBalances = async (params?: ListCreditBalancesParams, options?: RequestInit): Promise<ListCreditBalances200> => {
 
@@ -3472,7 +3511,7 @@ export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCred
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary List credit balances for all customers
+ * @summary List credit balances
  */
 
 export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
@@ -3510,9 +3549,10 @@ export const getListCreditLedgerEntriesUrl = (customerId: string,
 }
 
 /**
- * Ledger entries for one customer. `balance_after` is the running
- * balance in the entry's currency, in time order over the whole
- * ledger, so it stays right when you filter by `entry_type`.
+ * Ledger entries for one customer, newest first unless you sort
+ * otherwise. `balance_after` is the running balance in the entry's
+ * currency, in time order over the whole ledger, so it stays right
+ * when you filter by `entry_type`.
  * @summary List a customer's credit ledger
  */
 export const listCreditLedgerEntries = async (customerId: string,
@@ -5010,7 +5050,11 @@ export const getCreatePlanUrl = () => {
 }
 
 /**
- * @summary Create plan
+ * Creates an active plan and its usage prices in one request: if any
+ * price is refused, nothing is created. Every price takes the plan's
+ * currency. `base_bill_timing` is required when the base fee is above 0.
+ * The create is written to the audit log.
+ * @summary Create a plan
  */
 export const createPlan = async (createPlanBody: CreatePlanBody, options?: RequestInit): Promise<PlanDetail> => {
 
@@ -5059,7 +5103,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreatePlanMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Create plan
+ * @summary Create a plan
  */
 export const useCreatePlan = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPlan>>, TError,{data: CreatePlanBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -5088,6 +5132,7 @@ export const getListPlansUrl = (params?: ListPlansParams,) => {
 }
 
 /**
+ * Plans in the mode of your API key, newest first, each with its prices.
  * @summary List plans
  */
 export const listPlans = async (params?: ListPlansParams, options?: RequestInit): Promise<ListPlans200> => {
@@ -5189,7 +5234,7 @@ export const getGetPlanUrl = (id: string,) => {
 }
 
 /**
- * @summary Get plan
+ * @summary Get a plan
  */
 export const getPlan = async (id: string, options?: RequestInit): Promise<PlanDetail> => {
 
@@ -5260,7 +5305,7 @@ export function useGetPlan<TData = Awaited<ReturnType<typeof getPlan>>, TError =
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Get plan
+ * @summary Get a plan
  */
 
 export function useGetPlan<TData = Awaited<ReturnType<typeof getPlan>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
@@ -5290,19 +5335,18 @@ export const getUpdatePlanUrl = (id: string,) => {
 }
 
 /**
- * A field left out keeps its current value. To clear `description`
- * or `tax_code`, send an empty string. `code`, `currency` and
- * `billing_interval` cannot be changed: sending one is a 422 naming
- * it. The plan's
- * usage prices change through `/v1/plans/{id}/prices`.
+ * A field left out keeps its current value. To clear `description` or
+ * `tax_code`, send an empty string. `code`, `currency` and
+ * `billing_interval` cannot be changed: sending one is a 422 naming it.
+ * The plan's usage prices change through `/v1/plans/{id}/prices`.
  *
  * `base_amount_cents` cannot change while a subscription that is not
- * canceled uses the plan (`live_subscription_count` on Get plan):
- * create a new plan instead. It can be set to 0. `base_bill_timing`
- * cannot change once a subscription has used the plan (`used`). A
- * plan with no base fee must be `in_arrears`. `name`, `description`,
- * `tax_code` and `status` change at once.
- * @summary Update plan
+ * canceled uses the plan (`live_subscription_count` on Get plan): create
+ * a new plan instead. It can be set to 0. `base_bill_timing` cannot
+ * change once a subscription has used the plan (`used`). A plan with no
+ * base fee must be `in_arrears`. `name`, `description`, `tax_code` and
+ * `status` change at once. The change is written to the audit log.
+ * @summary Update a plan
  */
 export const updatePlan = async (id: string,
     updatePlanBody: UpdatePlanBody, options?: RequestInit): Promise<PlanDetail> => {
@@ -5352,7 +5396,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdatePlanMutationError = Error | UnauthorizedResponse | RateLimitedResponse
 
     /**
- * @summary Update plan
+ * @summary Update a plan
  */
 export const useUpdatePlan = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlan>>, TError,{id: string;data: UpdatePlanBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -5492,15 +5536,15 @@ export const getAddPlanPriceUrl = (id: string,) => {
 
 /**
  * On a plan no subscription has used, the price applies at once
- * (`effective: now`). On a used plan it applies from each
- * subscriber's next billing period (`effective: next_period`); until
- * then the plan's other prices bill the meter's usage as before. A
- * subscriber who first joins the plan in a period after the add pays
- * it from the join (see `PriceWrite`).
+ * (`effective: now`). On a used plan it applies from each subscriber's
+ * next billing period (`effective: next_period`); until then the plan's
+ * other prices bill the meter's usage as before. A subscriber who first
+ * joins the plan in a period after the add pays it from the join (see
+ * `PriceWrite`).
  *
- * A price that names a removed price's meter and `dimension_match`
- * adds that price back under its id. Its old customer overrides do
- * not come back.
+ * A price that names a removed price's meter and `dimension_match` adds
+ * that price back under its id. Its old customer overrides do not come
+ * back. The write is recorded in the audit log.
  * @summary Add a price to a plan
  */
 export const addPlanPrice = async (id: string,
@@ -5575,12 +5619,13 @@ export const getUpdatePlanPriceUrl = (id: string,
 
 /**
  * Changes the price's shape. Its meter and `dimension_match` are its
- * identity and cannot change: add a price for other events instead.
- * On a plan no subscription has used, the change applies at once; on
- * a used plan, from each subscriber's next billing period. The current
- * period keeps the price it started with. A subscriber who first joins
- * the plan in a period after the change pays it from the join (see
- * `PriceWrite`). Customer overrides of the price keep applying.
+ * identity and cannot change: add a price for other events instead. On a
+ * plan no subscription has used, the change applies at once; on a used
+ * plan, from each subscriber's next billing period. The current period
+ * keeps the price it started with. A subscriber who first joins the plan
+ * in a period after the change pays it from the join (see `PriceWrite`).
+ * Customer overrides of the price keep applying. The write is recorded
+ * in the audit log.
  * @summary Change a price's rate
  */
 export const updatePlanPrice = async (id: string,
@@ -5656,14 +5701,13 @@ export const getRemovePlanPriceUrl = (id: string,
 
 /**
  * On a plan no subscription has used, the price is gone at once. On a
- * used plan it takes no part from each subscriber's next billing
- * period; the current period keeps it. A subscriber who first joins the
- * plan in a period after the removal does not pay it (see
- * `PriceWrite`). The removal
- * ends every customer override of the price, each when the removal
- * takes effect for its customer, and the answer names them
+ * used plan it takes no part from each subscriber's next billing period;
+ * the current period keeps it. A subscriber who first joins the plan in
+ * a period after the removal does not pay it (see `PriceWrite`). The
+ * removal ends every customer override of the price, each when the
+ * removal takes effect for its customer, and the answer names them
  * (`ended_overrides`). Adding the price back later keeps its id but not
- * the overrides.
+ * the overrides. The write is recorded in the audit log. Send no body.
  * @summary Remove a price from a plan
  */
 export const removePlanPrice = async (id: string,
@@ -5682,7 +5726,7 @@ export const removePlanPrice = async (id: string,
 
 
 
-export const getRemovePlanPriceMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRemovePlanPriceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removePlanPrice>>, TError,{id: string;priceId: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof removePlanPrice>>, TError,{id: string;priceId: string}, TContext> => {
 
@@ -5711,12 +5755,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RemovePlanPriceMutationResult = NonNullable<Awaited<ReturnType<typeof removePlanPrice>>>
 
-    export type RemovePlanPriceMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type RemovePlanPriceMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Remove a price from a plan
  */
-export const useRemovePlanPrice = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRemovePlanPrice = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removePlanPrice>>, TError,{id: string;priceId: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof removePlanPrice>>,
@@ -5736,7 +5780,25 @@ export const getCreateSubscriptionUrl = () => {
 }
 
 /**
- * @summary Create subscription
+ * Creates a subscription that bills a customer for one or more plans.
+ * Leave out `status` and it starts now: `active` from today, or
+ * `trialing` when `trial_days` is above 0. Send `status: draft` to
+ * create it without starting it.
+ *
+ * All the plans must share one billing interval, one base-fee timing
+ * (in advance or in arrears) and one currency. The currency must also
+ * match the customer's billing profile and the customer's other
+ * subscriptions. No two live subscriptions of a customer may bill the
+ * same meter. The customer and the plans must not be archived.
+ *
+ * An `active` subscription whose plans bill a non-zero base fee in
+ * advance gets its first invoice in the same transaction; it is then
+ * collected like any other invoice. A customer on a test clock gives
+ * the subscription its clock, and the subscription starts at the
+ * clock's time.
+ *
+ * Sends the `subscription.created` webhook event.
+ * @summary Create a subscription
  */
 export const createSubscription = async (createSubscriptionBody: CreateSubscriptionBody, options?: RequestInit): Promise<Subscription> => {
 
@@ -5785,7 +5847,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateSubscriptionMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Create subscription
+ * @summary Create a subscription
  */
 export const useCreateSubscription = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSubscription>>, TError,{data: CreateSubscriptionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -5814,6 +5876,8 @@ export const getListSubscriptionsUrl = (params?: ListSubscriptionsParams,) => {
 }
 
 /**
+ * Lists the subscriptions of this account and mode, with their items,
+ * newest first unless you sort otherwise. The filters combine.
  * @summary List subscriptions
  */
 export const listSubscriptions = async (params?: ListSubscriptionsParams, options?: RequestInit): Promise<ListSubscriptions200> => {
@@ -5915,7 +5979,15 @@ export const getActivateSubscriptionUrl = (id: string,) => {
 }
 
 /**
- * @summary Activate draft subscription
+ * Starts a `draft` subscription: it becomes `active` now, and its
+ * first period starts today in your account's billing time zone (the
+ * clock's day for a customer on a test clock). A non-zero base fee
+ * billed in advance is invoiced in the same transaction. The plans'
+ * currency must still match the customer's billing profile and other
+ * subscriptions. Takes no body.
+ *
+ * Sends the `subscription.activated` webhook event.
+ * @summary Activate a draft subscription
  */
 export const activateSubscription = async (id: string, options?: RequestInit): Promise<Subscription> => {
 
@@ -5932,7 +6004,7 @@ export const activateSubscription = async (id: string, options?: RequestInit): P
 
 
 
-export const getActivateSubscriptionMutationOptions = <TError = UnauthorizedResponse | RateLimitedResponse,
+export const getActivateSubscriptionMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateSubscription>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof activateSubscription>>, TError,{id: string}, TContext> => {
 
@@ -5961,12 +6033,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ActivateSubscriptionMutationResult = NonNullable<Awaited<ReturnType<typeof activateSubscription>>>
 
-    export type ActivateSubscriptionMutationError = UnauthorizedResponse | RateLimitedResponse
+    export type ActivateSubscriptionMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Activate draft subscription
+ * @summary Activate a draft subscription
  */
-export const useActivateSubscription = <TError = UnauthorizedResponse | RateLimitedResponse,
+export const useActivateSubscription = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateSubscription>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof activateSubscription>>,
@@ -5989,7 +6061,7 @@ export const getRetrySubscriptionBillingUrl = (id: string,) => {
  * Clears the subscription's `billing_failure` and bills it now, with
  * the same attempt the billing run makes. Use it after fixing the
  * cause of a failure, to skip the wait, or to restart a parked
- * subscription. An audit log entry records the retry.
+ * subscription. An audit log entry records the retry. Takes no body.
  *
  * Once the failure is cleared, the outcome of the attempt is never
  * an HTTP error. A 200 has three outcomes:
@@ -6012,7 +6084,7 @@ export const getRetrySubscriptionBillingUrl = (id: string,) => {
  * catch-up, the response is an error, the invoices already created
  * stay, and the next billing run finishes the rest. The failure may
  * already be cleared at that point, so a repeat call can answer 409.
- * @summary Retry billing on a subscription whose billing is failing
+ * @summary Retry a subscription's failed billing
  */
 export const retrySubscriptionBilling = async (id: string, options?: RequestInit): Promise<RetrySubscriptionBilling200> => {
 
@@ -6029,7 +6101,7 @@ export const retrySubscriptionBilling = async (id: string, options?: RequestInit
 
 
 
-export const getRetrySubscriptionBillingMutationOptions = <TError = UnauthorizedResponse | void | RateLimitedResponse,
+export const getRetrySubscriptionBillingMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retrySubscriptionBilling>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof retrySubscriptionBilling>>, TError,{id: string}, TContext> => {
 
@@ -6058,12 +6130,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RetrySubscriptionBillingMutationResult = NonNullable<Awaited<ReturnType<typeof retrySubscriptionBilling>>>
 
-    export type RetrySubscriptionBillingMutationError = UnauthorizedResponse | void | RateLimitedResponse
+    export type RetrySubscriptionBillingMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Retry billing on a subscription whose billing is failing
+ * @summary Retry a subscription's failed billing
  */
-export const useRetrySubscriptionBilling = <TError = UnauthorizedResponse | void | RateLimitedResponse,
+export const useRetrySubscriptionBilling = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retrySubscriptionBilling>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof retrySubscriptionBilling>>,
@@ -6084,7 +6156,7 @@ export const getGetSubscriptionUrl = (id: string,) => {
 
 /**
  * Returns one subscription with its items.
- * @summary Get subscription
+ * @summary Get a subscription
  */
 export const getSubscription = async (id: string, options?: RequestInit): Promise<Subscription> => {
 
@@ -6155,7 +6227,7 @@ export function useGetSubscription<TData = Awaited<ReturnType<typeof getSubscrip
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Get subscription
+ * @summary Get a subscription
  */
 
 export function useGetSubscription<TData = Awaited<ReturnType<typeof getSubscription>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
@@ -6186,7 +6258,7 @@ export const getCancelSubscriptionUrl = (id: string,) => {
 
 /**
  * Cancels the subscription immediately. Works on `draft`, `trialing`
- * and `active` subscriptions.
+ * and `active` subscriptions. Takes no body.
  *
  * In the same transaction, Hardcount writes the final invoice for the
  * part of the current period that has been used, and credits the
@@ -6196,7 +6268,7 @@ export const getCancelSubscriptionUrl = (id: string,) => {
  * scheduled time and the canceled subscription is returned.
  *
  * Sends the `subscription.canceled` webhook event.
- * @summary Cancel subscription now
+ * @summary Cancel a subscription now
  */
 export const cancelSubscription = async (id: string, options?: RequestInit): Promise<Subscription> => {
 
@@ -6245,7 +6317,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CancelSubscriptionMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Cancel subscription now
+ * @summary Cancel a subscription now
  */
 export const useCancelSubscription = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelSubscription>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -6269,7 +6341,8 @@ export const getScheduleSubscriptionCancelUrl = (id: string,) => {
 /**
  * Schedules the subscription to cancel later. Set exactly one of
  * `at_period_end` or `cancel_at`. A new call replaces any earlier
- * schedule.
+ * schedule. If a billing period has ended and is not invoiced yet,
+ * it is billed first, so "the current period" is the one running.
  *
  * - **Active subscription.** `at_period_end` cancels at the end of
  *   the current period. `cancel_at` must be on or after the end of
@@ -6435,7 +6508,8 @@ export const getPauseSubscriptionCollectionUrl = (id: string,) => {
  * Pauses payment collection. The subscription keeps running: each
  * period still closes and its invoice is created, but the invoice
  * stays a draft. Hardcount does not finalize it, charge it or start
- * dunning (automatic payment retries).
+ * dunning (automatic payment retries). A period that ended before the
+ * call and is not invoiced yet is billed first, as it stood.
  *
  * Invoices finalized before the pause are not drafts. Payment retries
  * already under way for them continue, as in Stripe. To stop them,
@@ -6603,11 +6677,13 @@ export const getEndSubscriptionTrialUrl = (id: string,) => {
 
 /**
  * Ends the trial now and makes the subscription `active`. The first
- * paid period starts now. Items whose base fee is billed in advance
- * get their first invoice at once.
+ * paid period starts today, and `trial_end_at` becomes now. Items
+ * whose base fee is billed in advance get their first invoice in the
+ * same transaction. A subscription with a scheduled cancel is
+ * refused: clear the schedule first. Takes no body.
  *
  * Sends the `subscription.trial_ended` webhook event.
- * @summary End trial now
+ * @summary End a trial now
  */
 export const endSubscriptionTrial = async (id: string, options?: RequestInit): Promise<Subscription> => {
 
@@ -6656,7 +6732,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type EndSubscriptionTrialMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary End trial now
+ * @summary End a trial now
  */
 export const useEndSubscriptionTrial = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endSubscriptionTrial>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -6684,7 +6760,7 @@ export const getExtendSubscriptionTrialUrl = (id: string,) => {
  * `POST /v1/subscriptions/{id}/end-trial`.
  *
  * Sends the `subscription.trial_extended` webhook event.
- * @summary Extend trial
+ * @summary Extend a trial
  */
 export const extendSubscriptionTrial = async (id: string,
     extendSubscriptionTrialBody: ExtendSubscriptionTrialBody, options?: RequestInit): Promise<Subscription> => {
@@ -6734,7 +6810,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ExtendSubscriptionTrialMutationError = Error | UnauthorizedResponse | RateLimitedResponse
 
     /**
- * @summary Extend trial
+ * @summary Extend a trial
  */
 export const useExtendSubscriptionTrial = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof extendSubscriptionTrial>>, TError,{id: string;data: ExtendSubscriptionTrialBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -6918,17 +6994,18 @@ export const getAddSubscriptionItemUrl = (id: string,) => {
  * Adds a plan to the subscription as a new item. The plan must use
  * the same billing interval and currency as the other items, and
  * must not share meters with the customer's other live
- * subscriptions.
+ * subscriptions. A period that ended and is not invoiced yet is
+ * billed first.
  *
  * On an active subscription, a plan whose base fee is billed in
  * advance is charged for the rest of the current period, in the
  * same transaction as the add. An item added on the first day of the
- * period (in the tenant's timezone) pays for the whole period. A
- * plan billed in arrears is billed at the end of the period for the
- * days it was on the subscription.
+ * period (in your account's billing time zone) pays for the whole
+ * period. A plan billed in arrears is billed at the end of the
+ * period for the days it was on the subscription.
  *
  * Sends the `subscription.item.added` webhook event.
- * @summary Add subscription item
+ * @summary Add an item to a subscription
  */
 export const addSubscriptionItem = async (id: string,
     addSubscriptionItemBody: AddSubscriptionItemBody, options?: RequestInit): Promise<SubscriptionItem> => {
@@ -6978,7 +7055,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type AddSubscriptionItemMutationError = Error | UnauthorizedResponse | RateLimitedResponse
 
     /**
- * @summary Add subscription item
+ * @summary Add an item to a subscription
  */
 export const useAddSubscriptionItem = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addSubscriptionItem>>, TError,{id: string;data: AddSubscriptionItemBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -7002,7 +7079,8 @@ export const getUpdateSubscriptionItemUrl = (id: string,
 
 /**
  * Changes the quantity or the plan of one item. Send exactly one of
- * `quantity` or `new_plan_id`. The subscription must be `active`.
+ * `quantity` or `new_plan_id`. The subscription must be `active`. A
+ * period that ended and is not invoiced yet is billed first.
  *
  * - **Quantity.** Takes effect now.
  * - **Plan, `immediate: true`.** Takes effect now. If the new plan
@@ -7028,7 +7106,7 @@ export const getUpdateSubscriptionItemUrl = (id: string,
  * Sends `subscription.item.updated`, or
  * `subscription.pending_change.scheduled` for a scheduled plan
  * change.
- * @summary Change subscription item
+ * @summary Change a subscription item
  */
 export const updateSubscriptionItem = async (id: string,
     itemID: string,
@@ -7079,7 +7157,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateSubscriptionItemMutationError = Error | UnauthorizedResponse | RateLimitedResponse
 
     /**
- * @summary Change subscription item
+ * @summary Change a subscription item
  */
 export const useUpdateSubscriptionItem = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSubscriptionItem>>, TError,{id: string;itemID: string;data: UpdateSubscriptionItemBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -7103,7 +7181,9 @@ export const getRemoveSubscriptionItemUrl = (id: string,
 
 /**
  * Removes an item from the subscription. The last item of an active
- * subscription cannot be removed; cancel the subscription instead.
+ * subscription cannot be removed; cancel the subscription instead. A
+ * period that ended and is not invoiced yet is billed first. Takes
+ * no body.
  *
  * On an active subscription, the unused part of a base fee billed in
  * advance is credited in the same transaction. A plan billed in
@@ -7111,7 +7191,7 @@ export const getRemoveSubscriptionItemUrl = (id: string,
  * the subscription.
  *
  * Sends the `subscription.item.removed` webhook event.
- * @summary Remove subscription item
+ * @summary Remove a subscription item
  */
 export const removeSubscriptionItem = async (id: string,
     itemID: string, options?: RequestInit): Promise<void> => {
@@ -7161,7 +7241,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RemoveSubscriptionItemMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Remove subscription item
+ * @summary Remove a subscription item
  */
 export const useRemoveSubscriptionItem = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeSubscriptionItem>>, TError,{id: string;itemID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -7268,7 +7348,7 @@ export const getGetSubscriptionTimelineUrl = (id: string,) => {
  * otherwise by `timestamp`. On a test-clock subscription `timestamp`
  * (wall-clock) may therefore not be in ascending order. It holds at most the 100 most recent
  * entries. `truncated` is true when older entries were left out.
- * @summary Get subscription activity timeline
+ * @summary Get a subscription's activity timeline
  */
 export const getSubscriptionTimeline = async (id: string, options?: RequestInit): Promise<GetSubscriptionTimeline200> => {
 
@@ -7339,7 +7419,7 @@ export function useGetSubscriptionTimeline<TData = Awaited<ReturnType<typeof get
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Get subscription activity timeline
+ * @summary Get a subscription's activity timeline
  */
 
 export function useGetSubscriptionTimeline<TData = Awaited<ReturnType<typeof getSubscriptionTimeline>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
@@ -7369,9 +7449,24 @@ export const getCreateUsageEventUrl = () => {
 }
 
 /**
+ * Records one usage event for a customer and a meter. You name the
+ * customer by your `external_id` for it and the meter by its
+ * `event_name`. The event counts toward the billing period its
+ * `timestamp` falls in, and that period's invoice bills it.
+ *
+ * Every event needs its own `idempotency_key`. Send the same key when
+ * you retry the event: an event whose key is already stored is not
+ * stored again, and the call answers 200 with the first event and an
+ * `Idempotent-Replayed: true` header. Retrying is safe this way; a
+ * new key on each retry bills the usage twice.
+ *
+ * The 201 can carry a `billing_status`: what Hardcount found when the
+ * event arrived, such as a time that is already invoiced. The event
+ * is stored all the same.
+ *
  * Needs the `usage:ingest` permission: an ingest key or a secret
  * key.
- * @summary Ingest usage event
+ * @summary Send a usage event
  */
 export const createUsageEvent = async (createUsageEventBody: CreateUsageEventBody, options?: RequestInit): Promise<UsageEvent> => {
 
@@ -7388,7 +7483,7 @@ export const createUsageEvent = async (createUsageEventBody: CreateUsageEventBod
 
 
 
-export const getCreateUsageEventMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse | Error,
+export const getCreateUsageEventMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUsageEvent>>, TError,{data: CreateUsageEventBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createUsageEvent>>, TError,{data: CreateUsageEventBody}, TContext> => {
 
@@ -7417,12 +7512,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateUsageEventMutationResult = NonNullable<Awaited<ReturnType<typeof createUsageEvent>>>
     export type CreateUsageEventMutationBody = CreateUsageEventBody
-    export type CreateUsageEventMutationError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse | Error
+    export type CreateUsageEventMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Ingest usage event
+ * @summary Send a usage event
  */
-export const useCreateUsageEvent = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse | Error,
+export const useCreateUsageEvent = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUsageEvent>>, TError,{data: CreateUsageEventBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createUsageEvent>>,
@@ -7449,6 +7544,9 @@ export const getListUsageEventsUrl = (params?: ListUsageEventsParams,) => {
 }
 
 /**
+ * Lists the usage events of this account and mode, newest first by
+ * `timestamp`. The filters combine; `total` counts every matching
+ * event. Needs usage read permission.
  * @summary List usage events
  */
 export const listUsageEvents = async (params?: ListUsageEventsParams, options?: RequestInit): Promise<ListUsageEvents200> => {
@@ -7550,6 +7648,9 @@ export const getCreateUsageEventBatchUrl = () => {
 }
 
 /**
+ * Records up to 1,000 usage events in one call, in a body of at most
+ * 1 MB. Each event has the same fields as `POST /v1/usage-events`.
+ *
  * The batch is atomic: every event validates, then all of them
  * commit in one transaction. On any validation failure nothing is
  * ingested. Every event must carry its own `idempotency_key`; an
@@ -7561,7 +7662,7 @@ export const getCreateUsageEventBatchUrl = () => {
  * earlier event or by another event in the batch. Those events
  * were not stored. Needs the `usage:ingest` permission: an ingest
  * key or a secret key.
- * @summary Batch ingest usage events (max 1000, all-or-nothing)
+ * @summary Send a batch of usage events
  */
 export const createUsageEventBatch = async (createUsageEventBatchBodyItem: CreateUsageEventBatchBodyItem[], options?: RequestInit): Promise<UsageEventBatchResult> => {
 
@@ -7578,7 +7679,7 @@ export const createUsageEventBatch = async (createUsageEventBatchBodyItem: Creat
 
 
 
-export const getCreateUsageEventBatchMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse | Error,
+export const getCreateUsageEventBatchMutationOptions = <TError = Error | UnauthorizedResponse | CreateUsageEventBatch422 | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUsageEventBatch>>, TError,{data: CreateUsageEventBatchBodyItem[]}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createUsageEventBatch>>, TError,{data: CreateUsageEventBatchBodyItem[]}, TContext> => {
 
@@ -7607,12 +7708,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateUsageEventBatchMutationResult = NonNullable<Awaited<ReturnType<typeof createUsageEventBatch>>>
     export type CreateUsageEventBatchMutationBody = CreateUsageEventBatchBodyItem[]
-    export type CreateUsageEventBatchMutationError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse | Error
+    export type CreateUsageEventBatchMutationError = Error | UnauthorizedResponse | CreateUsageEventBatch422 | RateLimitedResponse
 
     /**
- * @summary Batch ingest usage events (max 1000, all-or-nothing)
+ * @summary Send a batch of usage events
  */
-export const useCreateUsageEventBatch = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse | Error,
+export const useCreateUsageEventBatch = <TError = Error | UnauthorizedResponse | CreateUsageEventBatch422 | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUsageEventBatch>>, TError,{data: CreateUsageEventBatchBodyItem[]}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createUsageEventBatch>>,
@@ -8005,7 +8106,7 @@ export const getAggregateUsageEventsUrl = (params?: AggregateUsageEventsParams,)
  * `total` stays the plain sum of reported quantities. `total_units`
  * adds quantities across all meters whatever their units, and is kept
  * for compatibility only.
- * @summary Usage totals
+ * @summary Get usage totals
  */
 export const aggregateUsageEvents = async (params?: AggregateUsageEventsParams, options?: RequestInit): Promise<UsageAggregate> => {
 
@@ -8076,7 +8177,7 @@ export function useAggregateUsageEvents<TData = Awaited<ReturnType<typeof aggreg
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Usage totals
+ * @summary Get usage totals
  */
 
 export function useAggregateUsageEvents<TData = Awaited<ReturnType<typeof aggregateUsageEvents>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
@@ -11805,7 +11906,20 @@ export const getRunBillingUrl = () => {
 }
 
 /**
- * @summary Trigger billing cycle
+ * Runs the billing run now for this account and mode, the same run
+ * the scheduler makes. It invoices every subscription that is due:
+ * an `active` or `trialing` subscription whose period ended, or whose
+ * scheduled mid-period cancel came, more than the invoice grace ago
+ * (`INVOICE_GRACE_PERIOD`, 1 hour by default), so usage that arrives
+ * late still makes its invoice. A subscription overdue for several
+ * periods gets one invoice per period.
+ *
+ * Subscriptions on a test clock are not included; advance the clock
+ * instead. A subscription whose billing is failing and is waiting for
+ * its next attempt, or is parked, is skipped; to retry one, use
+ * `POST /v1/subscriptions/{id}/retry-billing`. An audit log entry
+ * records the run. Takes no body.
+ * @summary Run billing now
  */
 export const runBilling = async ( options?: RequestInit): Promise<RunBilling200 | RunBilling206> => {
 
@@ -11822,7 +11936,7 @@ export const runBilling = async ( options?: RequestInit): Promise<RunBilling200 
 
 
 
-export const getRunBillingMutationOptions = <TError = UnauthorizedResponse | RateLimitedResponse,
+export const getRunBillingMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runBilling>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof runBilling>>, TError,void, TContext> => {
 
@@ -11851,12 +11965,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RunBillingMutationResult = NonNullable<Awaited<ReturnType<typeof runBilling>>>
 
-    export type RunBillingMutationError = UnauthorizedResponse | RateLimitedResponse
+    export type RunBillingMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Trigger billing cycle
+ * @summary Run billing now
  */
-export const useRunBilling = <TError = UnauthorizedResponse | RateLimitedResponse,
+export const useRunBilling = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runBilling>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof runBilling>>,
@@ -11883,9 +11997,11 @@ export const getListProviderCostsUrl = (params?: ListProviderCostsParams,) => {
 }
 
 /**
- * The operator's COGS table (ADR-079): what THEY pay LLM providers per
- * token, keyed by provider/model/token_type. Current-rate semantics —
- * one row per key, edited in place; per-event stamps are the history.
+ * Your provider cost rates: what you pay AI providers per token, one
+ * rate per provider, model and token type, ordered by provider, model
+ * and token type. A rate is edited in place. The cost stamped on each
+ * usage event when it arrived is the history, so changing a rate never
+ * changes past events.
  * @summary List provider cost rates
  */
 export const listProviderCosts = async (params?: ListProviderCostsParams, options?: RequestInit): Promise<ListProviderCosts200> => {
@@ -11987,6 +12103,11 @@ export const getUpsertProviderCostUrl = () => {
 }
 
 /**
+ * Sets the rate for one provider, model and token type: it creates the
+ * rate, or changes it when one exists for that key. `provider` and
+ * `token_type` are stored in lower case. The rate costs usage events
+ * that arrive from now on; events already stamped keep their cost. The
+ * write is recorded in the audit log.
  * @summary Create or update a provider cost rate
  */
 export const upsertProviderCost = async (upsertProviderCostBody: UpsertProviderCostBody, options?: RequestInit): Promise<ProviderCostRate> => {
@@ -12058,7 +12179,10 @@ export const getDeleteProviderCostUrl = (id: string,) => {
 }
 
 /**
- * Stamped events keep their snapshot — deletion never rewrites history.
+ * Deletes the rate. Usage events it already costed keep their stamped
+ * cost. Events that arrive later with its labels get no cost (the margin
+ * report counts them in `unresolved_events`) until you set a rate again.
+ * The delete is recorded in the audit log. Send no body.
  * @summary Delete a provider cost rate
  */
 export const deleteProviderCost = async (id: string, options?: RequestInit): Promise<void> => {
@@ -12076,7 +12200,7 @@ export const deleteProviderCost = async (id: string, options?: RequestInit): Pro
 
 
 
-export const getDeleteProviderCostMutationOptions = <TError = UnauthorizedResponse | RateLimitedResponse,
+export const getDeleteProviderCostMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProviderCost>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteProviderCost>>, TError,{id: string}, TContext> => {
 
@@ -12105,12 +12229,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteProviderCostMutationResult = NonNullable<Awaited<ReturnType<typeof deleteProviderCost>>>
 
-    export type DeleteProviderCostMutationError = UnauthorizedResponse | RateLimitedResponse
+    export type DeleteProviderCostMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Delete a provider cost rate
  */
-export const useDeleteProviderCost = <TError = UnauthorizedResponse | RateLimitedResponse,
+export const useDeleteProviderCost = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProviderCost>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteProviderCost>>,
@@ -12138,18 +12262,20 @@ export const getGetCustomerMarginUrl = (id: string,
 }
 
 /**
- * Rated usage revenue vs stamped provider COGS for a window (ADR-079).
- * A usage unit-economics view — base fees, credits, and taxes are not
- * included. Per-model margin renders only where the price that billed
- * the usage names the model; other revenue is reported unattributed,
- * never allocated by heuristic.
+ * The customer's rated usage revenue against the provider cost stamped
+ * on its usage events, for a window. It is a usage unit-economics view:
+ * base fees, credits and taxes are not included. Per-model margin shows
+ * only where the price that billed the usage names the model; other
+ * revenue is reported as unattributed, never split by a guess. Provider
+ * costs never appear on the public cost dashboard.
  *
  * The window is `[from, to)`: `from` inclusive, `to` exclusive. A
  * missing bound defaults to the last 30 days ending at the customer's
- * current time, which is the test clock's frozen time when the
- * customer is on a test clock. `from` and `to` take RFC 3339 instants
- * only (no bare dates), and `from` must be before `to`.
- * @summary Per-customer margin report (operator only)
+ * current time, which is the test clock's time when the customer is on a
+ * test clock. `from` and `to` take RFC 3339 instants only (no bare
+ * dates), and `from` must be before `to`. The window may be at most one
+ * year long.
+ * @summary Get a customer's margin report
  */
 export const getCustomerMargin = async (id: string,
     params?: GetCustomerMarginParams, options?: RequestInit): Promise<MarginReport> => {
@@ -12226,7 +12352,7 @@ export function useGetCustomerMargin<TData = Awaited<ReturnType<typeof getCustom
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Per-customer margin report (operator only)
+ * @summary Get a customer's margin report
  */
 
 export function useGetCustomerMargin<TData = Awaited<ReturnType<typeof getCustomerMargin>>, TError = Error | UnauthorizedResponse | RateLimitedResponse>(
@@ -12260,8 +12386,9 @@ export const getGrantCreditsUrl = () => {
  * Adds a block of credit in `currency`. The credit pays only the
  * customer's invoices in that currency; it is never converted. A
  * grant in a currency the customer is not billed in is accepted and
- * shows as its own balance.
- * @summary Grant credits to customer
+ * shows as its own balance. Invoices draw the credit when they are
+ * billed. The audit log records the grant.
+ * @summary Grant credit to a customer
  */
 export const grantCredits = async (grantCreditsBody: GrantCreditsBody, options?: RequestInit): Promise<CreditLedgerEntry> => {
 
@@ -12310,7 +12437,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type GrantCreditsMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Grant credits to customer
+ * @summary Grant credit to a customer
  */
 export const useGrantCredits = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof grantCredits>>, TError,{data: GrantCreditsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -12335,7 +12462,7 @@ export const getGetCreditBalanceUrl = (customerId: string,) => {
  * The customer's balances, one per currency the customer's credit
  * ledger holds, ordered by currency. Empty when the customer has no
  * ledger entry.
- * @summary Get customer credit balance
+ * @summary Get a customer's credit balance
  */
 export const getCreditBalance = async (customerId: string, options?: RequestInit): Promise<GetCreditBalance200> => {
 
@@ -12406,7 +12533,7 @@ export function useGetCreditBalance<TData = Awaited<ReturnType<typeof getCreditB
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Get customer credit balance
+ * @summary Get a customer's credit balance
  */
 
 export function useGetCreditBalance<TData = Awaited<ReturnType<typeof getCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
@@ -12450,7 +12577,7 @@ export const getGetLiveCreditBalanceUrl = (customerId: string,) => {
  *
  * Not included, so the figure can read high: tax, base fees billed at
  * period end, and amounts due on unpaid invoices. Requires a secret key.
- * @summary Get customer live credit balance
+ * @summary Get a customer's live credit balance
  */
 export const getLiveCreditBalance = async (customerId: string, options?: RequestInit): Promise<CreditLiveBalance> => {
 
@@ -12474,7 +12601,7 @@ export const getGetLiveCreditBalanceQueryKey = (customerId: string,) => {
     }
 
 
-export const getGetLiveCreditBalanceQueryOptions = <TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLiveCreditBalance>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetLiveCreditBalanceQueryOptions = <TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLiveCreditBalance>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -12493,10 +12620,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetLiveCreditBalanceQueryResult = NonNullable<Awaited<ReturnType<typeof getLiveCreditBalance>>>
-export type GetLiveCreditBalanceQueryError = UnauthorizedResponse | void | RateLimitedResponse
+export type GetLiveCreditBalanceQueryError = UnauthorizedResponse | Error | RateLimitedResponse
 
 
-export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(
+export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  customerId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLiveCreditBalance>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getLiveCreditBalance>>,
@@ -12506,7 +12633,7 @@ export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiv
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(
+export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLiveCreditBalance>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getLiveCreditBalance>>,
@@ -12516,15 +12643,15 @@ export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiv
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(
+export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLiveCreditBalance>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Get customer live credit balance
+ * @summary Get a customer's live credit balance
  */
 
-export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(
+export function useGetLiveCreditBalance<TData = Awaited<ReturnType<typeof getLiveCreditBalance>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLiveCreditBalance>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -12558,10 +12685,15 @@ export const getListTestClocksUrl = (params?: ListTestClocksParams,) => {
 }
 
 /**
- * Test mode only — returns 403 in live mode. Test clocks let
- * operators simulate time-bound billing flows without waiting for
- * wall-clock advances. See ADR / docs for the simulator semantics.
- * @summary List test clocks for the active tenant
+ * Lists the test clocks of this account, newest first. A test clock
+ * lets you walk a customer through months of billing in minutes:
+ * customers attached to it are billed on its time, and you move that
+ * time forward with `POST /v1/test-clocks/{id}/advance`.
+ *
+ * Test mode only: a live-mode key or session gets 403. Every
+ * test-clock route needs the `testclock:write` permission, reads
+ * included.
+ * @summary List test clocks
  */
 export const listTestClocks = async (params?: ListTestClocksParams, options?: RequestInit): Promise<ListTestClocks200> => {
 
@@ -12632,7 +12764,7 @@ export function useListTestClocks<TData = Awaited<ReturnType<typeof listTestCloc
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary List test clocks for the active tenant
+ * @summary List test clocks
  */
 
 export function useListTestClocks<TData = Awaited<ReturnType<typeof listTestClocks>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
@@ -12662,8 +12794,9 @@ export const getCreateTestClockUrl = () => {
 }
 
 /**
- * Test mode only. The clock starts in `ready` state at
- * `frozen_time`. Use `/advance` to move it forward.
+ * Creates a test clock in `ready` state at `frozen_time`. Attach
+ * customers to it, then use `POST /v1/test-clocks/{id}/advance` to
+ * move it forward. Test mode only.
  * @summary Create a test clock
  */
 export const createTestClock = async (createTestClockBody: CreateTestClockBody, options?: RequestInit): Promise<TestClock> => {
@@ -12681,7 +12814,7 @@ export const createTestClock = async (createTestClockBody: CreateTestClockBody, 
 
 
 
-export const getCreateTestClockMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | RateLimitedResponse,
+export const getCreateTestClockMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTestClock>>, TError,{data: CreateTestClockBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createTestClock>>, TError,{data: CreateTestClockBody}, TContext> => {
 
@@ -12710,12 +12843,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateTestClockMutationResult = NonNullable<Awaited<ReturnType<typeof createTestClock>>>
     export type CreateTestClockMutationBody = CreateTestClockBody
-    export type CreateTestClockMutationError = InvalidBodyResponse | UnauthorizedResponse | RateLimitedResponse
+    export type CreateTestClockMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create a test clock
  */
-export const useCreateTestClock = <TError = InvalidBodyResponse | UnauthorizedResponse | RateLimitedResponse,
+export const useCreateTestClock = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTestClock>>, TError,{data: CreateTestClockBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createTestClock>>,
@@ -12735,7 +12868,9 @@ export const getGetTestClockUrl = (id: string,) => {
 }
 
 /**
- * @summary Get a test clock by id
+ * Returns one test clock. While an advance runs, poll this route until
+ * `status` leaves `advancing`. Test mode only.
+ * @summary Get a test clock
  */
 export const getTestClock = async (id: string, options?: RequestInit): Promise<TestClock> => {
 
@@ -12759,7 +12894,7 @@ export const getGetTestClockQueryKey = (id: string,) => {
     }
 
 
-export const getGetTestClockQueryOptions = <TData = Awaited<ReturnType<typeof getTestClock>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTestClock>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetTestClockQueryOptions = <TData = Awaited<ReturnType<typeof getTestClock>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTestClock>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -12778,10 +12913,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetTestClockQueryResult = NonNullable<Awaited<ReturnType<typeof getTestClock>>>
-export type GetTestClockQueryError = UnauthorizedResponse | void | RateLimitedResponse
+export type GetTestClockQueryError = UnauthorizedResponse | Error | RateLimitedResponse
 
 
-export function useGetTestClock<TData = Awaited<ReturnType<typeof getTestClock>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(
+export function useGetTestClock<TData = Awaited<ReturnType<typeof getTestClock>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTestClock>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getTestClock>>,
@@ -12791,7 +12926,7 @@ export function useGetTestClock<TData = Awaited<ReturnType<typeof getTestClock>>
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetTestClock<TData = Awaited<ReturnType<typeof getTestClock>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(
+export function useGetTestClock<TData = Awaited<ReturnType<typeof getTestClock>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTestClock>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getTestClock>>,
@@ -12801,15 +12936,15 @@ export function useGetTestClock<TData = Awaited<ReturnType<typeof getTestClock>>
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetTestClock<TData = Awaited<ReturnType<typeof getTestClock>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(
+export function useGetTestClock<TData = Awaited<ReturnType<typeof getTestClock>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTestClock>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Get a test clock by id
+ * @summary Get a test clock
  */
 
-export function useGetTestClock<TData = Awaited<ReturnType<typeof getTestClock>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(
+export function useGetTestClock<TData = Awaited<ReturnType<typeof getTestClock>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTestClock>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -12836,7 +12971,25 @@ export const getDeleteTestClockUrl = (id: string,) => {
 }
 
 /**
- * @summary Delete a test clock (cascades to pinned subscriptions)
+ * Deletes the clock and everything simulated on it, in one
+ * transaction. Every customer attached to the clock is deleted, with
+ * all of that customer's:
+ *
+ * - subscriptions, with their items and item history;
+ * - invoices, with their line items, tax calculations, dunning runs
+ *   and their events, and refunds recorded from Stripe;
+ * - credit notes and their lines;
+ * - usage events and credit ledger entries;
+ * - price overrides, billing profile, payment methods,
+ *   payment-update links, and portal sessions and links.
+ *
+ * The emails queued for the clock and the clock's own effective
+ * dates on plan price versions are deleted too. Nothing that belongs
+ * to the account is touched: meters, plans and their prices, dunning
+ * policies, API keys and settings stay, and so does the audit log,
+ * which records the deletion. Webhook events already sent are not
+ * recalled. Takes no body.
+ * @summary Delete a test clock and its simulated data
  */
 export const deleteTestClock = async (id: string, options?: RequestInit): Promise<DeleteTestClock200> => {
 
@@ -12853,7 +13006,7 @@ export const deleteTestClock = async (id: string, options?: RequestInit): Promis
 
 
 
-export const getDeleteTestClockMutationOptions = <TError = UnauthorizedResponse | RateLimitedResponse,
+export const getDeleteTestClockMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTestClock>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteTestClock>>, TError,{id: string}, TContext> => {
 
@@ -12882,12 +13035,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteTestClockMutationResult = NonNullable<Awaited<ReturnType<typeof deleteTestClock>>>
 
-    export type DeleteTestClockMutationError = UnauthorizedResponse | RateLimitedResponse
+    export type DeleteTestClockMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Delete a test clock (cascades to pinned subscriptions)
+ * @summary Delete a test clock and its simulated data
  */
-export const useDeleteTestClock = <TError = UnauthorizedResponse | RateLimitedResponse,
+export const useDeleteTestClock = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTestClock>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteTestClock>>,
@@ -12915,7 +13068,9 @@ export const getListTestClockSubscriptionsUrl = (id: string,
 }
 
 /**
- * @summary List subscriptions pinned to this clock
+ * Lists the subscriptions that run on the clock: those of the
+ * customers attached to it. Test mode only.
+ * @summary List a test clock's subscriptions
  */
 export const listTestClockSubscriptions = async (id: string,
     params?: ListTestClockSubscriptionsParams, options?: RequestInit): Promise<ListTestClockSubscriptions200> => {
@@ -12941,7 +13096,7 @@ export const getListTestClockSubscriptionsQueryKey = (id: string,
     }
 
 
-export const getListTestClockSubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | void | InvalidPageResponse | RateLimitedResponse>(id: string,
+export const getListTestClockSubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(id: string,
     params?: ListTestClockSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
@@ -12961,10 +13116,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListTestClockSubscriptionsQueryResult = NonNullable<Awaited<ReturnType<typeof listTestClockSubscriptions>>>
-export type ListTestClockSubscriptionsQueryError = UnauthorizedResponse | void | InvalidPageResponse | RateLimitedResponse
+export type ListTestClockSubscriptionsQueryError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse
 
 
-export function useListTestClockSubscriptions<TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | void | InvalidPageResponse | RateLimitedResponse>(
+export function useListTestClockSubscriptions<TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params: undefined |  ListTestClockSubscriptionsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -12975,7 +13130,7 @@ export function useListTestClockSubscriptions<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListTestClockSubscriptions<TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | void | InvalidPageResponse | RateLimitedResponse>(
+export function useListTestClockSubscriptions<TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListTestClockSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -12986,16 +13141,16 @@ export function useListTestClockSubscriptions<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListTestClockSubscriptions<TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | void | InvalidPageResponse | RateLimitedResponse>(
+export function useListTestClockSubscriptions<TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListTestClockSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary List subscriptions pinned to this clock
+ * @summary List a test clock's subscriptions
  */
 
-export function useListTestClockSubscriptions<TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | void | InvalidPageResponse | RateLimitedResponse>(
+export function useListTestClockSubscriptions<TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
  id: string,
     params?: ListTestClockSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -13023,20 +13178,37 @@ export const getAdvanceTestClockUrl = (id: string,) => {
 }
 
 /**
- * Moves the clock forward and runs billing catchup asynchronously
- * for every subscription pinned to this clock. The 200 returns as
- * soon as the clock is marked `advancing` — a background worker
- * drains the catchup; poll `GET /v1/test-clocks/{id}` until status
- * leaves `advancing`. Concurrent advances 409 while catchup runs.
- * Catchup failures park the clock in `internal_failure` — resume
- * it with `POST /v1/test-clocks/{id}/retry-advance` (deletion is
- * not required). ADR-018. Catchup bills every skipped period
- * before it runs payment retries and dunning, so when a dunning
- * policy cancels or pauses a subscription, advance to the time of
- * the invoice's last retry first, then to the next billing date.
- * The cancel or pause is dated at the advance target, and one
- * longer advance bills a period a real clock would not (#1276).
- * @summary Advance the clock to a new frozen_time
+ * Moves the clock forward to `frozen_time` and catches billing up for
+ * every customer and subscription attached to it. The call returns
+ * 200 as soon as the clock is `advancing`; the catch-up runs in the
+ * background. Poll `GET /v1/test-clocks/{id}` until `status` leaves
+ * `advancing`. While it runs, another advance answers 409. One
+ * advance moves the clock at most one year; split a longer span into
+ * several advances.
+ *
+ * The catch-up runs these steps in order: trials that ended, period
+ * invoices (every period that came due), collection pauses that
+ * ended, billing thresholds, tax retries, charges, credit notes that
+ * were waiting to be issued, dunning steps, and credit expiry.
+ * `last_advance_summary` counts what each step did. If a step fails,
+ * the later steps still run, and the clock ends in
+ * `internal_failure` with a `last_failure_reason`. Resume it with
+ * `POST /v1/test-clocks/{id}/retry-advance`; you do not need to
+ * delete it.
+ *
+ * Every period that came due is invoiced before payment retries and
+ * dunning run. So when a dunning policy cancels or pauses a
+ * subscription during one long advance, the next period's invoice
+ * may already exist. The cancel or pause is dated at the escalation:
+ * the time of the invoice's final retry, or when that retry's failure
+ * was recorded if that is later. It is never dated before the start
+ * of the subscription's current period. When the escalation falls
+ * before that start, the action lands at the period's start, which
+ * uses none of the period and relieves any base fee billed in advance
+ * for it in full. To see the steps as a real clock would, advance to
+ * the time of the invoice's last retry first, then to the next
+ * billing date.
+ * @summary Advance a test clock
  */
 export const advanceTestClock = async (id: string,
     advanceTestClockBody: AdvanceTestClockBody, options?: RequestInit): Promise<TestClock> => {
@@ -13054,7 +13226,7 @@ export const advanceTestClock = async (id: string,
 
 
 
-export const getAdvanceTestClockMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse,
+export const getAdvanceTestClockMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof advanceTestClock>>, TError,{id: string;data: AdvanceTestClockBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof advanceTestClock>>, TError,{id: string;data: AdvanceTestClockBody}, TContext> => {
 
@@ -13083,12 +13255,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AdvanceTestClockMutationResult = NonNullable<Awaited<ReturnType<typeof advanceTestClock>>>
     export type AdvanceTestClockMutationBody = AdvanceTestClockBody
-    export type AdvanceTestClockMutationError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse
+    export type AdvanceTestClockMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Advance the clock to a new frozen_time
+ * @summary Advance a test clock
  */
-export const useAdvanceTestClock = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse,
+export const useAdvanceTestClock = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof advanceTestClock>>, TError,{id: string;data: AdvanceTestClockBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof advanceTestClock>>,
@@ -13108,15 +13280,14 @@ export const getRetryTestClockAdvanceUrl = (id: string,) => {
 }
 
 /**
- * Resumes a clock parked in `internal_failure` after a prior
- * catchup error. Catchup is idempotent (only subscriptions with
- * `next_billing_at <= frozen_time` are processed), so resuming
- * from where the previous attempt stopped is safe; `frozen_time`
- * keeps the value stamped by the original advance. Asynchronous
- * like advance: the 200 returns the clock back in `advancing`;
- * poll `GET /v1/test-clocks/{id}` until status leaves `advancing`.
- * ADR-018.
- * @summary Retry catchup on a clock parked in internal_failure
+ * Resumes a clock parked in `internal_failure` after a failed
+ * catch-up. The catch-up bills only what is still due at the clock's
+ * time, so resuming where the previous attempt stopped is safe;
+ * `frozen_time` keeps the value the failed advance set. Asynchronous
+ * like an advance: the 200 returns the clock back in `advancing`;
+ * poll `GET /v1/test-clocks/{id}` until `status` leaves `advancing`.
+ * Takes no body.
+ * @summary Retry a failed test clock advance
  */
 export const retryTestClockAdvance = async (id: string, options?: RequestInit): Promise<TestClock> => {
 
@@ -13133,7 +13304,7 @@ export const retryTestClockAdvance = async (id: string, options?: RequestInit): 
 
 
 
-export const getRetryTestClockAdvanceMutationOptions = <TError = UnauthorizedResponse | void | RateLimitedResponse,
+export const getRetryTestClockAdvanceMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryTestClockAdvance>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof retryTestClockAdvance>>, TError,{id: string}, TContext> => {
 
@@ -13162,12 +13333,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RetryTestClockAdvanceMutationResult = NonNullable<Awaited<ReturnType<typeof retryTestClockAdvance>>>
 
-    export type RetryTestClockAdvanceMutationError = UnauthorizedResponse | void | RateLimitedResponse
+    export type RetryTestClockAdvanceMutationError = UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Retry catchup on a clock parked in internal_failure
+ * @summary Retry a failed test clock advance
  */
-export const useRetryTestClockAdvance = <TError = UnauthorizedResponse | void | RateLimitedResponse,
+export const useRetryTestClockAdvance = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryTestClockAdvance>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof retryTestClockAdvance>>,
@@ -13195,8 +13366,8 @@ export const getListTestClockCustomersUrl = (id: string,
 }
 
 /**
- * Test mode only; a live-mode key gets 403. Returns every customer
- * attached to the clock. The list is not paginated.
+ * Lists the customers attached to the clock, one page at a time.
+ * Test mode only; a live-mode key gets 403.
  * @summary List customers attached to a test clock
  */
 export const listTestClockCustomers = async (id: string,
@@ -13312,11 +13483,10 @@ export const getListRecipesUrl = (params?: ListRecipesParams,) => {
 }
 
 /**
- * Every recipe in the embedded registry, tagged with this tenant's
- * installation state in the session's livemode. `instantiated` present
- * means installed (the dashboard renders an "Installed" badge instead
- * of the Install CTA); re-apply is an idempotent no-op and there is no
- * uninstall (ADR-085).
+ * Every recipe built into Hardcount, with its values at their defaults.
+ * A recipe installed in this account and mode carries its install record
+ * in `instantiated`. Installing again changes nothing, and there is no
+ * uninstall.
  * @summary List recipes
  */
 export const listRecipes = async (params?: ListRecipesParams, options?: RequestInit): Promise<ListRecipes200> => {
@@ -13425,7 +13595,9 @@ export const getListRecipeInstancesUrl = (params?: ListRecipeInstancesParams,) =
 }
 
 /**
- * @summary List installed recipe instances
+ * The install records of the recipes installed in this account and mode,
+ * one per recipe.
+ * @summary List installed recipes
  */
 export const listRecipeInstances = async (params?: ListRecipeInstancesParams, options?: RequestInit): Promise<ListRecipeInstances200> => {
 
@@ -13496,7 +13668,7 @@ export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRec
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary List installed recipe instances
+ * @summary List installed recipes
  */
 
 export function useListRecipeInstances<TData = Awaited<ReturnType<typeof listRecipeInstances>>, TError = UnauthorizedResponse | InvalidPageResponse | RateLimitedResponse>(
@@ -13526,8 +13698,9 @@ export const getGetRecipeUrl = (key: string,) => {
 }
 
 /**
- * Registry only — no DB read, no install state.
- * @summary Get recipe
+ * One recipe, with its values at their defaults. It does not say whether
+ * the recipe is installed: the list does.
+ * @summary Get a recipe
  */
 export const getRecipe = async (key: string, options?: RequestInit): Promise<RecipeDetail> => {
 
@@ -13551,7 +13724,7 @@ export const getGetRecipeQueryKey = (key: string,) => {
     }
 
 
-export const getGetRecipeQueryOptions = <TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(key: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRecipe>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetRecipeQueryOptions = <TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(key: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRecipe>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -13570,10 +13743,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetRecipeQueryResult = NonNullable<Awaited<ReturnType<typeof getRecipe>>>
-export type GetRecipeQueryError = UnauthorizedResponse | void | RateLimitedResponse
+export type GetRecipeQueryError = UnauthorizedResponse | Error | RateLimitedResponse
 
 
-export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(
+export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  key: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRecipe>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getRecipe>>,
@@ -13583,7 +13756,7 @@ export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TErr
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(
+export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  key: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRecipe>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getRecipe>>,
@@ -13593,15 +13766,15 @@ export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TErr
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(
+export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  key: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRecipe>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Get recipe
+ * @summary Get a recipe
  */
 
-export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | void | RateLimitedResponse>(
+export function useGetRecipe<TData = Awaited<ReturnType<typeof getRecipe>>, TError = UnauthorizedResponse | Error | RateLimitedResponse>(
  key: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRecipe>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -13628,10 +13801,10 @@ export const getPreviewRecipeUrl = (key: string,) => {
 }
 
 /**
- * Renders the recipe with caller-supplied overrides and returns the
- * would-be-created object graph. Pure in-memory — no DB writes, no
- * audit row.
- * @summary Preview recipe
+ * Shows what installing the recipe with your overrides would create: its
+ * meters and plans with their prices. Nothing is written, and nothing
+ * goes to the audit log. The body is optional.
+ * @summary Preview a recipe
  */
 export const previewRecipe = async (key: string,
     previewRecipeBody?: PreviewRecipeBody, options?: RequestInit): Promise<RecipePreviewResult> => {
@@ -13649,7 +13822,7 @@ export const previewRecipe = async (key: string,
 
 
 
-export const getPreviewRecipeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse,
+export const getPreviewRecipeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewRecipe>>, TError,{key: string;data?: PreviewRecipeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof previewRecipe>>, TError,{key: string;data?: PreviewRecipeBody}, TContext> => {
 
@@ -13678,12 +13851,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PreviewRecipeMutationResult = NonNullable<Awaited<ReturnType<typeof previewRecipe>>>
     export type PreviewRecipeMutationBody = PreviewRecipeBody | undefined
-    export type PreviewRecipeMutationError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse
+    export type PreviewRecipeMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Preview recipe
+ * @summary Preview a recipe
  */
-export const usePreviewRecipe = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse,
+export const usePreviewRecipe = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewRecipe>>, TError,{key: string;data?: PreviewRecipeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof previewRecipe>>,
@@ -13703,18 +13876,22 @@ export const getInstantiateRecipeUrl = (key: string,) => {
 }
 
 /**
- * Applies the recipe for the tenant under one transaction: meters are
- * adopted-or-created, a fresh born-unique plan is generated with the
- * recipe's prices, then the install badge written. It creates nothing
- * else: no dunning policy and no webhook endpoint. Adopting a meter
- * other plans price changes none of their prices.
- * Idempotent per (tenant, livemode): re-posting a recipe that is
- * installed returns the EXISTING instance with 201 and creates
- * nothing (ADR-085; badge livemode-scoped per m0157). Two installs
+ * Installs the recipe in one transaction: it creates the recipe's
+ * meters, reusing a meter that has the same `event_name` and
+ * aggregation, then a new plan with the recipe's prices, then the
+ * install record. If a step fails, nothing is installed. It creates
+ * nothing else: no dunning policy and no webhook endpoint. Reusing a
+ * meter that other plans price changes none of their prices. When the
+ * plan's code is taken, the new plan gets the first free code with `_2`,
+ * `_3` and so on added.
+ *
+ * Installing a recipe that is already installed in this account and mode
+ * returns the existing record with 201 and creates nothing. Two installs
  * that run at the same time can conflict: the second gets a 409 and
- * installs nothing. A retry returns the first install, or, for
- * another recipe, reuses the meter it made.
- * @summary Instantiate recipe (idempotent apply)
+ * installs nothing. A retry returns the first install, or, for another
+ * recipe, reuses the meter it made. An install is written to the audit
+ * log; a repeat that installs nothing is not. The body is optional.
+ * @summary Install a recipe
  */
 export const instantiateRecipe = async (key: string,
     instantiateRecipeBody?: InstantiateRecipeBody, options?: RequestInit): Promise<RecipeInstance> => {
@@ -13732,7 +13909,7 @@ export const instantiateRecipe = async (key: string,
 
 
 
-export const getInstantiateRecipeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse,
+export const getInstantiateRecipeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof instantiateRecipe>>, TError,{key: string;data?: InstantiateRecipeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof instantiateRecipe>>, TError,{key: string;data?: InstantiateRecipeBody}, TContext> => {
 
@@ -13761,12 +13938,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type InstantiateRecipeMutationResult = NonNullable<Awaited<ReturnType<typeof instantiateRecipe>>>
     export type InstantiateRecipeMutationBody = InstantiateRecipeBody | undefined
-    export type InstantiateRecipeMutationError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse
+    export type InstantiateRecipeMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
- * @summary Instantiate recipe (idempotent apply)
+ * @summary Install a recipe
  */
-export const useInstantiateRecipe = <TError = InvalidBodyResponse | UnauthorizedResponse | void | RateLimitedResponse,
+export const useInstantiateRecipe = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof instantiateRecipe>>, TError,{key: string;data?: InstantiateRecipeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof instantiateRecipe>>,
@@ -15784,18 +15961,20 @@ export const getCreatePriceOverrideUrl = () => {
  * Gives one customer its own rate for one plan price. The override is
  * keyed by the price, so it keeps applying when the price's rate
  * changes; removing the price ends it. If the customer already has an
- * active override for that price, it is closed and replaced by this
- * one. A new or replaced rate applies from the customer's next
- * billing period, in the customer's time (its test clock's, if it has
- * one); the current period keeps the rate it started with. It applies
- * from the join when a subscription of the customer first joins the
- * plan in a period after it is created: an override created before a
- * subscription starts (after a trial, before the trial ends), even on
- * the same day, applies from its first period. On a test clock, it takes effect just after the
- * clock's time, so a subscription created at that same clock time
- * bills the list price; advance the clock first. The override takes
- * the plan's currency. A plan swap does not carry
- * it: the new plan's price is another price.
+ * active override for that price, it is closed and replaced by this one.
+ * The override takes the plan's currency. A plan swap does not carry it:
+ * the new plan's price is another price.
+ *
+ * A new or replaced rate applies from the customer's next billing
+ * period, in the customer's time (its test clock's, if it has one); the
+ * current period keeps the rate it started with. It applies from the
+ * join when a subscription of the customer first joins the plan in a
+ * period after it is created: an override created before a subscription
+ * starts (after a trial, before the trial ends), even on the same day,
+ * applies from its first period. On a test clock, it takes effect just
+ * after the clock's time, so a subscription created at that same clock
+ * time bills the list price; advance the clock first. The create is
+ * written to the audit log.
  * @summary Create a customer price override
  */
 export const createPriceOverride = async (createPriceOverrideBody: CreatePriceOverrideBody, options?: RequestInit): Promise<CustomerPriceOverride> => {
@@ -15874,8 +16053,7 @@ export const getListPriceOverridesUrl = (params?: ListPriceOverridesParams,) => 
 }
 
 /**
- * Active overrides only, newest first. Closed or deleted
- * overrides are not listed. Requires pricing write permission.
+ * Active overrides only, newest first. Ended overrides are not listed.
  * @summary List active price overrides
  */
 export const listPriceOverrides = async (params?: ListPriceOverridesParams, options?: RequestInit): Promise<ListPriceOverrides200> => {
@@ -15981,8 +16159,9 @@ export const getDeletePriceOverrideUrl = (id: string,) => {
  * to the price's rate from its next billing period, in the customer's
  * time; the current period keeps the rate it started with. A
  * subscription of the customer that first joins the plan in a period
- * after the override ends (a new subscription, an immediate plan
- * change, an added item) pays the price's rate from the join.
+ * after the override ends (a new subscription, an immediate plan change,
+ * an added item) pays the price's rate from the join. The end is written
+ * to the audit log. Send no body.
  * @summary End a customer price override
  */
 export const deletePriceOverride = async (id: string, options?: RequestInit): Promise<CustomerPriceOverride> => {
@@ -16000,7 +16179,7 @@ export const deletePriceOverride = async (id: string, options?: RequestInit): Pr
 
 
 
-export const getDeletePriceOverrideMutationOptions = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const getDeletePriceOverrideMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePriceOverride>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deletePriceOverride>>, TError,{id: string}, TContext> => {
 
@@ -16029,12 +16208,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeletePriceOverrideMutationResult = NonNullable<Awaited<ReturnType<typeof deletePriceOverride>>>
 
-    export type DeletePriceOverrideMutationError = UnauthorizedResponse | Error | RateLimitedResponse
+    export type DeletePriceOverrideMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
 
     /**
  * @summary End a customer price override
  */
-export const useDeletePriceOverride = <TError = UnauthorizedResponse | Error | RateLimitedResponse,
+export const useDeletePriceOverride = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePriceOverride>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deletePriceOverride>>,
@@ -16088,7 +16267,7 @@ export const getIngestLitellmSpendUrl = () => {
  * 503 so LiteLLM retries it. Needs the `usage:ingest` permission:
  * give the proxy an ingest key (`hc_ingest_…`), which can do nothing
  * else. A secret key works too.
- * @summary Ingest LiteLLM spend logs
+ * @summary Receive LiteLLM spend logs
  */
 export const ingestLitellmSpend = async (ingestLitellmSpendBody: IngestLitellmSpendBody, options?: RequestInit): Promise<LitellmSpendResult> => {
 
@@ -16137,7 +16316,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type IngestLitellmSpendMutationError = Error | UnauthorizedResponse | RateLimitedResponse
 
     /**
- * @summary Ingest LiteLLM spend logs
+ * @summary Receive LiteLLM spend logs
  */
 export const useIngestLitellmSpend = <TError = Error | UnauthorizedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestLitellmSpend>>, TError,{data: IngestLitellmSpendBody}, TContext>, request?: SecondParameter<typeof orvalClient>}

@@ -12,7 +12,13 @@
  */
 
 export type AggregateUsageEventsParams = {
+/**
+ * Only this customer's events (`hc_cus_…`, the Hardcount ID, not your external ID).
+ */
 customer_id?: string;
+/**
+ * Only this meter's events (`hc_mtr_…`).
+ */
 meter_id?: string;
 /**
  * Events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.

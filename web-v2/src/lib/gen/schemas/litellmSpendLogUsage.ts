@@ -12,12 +12,26 @@
  */
 import type { LitellmSpendLogUsagePromptTokensDetails } from './litellmSpendLogUsagePromptTokensDetails';
 
+/**
+ * The call's token counts. When it is absent, Hardcount reads
+ * `metadata.usage_object`, then the top-level `prompt_tokens` and
+ * `completion_tokens`.
+ */
 export type LitellmSpendLogUsage = {
   /** Includes cache-read tokens. */
   prompt_tokens?: number;
+  /** Output tokens. They become the `output` event. */
   completion_tokens?: number;
+  /** Accepted but not used. */
   total_tokens?: number;
+  /** The breakdown of `prompt_tokens`, as LiteLLM reports it. */
   prompt_tokens_details?: LitellmSpendLogUsagePromptTokensDetails;
+  /**
+     * Anthropic's cache-read tokens, included in prompt_tokens.
+     * Hardcount takes the larger of this and
+     * `prompt_tokens_details.cached_tokens` as the `cache_read`
+     * event.
+     */
   cache_read_input_tokens?: number;
   /** Cache-write tokens, included in prompt_tokens. Split into `cache_write_5m` and `cache_write_1h` by `prompt_tokens_details.cache_creation_token_details`. */
   cache_creation_input_tokens?: number;

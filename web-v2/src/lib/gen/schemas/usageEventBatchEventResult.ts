@@ -13,6 +13,9 @@
 import type { UsageBillingStatus } from './usageBillingStatus';
 import type { UsageEventBatchEventResultStatus } from './usageEventBatchEventResultStatus';
 
+/**
+ * What the batch did with one of its events.
+ */
 export interface UsageEventBatchEventResult {
   /**
      * `ingested`: the batch wrote the event. `deduplicated`: an event

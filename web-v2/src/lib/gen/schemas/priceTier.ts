@@ -11,12 +11,18 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * One tier of a graduated price.
+ */
 export interface PriceTier {
   /**
      * The tier's upper bound in whole units: the tier prices the quantity above the previous tier's bound, up to this one. `null` on the last tier, which has no upper bound. Only the last tier is `null`, and it must be.
      * @nullable
      */
   up_to: number | null;
-  /** Price per unit in cents in this tier, as a decimal string. */
+  /**
+     * Price per unit in cents in this tier, as a decimal string. `"0"`
+     * makes the tier free.
+     */
   unit_amount_cents: string;
 }

@@ -14,8 +14,18 @@ import type { CustomerOverviewOutstandingBalance } from './customerOverviewOutst
 import type { Invoice } from './invoice';
 import type { Subscription } from './subscription';
 
+/**
+ * A one-call summary of a customer for a customer page: its active
+ * subscriptions, its 5 newest invoices and what it still owes.
+ * `GET /v1/customers/{customer_id}/overview` returns it.
+ */
 export interface CustomerOverview {
+  /** The customer the overview is about. */
   customer_id: string;
+  /**
+     * The customer's subscriptions with status `active`, up to 50,
+     * with their items. Trialing subscriptions are not listed.
+     */
   active_subscriptions: Subscription[];
   /** The 5 newest invoices. */
   recent_invoices: Invoice[];

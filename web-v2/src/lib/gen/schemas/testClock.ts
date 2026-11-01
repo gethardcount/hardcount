@@ -15,11 +15,15 @@ import type { TestClockStatus } from './testClockStatus';
 
 /**
  * A clock for test mode. Customers and subscriptions attached to it
- * are billed on its time, not the real time.
+ * are billed on its time, not the real time. Returned by the
+ * `/v1/test-clocks` routes.
  */
 export interface TestClock {
+  /** The clock's ID (`hc_tclk_…`). */
   id: string;
+  /** The account the clock belongs to. */
   tenant_id?: string;
+  /** Your name for the clock. Empty when you gave none. */
   name: string;
   /** The clock's current time. */
   frozen_time: string;
@@ -29,7 +33,9 @@ export interface TestClock {
      * failed partway; resume it with `POST /v1/test-clocks/{id}/retry-advance`.
      */
   status: TestClockStatus;
+  /** When the clock was created, in real time. */
   created_at: string;
+  /** When the clock last changed, in real time. */
   updated_at: string;
   /** Why the last advance failed. Cleared by the next successful advance. */
   last_failure_reason?: string;

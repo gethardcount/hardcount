@@ -12,7 +12,9 @@
  */
 
 /**
- * Optional when the base fee is 0; the plan is then in_arrears (ADR-031).
+ * When the base fee is billed; see Plan. Absent when the recipe
+ * leaves it out, which it may only with a base fee of 0. The plan is
+ * then `in_arrears`.
  */
 export type RecipePlanBaseBillTiming = typeof RecipePlanBaseBillTiming[keyof typeof RecipePlanBaseBillTiming];
 

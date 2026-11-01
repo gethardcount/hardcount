@@ -17,9 +17,16 @@ import type { SubscriptionItemThreshold } from './subscriptionItemThreshold';
  * invoice bills the period's usage so far, and no base fee. The period
  * keeps its dates, the base fee is billed as it would be with no
  * threshold, and the period's next invoice bills the rest of the usage.
+ * Absent on a subscription with no thresholds. Set them with
+ * `PUT /v1/subscriptions/{id}/billing-thresholds`.
  */
 export interface SubscriptionBillingThresholds {
-  /** Usage threshold in cents, compared with the period's usage so far (the base fee is not counted). Absent when not set. */
+  /**
+     * Usage threshold in the subscription currency's minor unit
+     * (cents for USD), compared with the period's usage so far (the
+     * base fee is not counted). Absent when not set.
+     */
   amount_gte?: number;
+  /** Per-item usage quantity thresholds. Empty when only `amount_gte` is set. */
   item_thresholds: SubscriptionItemThreshold[];
 }

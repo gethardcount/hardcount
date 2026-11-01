@@ -11,6 +11,10 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `archived` stops new subscriptions and plan changes onto
+ * the plan. `active` brings it back.
+ */
 export type UpdatePlanBodyStatus = typeof UpdatePlanBodyStatus[keyof typeof UpdatePlanBodyStatus];
 
 

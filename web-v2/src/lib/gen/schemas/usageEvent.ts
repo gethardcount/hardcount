@@ -15,16 +15,49 @@ import type { UsageEventDimensions } from './usageEventDimensions';
 import type { UsageEventOrigin } from './usageEventOrigin';
 import type { UsageEventProviderCostSource } from './usageEventProviderCostSource';
 
+/**
+ * One usage event: a quantity of one meter's usage, for one customer,
+ * at one time. Returned by `POST /v1/usage-events` and
+ * `POST /v1/usage-events/backfill`, and listed by
+ * `GET /v1/usage-events`. An event counts toward the billing period
+ * its `timestamp` falls in.
+ */
 export interface UsageEvent {
+  /** The event's ID (`hc_evt_…`). */
   id: string;
+  /** The account the event belongs to. */
   tenant_id?: string;
+  /**
+     * The customer the event was recorded for (`hc_cus_…`): the
+     * customer whose `external_id` you sent as
+     * `external_customer_id`.
+     */
   customer_id: string;
+  /**
+     * The meter the event counts toward (`hc_mtr_…`): the meter whose
+     * `event_name` you sent.
+     */
   meter_id: string;
   /** Exact quantity as a decimal string (e.g. "1.5"). */
   quantity: string;
   /** The dimension values sent with the event. Absent when none were sent. */
   dimensions?: UsageEventDimensions;
+  /**
+     * The key the event was sent with. Hardcount keeps one event per
+     * key in each account and mode (live or test), with no expiry: an
+     * event sent later with the same key is not stored again, however
+     * long after. Absent on an event stored without a key.
+     */
   idempotency_key?: string;
+  /**
+     * When the usage happened. It decides which billing period the
+     * event counts toward. An event sent without `timestamp` is
+     * stamped with the time Hardcount received it, or, for a customer
+     * on a test clock, with the clock's time. A live event may be at
+     * most 5 minutes ahead of that time. There is no limit on how far
+     * back it goes, but an event in a period whose invoice is already
+     * built is stored and not billed (see `billing_status`).
+     */
   timestamp: string;
   /** How the event arrived. `backfill` means `POST /v1/usage-events/backfill`. */
   origin?: UsageEventOrigin;

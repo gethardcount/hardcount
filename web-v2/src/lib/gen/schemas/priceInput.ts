@@ -14,9 +14,15 @@ import type { PriceInputDimensionMatch } from './priceInputDimensionMatch';
 import type { PriceShape } from './priceShape';
 
 /**
- * One price to add to a plan.
+ * One price to add to a plan: the body of
+ * `POST /v1/plans/{id}/prices`, and one entry of `prices` on
+ * `POST /v1/plans`. The meter and labels, then the shape.
  */
 export type PriceInput = PriceShape & {
+  /**
+     * The meter whose usage the price bills. It must be a meter in
+     * this account and mode.
+     */
   meter_id: string;
   /**
      * The labels an event must carry for the price to take it.

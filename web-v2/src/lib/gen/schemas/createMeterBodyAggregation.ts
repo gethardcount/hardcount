@@ -12,7 +12,8 @@
  */
 
 /**
- * How the meter rolls its events into one quantity per billing period. Fixed once the meter has a usage event.
+ * How the meter rolls its events into one quantity per
+ * billing period. Fixed once the meter has a usage event.
  */
 export type CreateMeterBodyAggregation = typeof CreateMeterBodyAggregation[keyof typeof CreateMeterBodyAggregation];
 

@@ -13,7 +13,14 @@
 import type { CustomerUsageBucketsItemPerMeter } from './customerUsageBucketsItemPerMeter';
 
 export type CustomerUsageBucketsItem = {
+  /** The start of the UTC day. */
   bucket_start: string;
-  /** Quantity per meter ID for that day, as a decimal string. */
+  /**
+     * Quantity per meter ID for that day, as a decimal string:
+     * the sum of the day's event quantities, including usage
+     * no price takes. So the days need not add up to a meter's
+     * `total_quantity`, which uses the meter's aggregation.
+     * Empty on a day with no usage.
+     */
   per_meter: CustomerUsageBucketsItemPerMeter;
 };

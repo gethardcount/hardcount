@@ -13,5 +13,11 @@
 import type { InstantiateRecipeBodyOverrides } from './instantiateRecipeBodyOverrides';
 
 export type InstantiateRecipeBody = {
+  /**
+     * Values for the recipe's `overridable` keys, such as
+     * `{"currency": "EUR"}`. A key the recipe does not list, or
+     * a value that breaks the key's rules, is refused with 422.
+     * Keys you leave out take their defaults.
+     */
   overrides?: InstantiateRecipeBodyOverrides;
 };

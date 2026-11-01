@@ -12,9 +12,15 @@
  */
 import type { RecipePreviewObjects } from './recipePreviewObjects';
 
+/**
+ * The answer to `POST /v1/recipes/{key}/preview`: what installing the recipe with your overrides would create. Nothing is written.
+ */
 export interface RecipePreviewResult {
+  /** The recipe's key. */
   key: string;
+  /** The recipe's version. */
   version: string;
   objects: RecipePreviewObjects;
+  /** Problems that would not stop the install. Always empty today. */
   warnings: string[];
 }

@@ -76,10 +76,25 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List customers */
+        /**
+         * List customers
+         * @description Customers in the mode of your API key, newest first unless you choose
+         *     a sort. The list answer leaves out `additional_emails`,
+         *     `email_status`, `dunning_policy_id` and `stripe_customer_id`: get one
+         *     customer for those.
+         */
         get: operations["listCustomers"];
         put?: never;
-        /** Create customer */
+        /**
+         * Create a customer
+         * @description Creates a customer in the mode of your API key. `external_id` must be
+         *     unique in the account and mode. To run the customer on a test clock
+         *     (test mode only), send `test_clock_id`; it cannot change later. The
+         *     create is written to the audit log.
+         *
+         *     `dunning_policy_id` is not a create field: assign a policy with
+         *     `PATCH /v1/customers/{id}`.
+         */
         post: operations["createCustomer"];
         delete?: never;
         options?: never;
@@ -97,13 +112,16 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Rotate the public cost-dashboard token (ADR-032)
-         * @description Mints a fresh `hc_pcd_…` token and writes it to the customer
-         *     row. The previous token is invalidated immediately (read-only
-         *     public surface; no grace window). The plaintext token is the
-         *     sole credential for `GET /v1/public/cost-dashboard/{token}`
-         *     and is shown ONCE — Hardcount never returns it again after this
-         *     response. Audit log records the rotation without the token.
+         * Rotate the customer's public cost-dashboard link
+         * @description Makes a new public cost-dashboard token for the customer and returns
+         *     it with the page's address. The token is the only credential for
+         *     `GET /v1/public/cost-dashboard/{token}`, so anyone with the link can
+         *     read the customer's usage and cost. The previous token stops working
+         *     at once.
+         *
+         *     Hardcount keeps only a hash of the token, so this answer is the only
+         *     time you see it: copy it now. The rotation is written to the audit
+         *     log, without the token. Send no body.
          */
         post: operations["rotateCustomerCostDashboardToken"];
         delete?: never;
@@ -119,7 +137,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get customer */
+        /**
+         * Get a customer
+         * @description One customer, with every field it has.
+         */
         get: operations["getCustomer"];
         put?: never;
         post?: never;
@@ -127,29 +148,30 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Update customer
-         * @description Changes only the fields you send. An empty `display_name` or
-         *     `email` is ignored, so you cannot clear the email here.
+         * Update a customer
+         * @description Changes only the fields you send. An empty `display_name` or `email`
+         *     is ignored, so you cannot clear the email here.
          *
-         *     - `status: archived` is refused with 409 `invalid_state` while
-         *       the customer has a subscription that still bills. Cancel those
-         *       subscriptions first. Archiving does not stop dunning on unpaid
-         *       invoices.
+         *     - `status: archived` is refused with 409 `invalid_state` while the
+         *       customer has an active or trialing subscription, which still bills.
+         *       Cancel those subscriptions first. Archiving does not stop dunning
+         *       (the retries of failed payments) on unpaid invoices.
          *     - `dunning_policy_id` set to `""` removes the assignment, so the
-         *       tenant's default policy applies. A set ID must be a policy in
-         *       this tenant and mode, or the call returns 404. The change
-         *       applies to the next dunning run, not to runs already started.
-         *     - `additional_emails` replaces the whole CC list; `[]` clears
-         *       it. Entries are lowercased, deduplicated, capped at 10 and may
-         *       not equal the primary email.
-         *     - A new `email` that is already on the CC list is refused with
-         *       422 unless you send a new `additional_emails` too. Changing the
-         *       email resets its bounce state.
+         *       account's default policy applies. A set ID must be a policy in this
+         *       account and mode, or the call returns 404. The change applies to the
+         *       next dunning run, not to runs already started.
+         *     - `additional_emails` replaces the whole CC list; `[]` clears it.
+         *       Entries are lowercased, deduplicated, capped at 10 and may not equal
+         *       the primary email.
+         *     - A new `email` that is already on the CC list is refused with 422
+         *       unless you send a new `additional_emails` too. Changing the email
+         *       sets `email_status` back to `unknown`, after the answer is built:
+         *       the answer still shows the earlier `email_status`.
          *
-         *     Name and email changes are copied to the linked Stripe customer
-         *     when there is one. A Stripe failure is logged and does not fail
-         *     the call. The change is written to the audit log (it records that
-         *     the email changed, not the address).
+         *     Name and email changes are copied to the linked Stripe customer when
+         *     there is one. A Stripe failure is logged and does not fail the call.
+         *     The change is written to the audit log (it records that the email
+         *     changed, not the address).
          */
         patch: operations["updateCustomer"];
         trace?: never;
@@ -165,28 +187,27 @@ export interface paths {
         get: operations["getCustomerBillingProfile"];
         /**
          * Create or replace the customer's billing profile
-         * @description Writes the whole profile. Fields you leave out are stored empty,
-         *     so send every field you want to keep. `profile_status` is worked
-         *     out by the server: `ready` when legal name, address line 1, city
-         *     and country are all set, otherwise `incomplete`.
+         * @description Writes the whole profile. Fields you leave out are stored empty, so
+         *     send every field you want to keep. `profile_status` is worked out by
+         *     the server: `ready` when legal name, address line 1, city and country
+         *     are all set, otherwise `incomplete`.
          *
-         *     Checks, each answered with 422 and `param` set to the field:
-         *     `country` must be an ISO 3166 alpha-2 code; `currency` must be a
-         *     supported ISO 4217 code (zero-decimal currencies such as JPY are
-         *     refused); `phone` is 7 to 20 digits, spaces or `+-()`; `tax_id`
-         *     must match `tax_id_type` when the type is a known one;
-         *     `tax_status: exempt` needs `tax_exempt_reason`;
-         *     `tax_status: reverse_charge` needs `tax_id`. Country and currency
-         *     are stored in upper case.
+         *     Checks, each answered with 422 and `param` set to the field: `country`
+         *     must be an ISO 3166 alpha-2 code; `currency` must be a supported ISO
+         *     4217 code (zero-decimal currencies such as JPY are refused); `phone`
+         *     is 7 to 20 digits, spaces or `+-()`; `tax_id` must match `tax_id_type`
+         *     when the type is `eu_vat`, `in_gst` or `au_abn`; `tax_status: exempt`
+         *     needs `tax_exempt_reason`; `tax_status: reverse_charge` needs
+         *     `tax_id`. Country, currency and tax ID are stored in upper case.
          *
-         *     A currency that differs from the plan currency of a subscription
-         *     that still bills is refused with 409 `invalid_state`, because
+         *     A currency that differs from the plan currency of a draft, trialing or
+         *     active subscription is refused with 409 `invalid_state`, because
          *     invoices would show plan prices in the new currency without
          *     conversion.
          *
          *     After saving, the profile is copied to the linked Stripe customer
-         *     (best effort), and draft invoices whose tax failed on bad
-         *     customer data are retried. The change is written to the audit log.
+         *     (best effort), and draft invoices whose tax failed on bad customer
+         *     data are retried. The change is written to the audit log.
          */
         put: operations["upsertCustomerBillingProfile"];
         post?: never;
@@ -205,11 +226,12 @@ export interface paths {
         };
         /**
          * List emails sent to the customer
-         * @description Billing emails tied to this customer's invoices from the last 30
-         *     days, newest first: invoice, payment receipt, payment failed,
-         *     payment setup request, dunning, and credit note emails. Emails
-         *     not tied to an invoice (such as a setup link sent from the
-         *     payment-methods page) are not listed.
+         * @description Billing emails tied to this customer's invoices from the last 30 days,
+         *     newest first: invoice, payment receipt, payment failed, payment setup
+         *     request, payment reminder, final notice, and credit note emails.
+         *     Emails not tied to an invoice (such as a link sent with
+         *     `POST /v1/customers/{customer_id}/payment-methods/send-setup-email`)
+         *     are not listed.
          */
         get: operations["listCustomerSentEmails"];
         put?: never;
@@ -229,23 +251,21 @@ export interface paths {
         };
         /**
          * Get the customer's usage and cost for a period
-         * @description Usage per meter on the customer's active and trialing
-         *     subscriptions, priced the same way the invoice prices it. With no
-         *     `from` and `to`, the period is the current billing cycle of the
-         *     subscription whose cycle started last, as of the customer's current
-         *     time (the test clock's time for a customer on a test clock). A
-         *     trialing subscription's cycle starts when its trial ends, so it is
-         *     not picked before then, unless no subscription's cycle has started.
-         *     Send both or neither.
+         * @description Usage per meter on the customer's active and trialing subscriptions,
+         *     priced the same way the invoice prices it. Send both `from` and `to`,
+         *     or neither.
          *
-         *     Errors: 404 if the customer does not exist. 422 when only one of
-         *     `from`/`to` is sent, when `from` is not before `to`, when the
-         *     window is longer than one year, or (code
-         *     `customer_has_no_subscription`) when no period is sent and the
-         *     customer has no subscription with a current cycle.
+         *     With neither, each subscription is rated over its own current billing
+         *     period, and `period` runs from the earliest start to the latest end of
+         *     those periods. Which cycle is current is read at the customer's
+         *     current time (the test clock's time for a customer on a test clock). A
+         *     trialing subscription's first cycle starts when its trial ends.
          *
-         *     Decimal quantities are returned as strings. If the daily series
-         *     fails to load, `buckets` is empty and `warnings` says so.
+         *     With both, the window is `[from, to)`, at most one year long, and the
+         *     amounts are an estimate at each subscription's current prices.
+         *
+         *     Decimal quantities are returned as strings. If the daily series fails
+         *     to load, `buckets` is empty and `warnings` says so.
          */
         get: operations["getCustomerUsage"];
         put?: never;
@@ -265,10 +285,9 @@ export interface paths {
         };
         /**
          * Get a customer overview
-         * @description The customer's active subscriptions (up to 50), the 5 newest
-         *     invoices, and the amount still owed on unpaid invoices. A failed
-         *     read inside the overview returns an empty part or a zero balance
-         *     rather than an error.
+         * @description The customer's active subscriptions (up to 50), the 5 newest invoices,
+         *     and the amount still owed on unpaid invoices. A failed read inside the
+         *     overview returns an empty part or a zero balance rather than an error.
          */
         get: operations["getCustomerOverview"];
         put?: never;
@@ -288,8 +307,8 @@ export interface paths {
         };
         /**
          * List the customer's payment methods
-         * @description Saved payment methods that are not detached, default first, then
-         *     newest. At most 100. `total` is the number returned.
+         * @description Saved cards that are not detached, default first, then newest. Paged
+         *     with `limit` and `offset`; `total` counts every saved card.
          */
         get: operations["listCustomerPaymentMethods"];
         put?: never;
@@ -311,19 +330,21 @@ export interface paths {
         put?: never;
         /**
          * Email the customer a link to add a payment method
-         * @description Creates a Stripe Checkout setup link (as `setup-session` does)
-         *     and queues an email with it to the customer's primary email. The
-         *     link is never sent to the CC list. The card details go from the
-         *     customer's browser to Stripe; Hardcount does not see them. The card
-         *     is saved when Stripe reports the setup succeeded.
+         * @description Creates a Stripe Checkout setup link (as `setup-session` does) and
+         *     queues an email with it to the customer's primary email. The link is
+         *     never sent to the CC list. The card details go from the customer's
+         *     browser to Stripe; Hardcount does not see them. The card is saved when
+         *     Stripe reports the setup succeeded.
          *
          *     At most one call per customer per minute when the server has Redis
          *     configured. The minute starts at any call whose body is accepted,
-         *     including one that then fails, so a second call within it returns
-         *     429 `cooldown_active` with a `Retry-After` header. Without Redis
-         *     there is no cooldown.
+         *     including one that then fails, so a second call within it returns 429
+         *     `cooldown_active` with a `Retry-After` header. Without Redis there is
+         *     no cooldown.
          *
-         *     The send is written to the audit log.
+         *     On a server with no SMTP set up, the call answers 409
+         *     `email_not_configured` and creates no link. The send is written to the
+         *     audit log.
          */
         post: operations["sendCustomerPaymentSetupEmail"];
         delete?: never;
@@ -343,13 +364,15 @@ export interface paths {
         put?: never;
         /**
          * Create a link for the customer to add a payment method
-         * @description Returns a Stripe Checkout URL in setup mode (card only, no
-         *     charge) for you to give to the customer. Creates the Stripe
-         *     customer on first use. When the customer finishes, Stripe sends
-         *     them to `return_url` with `?status=success` or `?status=cancel`
-         *     added. The card is saved when Stripe reports the setup succeeded.
+         * @description Returns a Stripe Checkout URL in setup mode (card only, no charge) for
+         *     you to give to the customer. Creates the Stripe customer on first use.
+         *     When the customer finishes, Stripe sends them to `return_url` with
+         *     `?status=success` or `?status=cancel` added. The card is saved when
+         *     Stripe reports the setup succeeded.
+         *
          *     The link is written to the audit log; if the audit row cannot be
-         *     written, no link is returned.
+         *     written, no link is returned. A Stripe failure answers 500
+         *     `internal_error`.
          */
         post: operations["createCustomerPaymentSetupSession"];
         delete?: never;
@@ -371,10 +394,11 @@ export interface paths {
         /**
          * Detach a payment method
          * @description Detaches the card in Stripe and marks it detached in Hardcount. If it
-         *     was the default, the newest remaining card becomes the default in
-         *     the same step, and that change is copied to Stripe (best effort).
-         *     Both changes are written to the audit log. A Stripe error on the
-         *     detach returns 500 and leaves the card attached.
+         *     was the default, the newest remaining card becomes the default in the
+         *     same step, and that change is copied to Stripe (best effort). Both
+         *     changes are written to the audit log. A Stripe error on the detach,
+         *     including Stripe not being connected for this mode, returns 500 and
+         *     leaves the card attached. Send no body.
          */
         delete: operations["detachCustomerPaymentMethod"];
         options?: never;
@@ -394,9 +418,9 @@ export interface paths {
         /**
          * Make a payment method the default
          * @description Makes this card the one Hardcount charges and clears the flag on the
-         *     others. The change is copied to the Stripe customer (best effort;
-         *     a Stripe failure is recorded on the audit row and does not fail
-         *     the call).
+         *     others. The change is copied to the Stripe customer (best effort; a
+         *     Stripe failure is recorded on the audit row and does not fail the
+         *     call). Send no body.
          */
         post: operations["setCustomerDefaultPaymentMethod"];
         delete?: never;
@@ -413,17 +437,22 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Public cost-dashboard projection (ADR-032)
-         * @description Unauthenticated. The `hc_pcd_…` token in the URL is the sole
-         *     credential — partners embed via iframe / fetch from their own
-         *     app without an API key. Sanitized projection: customer_id,
-         *     tenant_id, livemode, billing_period, subscriptions, usage[],
-         *     totals, projected_total_cents, credits. PII (email, display_name, external_id,
-         *     metadata, billing_profile) is NEVER on this response. Wrong
-         *     prefix or unknown token → 401 (anti-enumeration). No active
-         *     sub → 200 with `billing_period.source = "no_subscription"`:
-         *     `subscriptions`, `usage` and `totals` are empty, and `credits`
-         *     still lists the customer's credit balance.
+         * Get a customer's public cost dashboard
+         * @description Public: no API key. The `hc_pcd_` token in the URL is the only
+         *     credential, so you can embed the page or fetch it from your own app.
+         *     Make the token with
+         *     `POST /v1/customers/{id}/rotate-cost-dashboard-token`.
+         *
+         *     The answer holds the customer's usage and cost for the current billing
+         *     period and its credit balance. It never holds the customer's name,
+         *     email, external ID or billing profile, your provider costs, or usage
+         *     that no price takes.
+         *
+         *     A token with the wrong prefix or no customer gets 401, the same answer
+         *     for both. A customer with no active or trialing subscription gets 200
+         *     with `billing_period.source` `no_subscription`: `subscriptions`,
+         *     `usage` and `totals` are empty, and `credits` still lists the credit
+         *     balance. Limited to 60 requests a minute per IP address.
          */
         get: operations["getPublicCostDashboard"];
         put?: never;
@@ -511,11 +540,14 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Data behind the payment-update page
-         * @description Unauthenticated. The token from the payment-update email is the only
-         *     credential. It is valid for 24 hours, and starting checkout uses it
-         *     up. Share the page link with customers instead of calling this
-         *     route.
+         * Get what the payment-update page shows
+         * @description Public: no API key. The token from the link in a payment setup email
+         *     is the only credential. Hardcount sends that email when an invoice has
+         *     no payment method to charge; the link is the server's
+         *     `PAYMENT_UPDATE_URL` with `?token=` and the token. The token is valid
+         *     for 24 hours, and starting checkout uses it up. Share the page link
+         *     with customers instead of calling this route. Limited to 60 requests a
+         *     minute per IP address.
          */
         get: operations["getPublicPaymentUpdate"];
         put?: never;
@@ -537,11 +569,15 @@ export interface paths {
         put?: never;
         /**
          * Start adding a card in Stripe Checkout
-         * @description Returns a Stripe Checkout URL in setup mode (card only, no charge).
-         *     Creates the Stripe customer if there is none. This call uses up the
-         *     token. If Stripe fails to create the session, the token works again.
-         *     Stripe sends the customer to the payment-method-added page with
-         *     `?status=success` or `?status=cancel`. Writes an audit row.
+         * @description Public: no API key. Returns a Stripe Checkout URL in setup mode (card
+         *     only, no charge) for the customer behind the token. Creates the Stripe
+         *     customer if there is none. This call uses up the token. If Stripe
+         *     fails to create the session, the token works again.
+         *
+         *     Stripe sends the customer to the server's `PAYMENT_UPDATE_RETURN_URL`
+         *     (`http://localhost:5173/payment-method-added` when that is unset) with
+         *     `?status=success` or `?status=cancel` added. The card is saved when
+         *     Stripe reports the setup succeeded. Writes an audit row. Send no body.
          */
         post: operations["createPublicPaymentUpdateCheckout"];
         delete?: never;
@@ -557,10 +593,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List meters */
+        /**
+         * List meters
+         * @description Meters in the mode of your API key, newest first. The list leaves out
+         *     `has_usage`.
+         */
         get: operations["listMeters"];
         put?: never;
-        /** Create meter */
+        /**
+         * Create a meter
+         * @description Creates a meter. `event_name` is what your usage events send for it,
+         *     and it cannot change later. `unit` defaults to `unit` and
+         *     `aggregation` to `sum`. A meter only counts: put its prices on a plan
+         *     (`POST /v1/plans/{id}/prices`). The create is written to the audit
+         *     log.
+         */
         post: operations["createMeter"];
         delete?: never;
         options?: never;
@@ -575,7 +622,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get meter */
+        /** Get a meter */
         get: operations["getMeter"];
         put?: never;
         post?: never;
@@ -583,17 +630,17 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Update meter
-         * @description Fields omitted are left unchanged. A meter only counts: its prices
-         *     are on the plans (`/v1/plans/{id}/prices`).
+         * Update a meter
+         * @description Fields omitted are left unchanged. A meter only counts: its prices are
+         *     on the plans (`/v1/plans/{id}/prices`).
          *
-         *     `aggregation` can change until the meter has a usage event, then
-         *     it is fixed: a change is refused with 409 `meter_has_usage`. Usage
-         *     events are counted under the aggregation the meter has; to count
-         *     differently, make a new meter with another event name. Held usage
-         *     for its `event_name` does not fix it: it is counted under the
-         *     meter's aggregation once released. `name` and `unit` can always
-         *     change, at once.
+         *     `aggregation` can change until the meter has a usage event, then it is
+         *     fixed: a change is refused with 409 `meter_has_usage`. Usage events
+         *     are counted under the aggregation the meter has; to count differently,
+         *     make a new meter with another event name. Held usage for its
+         *     `event_name` does not fix it: it is counted under the meter's
+         *     aggregation once released. `name` and `unit` can always change, at
+         *     once. The change is written to the audit log.
          */
         patch: operations["updateMeter"];
         trace?: never;
@@ -641,7 +688,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Per-grant burndown + kind subtotals
+         * List a customer's credit grants
          * @description The customer's credit blocks with drawdown state — granted /
          *     drawn / remaining per grant, expiry, and remaining per currency
          *     split by cost-basis class (commit = money-backed, promotional =
@@ -676,8 +723,9 @@ export interface paths {
          * Add or remove credit
          * @description Writes one `adjustment` entry to the customer's credit ledger in
          *     `currency`. A positive amount adds credit in that currency; a
-         *     negative amount removes credit in that currency only. Audit action
-         *     is `credit.adjustment` or `credit.deduction`.
+         *     negative amount removes credit in that currency only. The audit
+         *     log records it as
+         *     `credit.adjustment` or `credit.deduction`.
          *
          *     Errors (422, `param` names the field): `customer_id`, `currency` or
          *     `description` missing; `currency` not supported (an unknown code or
@@ -701,7 +749,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List credit balances for all customers
+         * List credit balances
          * @description One row per customer and currency that has any credit ledger
          *     entry, highest balance first.
          *     `total_granted` is the sum of every credit added in that currency
@@ -726,9 +774,10 @@ export interface paths {
         };
         /**
          * List a customer's credit ledger
-         * @description Ledger entries for one customer. `balance_after` is the running
-         *     balance in the entry's currency, in time order over the whole
-         *     ledger, so it stays right when you filter by `entry_type`.
+         * @description Ledger entries for one customer, newest first unless you sort
+         *     otherwise. `balance_after` is the running balance in the entry's
+         *     currency, in time order over the whole ledger, so it stays right
+         *     when you filter by `entry_type`.
          */
         get: operations["listCreditLedgerEntries"];
         put?: never;
@@ -1049,10 +1098,19 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List plans */
+        /**
+         * List plans
+         * @description Plans in the mode of your API key, newest first, each with its prices.
+         */
         get: operations["listPlans"];
         put?: never;
-        /** Create plan */
+        /**
+         * Create a plan
+         * @description Creates an active plan and its usage prices in one request: if any
+         *     price is refused, nothing is created. Every price takes the plan's
+         *     currency. `base_bill_timing` is required when the base fee is above 0.
+         *     The create is written to the audit log.
+         */
         post: operations["createPlan"];
         delete?: never;
         options?: never;
@@ -1067,7 +1125,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get plan */
+        /** Get a plan */
         get: operations["getPlan"];
         put?: never;
         post?: never;
@@ -1075,19 +1133,18 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Update plan
-         * @description A field left out keeps its current value. To clear `description`
-         *     or `tax_code`, send an empty string. `code`, `currency` and
-         *     `billing_interval` cannot be changed: sending one is a 422 naming
-         *     it. The plan's
-         *     usage prices change through `/v1/plans/{id}/prices`.
+         * Update a plan
+         * @description A field left out keeps its current value. To clear `description` or
+         *     `tax_code`, send an empty string. `code`, `currency` and
+         *     `billing_interval` cannot be changed: sending one is a 422 naming it.
+         *     The plan's usage prices change through `/v1/plans/{id}/prices`.
          *
          *     `base_amount_cents` cannot change while a subscription that is not
-         *     canceled uses the plan (`live_subscription_count` on Get plan):
-         *     create a new plan instead. It can be set to 0. `base_bill_timing`
-         *     cannot change once a subscription has used the plan (`used`). A
-         *     plan with no base fee must be `in_arrears`. `name`, `description`,
-         *     `tax_code` and `status` change at once.
+         *     canceled uses the plan (`live_subscription_count` on Get plan): create
+         *     a new plan instead. It can be set to 0. `base_bill_timing` cannot
+         *     change once a subscription has used the plan (`used`). A plan with no
+         *     base fee must be `in_arrears`. `name`, `description`, `tax_code` and
+         *     `status` change at once. The change is written to the audit log.
          */
         patch: operations["updatePlan"];
         trace?: never;
@@ -1108,15 +1165,15 @@ export interface paths {
         /**
          * Add a price to a plan
          * @description On a plan no subscription has used, the price applies at once
-         *     (`effective: now`). On a used plan it applies from each
-         *     subscriber's next billing period (`effective: next_period`); until
-         *     then the plan's other prices bill the meter's usage as before. A
-         *     subscriber who first joins the plan in a period after the add pays
-         *     it from the join (see `PriceWrite`).
+         *     (`effective: now`). On a used plan it applies from each subscriber's
+         *     next billing period (`effective: next_period`); until then the plan's
+         *     other prices bill the meter's usage as before. A subscriber who first
+         *     joins the plan in a period after the add pays it from the join (see
+         *     `PriceWrite`).
          *
-         *     A price that names a removed price's meter and `dimension_match`
-         *     adds that price back under its id. Its old customer overrides do
-         *     not come back.
+         *     A price that names a removed price's meter and `dimension_match` adds
+         *     that price back under its id. Its old customer overrides do not come
+         *     back. The write is recorded in the audit log.
          */
         post: operations["addPlanPrice"];
         delete?: never;
@@ -1138,14 +1195,13 @@ export interface paths {
         /**
          * Remove a price from a plan
          * @description On a plan no subscription has used, the price is gone at once. On a
-         *     used plan it takes no part from each subscriber's next billing
-         *     period; the current period keeps it. A subscriber who first joins the
-         *     plan in a period after the removal does not pay it (see
-         *     `PriceWrite`). The removal
-         *     ends every customer override of the price, each when the removal
-         *     takes effect for its customer, and the answer names them
+         *     used plan it takes no part from each subscriber's next billing period;
+         *     the current period keeps it. A subscriber who first joins the plan in
+         *     a period after the removal does not pay it (see `PriceWrite`). The
+         *     removal ends every customer override of the price, each when the
+         *     removal takes effect for its customer, and the answer names them
          *     (`ended_overrides`). Adding the price back later keeps its id but not
-         *     the overrides.
+         *     the overrides. The write is recorded in the audit log. Send no body.
          */
         delete: operations["removePlanPrice"];
         options?: never;
@@ -1153,12 +1209,13 @@ export interface paths {
         /**
          * Change a price's rate
          * @description Changes the price's shape. Its meter and `dimension_match` are its
-         *     identity and cannot change: add a price for other events instead.
-         *     On a plan no subscription has used, the change applies at once; on
-         *     a used plan, from each subscriber's next billing period. The current
-         *     period keeps the price it started with. A subscriber who first joins
-         *     the plan in a period after the change pays it from the join (see
-         *     `PriceWrite`). Customer overrides of the price keep applying.
+         *     identity and cannot change: add a price for other events instead. On a
+         *     plan no subscription has used, the change applies at once; on a used
+         *     plan, from each subscriber's next billing period. The current period
+         *     keeps the price it started with. A subscriber who first joins the plan
+         *     in a period after the change pays it from the join (see `PriceWrite`).
+         *     Customer overrides of the price keep applying. The write is recorded
+         *     in the audit log.
          */
         patch: operations["updatePlanPrice"];
         trace?: never;
@@ -1170,10 +1227,34 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List subscriptions */
+        /**
+         * List subscriptions
+         * @description Lists the subscriptions of this account and mode, with their items,
+         *     newest first unless you sort otherwise. The filters combine.
+         */
         get: operations["listSubscriptions"];
         put?: never;
-        /** Create subscription */
+        /**
+         * Create a subscription
+         * @description Creates a subscription that bills a customer for one or more plans.
+         *     Leave out `status` and it starts now: `active` from today, or
+         *     `trialing` when `trial_days` is above 0. Send `status: draft` to
+         *     create it without starting it.
+         *
+         *     All the plans must share one billing interval, one base-fee timing
+         *     (in advance or in arrears) and one currency. The currency must also
+         *     match the customer's billing profile and the customer's other
+         *     subscriptions. No two live subscriptions of a customer may bill the
+         *     same meter. The customer and the plans must not be archived.
+         *
+         *     An `active` subscription whose plans bill a non-zero base fee in
+         *     advance gets its first invoice in the same transaction; it is then
+         *     collected like any other invoice. A customer on a test clock gives
+         *     the subscription its clock, and the subscription starts at the
+         *     clock's time.
+         *
+         *     Sends the `subscription.created` webhook event.
+         */
         post: operations["createSubscription"];
         delete?: never;
         options?: never;
@@ -1190,7 +1271,17 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Activate draft subscription */
+        /**
+         * Activate a draft subscription
+         * @description Starts a `draft` subscription: it becomes `active` now, and its
+         *     first period starts today in your account's billing time zone (the
+         *     clock's day for a customer on a test clock). A non-zero base fee
+         *     billed in advance is invoiced in the same transaction. The plans'
+         *     currency must still match the customer's billing profile and other
+         *     subscriptions. Takes no body.
+         *
+         *     Sends the `subscription.activated` webhook event.
+         */
         post: operations["activateSubscription"];
         delete?: never;
         options?: never;
@@ -1208,11 +1299,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Retry billing on a subscription whose billing is failing
+         * Retry a subscription's failed billing
          * @description Clears the subscription's `billing_failure` and bills it now, with
          *     the same attempt the billing run makes. Use it after fixing the
          *     cause of a failure, to skip the wait, or to restart a parked
-         *     subscription. An audit log entry records the retry.
+         *     subscription. An audit log entry records the retry. Takes no body.
          *
          *     Once the failure is cleared, the outcome of the attempt is never
          *     an HTTP error. A 200 has three outcomes:
@@ -1251,7 +1342,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get subscription
+         * Get a subscription
          * @description Returns one subscription with its items.
          */
         get: operations["getSubscription"];
@@ -1273,9 +1364,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Cancel subscription now
+         * Cancel a subscription now
          * @description Cancels the subscription immediately. Works on `draft`, `trialing`
-         *     and `active` subscriptions.
+         *     and `active` subscriptions. Takes no body.
          *
          *     In the same transaction, Hardcount writes the final invoice for the
          *     part of the current period that has been used, and credits the
@@ -1306,7 +1397,8 @@ export interface paths {
          * Schedule a cancel
          * @description Schedules the subscription to cancel later. Set exactly one of
          *     `at_period_end` or `cancel_at`. A new call replaces any earlier
-         *     schedule.
+         *     schedule. If a billing period has ended and is not invoiced yet,
+         *     it is billed first, so "the current period" is the one running.
          *
          *     - **Active subscription.** `at_period_end` cancels at the end of
          *       the current period. `cancel_at` must be on or after the end of
@@ -1366,7 +1458,8 @@ export interface paths {
          * @description Pauses payment collection. The subscription keeps running: each
          *     period still closes and its invoice is created, but the invoice
          *     stays a draft. Hardcount does not finalize it, charge it or start
-         *     dunning (automatic payment retries).
+         *     dunning (automatic payment retries). A period that ended before the
+         *     call and is not invoiced yet is billed first, as it stood.
          *
          *     Invoices finalized before the pause are not drafts. Payment retries
          *     already under way for them continue, as in Stripe. To stop them,
@@ -1412,10 +1505,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * End trial now
+         * End a trial now
          * @description Ends the trial now and makes the subscription `active`. The first
-         *     paid period starts now. Items whose base fee is billed in advance
-         *     get their first invoice at once.
+         *     paid period starts today, and `trial_end_at` becomes now. Items
+         *     whose base fee is billed in advance get their first invoice in the
+         *     same transaction. A subscription with a scheduled cancel is
+         *     refused: clear the schedule first. Takes no body.
          *
          *     Sends the `subscription.trial_ended` webhook event.
          */
@@ -1436,7 +1531,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Extend trial
+         * Extend a trial
          * @description Moves the end of the trial later. The first paid period is moved
          *     to start at the new trial end. A cancel scheduled with
          *     `at_period_end` moves with the trial. To shorten a trial, use
@@ -1499,18 +1594,19 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Add subscription item
+         * Add an item to a subscription
          * @description Adds a plan to the subscription as a new item. The plan must use
          *     the same billing interval and currency as the other items, and
          *     must not share meters with the customer's other live
-         *     subscriptions.
+         *     subscriptions. A period that ended and is not invoiced yet is
+         *     billed first.
          *
          *     On an active subscription, a plan whose base fee is billed in
          *     advance is charged for the rest of the current period, in the
          *     same transaction as the add. An item added on the first day of the
-         *     period (in the tenant's timezone) pays for the whole period. A
-         *     plan billed in arrears is billed at the end of the period for the
-         *     days it was on the subscription.
+         *     period (in your account's billing time zone) pays for the whole
+         *     period. A plan billed in arrears is billed at the end of the
+         *     period for the days it was on the subscription.
          *
          *     Sends the `subscription.item.added` webhook event.
          */
@@ -1532,9 +1628,11 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Remove subscription item
+         * Remove a subscription item
          * @description Removes an item from the subscription. The last item of an active
-         *     subscription cannot be removed; cancel the subscription instead.
+         *     subscription cannot be removed; cancel the subscription instead. A
+         *     period that ended and is not invoiced yet is billed first. Takes
+         *     no body.
          *
          *     On an active subscription, the unused part of a base fee billed in
          *     advance is credited in the same transaction. A plan billed in
@@ -1547,9 +1645,10 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Change subscription item
+         * Change a subscription item
          * @description Changes the quantity or the plan of one item. Send exactly one of
-         *     `quantity` or `new_plan_id`. The subscription must be `active`.
+         *     `quantity` or `new_plan_id`. The subscription must be `active`. A
+         *     period that ended and is not invoiced yet is billed first.
          *
          *     - **Quantity.** Takes effect now.
          *     - **Plan, `immediate: true`.** Takes effect now. If the new plan
@@ -1612,7 +1711,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get subscription activity timeline
+         * Get a subscription's activity timeline
          * @description Returns the subscription's history from the audit log as
          *     display-ready rows, in the order the actions took effect: by
          *     `sim_effective_at` for actions on a test-clock subscription,
@@ -1636,12 +1735,32 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List usage events */
+        /**
+         * List usage events
+         * @description Lists the usage events of this account and mode, newest first by
+         *     `timestamp`. The filters combine; `total` counts every matching
+         *     event. Needs usage read permission.
+         */
         get: operations["listUsageEvents"];
         put?: never;
         /**
-         * Ingest usage event
-         * @description Needs the `usage:ingest` permission: an ingest key or a secret
+         * Send a usage event
+         * @description Records one usage event for a customer and a meter. You name the
+         *     customer by your `external_id` for it and the meter by its
+         *     `event_name`. The event counts toward the billing period its
+         *     `timestamp` falls in, and that period's invoice bills it.
+         *
+         *     Every event needs its own `idempotency_key`. Send the same key when
+         *     you retry the event: an event whose key is already stored is not
+         *     stored again, and the call answers 200 with the first event and an
+         *     `Idempotent-Replayed: true` header. Retrying is safe this way; a
+         *     new key on each retry bills the usage twice.
+         *
+         *     The 201 can carry a `billing_status`: what Hardcount found when the
+         *     event arrived, such as a time that is already invoiced. The event
+         *     is stored all the same.
+         *
+         *     Needs the `usage:ingest` permission: an ingest key or a secret
          *     key.
          */
         post: operations["createUsageEvent"];
@@ -1661,8 +1780,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Batch ingest usage events (max 1000, all-or-nothing)
-         * @description The batch is atomic: every event validates, then all of them
+         * Send a batch of usage events
+         * @description Records up to 1,000 usage events in one call, in a body of at most
+         *     1 MB. Each event has the same fields as `POST /v1/usage-events`.
+         *
+         *     The batch is atomic: every event validates, then all of them
          *     commit in one transaction. On any validation failure nothing is
          *     ingested. Every event must carry its own `idempotency_key`; an
          *     event without one fails validation, so the whole batch is refused.
@@ -1809,7 +1931,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Usage totals
+         * Get usage totals
          * @description Event count, quantity totals, and a per-meter breakdown over every
          *     usage event matching the filters (no paging). Each `by_meter` row
          *     carries `value`, the meter's usage under its own aggregation: a
@@ -2937,7 +3059,22 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Trigger billing cycle */
+        /**
+         * Run billing now
+         * @description Runs the billing run now for this account and mode, the same run
+         *     the scheduler makes. It invoices every subscription that is due:
+         *     an `active` or `trialing` subscription whose period ended, or whose
+         *     scheduled mid-period cancel came, more than the invoice grace ago
+         *     (`INVOICE_GRACE_PERIOD`, 1 hour by default), so usage that arrives
+         *     late still makes its invoice. A subscription overdue for several
+         *     periods gets one invoice per period.
+         *
+         *     Subscriptions on a test clock are not included; advance the clock
+         *     instead. A subscription whose billing is failing and is waiting for
+         *     its next attempt, or is parked, is skipped; to retry one, use
+         *     `POST /v1/subscriptions/{id}/retry-billing`. An audit log entry
+         *     records the run. Takes no body.
+         */
         post: operations["runBilling"];
         delete?: never;
         options?: never;
@@ -2954,12 +3091,21 @@ export interface paths {
         };
         /**
          * List provider cost rates
-         * @description The operator's COGS table (ADR-079): what THEY pay LLM providers per
-         *     token, keyed by provider/model/token_type. Current-rate semantics —
-         *     one row per key, edited in place; per-event stamps are the history.
+         * @description Your provider cost rates: what you pay AI providers per token, one
+         *     rate per provider, model and token type, ordered by provider, model
+         *     and token type. A rate is edited in place. The cost stamped on each
+         *     usage event when it arrived is the history, so changing a rate never
+         *     changes past events.
          */
         get: operations["listProviderCosts"];
-        /** Create or update a provider cost rate */
+        /**
+         * Create or update a provider cost rate
+         * @description Sets the rate for one provider, model and token type: it creates the
+         *     rate, or changes it when one exists for that key. `provider` and
+         *     `token_type` are stored in lower case. The rate costs usage events
+         *     that arrive from now on; events already stamped keep their cost. The
+         *     write is recorded in the audit log.
+         */
         put: operations["upsertProviderCost"];
         post?: never;
         delete?: never;
@@ -2980,7 +3126,10 @@ export interface paths {
         post?: never;
         /**
          * Delete a provider cost rate
-         * @description Stamped events keep their snapshot — deletion never rewrites history.
+         * @description Deletes the rate. Usage events it already costed keep their stamped
+         *     cost. Events that arrive later with its labels get no cost (the margin
+         *     report counts them in `unresolved_events`) until you set a rate again.
+         *     The delete is recorded in the audit log. Send no body.
          */
         delete: operations["deleteProviderCost"];
         options?: never;
@@ -2996,18 +3145,20 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Per-customer margin report (operator only)
-         * @description Rated usage revenue vs stamped provider COGS for a window (ADR-079).
-         *     A usage unit-economics view — base fees, credits, and taxes are not
-         *     included. Per-model margin renders only where the price that billed
-         *     the usage names the model; other revenue is reported unattributed,
-         *     never allocated by heuristic.
+         * Get a customer's margin report
+         * @description The customer's rated usage revenue against the provider cost stamped
+         *     on its usage events, for a window. It is a usage unit-economics view:
+         *     base fees, credits and taxes are not included. Per-model margin shows
+         *     only where the price that billed the usage names the model; other
+         *     revenue is reported as unattributed, never split by a guess. Provider
+         *     costs never appear on the public cost dashboard.
          *
          *     The window is `[from, to)`: `from` inclusive, `to` exclusive. A
          *     missing bound defaults to the last 30 days ending at the customer's
-         *     current time, which is the test clock's frozen time when the
-         *     customer is on a test clock. `from` and `to` take RFC 3339 instants
-         *     only (no bare dates), and `from` must be before `to`.
+         *     current time, which is the test clock's time when the customer is on a
+         *     test clock. `from` and `to` take RFC 3339 instants only (no bare
+         *     dates), and `from` must be before `to`. The window may be at most one
+         *     year long.
          */
         get: operations["getCustomerMargin"];
         put?: never;
@@ -3028,11 +3179,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Grant credits to customer
+         * Grant credit to a customer
          * @description Adds a block of credit in `currency`. The credit pays only the
          *     customer's invoices in that currency; it is never converted. A
          *     grant in a currency the customer is not billed in is accepted and
-         *     shows as its own balance.
+         *     shows as its own balance. Invoices draw the credit when they are
+         *     billed. The audit log records the grant.
          */
         post: operations["grantCredits"];
         delete?: never;
@@ -3049,7 +3201,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get customer credit balance
+         * Get a customer's credit balance
          * @description The customer's balances, one per currency the customer's credit
          *     ledger holds, ordered by currency. Empty when the customer has no
          *     ledger entry.
@@ -3071,7 +3223,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get customer live credit balance
+         * Get a customer's live credit balance
          * @description How much credit the customer has left right now, per currency: the
          *     settled balance less the usage no invoice has billed yet in that
          *     currency. Use it to decide in your
@@ -3104,17 +3256,23 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List test clocks for the active tenant
-         * @description Test mode only — returns 403 in live mode. Test clocks let
-         *     operators simulate time-bound billing flows without waiting for
-         *     wall-clock advances. See ADR / docs for the simulator semantics.
+         * List test clocks
+         * @description Lists the test clocks of this account, newest first. A test clock
+         *     lets you walk a customer through months of billing in minutes:
+         *     customers attached to it are billed on its time, and you move that
+         *     time forward with `POST /v1/test-clocks/{id}/advance`.
+         *
+         *     Test mode only: a live-mode key or session gets 403. Every
+         *     test-clock route needs the `testclock:write` permission, reads
+         *     included.
          */
         get: operations["listTestClocks"];
         put?: never;
         /**
          * Create a test clock
-         * @description Test mode only. The clock starts in `ready` state at
-         *     `frozen_time`. Use `/advance` to move it forward.
+         * @description Creates a test clock in `ready` state at `frozen_time`. Attach
+         *     customers to it, then use `POST /v1/test-clocks/{id}/advance` to
+         *     move it forward. Test mode only.
          */
         post: operations["createTestClock"];
         delete?: never;
@@ -3130,11 +3288,35 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get a test clock by id */
+        /**
+         * Get a test clock
+         * @description Returns one test clock. While an advance runs, poll this route until
+         *     `status` leaves `advancing`. Test mode only.
+         */
         get: operations["getTestClock"];
         put?: never;
         post?: never;
-        /** Delete a test clock (cascades to pinned subscriptions) */
+        /**
+         * Delete a test clock and its simulated data
+         * @description Deletes the clock and everything simulated on it, in one
+         *     transaction. Every customer attached to the clock is deleted, with
+         *     all of that customer's:
+         *
+         *     - subscriptions, with their items and item history;
+         *     - invoices, with their line items, tax calculations, dunning runs
+         *       and their events, and refunds recorded from Stripe;
+         *     - credit notes and their lines;
+         *     - usage events and credit ledger entries;
+         *     - price overrides, billing profile, payment methods,
+         *       payment-update links, and portal sessions and links.
+         *
+         *     The emails queued for the clock and the clock's own effective
+         *     dates on plan price versions are deleted too. Nothing that belongs
+         *     to the account is touched: meters, plans and their prices, dunning
+         *     policies, API keys and settings stay, and so does the audit log,
+         *     which records the deletion. Webhook events already sent are not
+         *     recalled. Takes no body.
+         */
         delete: operations["deleteTestClock"];
         options?: never;
         head?: never;
@@ -3148,7 +3330,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List subscriptions pinned to this clock */
+        /**
+         * List a test clock's subscriptions
+         * @description Lists the subscriptions that run on the clock: those of the
+         *     customers attached to it. Test mode only.
+         */
         get: operations["listTestClockSubscriptions"];
         put?: never;
         post?: never;
@@ -3168,20 +3354,37 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Advance the clock to a new frozen_time
-         * @description Moves the clock forward and runs billing catchup asynchronously
-         *     for every subscription pinned to this clock. The 200 returns as
-         *     soon as the clock is marked `advancing` — a background worker
-         *     drains the catchup; poll `GET /v1/test-clocks/{id}` until status
-         *     leaves `advancing`. Concurrent advances 409 while catchup runs.
-         *     Catchup failures park the clock in `internal_failure` — resume
-         *     it with `POST /v1/test-clocks/{id}/retry-advance` (deletion is
-         *     not required). ADR-018. Catchup bills every skipped period
-         *     before it runs payment retries and dunning, so when a dunning
-         *     policy cancels or pauses a subscription, advance to the time of
-         *     the invoice's last retry first, then to the next billing date.
-         *     The cancel or pause is dated at the advance target, and one
-         *     longer advance bills a period a real clock would not (#1276).
+         * Advance a test clock
+         * @description Moves the clock forward to `frozen_time` and catches billing up for
+         *     every customer and subscription attached to it. The call returns
+         *     200 as soon as the clock is `advancing`; the catch-up runs in the
+         *     background. Poll `GET /v1/test-clocks/{id}` until `status` leaves
+         *     `advancing`. While it runs, another advance answers 409. One
+         *     advance moves the clock at most one year; split a longer span into
+         *     several advances.
+         *
+         *     The catch-up runs these steps in order: trials that ended, period
+         *     invoices (every period that came due), collection pauses that
+         *     ended, billing thresholds, tax retries, charges, credit notes that
+         *     were waiting to be issued, dunning steps, and credit expiry.
+         *     `last_advance_summary` counts what each step did. If a step fails,
+         *     the later steps still run, and the clock ends in
+         *     `internal_failure` with a `last_failure_reason`. Resume it with
+         *     `POST /v1/test-clocks/{id}/retry-advance`; you do not need to
+         *     delete it.
+         *
+         *     Every period that came due is invoiced before payment retries and
+         *     dunning run. So when a dunning policy cancels or pauses a
+         *     subscription during one long advance, the next period's invoice
+         *     may already exist. The cancel or pause is dated at the escalation:
+         *     the time of the invoice's final retry, or when that retry's failure
+         *     was recorded if that is later. It is never dated before the start
+         *     of the subscription's current period. When the escalation falls
+         *     before that start, the action lands at the period's start, which
+         *     uses none of the period and relieves any base fee billed in advance
+         *     for it in full. To see the steps as a real clock would, advance to
+         *     the time of the invoice's last retry first, then to the next
+         *     billing date.
          */
         post: operations["advanceTestClock"];
         delete?: never;
@@ -3200,15 +3403,14 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Retry catchup on a clock parked in internal_failure
-         * @description Resumes a clock parked in `internal_failure` after a prior
-         *     catchup error. Catchup is idempotent (only subscriptions with
-         *     `next_billing_at <= frozen_time` are processed), so resuming
-         *     from where the previous attempt stopped is safe; `frozen_time`
-         *     keeps the value stamped by the original advance. Asynchronous
-         *     like advance: the 200 returns the clock back in `advancing`;
-         *     poll `GET /v1/test-clocks/{id}` until status leaves `advancing`.
-         *     ADR-018.
+         * Retry a failed test clock advance
+         * @description Resumes a clock parked in `internal_failure` after a failed
+         *     catch-up. The catch-up bills only what is still due at the clock's
+         *     time, so resuming where the previous attempt stopped is safe;
+         *     `frozen_time` keeps the value the failed advance set. Asynchronous
+         *     like an advance: the 200 returns the clock back in `advancing`;
+         *     poll `GET /v1/test-clocks/{id}` until `status` leaves `advancing`.
+         *     Takes no body.
          */
         post: operations["retryTestClockAdvance"];
         delete?: never;
@@ -3226,8 +3428,8 @@ export interface paths {
         };
         /**
          * List customers attached to a test clock
-         * @description Test mode only; a live-mode key gets 403. Returns every customer
-         *     attached to the clock. The list is not paginated.
+         * @description Lists the customers attached to the clock, one page at a time.
+         *     Test mode only; a live-mode key gets 403.
          */
         get: operations["listTestClockCustomers"];
         put?: never;
@@ -3247,11 +3449,10 @@ export interface paths {
         };
         /**
          * List recipes
-         * @description Every recipe in the embedded registry, tagged with this tenant's
-         *     installation state in the session's livemode. `instantiated` present
-         *     means installed (the dashboard renders an "Installed" badge instead
-         *     of the Install CTA); re-apply is an idempotent no-op and there is no
-         *     uninstall (ADR-085).
+         * @description Every recipe built into Hardcount, with its values at their defaults.
+         *     A recipe installed in this account and mode carries its install record
+         *     in `instantiated`. Installing again changes nothing, and there is no
+         *     uninstall.
          */
         get: operations["listRecipes"];
         put?: never;
@@ -3269,7 +3470,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List installed recipe instances */
+        /**
+         * List installed recipes
+         * @description The install records of the recipes installed in this account and mode,
+         *     one per recipe.
+         */
         get: operations["listRecipeInstances"];
         put?: never;
         post?: never;
@@ -3287,8 +3492,9 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get recipe
-         * @description Registry only — no DB read, no install state.
+         * Get a recipe
+         * @description One recipe, with its values at their defaults. It does not say whether
+         *     the recipe is installed: the list does.
          */
         get: operations["getRecipe"];
         put?: never;
@@ -3309,10 +3515,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Preview recipe
-         * @description Renders the recipe with caller-supplied overrides and returns the
-         *     would-be-created object graph. Pure in-memory — no DB writes, no
-         *     audit row.
+         * Preview a recipe
+         * @description Shows what installing the recipe with your overrides would create: its
+         *     meters and plans with their prices. Nothing is written, and nothing
+         *     goes to the audit log. The body is optional.
          */
         post: operations["previewRecipe"];
         delete?: never;
@@ -3331,18 +3537,22 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Instantiate recipe (idempotent apply)
-         * @description Applies the recipe for the tenant under one transaction: meters are
-         *     adopted-or-created, a fresh born-unique plan is generated with the
-         *     recipe's prices, then the install badge written. It creates nothing
-         *     else: no dunning policy and no webhook endpoint. Adopting a meter
-         *     other plans price changes none of their prices.
-         *     Idempotent per (tenant, livemode): re-posting a recipe that is
-         *     installed returns the EXISTING instance with 201 and creates
-         *     nothing (ADR-085; badge livemode-scoped per m0157). Two installs
+         * Install a recipe
+         * @description Installs the recipe in one transaction: it creates the recipe's
+         *     meters, reusing a meter that has the same `event_name` and
+         *     aggregation, then a new plan with the recipe's prices, then the
+         *     install record. If a step fails, nothing is installed. It creates
+         *     nothing else: no dunning policy and no webhook endpoint. Reusing a
+         *     meter that other plans price changes none of their prices. When the
+         *     plan's code is taken, the new plan gets the first free code with `_2`,
+         *     `_3` and so on added.
+         *
+         *     Installing a recipe that is already installed in this account and mode
+         *     returns the existing record with 201 and creates nothing. Two installs
          *     that run at the same time can conflict: the second gets a 409 and
-         *     installs nothing. A retry returns the first install, or, for
-         *     another recipe, reuses the meter it made.
+         *     installs nothing. A retry returns the first install, or, for another
+         *     recipe, reuses the meter it made. An install is written to the audit
+         *     log; a repeat that installs nothing is not. The body is optional.
          */
         post: operations["instantiateRecipe"];
         delete?: never;
@@ -3816,8 +4026,7 @@ export interface paths {
         };
         /**
          * List active price overrides
-         * @description Active overrides only, newest first. Closed or deleted
-         *     overrides are not listed. Requires pricing write permission.
+         * @description Active overrides only, newest first. Ended overrides are not listed.
          */
         get: operations["listPriceOverrides"];
         put?: never;
@@ -3826,18 +4035,20 @@ export interface paths {
          * @description Gives one customer its own rate for one plan price. The override is
          *     keyed by the price, so it keeps applying when the price's rate
          *     changes; removing the price ends it. If the customer already has an
-         *     active override for that price, it is closed and replaced by this
-         *     one. A new or replaced rate applies from the customer's next
-         *     billing period, in the customer's time (its test clock's, if it has
-         *     one); the current period keeps the rate it started with. It applies
-         *     from the join when a subscription of the customer first joins the
-         *     plan in a period after it is created: an override created before a
-         *     subscription starts (after a trial, before the trial ends), even on
-         *     the same day, applies from its first period. On a test clock, it takes effect just after the
-         *     clock's time, so a subscription created at that same clock time
-         *     bills the list price; advance the clock first. The override takes
-         *     the plan's currency. A plan swap does not carry
-         *     it: the new plan's price is another price.
+         *     active override for that price, it is closed and replaced by this one.
+         *     The override takes the plan's currency. A plan swap does not carry it:
+         *     the new plan's price is another price.
+         *
+         *     A new or replaced rate applies from the customer's next billing
+         *     period, in the customer's time (its test clock's, if it has one); the
+         *     current period keeps the rate it started with. It applies from the
+         *     join when a subscription of the customer first joins the plan in a
+         *     period after it is created: an override created before a subscription
+         *     starts (after a trial, before the trial ends), even on the same day,
+         *     applies from its first period. On a test clock, it takes effect just
+         *     after the clock's time, so a subscription created at that same clock
+         *     time bills the list price; advance the clock first. The create is
+         *     written to the audit log.
          */
         post: operations["createPriceOverride"];
         delete?: never;
@@ -3862,8 +4073,9 @@ export interface paths {
          *     to the price's rate from its next billing period, in the customer's
          *     time; the current period keeps the rate it started with. A
          *     subscription of the customer that first joins the plan in a period
-         *     after the override ends (a new subscription, an immediate plan
-         *     change, an added item) pays the price's rate from the join.
+         *     after the override ends (a new subscription, an immediate plan change,
+         *     an added item) pays the price's rate from the join. The end is written
+         *     to the audit log. Send no body.
          */
         delete: operations["deletePriceOverride"];
         options?: never;
@@ -3881,7 +4093,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Ingest LiteLLM spend logs
+         * Receive LiteLLM spend logs
          * @description Target for LiteLLM Proxy's `generic_api` logging callback. Accepts
          *     one LiteLLM log record, a JSON array of records, or
          *     `{"events": [...]}`. Each record with token counts becomes up to
@@ -4344,61 +4556,167 @@ export interface components {
             /** Format: date-time */
             revoked_at?: string;
         };
+        /**
+         * @description A customer you bill: the person or company that subscriptions,
+         *     invoices, credits and payment methods belong to. Create, list, get
+         *     and update customers under `/v1/customers`. The
+         *     `customer.email_bounced` and `customer.email_complained` webhook
+         *     events carry this object too.
+         *
+         *     Not every route fills every optional field. Get and update return
+         *     the whole record. The list and create answers leave out
+         *     `email_status`, the bounce fields, `dunning_policy_id` and
+         *     `stripe_customer_id`, and the list also leaves out
+         *     `additional_emails`.
+         * @example {
+         *       "id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "external_id": "acme-42",
+         *       "display_name": "Acme Inc",
+         *       "email": "billing@acme.example",
+         *       "additional_emails": [
+         *         "finance@acme.example"
+         *       ],
+         *       "status": "active",
+         *       "email_status": "unknown",
+         *       "dunning_policy_id": "hc_dpol_dajqj1aq3gpgqfoq5c6g",
+         *       "stripe_customer_id": "cus_RkT9qW2xYz3AbC",
+         *       "created_at": "2026-09-30T16:20:00Z",
+         *       "updated_at": "2026-10-15T09:12:44Z"
+         *     }
+         */
         Customer: {
-            /** @example hc_cus_42014438d82ddf33 */
+            /**
+             * @description The customer's ID, `hc_cus_` and 20 characters.
+             * @example hc_cus_dakhnk2q3gpgqfoq5c0g
+             */
             id: string;
+            /**
+             * @description Your own ID for the customer, such as the account ID in your
+             *     app. Unique in the account and mode, at most 255 characters,
+             *     and fixed after create.
+             */
             external_id: string;
+            /** @description The name shown on invoices, emails and the dashboard. At most 255 characters. */
             display_name: string;
+            /**
+             * @description Where billing emails go: invoices, receipts, payment reminders
+             *     and payment-method links. Absent when the customer has none.
+             */
             email?: string;
             /**
-             * @description CC'd on billing documents and billing-state emails (invoice,
-             *     receipt, dunning, payment failed, credit note) — never on
-             *     credential-bearing emails (setup links, resets, invites).
-             *     Normalized to lowercase bare addresses, deduped, capped at 10,
-             *     never equal to the primary email. Stored encrypted at rest.
+             * @description Addresses copied (CC) on billing documents and billing emails:
+             *     invoice, receipt, payment reminder, failed payment and credit
+             *     note. Never on emails that carry a link to act on the account,
+             *     such as a payment-method link. Lowercase bare addresses, no
+             *     duplicates, at most 10, never the primary `email`. Absent when
+             *     the list is empty.
              */
             additional_emails?: string[];
-            /** @enum {string} */
+            /**
+             * @description `archived` blocks new subscriptions for the customer. Its
+             *     unpaid invoices stay collectible.
+             * @enum {string}
+             */
             status: "active" | "archived";
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the customer was created.
+             */
             created_at: string;
             /**
-             * @description Test clock this customer is pinned to (test mode only). When set,
-             *     the customer — and any invoices/subscriptions created for it —
-             *     run on the clock's simulated time. Empty for live customers. The
-             *     dashboard reads it to show the "test clock" badge + simulated-time
-             *     banner on the customer and its invoices.
+             * @description The test clock the customer was created on (test mode only).
+             *     Its subscriptions and invoices then run on the clock's
+             *     simulated time. Set at create and fixed after. Absent for a
+             *     customer with no test clock.
              */
             test_clock_id?: string;
+            /** @description The account the customer belongs to. */
             tenant_id?: string;
             /**
-             * @description Deliverability of `email`, learned from bounce and complaint reports.
+             * @description Whether `email` receives mail, learned from bounce and spam
+             *     reports. `unknown` until a report arrives. `bounced` or
+             *     `complained` after one, and Hardcount then stops emailing the
+             *     address. Changing `email` sets it back to `unknown`. Hardcount
+             *     does not set `ok` today.
              * @enum {string}
              */
             email_status?: "unknown" | "ok" | "bounced" | "complained";
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the last bounce or spam report was recorded. Absent until one is.
+             */
             email_last_bounced_at?: string;
+            /**
+             * @description The reason the email provider gave with the last bounce or spam
+             *     report. Absent until one is recorded.
+             */
             email_bounce_reason?: string;
-            /** @description Assigned dunning policy; absent means the tenant default. */
+            /**
+             * @description The dunning policy (the plan for retrying failed payments) this
+             *     customer uses. Absent when the customer uses the account's
+             *     default policy.
+             */
             dunning_policy_id?: string;
-            /** @description The Stripe customer. Absent until the first payment-method action. */
+            /**
+             * @description The Stripe customer linked to this customer. Absent until the
+             *     first payment-method action, such as a payment-method link,
+             *     creates it.
+             */
             stripe_customer_id?: string;
+            /**
+             * @description Whether the customer is in live mode. The customer routes and
+             *     webhook events leave it out: use the mode of your API key.
+             */
             livemode?: boolean;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the customer was last changed.
+             */
             updated_at: string;
         };
+        /**
+         * @description A meter counts one kind of usage: every usage event that sends its
+         *     `event_name`. A meter has no price of its own. Plans price it
+         *     (`/v1/plans/{id}/prices`). Create, list, get and update meters
+         *     under `/v1/meters`.
+         * @example {
+         *       "id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "event_name": "tokens",
+         *       "name": "Tokens",
+         *       "unit": "tokens",
+         *       "aggregation": "sum",
+         *       "has_usage": true,
+         *       "created_at": "2026-09-15T09:00:00Z",
+         *       "updated_at": "2026-09-15T09:00:00Z"
+         *     }
+         */
         Meter: {
+            /** @description The meter's ID, `hc_mtr_` and 20 characters. */
             id: string;
+            /** @description The account the meter belongs to. */
             tenant_id?: string;
-            /** @description The `event_name` usage events send for this meter. */
+            /**
+             * @description The `event_name` usage events send for this meter. Letters,
+             *     digits, `-` and `_`, at most 100 characters. Unique in the
+             *     account and mode, and fixed after create.
+             */
             event_name: string;
+            /** @description The meter's display name, at most 255 characters. */
             name: string;
+            /**
+             * @description The unit of the quantity, such as `tokens` or `seconds`.
+             *     `unit` when none was given.
+             */
             unit: string;
             /**
              * @description How the meter rolls its events into one quantity per billing
-             *     period. Every price of the meter bills under it. `last`
-             *     is the latest event by timestamp, then by id. Fixed once the
-             *     meter has a usage event (see `has_usage`).
+             *     period: `sum` adds the quantities, `count` counts the events,
+             *     `max` takes the highest quantity, and `last` takes the latest
+             *     event's quantity, by timestamp, then by id. Every price of the
+             *     meter bills under it. Fixed once the meter has a usage event
+             *     (see `has_usage`).
              * @enum {string}
              */
             aggregation: "sum" | "count" | "max" | "last";
@@ -4410,47 +4728,160 @@ export interface components {
              *     or update that succeeded leaves it out if it could not be read.
              */
             has_usage?: boolean;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the meter was created.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the meter was last changed.
+             */
             updated_at: string;
         };
+        /**
+         * @description A plan is what a subscription buys: a recurring base fee and the
+         *     usage prices of its meters, in one currency and billing interval.
+         *     `GET /v1/plans` lists plans in this shape. Get, create and update
+         *     answer a `PlanDetail`, which adds two fields.
+         * @example {
+         *       "id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "code": "pro",
+         *       "name": "Pro",
+         *       "description": "Base fee plus metered tokens.",
+         *       "currency": "USD",
+         *       "billing_interval": "monthly",
+         *       "status": "active",
+         *       "base_amount_cents": 4900,
+         *       "base_bill_timing": "in_arrears",
+         *       "prices": [
+         *         {
+         *           "id": "hc_prc_dajr672q3gpgqfoq5c20",
+         *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *           "dimension_match": {},
+         *           "mode": "per_unit",
+         *           "unit_amount_cents": "0.0003",
+         *           "tiers": [],
+         *           "package_size": 0,
+         *           "package_amount_cents": "0",
+         *           "created_at": "2026-09-15T09:05:00Z",
+         *           "updated_at": "2026-09-15T09:05:00Z"
+         *         }
+         *       ],
+         *       "created_at": "2026-09-15T09:05:00Z",
+         *       "updated_at": "2026-09-15T09:05:00Z"
+         *     }
+         */
         Plan: {
+            /** @description The plan's ID, `hc_pln_` and 20 characters. */
             id: string;
+            /** @description The account the plan belongs to. */
             tenant_id?: string;
+            /**
+             * @description Your short name for the plan. Letters, digits, `-` and `_`, at
+             *     most 100 characters, unique in the account and mode. Fixed
+             *     after create.
+             */
             code: string;
+            /** @description The plan's display name, at most 255 characters. */
             name: string;
+            /**
+             * @description ISO 4217 code in upper case, such as `USD`. Fixed after create.
+             *     The plan's prices take it.
+             */
             currency: string;
-            /** @enum {string} */
+            /**
+             * @description How often a subscription to the plan is billed. Fixed after create.
+             * @enum {string}
+             */
             billing_interval: "monthly" | "yearly";
-            /** @enum {string} */
+            /**
+             * @description An archived plan takes no new subscriptions and no plan change
+             *     onto it. Subscriptions already on it keep billing.
+             * @enum {string}
+             */
             status: "active" | "archived";
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The recurring base fee per billing period, in the currency's minor
+             *     unit (cents for USD). 0 for a usage-only plan.
+             */
             base_amount_cents: number;
             /**
-             * @description When the recurring base fee is invoiced relative to the period it covers.
-             *     in_arrears: base + usage billed at period end.
-             *     in_advance: base billed at period start (day 1 on create; cycle-close invoice
-             *     carries upcoming period's base + elapsed period's usage). Usage lines are
-             *     always arrears regardless of this field. A plan with no base fee is
-             *     in_arrears. See ADR-031.
+             * @description When the base fee is invoiced, relative to the period it
+             *     covers. `in_arrears`: the base fee and the usage are billed at
+             *     the period end. `in_advance`: the base fee is billed at the
+             *     period start; the first invoice comes when the subscription
+             *     starts, and each cycle invoice carries the next period's base
+             *     fee with the past period's usage. Usage is always billed at
+             *     the period end. A plan with no base fee is `in_arrears`.
              * @enum {string}
              */
             base_bill_timing: "in_advance" | "in_arrears";
             /**
-             * @description The plan's usage prices from now on. A plan's meters are the
-             *     meters it has a price for.
+             * @description The plan's usage prices from now on, in the order they were
+             *     added. A plan's meters are the meters it has a price for.
              */
             prices: components["schemas"]["PlanPrice"][];
+            /** @description Your description of the plan. Absent when empty. */
             description?: string;
-            /** @description Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`. */
+            /**
+             * @description The Stripe product tax code of the base fee, such as
+             *     `txcd_10103001`. Absent when the plan uses the account's
+             *     `default_product_tax_code`.
+             */
             tax_code?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the plan was created.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the plan was last changed.
+             */
             updated_at: string;
         };
-        /** @description A plan as Get, Create and Update plan answer it. */
+        /**
+         * @description A plan as get, create and update plan answer it: the plan with its
+         *     prices, whether a subscription has ever used it, and how many live
+         *     subscriptions are on it.
+         * @example {
+         *       "id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "code": "pro",
+         *       "name": "Pro",
+         *       "description": "Base fee plus metered tokens.",
+         *       "currency": "USD",
+         *       "billing_interval": "monthly",
+         *       "status": "active",
+         *       "base_amount_cents": 4900,
+         *       "base_bill_timing": "in_arrears",
+         *       "prices": [
+         *         {
+         *           "id": "hc_prc_dajr672q3gpgqfoq5c20",
+         *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *           "dimension_match": {},
+         *           "mode": "per_unit",
+         *           "unit_amount_cents": "0.0003",
+         *           "tiers": [],
+         *           "package_size": 0,
+         *           "package_amount_cents": "0",
+         *           "created_at": "2026-09-15T09:05:00Z",
+         *           "updated_at": "2026-09-15T09:05:00Z"
+         *         }
+         *       ],
+         *       "used": true,
+         *       "live_subscription_count": 1,
+         *       "created_at": "2026-09-15T09:05:00Z",
+         *       "updated_at": "2026-09-15T09:05:00Z"
+         *     }
+         */
         PlanDetail: components["schemas"]["Plan"] & {
             /**
              * @description Whether a subscription has ever used the plan (canceled ones
@@ -4463,14 +4894,29 @@ export interface components {
             /**
              * @description Subscriptions on this plan that are not canceled. While it
              *     is above 0, `base_amount_cents` cannot change (see Update
-             *     plan).
+             *     plan). Always 0 on the answer to a create.
              */
             live_subscription_count: number;
         };
         /**
-         * @description How a price bills a quantity. Send only the mode's fields: a field the
-         *     mode does not use must be 0 or left out (`tiers`: `[]` or left out),
-         *     or the request is refused with 422 and `param` naming it.
+         * @description How a price bills a quantity: its mode and the mode's fields. It is
+         *     the body of `PATCH /v1/plans/{id}/prices/{price_id}` and part of
+         *     every price you add. Send only the mode's fields: a field the mode
+         *     does not use must be 0 or left out (`tiers`: `[]` or left out), or
+         *     the request is refused with 422 and `param` naming it.
+         * @example {
+         *       "mode": "graduated",
+         *       "tiers": [
+         *         {
+         *           "up_to": 1000000,
+         *           "unit_amount_cents": "0"
+         *         },
+         *         {
+         *           "up_to": null,
+         *           "unit_amount_cents": "0.0003"
+         *         }
+         *       ]
+         *     }
          */
         PriceShape: {
             /**
@@ -4484,7 +4930,7 @@ export interface components {
             tiers?: components["schemas"]["PriceTier"][];
             /**
              * Format: int64
-             * @description Used when `mode` is `package`. Must be above 0.
+             * @description Used when `mode` is `package`. The units in one package, above 0.
              */
             package_size?: number;
             /** @description Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`. */
@@ -4494,13 +4940,35 @@ export interface components {
          * @description One usage price of a plan: a meter, the events it takes
          *     (`dimension_match`) and its rate. The price takes the plan's
          *     currency. Its id stays the same when its rate changes; its meter
-         *     and `dimension_match` are its identity and never change.
+         *     and `dimension_match` are its identity and never change. Every
+         *     shape field is always sent: the ones the mode does not use are
+         *     `"0"`, `0` or `[]`.
+         * @example {
+         *       "id": "hc_prc_dajr672q3gpgqfoq5c20",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *       "dimension_match": {},
+         *       "mode": "per_unit",
+         *       "unit_amount_cents": "0.0003",
+         *       "tiers": [],
+         *       "package_size": 0,
+         *       "package_amount_cents": "0",
+         *       "created_at": "2026-09-15T09:05:00Z",
+         *       "updated_at": "2026-09-15T09:05:00Z"
+         *     }
          */
         PlanPrice: {
-            /** @example hc_prc_1a2b3c4d5e6f7890abcdef12 */
+            /**
+             * @description The price's ID, `hc_prc_` and 20 characters.
+             * @example hc_prc_dajr672q3gpgqfoq5c20
+             */
             id: string;
+            /** @description The account the price belongs to. */
             tenant_id?: string;
+            /** @description The plan the price belongs to. */
             plan_id: string;
+            /** @description The meter whose usage the price bills. */
             meter_id: string;
             /**
              * @description The labels an event must carry for this price to take it, for
@@ -4512,19 +4980,31 @@ export interface components {
                 [key: string]: string;
             };
             /**
-             * @description As on PriceShape.
+             * @description How the price bills a quantity; see PriceShape.
              * @enum {string}
              */
             mode: "per_unit" | "graduated" | "package";
-            /** @description Price per unit in cents, as a decimal string. */
+            /**
+             * @description Price per unit, as a decimal string of cents. `"0"` unless `mode`
+             *     is `per_unit`.
+             */
             unit_amount_cents: string;
             /** @description Empty (`[]`) unless `mode` is `graduated`. */
             tiers: components["schemas"]["PriceTier"][];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The units in one package. 0 unless `mode` is `package`.
+             */
             package_size: number;
-            /** @description Price of one package in cents, as a decimal string. */
+            /**
+             * @description Price of one package, as a decimal string of cents. `"0"` unless
+             *     `mode` is `package`.
+             */
             package_amount_cents: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the price was first added to the plan.
+             */
             created_at: string;
             /**
              * Format: date-time
@@ -4533,7 +5013,8 @@ export interface components {
             updated_at: string;
         };
         /**
-         * @description The answer to a price write: the price, and when the write applies.
+         * @description The answer to a price write (add, change or remove): the price, and
+         *     when the write applies.
          *     `now`: no subscription has used the plan, so it applies at once.
          *     `next_period`: each subscriber pays the new content from their next
          *     billing period; the current period keeps the prices it started with.
@@ -4548,23 +5029,61 @@ export interface components {
          *     period. On a test clock, the write takes effect just after the
          *     clock's time: a subscriber who joins at that same clock time gets
          *     the earlier prices.
+         * @example {
+         *       "id": "hc_prc_dajr672q3gpgqfoq5c20",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *       "dimension_match": {},
+         *       "mode": "per_unit",
+         *       "unit_amount_cents": "0.00025",
+         *       "tiers": [],
+         *       "package_size": 0,
+         *       "package_amount_cents": "0",
+         *       "created_at": "2026-09-15T09:05:00Z",
+         *       "updated_at": "2026-10-20T14:00:00Z",
+         *       "effective": "next_period"
+         *     }
          */
         PriceWrite: components["schemas"]["PlanPrice"] & {
-            /** @enum {string} */
+            /**
+             * @description When the write applies, as explained above.
+             * @enum {string}
+             */
             effective: "now" | "next_period";
-            /** @description True on the answer to a removal. */
+            /** @description True on the answer to a removal. Absent otherwise. */
             removed?: boolean;
             /**
-             * @description On a removal, the customer overrides of the price it ended.
-             *     Each ends when the removal takes effect for its customer.
+             * @description On a removal, the customer overrides of the price it ended
+             *     (`[]` when there were none). Each ends when the removal
+             *     takes effect for its customer. Absent on an add or a
+             *     change.
              */
             ended_overrides?: {
+                /** @description The ended override's ID. */
                 id: string;
+                /** @description The customer the override was for. */
                 customer_id: string;
             }[];
         };
-        /** @description One price to add to a plan. */
+        /**
+         * @description One price to add to a plan: the body of
+         *     `POST /v1/plans/{id}/prices`, and one entry of `prices` on
+         *     `POST /v1/plans`. The meter and labels, then the shape.
+         * @example {
+         *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *       "dimension_match": {
+         *         "model": "claude-opus-4.5"
+         *       },
+         *       "mode": "per_unit",
+         *       "unit_amount_cents": "0.0015"
+         *     }
+         */
         PriceInput: {
+            /**
+             * @description The meter whose usage the price bills. It must be a meter in
+             *     this account and mode.
+             */
             meter_id: string;
             /**
              * @description The labels an event must carry for the price to take it.
@@ -4578,34 +5097,134 @@ export interface components {
                 [key: string]: string;
             };
         } & components["schemas"]["PriceShape"];
+        /**
+         * @description One tier of a graduated price.
+         * @example {
+         *       "up_to": 1000000,
+         *       "unit_amount_cents": "0"
+         *     }
+         */
         PriceTier: {
             /**
              * Format: int64
              * @description The tier's upper bound in whole units: the tier prices the quantity above the previous tier's bound, up to this one. `null` on the last tier, which has no upper bound. Only the last tier is `null`, and it must be.
              */
             up_to: number | null;
-            /** @description Price per unit in cents in this tier, as a decimal string. */
+            /**
+             * @description Price per unit in cents in this tier, as a decimal string. `"0"`
+             *     makes the tier free.
+             */
             unit_amount_cents: string;
         };
+        /**
+         * @description A customer's subscription: the plans it bills (its `items`), its
+         *     status and its current billing period. Every route under
+         *     `/v1/subscriptions` that returns a subscription returns this
+         *     object, with its items.
+         *
+         *     A subscription bills in one currency, the currency of its plans.
+         *     All its items share one billing interval and one base-fee timing.
+         *     Hardcount invoices each period when it ends.
+         * @example {
+         *       "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "code": "acme-pro",
+         *       "display_name": "Acme Pro",
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "items": [
+         *         {
+         *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+         *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+         *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *           "quantity": 1,
+         *           "created_at": "2026-10-01T09:12:44Z",
+         *           "updated_at": "2026-10-01T09:12:44Z"
+         *         }
+         *       ],
+         *       "status": "active",
+         *       "billing_time": "calendar",
+         *       "started_at": "2026-10-01T09:12:44Z",
+         *       "activated_at": "2026-10-01T09:12:44Z",
+         *       "cancel_at_period_end": false,
+         *       "current_billing_period_start": "2026-10-01T00:00:00Z",
+         *       "current_billing_period_end": "2026-11-01T00:00:00Z",
+         *       "current_billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+         *       "next_billing_at": "2026-11-01T00:00:00Z",
+         *       "created_at": "2026-10-01T09:12:44Z",
+         *       "updated_at": "2026-10-01T09:12:44Z"
+         *     }
+         */
         Subscription: {
+            /** @description The subscription's ID (`hc_sub_…`). */
             id: string;
+            /** @description The account the subscription belongs to. */
             tenant_id?: string;
+            /**
+             * @description Your code for the subscription: letters, digits, hyphens and
+             *     underscores. Unique in your account and mode (live or test).
+             */
             code: string;
+            /** @description The subscription's name, as shown in the dashboard. */
             display_name: string;
+            /** @description The customer the subscription bills (`hc_cus_…`). */
             customer_id: string;
             /** @description The subscription's priced lines. Each item names its plan. */
             items?: components["schemas"]["SubscriptionItem"][];
-            /** @enum {string} */
+            /**
+             * @description Where the subscription is in its life.
+             *
+             *     - `draft`: created with `status: draft`. It has no billing
+             *       period and bills nothing until you activate it with
+             *       `POST /v1/subscriptions/{id}/activate`.
+             *     - `trialing`: in a free trial until `trial_end_at`. Usage in
+             *       the trial is not billed. When the trial ends, Hardcount makes
+             *       the subscription `active` and its first paid period starts.
+             *       If a cancel is scheduled for the trial end, it becomes
+             *       `canceled` instead, with no charge.
+             *     - `active`: billing. Each period is invoiced when it ends.
+             *     - `canceled`: ended at `canceled_at`. It bills nothing more,
+             *       and no route makes it `active` again.
+             *
+             *     A paused collection is not a status: see `pause_collection`.
+             * @enum {string}
+             */
             status: "draft" | "trialing" | "active" | "canceled";
-            /** @enum {string} */
+            /**
+             * @description How monthly periods line up. `calendar`: every period ends on
+             *     the 1st of a month, in your account's billing time zone, so the
+             *     first period runs from the start day to the next 1st.
+             *     `anniversary`: each period starts on the day of the month the
+             *     subscription started (the last day of a shorter month). A plan
+             *     billed yearly always bills from its start date, whatever this
+             *     says.
+             * @enum {string}
+             */
             billing_time: "calendar" | "anniversary";
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the trial started. Absent when the subscription had no trial.
+             */
             trial_start_at?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the trial ends, or ended. The first paid period starts at
+             *     the beginning of that day in your account's billing time zone.
+             *     Absent when the subscription had no trial.
+             */
             trial_end_at?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the subscription started: when it was created, or, for a
+             *     draft, when it was activated. Absent on a draft.
+             */
             started_at?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the subscription became `active`: at creation without a
+             *     trial, at activation of a draft, or when its trial ended.
+             *     Absent on a draft and while it trials.
+             */
             activated_at?: string;
             /**
              * Format: date-time
@@ -4614,36 +5233,74 @@ export interface components {
             canceled_at?: string;
             /**
              * Format: date-time
-             * @description A scheduled cancel time, if one is set.
+             * @description The instant a cancel is scheduled for, when it was scheduled
+             *     with `cancel_at`. Absent when none is set, and after the
+             *     subscription is canceled.
              */
             cancel_at?: string;
-            /** @description True when the subscription cancels at the end of the current period. */
+            /**
+             * @description True when the subscription cancels at the end of the current
+             *     period, or, while it trials, at the end of the trial. False
+             *     after the subscription is canceled.
+             */
             cancel_at_period_end: boolean;
             /**
              * Format: date-time
-             * @description When a scheduled cancel takes effect. Absent when no cancel is scheduled.
+             * @description When a scheduled cancel takes effect: `cancel_at` when set;
+             *     otherwise, with `cancel_at_period_end`, `trial_end_at` while
+             *     the subscription trials and `current_billing_period_end`
+             *     after. Absent when no cancel is scheduled.
              */
             cancel_effective_at?: string;
             pause_collection?: components["schemas"]["SubscriptionPauseCollection"];
             billing_thresholds?: components["schemas"]["SubscriptionBillingThresholds"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Start of the current billing period, at the beginning of a day
+             *     in your account's billing time zone. While the subscription
+             *     trials, it is the start of the first paid period, which begins
+             *     when the trial ends. Absent on a draft.
+             */
             current_billing_period_start?: string;
             /**
              * Format: date-time
-             * @description End of the current period (exclusive).
+             * @description End of the current period (exclusive): the start of the next
+             *     one. While the subscription trials, the end of the first paid
+             *     period. Absent on a draft.
              */
             current_billing_period_end?: string;
-            /** @description The current period as text, with the last day included, in the tenant's billing time zone. */
+            /**
+             * @description The current period as text, with the last day included, in your
+             *     account's billing time zone, for example "Oct 1, 2026 – Oct 31,
+             *     2026". Absent when the subscription has no current period, and
+             *     when the time zone could not be read.
+             */
             current_billing_period_display?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the current period's invoice is due to be built: the end
+             *     of the current period. The billing run builds it once the
+             *     invoice grace after that time has passed. Absent on a draft.
+             */
             next_billing_at?: string;
             /** @description Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions. */
             billing_anchor_day?: number;
+            /**
+             * @description The test clock the subscription runs on (test mode only),
+             *     taken from its customer when it was created. Absent when the
+             *     customer is not on a test clock.
+             */
             test_clock_id?: string;
             billing_failure?: components["schemas"]["BillingFailure"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the subscription was created. For a customer on a test clock, the clock's time.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the subscription last changed.
+             */
             updated_at: string;
         };
         /**
@@ -4659,6 +5316,14 @@ export interface components {
          *     until `POST /v1/subscriptions/{id}/retry-billing` is called.
          *
          *     Never set on a subscription attached to a test clock.
+         * @example {
+         *       "attempts": 2,
+         *       "max_attempts": 8,
+         *       "last_error": "The tax provider in settings cannot be used. Choose a tax provider that is configured, then retry billing.",
+         *       "failed_at": "2026-11-01T01:20:00Z",
+         *       "next_attempt_at": "2026-11-01T02:20:00Z",
+         *       "parked": false
+         *     }
          */
         BillingFailure: {
             /** @description Failed attempts on the work that is due now. At least 1. */
@@ -4687,10 +5352,44 @@ export interface components {
             /** @description True when automatic attempts have stopped. */
             parked: boolean;
         };
+        /**
+         * @description One usage event: a quantity of one meter's usage, for one customer,
+         *     at one time. Returned by `POST /v1/usage-events` and
+         *     `POST /v1/usage-events/backfill`, and listed by
+         *     `GET /v1/usage-events`. An event counts toward the billing period
+         *     its `timestamp` falls in.
+         * @example {
+         *       "id": "hc_evt_db6eh6qq3gpgqfoq5c3g",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *       "quantity": "1200",
+         *       "dimensions": {
+         *         "model": "gpt-4o",
+         *         "token_type": "input"
+         *       },
+         *       "idempotency_key": "req-7f3a9c",
+         *       "timestamp": "2026-10-12T14:03:07Z",
+         *       "origin": "api",
+         *       "provider_cost_cents": "0.3",
+         *       "provider_cost_source": "table"
+         *     }
+         */
         UsageEvent: {
+            /** @description The event's ID (`hc_evt_…`). */
             id: string;
+            /** @description The account the event belongs to. */
             tenant_id?: string;
+            /**
+             * @description The customer the event was recorded for (`hc_cus_…`): the
+             *     customer whose `external_id` you sent as
+             *     `external_customer_id`.
+             */
             customer_id: string;
+            /**
+             * @description The meter the event counts toward (`hc_mtr_…`): the meter whose
+             *     `event_name` you sent.
+             */
             meter_id: string;
             /** @description Exact quantity as a decimal string (e.g. "1.5"). */
             quantity: string;
@@ -4698,8 +5397,23 @@ export interface components {
             dimensions?: {
                 [key: string]: unknown;
             };
+            /**
+             * @description The key the event was sent with. Hardcount keeps one event per
+             *     key in each account and mode (live or test), with no expiry: an
+             *     event sent later with the same key is not stored again, however
+             *     long after. Absent on an event stored without a key.
+             */
             idempotency_key?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the usage happened. It decides which billing period the
+             *     event counts toward. An event sent without `timestamp` is
+             *     stamped with the time Hardcount received it, or, for a customer
+             *     on a test clock, with the clock's time. A live event may be at
+             *     most 5 minutes ahead of that time. There is no limit on how far
+             *     back it goes, but an event in a period whose invoice is already
+             *     built is stored and not billed (see `billing_status`).
+             */
             timestamp: string;
             /**
              * @description How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
@@ -4763,6 +5477,28 @@ export interface components {
          * @enum {string}
          */
         UsageBillingStatus: "after_close" | "no_price" | "not_on_plan" | "outside_subscription";
+        /**
+         * @description What `POST /v1/usage-events/batch` wrote: how many events were new,
+         *     how many were already stored, and one result per event in the order
+         *     sent.
+         * @example {
+         *       "ingested": 2,
+         *       "deduplicated": 0,
+         *       "total": 2,
+         *       "after_close": 0,
+         *       "no_price": 0,
+         *       "not_on_plan": 0,
+         *       "outside_subscription": 0,
+         *       "results": [
+         *         {
+         *           "status": "ingested"
+         *         },
+         *         {
+         *           "status": "ingested"
+         *         }
+         *       ]
+         *     }
+         */
         UsageEventBatchResult: {
             /** @description Newly written events. */
             ingested: number;
@@ -4784,6 +5520,12 @@ export interface components {
              */
             results: components["schemas"]["UsageEventBatchEventResult"][];
         };
+        /**
+         * @description What the batch did with one of its events.
+         * @example {
+         *       "status": "ingested"
+         *     }
+         */
         UsageEventBatchEventResult: {
             /**
              * @description `ingested`: the batch wrote the event. `deduplicated`: an event
@@ -5077,9 +5819,10 @@ export interface components {
         /** @enum {string} */
         InvoiceLineType: "base_fee" | "usage" | "add_on";
         /**
-         * @description Classifies per-item proration artifacts so the dedup index can
-         *     distinguish a plan-change and a quantity-change that happen to
-         *     share the same `(subscription, item, timestamp)`.
+         * @description The kind of subscription item change that produced a proration:
+         *     `plan` (the item moved to another plan), `quantity` (its quantity
+         *     changed), `add` (the item was added) or `remove` (the item was
+         *     removed).
          * @enum {string}
          */
         ItemChangeType: "plan" | "quantity" | "add" | "remove";
@@ -5407,73 +6150,197 @@ export interface components {
              */
             commit_expires_at?: string | null;
         };
+        /**
+         * @description What you pay an upstream AI provider per token, for one provider,
+         *     model and token type. When a usage event with matching `provider`,
+         *     `model` and `token_type` labels arrives, Hardcount stamps this cost
+         *     on it, unless the event already brings a cost the provider
+         *     reported. The margin report adds the stamps up. Editing or deleting
+         *     a rate changes only events that arrive later. The
+         *     `/v1/provider-costs` routes manage rates.
+         * @example {
+         *       "id": "hc_pcr_9c3e5a7b1d2f4e6a8c0b2d4f",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "provider": "anthropic",
+         *       "model": "claude-sonnet-4.5",
+         *       "token_type": "input",
+         *       "unit_cost_cents": "0.0002",
+         *       "currency": "USD",
+         *       "created_at": "2026-09-15T09:10:00Z",
+         *       "updated_at": "2026-09-15T09:10:00Z"
+         *     }
+         */
         ProviderCostRate: {
+            /** @description The rate's ID, `hc_pcr_` and 24 hex characters. */
             id: string;
+            /** @description The account the rate belongs to. */
             tenant_id?: string;
+            /**
+             * @description The provider, in lower case, such as `anthropic`. It must equal
+             *     the `provider` label of the usage events it costs.
+             */
             provider: string;
+            /**
+             * @description The model, such as `claude-sonnet-4.5`. An event matches on its
+             *     `model_raw` label first, then on its `model` label.
+             */
             model: string;
+            /**
+             * @description The kind of token, in lower case, such as `input`, `output` or
+             *     `cache_read`. It must equal the `token_type` label of the usage
+             *     events it costs.
+             */
             token_type: string;
-            /** @description US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens). */
+            /**
+             * @description US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per
+             *     1,000,000 tokens).
+             */
             unit_cost_cents: string;
             /**
              * @description Always USD. Cost and margin count every rate in US cents.
              * @enum {string}
              */
             currency: "USD";
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the rate was first set.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the rate was last set.
+             */
             updated_at: string;
         };
+        /**
+         * @description One customer's usage revenue against what that usage cost you at
+         *     your AI providers, for a window: `GET /v1/customers/{id}/margin`.
+         *     It looks only at usage: base fees, credits and tax are not in it.
+         *     Revenue is shown per model only where the price that billed the
+         *     usage names the model in its `dimension_match`; other revenue is
+         *     reported as unattributed, never split by a guess.
+         * @example {
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "from": "2026-10-01T00:00:00Z",
+         *       "to": "2026-11-01T00:00:00Z",
+         *       "revenue_cents": 3750,
+         *       "revenue_currency": "USD",
+         *       "cost_cents": "2500",
+         *       "cost_currency": "USD",
+         *       "margin_bps": 3333,
+         *       "costed_events": 4210,
+         *       "cost_rates_configured": true,
+         *       "by_model": [
+         *         {
+         *           "model": "claude-sonnet-4.5",
+         *           "cost_cents": "2500",
+         *           "attributed": false
+         *         }
+         *       ],
+         *       "unattributed_revenue_cents": 3750,
+         *       "unresolved_events": 0
+         *     }
+         */
         MarginReport: {
+            /** @description The customer the report is about. */
             customer_id: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Start of the window, inclusive.
+             */
             from: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description End of the window, exclusive.
+             */
             to: string;
             /**
              * Format: int64
-             * @description Total rated usage revenue in the window, an estimate at each subscription's current prices. Only active and trialing subscriptions are counted.
+             * @description Total rated usage revenue in the window, in the minor unit of
+             *     `revenue_currency` (cents for USD). It is an estimate at each
+             *     subscription's current prices. Only active and trialing
+             *     subscriptions are counted.
              */
             revenue_cents: number;
-            /** @description Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter. */
+            /**
+             * @description Currency of `revenue_cents` (the currency of the customer's
+             *     prices). Absent when the window's revenue spans more than one
+             *     currency, or the customer has no priced meter.
+             */
             revenue_currency?: string;
             /** @description Total stamped provider cost in US cents, as a decimal string (e.g. "275.75"). */
             cost_cents: string;
-            /** @description Currency of cost_cents. Always USD. */
+            /** @description Currency of `cost_cents`. Always USD. */
             cost_currency: string;
             /**
              * Format: int64
-             * @description (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, when costed_events is 0 (no provider cost known), or when unresolved_events is above 0 (part of the cost unknown, so the margin would read too high).
+             * @description (revenue − cost) / revenue in basis points (100 = 1%). Absent
+             *     when revenue is 0, when `revenue_currency` is not
+             *     `cost_currency`, when `costed_events` is 0 (no provider cost
+             *     known), or when `unresolved_events` is above 0 (part of the
+             *     cost unknown, so the margin would read too high).
              */
             margin_bps?: number;
+            /**
+             * @description One row per model that has stamped cost or attributed revenue in
+             *     the window, largest revenue first, then largest cost.
+             */
             by_model: {
+                /**
+                 * @description The model, from the events' `model` label (else their
+                 *     `model_raw` label, else `(unknown)`), or from the price's
+                 *     `dimension_match` for revenue with no stamped cost.
+                 */
                 model: string;
                 /** @description This model's stamped provider cost in US cents, as a decimal string. */
                 cost_cents: string;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description The revenue of the prices that name this model, in the
+                 *     minor unit of `revenue_currency`. Absent when the row is
+                 *     not attributed or the revenue is 0.
+                 */
                 revenue_cents?: number;
-                /** @description True only when the price that billed the usage names this model — margin is never heuristically allocated. */
+                /**
+                 * @description True only when the price that billed the usage names this
+                 *     model, so revenue is never split by a guess.
+                 */
                 attributed: boolean;
                 /**
                  * Format: int64
-                 * @description This model's (revenue − cost) / revenue in basis points, by the same formula as the report's margin_bps. Omitted whenever the report's margin_bps is omitted for currency or unresolved_events, and when the row is not attributed or has no provider cost of its own.
+                 * @description This model's (revenue − cost) / revenue in basis points, by
+                 *     the same formula as the report's `margin_bps`. Absent
+                 *     whenever the report's `margin_bps` is absent for currency or
+                 *     `unresolved_events`, and when the row is not attributed or
+                 *     has no provider cost of its own.
                  */
                 margin_bps?: number;
             }[];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The revenue of prices that name no model, in the minor unit of
+             *     `revenue_currency` (cents for USD).
+             */
             unattributed_revenue_cents: number;
             /**
              * Format: int64
-             * @description Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `unit_cost_cents`, was too large to record (about $9.2 trillion or more, either sign).
+             * @description Usage events in the window that carry `provider`, `model` and
+             *     `token_type` labels but have no cost: no rate matched (add a
+             *     rate to cost new events), or the cost, quantity ×
+             *     `unit_cost_cents`, was too large to record (about $9.2 trillion
+             *     or more, either sign).
              */
             unresolved_events: number;
             /**
              * Format: int64
-             * @description Events in the window that carry a stamped provider cost (zero cost included). 0 means the cost side is unknown.
+             * @description Events in the window that carry a stamped provider cost (zero cost
+             *     included). 0 means the cost side is unknown.
              */
             costed_events: number;
-            /** @description Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up. */
+            /**
+             * @description Whether the account has any provider cost rate in this mode. False
+             *     with `costed_events` 0 means no rates are set up.
+             */
             cost_rates_configured: boolean;
         };
         /**
@@ -5486,41 +6353,72 @@ export interface components {
             invoice: components["schemas"]["Invoice"];
             line_items: components["schemas"]["InvoiceLineItem"][];
         };
-        /** @description A customer's credit balance in one currency and where that credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents. */
+        /**
+         * @description A customer's credit balance in one currency and where that credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents. All amounts are in the currency's minor unit (cents for USD).
+         * @example {
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "currency": "USD",
+         *       "balance_cents": 5000,
+         *       "total_granted": 5000,
+         *       "total_used": 0,
+         *       "total_expired": 0,
+         *       "total_retired": 0,
+         *       "total_deducted": 0
+         *     }
+         */
         CreditBalance: {
+            /** @description The customer (`hc_cus_…`). */
             customer_id: string;
             /** @description The currency of this balance, uppercase. Each credit ledger entry stores its own currency, and credit pays only invoices in that currency. A customer with credit in two currencies has two balances; they are never added together or converted. */
             currency: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The credit left: the sum of the customer's ledger entries in this currency, in its minor unit (cents for USD). A grant past its expiry still counts here until the expiry run writes it off.
+             */
             balance_cents: number;
             /**
              * Format: int64
-             * @description Every credit added: grants, positive adjustments, and credit a void or credit note gave back as new credit. Credit a void or credit note put back on the grant it was drawn from is not added again.
+             * @description Every credit added, in the currency's minor unit: grants, positive adjustments, and credit a void or credit note gave back as new credit. Credit a void or credit note put back on the grant it was drawn from is not added again.
              */
             total_granted: number;
             /**
              * Format: int64
-             * @description Credit applied to invoices, less what a void or credit note put back on the grant it was drawn from.
+             * @description Credit applied to invoices, less what a void or credit note put back on the grant it was drawn from, in the currency's minor unit.
              */
             total_used: number;
             /**
              * Format: int64
-             * @description Credit written off by expiry.
+             * @description Credit written off by expiry, in the currency's minor unit.
              */
             total_expired: number;
             /**
              * Format: int64
-             * @description Prepaid commit credit taken back because the invoice that funded it was voided or refunded by a credit note.
+             * @description Prepaid commit credit taken back because the invoice that funded it was voided or refunded by a credit note, in the currency's minor unit.
              */
             total_retired: number;
             /**
              * Format: int64
-             * @description Credit an operator deducted (a negative adjustment).
+             * @description Credit an operator deducted (a negative adjustment), in the currency's minor unit.
              */
             total_deducted: number;
         };
-        /** @description A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency a live subscription will invoice usage in. Amounts in two currencies are never added together. */
+        /**
+         * @description A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency a live subscription will invoice usage in. Amounts in two currencies are never added together. Returned by `GET /v1/credits/balance/{customer_id}/live`; nothing is stored.
+         * @example {
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "balances": [
+         *         {
+         *           "currency": "USD",
+         *           "balance_cents": 5000,
+         *           "unbilled_usage_cents": 2400,
+         *           "estimated_remaining_cents": 2600
+         *         }
+         *       ],
+         *       "computed_at": "2026-10-20T12:00:00Z"
+         *     }
+         */
         CreditLiveBalance: {
+            /** @description The customer (`hc_cus_…`). */
             customer_id: string;
             /** @description Ordered by currency. */
             balances: components["schemas"]["CreditLiveCurrency"][];
@@ -5530,196 +6428,1075 @@ export interface components {
              */
             computed_at: string;
         };
-        /** @description The live position in one currency. `balance_cents` is the credit the customer can spend in it: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet and that will be invoiced in this currency. `estimated_remaining_cents` is the first minus the second, never below zero. */
+        /**
+         * @description The live position in one currency, in its minor unit (cents for USD). `balance_cents` is the credit the customer can spend in it: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet and that will be invoiced in this currency. `estimated_remaining_cents` is the first minus the second, never below zero.
+         * @example {
+         *       "currency": "USD",
+         *       "balance_cents": 5000,
+         *       "unbilled_usage_cents": 2400,
+         *       "estimated_remaining_cents": 2600
+         *     }
+         */
         CreditLiveCurrency: {
+            /** @description The currency of this position, uppercase (for example `USD`). */
             currency: string;
             /**
              * Format: int64
-             * @description Settled ledger balance in this currency, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant). Can be negative.
+             * @description Settled ledger balance in this currency, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant), in the currency's minor unit. Can be negative.
              */
             balance_cents: number;
             /**
              * Format: int64
-             * @description Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
+             * @description Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it, in the currency's minor unit. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
              */
             unbilled_usage_cents: number;
             /**
              * Format: int64
-             * @description `balance_cents` minus `unbilled_usage_cents`, floored at zero. To see how far past zero a customer is, subtract the two parts yourself.
+             * @description `balance_cents` minus `unbilled_usage_cents`, floored at zero, in the currency's minor unit. To see how far past zero a customer is, subtract the two parts yourself.
              */
             estimated_remaining_cents: number;
         };
-        /** @description One override key declared in a recipe's `overridable` list. Drives validation at instantiate time and the override form in the dashboard's preview dialog. */
+        /**
+         * @description One value of a recipe you can set before you install it, such as the currency or the plan's name. The recipe's `overridable` list holds them; preview and install check `overrides` against them.
+         * @example {
+         *       "key": "currency",
+         *       "type": "string",
+         *       "default": "USD",
+         *       "enum": [
+         *         "USD",
+         *         "EUR",
+         *         "GBP"
+         *       ]
+         *     }
+         */
         RecipeOverride: {
+            /** @description The name to use in `overrides`, such as `currency`. */
             key: string;
-            /** @enum {string} */
+            /**
+             * @description The JSON type the value must have. `int` takes any JSON number.
+             * @enum {string}
+             */
             type: "string" | "int";
             /** @description Default value applied when the override is not supplied. */
             default: unknown;
+            /** @description The only values allowed. Absent when any value of the type is allowed. */
             enum?: string[];
+            /** @description The most bytes a string value may have. Absent when there is no limit. */
             max_length?: number;
+            /** @description A regular expression a string value must match. Absent when there is none. */
             pattern?: string;
         };
+        /**
+         * @description A meter a recipe creates, or reuses when one with the same
+         *     `event_name` and aggregation exists.
+         * @example {
+         *       "event_name": "gpu_seconds",
+         *       "name": "GPU seconds",
+         *       "unit": "seconds",
+         *       "aggregation": "sum"
+         *     }
+         */
         RecipeMeter: {
+            /** @description The `event_name` usage events send for the meter. */
             event_name: string;
+            /** @description The meter's display name. */
             name: string;
+            /** @description The unit of the quantity, such as `seconds`. */
             unit: string;
+            /**
+             * @description How the meter rolls its events into one quantity per period, one
+             *     of `sum`, `count`, `max` or `last`.
+             */
             aggregation: string;
         };
+        /**
+         * @description A plan a recipe creates, with its usage prices. An install always
+         *     creates a new plan.
+         * @example {
+         *       "code": "gpu_compute_pro",
+         *       "name": "GPU Compute",
+         *       "currency": "USD",
+         *       "billing_interval": "monthly",
+         *       "base_amount_cents": 0,
+         *       "prices": [
+         *         {
+         *           "meter": "gpu_seconds",
+         *           "dimension_match": {
+         *             "gpu_type": "h100"
+         *           },
+         *           "mode": "per_unit",
+         *           "unit_amount_cents": "0.1525",
+         *           "tiers": [],
+         *           "package_size": 0,
+         *           "package_amount_cents": "0"
+         *         },
+         *         {
+         *           "meter": "gpu_seconds",
+         *           "dimension_match": {
+         *             "gpu_type": "a100"
+         *           },
+         *           "mode": "per_unit",
+         *           "unit_amount_cents": "0.14",
+         *           "tiers": [],
+         *           "package_size": 0,
+         *           "package_amount_cents": "0"
+         *         },
+         *         {
+         *           "meter": "gpu_seconds",
+         *           "dimension_match": {
+         *             "gpu_type": "a40"
+         *           },
+         *           "mode": "per_unit",
+         *           "unit_amount_cents": "0.0575",
+         *           "tiers": [],
+         *           "package_size": 0,
+         *           "package_amount_cents": "0"
+         *         },
+         *         {
+         *           "meter": "gpu_seconds",
+         *           "dimension_match": {
+         *             "gpu_type": "t4"
+         *           },
+         *           "mode": "per_unit",
+         *           "unit_amount_cents": "0.0225",
+         *           "tiers": [],
+         *           "package_size": 0,
+         *           "package_amount_cents": "0"
+         *         },
+         *         {
+         *           "meter": "gpu_seconds",
+         *           "dimension_match": {
+         *             "gpu_type": "cpu"
+         *           },
+         *           "mode": "per_unit",
+         *           "unit_amount_cents": "0.01",
+         *           "tiers": [],
+         *           "package_size": 0,
+         *           "package_amount_cents": "0"
+         *         }
+         *       ]
+         *     }
+         */
         RecipePlan: {
+            /**
+             * @description The plan's code. When a plan with this code exists, the install
+             *     gives the new plan the first free code with `_2`, `_3` and so
+             *     on added.
+             */
             code: string;
+            /** @description The plan's name. */
             name: string;
+            /** @description The plan's currency, such as `USD`. */
             currency: string;
-            /** @enum {string} */
+            /**
+             * @description How often a subscription to the plan is billed.
+             * @enum {string}
+             */
             billing_interval: "monthly" | "yearly";
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The plan's recurring base fee, in the currency's minor unit (cents for USD).
+             */
             base_amount_cents: number;
             /**
-             * @description Optional when the base fee is 0; the plan is then in_arrears (ADR-031).
+             * @description When the base fee is billed; see Plan. Absent when the recipe
+             *     leaves it out, which it may only with a base fee of 0. The plan is
+             *     then `in_arrears`.
              * @enum {string}
              */
             base_bill_timing?: "in_advance" | "in_arrears";
             /** @description The plan's usage prices. Each takes the plan's currency. */
             prices: components["schemas"]["RecipePrice"][];
         };
-        /** @description Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count. */
+        /**
+         * @description How many objects a recipe makes when installed, by kind. A recipe makes only meters, plans and prices.
+         * @example {
+         *       "meters": 1,
+         *       "plans": 1,
+         *       "prices": 5
+         *     }
+         */
         RecipeCreates: {
+            /**
+             * @description The meters the recipe declares. An install reuses a matching meter
+             *     instead of making a new one.
+             */
             meters: number;
+            /** @description The plans an install creates. */
             plans: number;
             /** @description The prices the install puts on its plans. */
             prices: number;
         };
-        /** @description Per-role map of entity IDs a recipe apply produced (including ADOPTED meters — apply reconnects to an existing meter rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads. */
+        /**
+         * @description The IDs of the objects an install made, by kind. `meter_ids` also holds a meter the install reused rather than made. Each list is absent when empty.
+         * @example {
+         *       "meter_ids": [
+         *         "hc_mtr_dajr122q3gpgqfoq5c18"
+         *       ],
+         *       "plan_ids": [
+         *         "hc_pln_dajr5o2q3gpgqfoq5c1s"
+         *       ],
+         *       "price_ids": [
+         *         "hc_prc_dajr672q3gpgqfoq5c3a",
+         *         "hc_prc_dajr672q3gpgqfoq5c3b",
+         *         "hc_prc_dajr672q3gpgqfoq5c3c",
+         *         "hc_prc_dajr672q3gpgqfoq5c3d",
+         *         "hc_prc_dajr672q3gpgqfoq5c3e"
+         *       ]
+         *     }
+         */
         RecipeCreatedObjects: {
+            /** @description The meters the install made or reused. */
             meter_ids?: string[];
+            /** @description The plans the install made. */
             plan_ids?: string[];
+            /** @description The prices the install put on its plans. */
             price_ids?: string[];
         };
-        /** @description The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses. */
+        /**
+         * @description The record that a recipe was installed in this account and mode, and what the install made. A recipe is installed once per mode; installing it again returns this record. Its fields are `recipe_key` and `recipe_version`, not the recipe's own `key` and `version`.
+         * @example {
+         *       "id": "hc_rec_6b1d3f5a7c9e0b2d4f6a8c1e",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "recipe_key": "replicate_style",
+         *       "recipe_version": "7.0.0",
+         *       "overrides": {
+         *         "plan_name": "GPU Pro"
+         *       },
+         *       "created_objects": {
+         *         "meter_ids": [
+         *           "hc_mtr_dajr122q3gpgqfoq5c18"
+         *         ],
+         *         "plan_ids": [
+         *           "hc_pln_dajr5o2q3gpgqfoq5c1s"
+         *         ],
+         *         "price_ids": [
+         *           "hc_prc_dajr672q3gpgqfoq5c3a",
+         *           "hc_prc_dajr672q3gpgqfoq5c3b",
+         *           "hc_prc_dajr672q3gpgqfoq5c3c",
+         *           "hc_prc_dajr672q3gpgqfoq5c3d",
+         *           "hc_prc_dajr672q3gpgqfoq5c3e"
+         *         ]
+         *       },
+         *       "created_at": "2026-10-05T10:00:00Z",
+         *       "created_by": "hc_key_dajqj1iq3gpgqfoq5ca0"
+         *     }
+         */
         RecipeInstance: {
+            /** @description The install's ID, `hc_rec_` and 24 hex characters. */
             id: string;
-            /** @description Omitted when empty. */
+            /** @description The account the recipe was installed in. */
             tenant_id?: string;
+            /** @description The `key` of the recipe installed. */
             recipe_key: string;
+            /** @description The recipe's `version` at the install. */
             recipe_version: string;
+            /**
+             * @description The overrides the install was sent, as sent (`{}` when none).
+             *     Defaults are not filled in.
+             */
             overrides: {
                 [key: string]: unknown;
             };
             created_objects: components["schemas"]["RecipeCreatedObjects"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the recipe was installed.
+             */
             created_at: string;
-            /** @description Operator email or API key ID. Omitted when empty. */
+            /**
+             * @description The ID of the API key that installed the recipe. Absent for an
+             *     install from a dashboard session.
+             */
             created_by?: string;
         };
-        /** @description A recipe template as served by list/detail: the full parsed YAML, its meters and its plans with their prices, not just display metadata. A recipe creates nothing else. */
+        /**
+         * @description A ready-made pricing setup built into Hardcount: its meters, and its plans with their prices, with every overridable value at its default. Installing it creates those objects. A recipe creates nothing else.
+         * @example {
+         *       "key": "replicate_style",
+         *       "version": "7.0.0",
+         *       "name": "GPU compute pricing (per-second)",
+         *       "summary": "Ready-made pricing for reselling GPU compute. Bills each customer per\nsecond of GPU time, at a separate rate for each GPU type (H100, A100,\nA40, T4, CPU), on a monthly plan.\n",
+         *       "description": "Sets up everything you need to bill customers for GPU compute time:\n\n  • A usage meter that counts GPU-seconds. Each event you send must\n    carry the seconds consumed since that job's previous report (a\n    per-interval delta), not a cumulative running total — the meter\n    sums deltas, and cumulative totals would under-bill whenever two\n    jobs share a GPU class\n  • A per-second price for each GPU type — H100, A100 (80GB), A40, T4,\n    and CPU\n  • A monthly plan your customers subscribe to\n\nPrices start at Replicate's public per-second rates — a starting point\nyou'll edit to your own margins after setup. Before installing, you can\nset the currency and the plan's name.\n",
+         *       "overridable": [
+         *         {
+         *           "key": "currency",
+         *           "type": "string",
+         *           "default": "USD",
+         *           "enum": [
+         *             "USD",
+         *             "EUR",
+         *             "GBP"
+         *           ]
+         *         },
+         *         {
+         *           "key": "plan_name",
+         *           "type": "string",
+         *           "default": "GPU Compute",
+         *           "max_length": 80
+         *         },
+         *         {
+         *           "key": "plan_code",
+         *           "type": "string",
+         *           "default": "gpu_compute_pro",
+         *           "pattern": "^[a-z][a-z0-9_]*$"
+         *         }
+         *       ],
+         *       "meters": [
+         *         {
+         *           "event_name": "gpu_seconds",
+         *           "name": "GPU seconds",
+         *           "unit": "seconds",
+         *           "aggregation": "sum"
+         *         }
+         *       ],
+         *       "plans": [
+         *         {
+         *           "code": "gpu_compute_pro",
+         *           "name": "GPU Compute",
+         *           "currency": "USD",
+         *           "billing_interval": "monthly",
+         *           "base_amount_cents": 0,
+         *           "prices": [
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "h100"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.1525",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "a100"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.14",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "a40"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.0575",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "t4"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.0225",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "cpu"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.01",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             }
+         *           ]
+         *         }
+         *       ]
+         *     }
+         */
         Recipe: {
+            /** @description The recipe's key, used in the recipe routes, such as `replicate_style`. */
             key: string;
+            /** @description The recipe's version. */
             version: string;
+            /** @description The recipe's display name. */
             name: string;
+            /** @description A short description of what the recipe sets up. */
             summary: string;
+            /** @description A longer description. Absent when the recipe has none. */
             description?: string;
+            /** @description The values you can set before installing. */
             overridable: components["schemas"]["RecipeOverride"][];
+            /** @description The meters the recipe creates or reuses. */
             meters: components["schemas"]["RecipeMeter"][];
+            /** @description The plans the recipe creates, with their prices. */
             plans: components["schemas"]["RecipePlan"][];
         };
+        /**
+         * @description A recipe as `GET /v1/recipes` lists it: the recipe, how many objects it makes (`creates`), and, in `instantiated`, its install record when it is installed in this account and mode. `instantiated` is absent when it is not installed. Installing again changes nothing, and there is no uninstall.
+         * @example {
+         *       "key": "replicate_style",
+         *       "version": "7.0.0",
+         *       "name": "GPU compute pricing (per-second)",
+         *       "summary": "Ready-made pricing for reselling GPU compute. Bills each customer per\nsecond of GPU time, at a separate rate for each GPU type (H100, A100,\nA40, T4, CPU), on a monthly plan.\n",
+         *       "description": "Sets up everything you need to bill customers for GPU compute time:\n\n  • A usage meter that counts GPU-seconds. Each event you send must\n    carry the seconds consumed since that job's previous report (a\n    per-interval delta), not a cumulative running total — the meter\n    sums deltas, and cumulative totals would under-bill whenever two\n    jobs share a GPU class\n  • A per-second price for each GPU type — H100, A100 (80GB), A40, T4,\n    and CPU\n  • A monthly plan your customers subscribe to\n\nPrices start at Replicate's public per-second rates — a starting point\nyou'll edit to your own margins after setup. Before installing, you can\nset the currency and the plan's name.\n",
+         *       "overridable": [
+         *         {
+         *           "key": "currency",
+         *           "type": "string",
+         *           "default": "USD",
+         *           "enum": [
+         *             "USD",
+         *             "EUR",
+         *             "GBP"
+         *           ]
+         *         },
+         *         {
+         *           "key": "plan_name",
+         *           "type": "string",
+         *           "default": "GPU Compute",
+         *           "max_length": 80
+         *         },
+         *         {
+         *           "key": "plan_code",
+         *           "type": "string",
+         *           "default": "gpu_compute_pro",
+         *           "pattern": "^[a-z][a-z0-9_]*$"
+         *         }
+         *       ],
+         *       "meters": [
+         *         {
+         *           "event_name": "gpu_seconds",
+         *           "name": "GPU seconds",
+         *           "unit": "seconds",
+         *           "aggregation": "sum"
+         *         }
+         *       ],
+         *       "plans": [
+         *         {
+         *           "code": "gpu_compute_pro",
+         *           "name": "GPU Compute",
+         *           "currency": "USD",
+         *           "billing_interval": "monthly",
+         *           "base_amount_cents": 0,
+         *           "prices": [
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "h100"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.1525",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "a100"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.14",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "a40"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.0575",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "t4"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.0225",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "cpu"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.01",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             }
+         *           ]
+         *         }
+         *       ],
+         *       "creates": {
+         *         "meters": 1,
+         *         "plans": 1,
+         *         "prices": 5
+         *       },
+         *       "instantiated": {
+         *         "id": "hc_rec_6b1d3f5a7c9e0b2d4f6a8c1e",
+         *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *         "recipe_key": "replicate_style",
+         *         "recipe_version": "7.0.0",
+         *         "overrides": {
+         *           "plan_name": "GPU Pro"
+         *         },
+         *         "created_objects": {
+         *           "meter_ids": [
+         *             "hc_mtr_dajr122q3gpgqfoq5c18"
+         *           ],
+         *           "plan_ids": [
+         *             "hc_pln_dajr5o2q3gpgqfoq5c1s"
+         *           ],
+         *           "price_ids": [
+         *             "hc_prc_dajr672q3gpgqfoq5c3a",
+         *             "hc_prc_dajr672q3gpgqfoq5c3b",
+         *             "hc_prc_dajr672q3gpgqfoq5c3c",
+         *             "hc_prc_dajr672q3gpgqfoq5c3d",
+         *             "hc_prc_dajr672q3gpgqfoq5c3e"
+         *           ]
+         *         },
+         *         "created_at": "2026-10-05T10:00:00Z",
+         *         "created_by": "hc_key_dajqj1iq3gpgqfoq5ca0"
+         *       }
+         *     }
+         */
         RecipeListItem: components["schemas"]["Recipe"] & {
             creates: components["schemas"]["RecipeCreates"];
-            /** @description Present when this tenant (in the session's livemode) has installed the recipe; absent otherwise. Drives the "Installed" badge — re-apply is an idempotent no-op and there is no uninstall (ADR-085). */
             instantiated?: components["schemas"]["RecipeInstance"];
         };
+        /**
+         * @description A recipe as `GET /v1/recipes/{key}` returns it, with how many objects it makes.
+         * @example {
+         *       "key": "replicate_style",
+         *       "version": "7.0.0",
+         *       "name": "GPU compute pricing (per-second)",
+         *       "summary": "Ready-made pricing for reselling GPU compute. Bills each customer per\nsecond of GPU time, at a separate rate for each GPU type (H100, A100,\nA40, T4, CPU), on a monthly plan.\n",
+         *       "description": "Sets up everything you need to bill customers for GPU compute time:\n\n  • A usage meter that counts GPU-seconds. Each event you send must\n    carry the seconds consumed since that job's previous report (a\n    per-interval delta), not a cumulative running total — the meter\n    sums deltas, and cumulative totals would under-bill whenever two\n    jobs share a GPU class\n  • A per-second price for each GPU type — H100, A100 (80GB), A40, T4,\n    and CPU\n  • A monthly plan your customers subscribe to\n\nPrices start at Replicate's public per-second rates — a starting point\nyou'll edit to your own margins after setup. Before installing, you can\nset the currency and the plan's name.\n",
+         *       "overridable": [
+         *         {
+         *           "key": "currency",
+         *           "type": "string",
+         *           "default": "USD",
+         *           "enum": [
+         *             "USD",
+         *             "EUR",
+         *             "GBP"
+         *           ]
+         *         },
+         *         {
+         *           "key": "plan_name",
+         *           "type": "string",
+         *           "default": "GPU Compute",
+         *           "max_length": 80
+         *         },
+         *         {
+         *           "key": "plan_code",
+         *           "type": "string",
+         *           "default": "gpu_compute_pro",
+         *           "pattern": "^[a-z][a-z0-9_]*$"
+         *         }
+         *       ],
+         *       "meters": [
+         *         {
+         *           "event_name": "gpu_seconds",
+         *           "name": "GPU seconds",
+         *           "unit": "seconds",
+         *           "aggregation": "sum"
+         *         }
+         *       ],
+         *       "plans": [
+         *         {
+         *           "code": "gpu_compute_pro",
+         *           "name": "GPU Compute",
+         *           "currency": "USD",
+         *           "billing_interval": "monthly",
+         *           "base_amount_cents": 0,
+         *           "prices": [
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "h100"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.1525",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "a100"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.14",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "a40"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.0575",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "t4"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.0225",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "cpu"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.01",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             }
+         *           ]
+         *         }
+         *       ],
+         *       "creates": {
+         *         "meters": 1,
+         *         "plans": 1,
+         *         "prices": 5
+         *       }
+         *     }
+         */
         RecipeDetail: components["schemas"]["Recipe"] & {
             creates: components["schemas"]["RecipeCreates"];
         };
-        /** @description What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation. */
+        /**
+         * @description What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation.
+         * @example {
+         *       "meters": [
+         *         {
+         *           "event_name": "gpu_seconds",
+         *           "name": "GPU seconds",
+         *           "unit": "seconds",
+         *           "aggregation": "sum"
+         *         }
+         *       ],
+         *       "plans": [
+         *         {
+         *           "code": "gpu_compute_pro",
+         *           "name": "GPU Pro",
+         *           "currency": "USD",
+         *           "billing_interval": "monthly",
+         *           "base_amount_cents": 0,
+         *           "prices": [
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "h100"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.1525",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "a100"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.14",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "a40"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.0575",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "t4"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.0225",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             },
+         *             {
+         *               "meter": "gpu_seconds",
+         *               "dimension_match": {
+         *                 "gpu_type": "cpu"
+         *               },
+         *               "mode": "per_unit",
+         *               "unit_amount_cents": "0.01",
+         *               "tiers": [],
+         *               "package_size": 0,
+         *               "package_amount_cents": "0"
+         *             }
+         *           ]
+         *         }
+         *       ]
+         *     }
+         */
         RecipePreviewObjects: {
+            /** @description The meters the install creates or reuses. */
             meters: components["schemas"]["RecipeMeter"][];
+            /**
+             * @description The plans the install creates, with the overrides applied. An
+             *     install that finds a plan's code taken gives the new plan the
+             *     first free code with `_2`, `_3` and so on added.
+             */
             plans: components["schemas"]["RecipePlan"][];
         };
-        /** @description One usage price of a recipe plan. It takes the plan's currency. */
+        /**
+         * @description One usage price of a recipe plan. It takes the plan's currency. Every
+         *     shape field is sent.
+         * @example {
+         *       "meter": "gpu_seconds",
+         *       "dimension_match": {
+         *         "gpu_type": "h100"
+         *       },
+         *       "mode": "per_unit",
+         *       "unit_amount_cents": "0.1525",
+         *       "tiers": [],
+         *       "package_size": 0,
+         *       "package_amount_cents": "0"
+         *     }
+         */
         RecipePrice: {
             /** @description The `event_name` of the recipe meter the price is on. */
             meter: string;
+            /**
+             * @description The labels an event must carry for the price to take it. `{}`
+             *     takes every event of the meter.
+             */
             dimension_match: {
                 [key: string]: string;
             };
         } & WithRequired<components["schemas"]["PriceShape"], "mode" | "unit_amount_cents" | "tiers" | "package_size" | "package_amount_cents">;
+        /**
+         * @description The answer to `POST /v1/recipes/{key}/preview`: what installing the recipe with your overrides would create. Nothing is written.
+         * @example {
+         *       "key": "replicate_style",
+         *       "version": "7.0.0",
+         *       "objects": {
+         *         "meters": [
+         *           {
+         *             "event_name": "gpu_seconds",
+         *             "name": "GPU seconds",
+         *             "unit": "seconds",
+         *             "aggregation": "sum"
+         *           }
+         *         ],
+         *         "plans": [
+         *           {
+         *             "code": "gpu_compute_pro",
+         *             "name": "GPU Pro",
+         *             "currency": "USD",
+         *             "billing_interval": "monthly",
+         *             "base_amount_cents": 0,
+         *             "prices": [
+         *               {
+         *                 "meter": "gpu_seconds",
+         *                 "dimension_match": {
+         *                   "gpu_type": "h100"
+         *                 },
+         *                 "mode": "per_unit",
+         *                 "unit_amount_cents": "0.1525",
+         *                 "tiers": [],
+         *                 "package_size": 0,
+         *                 "package_amount_cents": "0"
+         *               },
+         *               {
+         *                 "meter": "gpu_seconds",
+         *                 "dimension_match": {
+         *                   "gpu_type": "a100"
+         *                 },
+         *                 "mode": "per_unit",
+         *                 "unit_amount_cents": "0.14",
+         *                 "tiers": [],
+         *                 "package_size": 0,
+         *                 "package_amount_cents": "0"
+         *               },
+         *               {
+         *                 "meter": "gpu_seconds",
+         *                 "dimension_match": {
+         *                   "gpu_type": "a40"
+         *                 },
+         *                 "mode": "per_unit",
+         *                 "unit_amount_cents": "0.0575",
+         *                 "tiers": [],
+         *                 "package_size": 0,
+         *                 "package_amount_cents": "0"
+         *               },
+         *               {
+         *                 "meter": "gpu_seconds",
+         *                 "dimension_match": {
+         *                   "gpu_type": "t4"
+         *                 },
+         *                 "mode": "per_unit",
+         *                 "unit_amount_cents": "0.0225",
+         *                 "tiers": [],
+         *                 "package_size": 0,
+         *                 "package_amount_cents": "0"
+         *               },
+         *               {
+         *                 "meter": "gpu_seconds",
+         *                 "dimension_match": {
+         *                   "gpu_type": "cpu"
+         *                 },
+         *                 "mode": "per_unit",
+         *                 "unit_amount_cents": "0.01",
+         *                 "tiers": [],
+         *                 "package_size": 0,
+         *                 "package_amount_cents": "0"
+         *               }
+         *             ]
+         *           }
+         *         ]
+         *       },
+         *       "warnings": []
+         *     }
+         */
         RecipePreviewResult: {
+            /** @description The recipe's key. */
             key: string;
+            /** @description The recipe's version. */
             version: string;
             objects: components["schemas"]["RecipePreviewObjects"];
+            /** @description Problems that would not stop the install. Always empty today. */
             warnings: string[];
         };
         /**
-         * @description The billing details printed on invoices and used for tax. The
-         *     whole profile is replaced on every write.
+         * @description The billing details printed on invoices and used for tax: the body
+         *     of `PUT /v1/customers/{id}/billing-profile`. The whole profile is
+         *     replaced on every write, so a field you leave out is stored empty.
+         * @example {
+         *       "legal_name": "Acme Incorporated",
+         *       "phone": "+1 415 555 0100",
+         *       "address_line1": "548 Market St",
+         *       "address_line2": "Suite 100",
+         *       "city": "San Francisco",
+         *       "state": "CA",
+         *       "postal_code": "94104",
+         *       "country": "US",
+         *       "tax_status": "standard"
+         *     }
          */
         CustomerBillingProfileInput: {
+            /** @description The customer's legal name, printed in the invoice's Bill to block. */
             legal_name?: string;
             /** @description 7 to 20 characters of digits, spaces, `+`, `-`, `(`, `)`. */
             phone?: string;
+            /** @description First line of the billing address. */
             address_line1?: string;
+            /** @description Second line of the billing address. */
             address_line2?: string;
+            /** @description City of the billing address. */
             city?: string;
+            /** @description State, province or region of the billing address, where the country has one. */
             state?: string;
+            /** @description Postal code of the billing address, where the country has one. */
             postal_code?: string;
-            /** @description ISO 3166 alpha-2 code, such as `US` or `IN`. */
+            /** @description ISO 3166 alpha-2 code, such as `US` or `IN`. Stored in upper case. */
             country?: string;
             /**
              * @description ISO 4217 code, such as `USD`. When set, invoices for this
-             *     customer use it instead of the plan currency.
+             *     customer use it instead of the plan currency. Stored in upper
+             *     case. Zero-decimal currencies such as JPY are refused.
              */
             currency?: string;
             /**
-             * @description Defaults to `standard`.
+             * @description `standard`: tax is worked out as usual. `exempt`: no tax, and
+             *     the invoice shows `tax_exempt_reason`. `reverse_charge`: no tax,
+             *     and the invoice tells the buyer to account for it. Defaults to
+             *     `standard`.
              * @enum {string}
              */
             tax_status?: "standard" | "exempt" | "reverse_charge";
-            /** @description Required when `tax_status` is `exempt`. */
+            /**
+             * @description Why the customer pays no tax, such as a reseller certificate.
+             *     Required when `tax_status` is `exempt`.
+             */
             tax_exempt_reason?: string;
-            /** @description Buyer tax ID. Required when `tax_status` is `reverse_charge`. */
+            /**
+             * @description The buyer's tax ID, stored in upper case. Required when
+             *     `tax_status` is `reverse_charge`. For `eu_vat`, `in_gst` and
+             *     `au_abn` its format is checked.
+             */
             tax_id?: string;
-            /** @description Tax ID kind, stored as its Stripe code (for example `eu_vat`, `in_gst`). */
+            /**
+             * @description The kind of tax ID, as its Stripe code (for example `eu_vat`,
+             *     `in_gst`, `au_abn`). `vat`, `gstin` and `abn` are read as those
+             *     codes.
+             */
             tax_id_type?: string;
         };
+        /**
+         * @description A customer's stored billing profile, as the billing-profile routes
+         *     return it. Empty text fields are left out, except `tax_id` and
+         *     `tax_id_type`, which are always sent (`""` when unset).
+         * @example {
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "legal_name": "Acme Incorporated",
+         *       "phone": "+1 415 555 0100",
+         *       "address_line1": "548 Market St",
+         *       "address_line2": "Suite 100",
+         *       "city": "San Francisco",
+         *       "state": "CA",
+         *       "postal_code": "94104",
+         *       "country": "US",
+         *       "tax_status": "standard",
+         *       "tax_id": "",
+         *       "tax_id_type": "",
+         *       "profile_status": "ready",
+         *       "created_at": "2026-09-30T16:25:00Z",
+         *       "updated_at": "2026-10-15T09:12:44Z"
+         *     }
+         */
         CustomerBillingProfile: components["schemas"]["CustomerBillingProfileInput"] & {
+            /** @description The customer this profile belongs to. */
             customer_id: string;
+            /** @description The account the customer belongs to. */
             tenant_id?: string;
             /**
              * @description Set by the server. `ready` when legal name, address line
-             *     1, city and country are all set.
+             *     1, city and country are all set, so the invoice can print
+             *     a full Bill to block. Otherwise `incomplete`.
              * @enum {string}
              */
             profile_status: "incomplete" | "ready";
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the profile was first saved.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the profile was last saved.
+             */
             updated_at: string;
         };
+        /**
+         * @description One billing email Hardcount sent, or tried to send, to a customer
+         *     about one of its invoices. `GET /v1/customers/{id}/sent-emails`
+         *     lists them.
+         * @example {
+         *       "id": "hc_emob_dbj84cqq3gpgqfoq5cbg",
+         *       "email_type": "invoice",
+         *       "recipient": "billing@acme.example",
+         *       "status": "dispatched",
+         *       "delivery_state": "delivered",
+         *       "invoice_number": "HC-000001",
+         *       "created_at": "2026-11-01T00:05:02Z",
+         *       "dispatched_at": "2026-11-01T00:05:09Z",
+         *       "line": {
+         *         "id": "email:hc_emob_dbj84cqq3gpgqfoq5cbg",
+         *         "kind": "email.invoice",
+         *         "title": "Invoice email delivered",
+         *         "detail": [
+         *           [
+         *             {
+         *               "link": {
+         *                 "kind": "invoice",
+         *                 "id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *                 "label": "HC-000001"
+         *               }
+         *             }
+         *           ],
+         *           [
+         *             {
+         *               "text": "To billing@acme.example"
+         *             }
+         *           ]
+         *         ],
+         *         "tone": "neutral",
+         *         "occurred_at": "2026-11-01T00:05:09Z"
+         *       }
+         *     }
+         */
         SentEmail: {
+            /** @description The email's ID, `hc_emob_` and 20 characters. */
             id: string;
-            /** @enum {string} */
+            /**
+             * @description Which email it is: the invoice, a payment receipt, a failed
+             *     payment notice, a request to add a payment method, a payment
+             *     reminder (`dunning_warning`), a final notice
+             *     (`dunning_escalation`), or a credit note.
+             * @enum {string}
+             */
             email_type: "invoice" | "payment_receipt" | "payment_failed" | "payment_setup_request" | "dunning_warning" | "dunning_escalation" | "credit_note";
+            /** @description The address the email was sent to. */
             recipient: string;
             /**
-             * @description Hardcount's send state. `dispatched` means the mail server accepted it.
+             * @description Hardcount's send state. `pending`: queued. `dispatched`: the
+             *     mail server accepted it. `failed`: it could not be sent.
+             *     `skipped`: Hardcount did not send it, because the invoice was
+             *     already paid, voided or uncollectible, or no longer exists.
              * @enum {string}
              */
             status: "pending" | "dispatched" | "failed" | "skipped";
             /**
-             * @description What the email provider reported back, if anything.
+             * @description What the email provider reported back about delivery.
+             *     `unknown` until it reports.
              * @enum {string}
              */
             delivery_state: "unknown" | "delivered" | "bounced" | "complained";
+            /** @description The number of the invoice the email is about. */
             invoice_number?: string;
+            /** @description Why the last send attempt failed. Absent when no attempt failed. */
             last_error?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the email was queued.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the mail server accepted the email. Absent until then.
+             */
             dispatched_at?: string;
             /**
-             * @description The email in the words of the activity line standard (ADR-128),
-             *     the same as on the invoice's payment timeline: its name and
-             *     what happened to it ("Receipt email delivered"), why it was not
+             * @description The email in the words of the activity line standard, the same
+             *     as on the invoice's payment timeline: its name and what
+             *     happened to it ("Receipt email delivered"), why it was not
              *     sent, the invoice it was about, and who it went to. Dated at the
              *     time on the customer's test clock that caused it, with the real
              *     send time as `recorded_at`. Present for every email type this
@@ -5727,7 +7504,72 @@ export interface components {
              */
             line?: components["schemas"]["ActivityLine"];
         };
+        /**
+         * @description A customer's usage and its cost over a window, priced the way the
+         *     invoice prices it: `GET /v1/customers/{id}/usage`. Only active and
+         *     trialing subscriptions are counted. Quantities are decimal strings.
+         * @example {
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "period": {
+         *         "from": "2026-10-12T00:00:00Z",
+         *         "to": "2026-10-14T00:00:00Z",
+         *         "source": "explicit"
+         *       },
+         *       "subscriptions": [
+         *         {
+         *           "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+         *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *           "plan_name": "Pro",
+         *           "currency": "USD",
+         *           "current_period_start": "2026-10-01T00:00:00Z",
+         *           "current_period_end": "2026-11-01T00:00:00Z"
+         *         }
+         *       ],
+         *       "meters": [
+         *         {
+         *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *           "event_name": "tokens",
+         *           "meter_name": "Tokens",
+         *           "unit": "tokens",
+         *           "currency": "USD",
+         *           "total_quantity": "2000000",
+         *           "total_amount_cents": 600,
+         *           "prices": [
+         *             {
+         *               "price_id": "hc_prc_dajr672q3gpgqfoq5c20",
+         *               "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *               "quantity": "2000000",
+         *               "amount_cents": 600,
+         *               "unit_amount_decimal": "0.0003"
+         *             }
+         *           ]
+         *         }
+         *       ],
+         *       "totals": [
+         *         {
+         *           "currency": "USD",
+         *           "amount_cents": 600
+         *         }
+         *       ],
+         *       "warnings": [],
+         *       "buckets": [
+         *         {
+         *           "bucket_start": "2026-10-12T00:00:00Z",
+         *           "per_meter": {
+         *             "hc_mtr_dajr122q3gpgqfoq5c10": "800000"
+         *           }
+         *         },
+         *         {
+         *           "bucket_start": "2026-10-13T00:00:00Z",
+         *           "per_meter": {
+         *             "hc_mtr_dajr122q3gpgqfoq5c10": "1200000"
+         *           }
+         *         }
+         *       ]
+         *     }
+         */
         CustomerUsage: {
+            /** @description The customer the usage belongs to. */
             customer_id: string;
             /**
              * @description The window the response covers. With no `from` and `to`
@@ -5738,9 +7580,15 @@ export interface components {
              *     period, including usage a threshold invoice already billed.
              */
             period: {
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description Start of the window, inclusive.
+                 */
                 from: string;
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description End of the window, exclusive.
+                 */
                 to: string;
                 /**
                  * @description `current_billing_cycle`: no `from` and `to` were sent, and
@@ -5761,20 +7609,36 @@ export interface components {
              *     same `id`.
              */
             subscriptions: {
+                /** @description The subscription's ID. */
                 id: string;
+                /** @description The plan of this item. */
                 plan_id: string;
+                /** @description The plan's name. */
                 plan_name: string;
+                /** @description The plan's currency, such as `USD`. */
                 currency: string;
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description Start of the subscription's current billing period.
+                 */
                 current_period_start: string;
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description End of the subscription's current billing period, exclusive.
+                 */
                 current_period_end: string;
             }[];
+            /** @description One entry per meter the customer's plans price, with or without usage. */
             meters: components["schemas"]["CustomerUsageMeter"][];
             /** @description One entry per currency. */
             totals: {
+                /** @description The currency, such as `USD`. */
                 currency: string;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description The usage cost of every meter in this currency, in the
+                 *     currency's minor unit (cents for USD).
+                 */
                 amount_cents: number;
             }[];
             /**
@@ -5784,23 +7648,69 @@ export interface components {
             warnings: string[];
             /** @description One entry per UTC day in the period, including days with no usage. */
             buckets: {
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description The start of the UTC day.
+                 */
                 bucket_start: string;
-                /** @description Quantity per meter ID for that day, as a decimal string. */
+                /**
+                 * @description Quantity per meter ID for that day, as a decimal string:
+                 *     the sum of the day's event quantities, including usage
+                 *     no price takes. So the days need not add up to a meter's
+                 *     `total_quantity`, which uses the meter's aggregation.
+                 *     Empty on a day with no usage.
+                 */
                 per_meter: {
                     [key: string]: string;
                 };
             }[];
         };
+        /**
+         * @description One meter in a customer's usage report: its usage over the window
+         *     and what that usage costs, split by the price that took it.
+         * @example {
+         *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *       "event_name": "tokens",
+         *       "meter_name": "Tokens",
+         *       "unit": "tokens",
+         *       "currency": "USD",
+         *       "total_quantity": "12500000",
+         *       "total_amount_cents": 3750,
+         *       "prices": [
+         *         {
+         *           "price_id": "hc_prc_dajr672q3gpgqfoq5c20",
+         *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *           "quantity": "12500000",
+         *           "amount_cents": 3750,
+         *           "unit_amount_decimal": "0.0003"
+         *         }
+         *       ]
+         *     }
+         */
         CustomerUsageMeter: {
+            /** @description The meter's ID. */
             meter_id: string;
+            /** @description The `event_name` usage events send for this meter. */
             event_name: string;
+            /** @description The meter's display name. */
             meter_name: string;
+            /** @description The meter's unit, such as `tokens`. */
             unit: string;
+            /**
+             * @description The currency of the plan whose prices took the usage. Empty when
+             *     no usage was priced.
+             */
             currency: string;
-            /** @description Decimal string. */
+            /**
+             * @description The usage the meter's prices took, as a decimal string, under
+             *     the meter's aggregation. Usage no price took is left out.
+             */
             total_quantity: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description What the usage costs, in the currency's minor unit (cents for
+             *     USD). Usage no price took is left out.
+             */
             total_amount_cents: number;
             /**
              * @description One row per (plan, price) that took usage, and a `no_price` row
@@ -5808,28 +7718,123 @@ export interface components {
              *     price one meter differently.
              */
             prices: {
-                /** @description Absent on a `no_price` row. */
+                /** @description The plan price that took the usage. Absent on a `no_price` row. */
                 price_id?: string;
+                /** @description The plan the price belongs to. */
                 plan_id: string;
                 /** @description The labels the price takes. Absent for a price that takes every event. */
                 dimension_match?: {
                     [key: string]: string;
                 };
-                /** @description Decimal string. */
+                /** @description The usage this price took, as a decimal string. */
                 quantity: string;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description What this price bills for the usage, in the currency's minor
+                 *     unit (cents for USD).
+                 */
                 amount_cents: number;
-                /** @description Price per unit in cents, as a decimal string; the same figure the invoice line shows. */
+                /**
+                 * @description Price per unit, as a decimal string of cents; the same
+                 *     figure the invoice line shows. Absent on a `no_price`
+                 *     row.
+                 */
                 unit_amount_decimal?: string;
                 /**
                  * @description True for usage no price of the plan took. Hardcount bills
                  *     nothing for it, and it is left out of the meter's totals.
+                 *     Absent on other rows.
                  */
                 no_price?: boolean;
             }[];
         };
+        /**
+         * @description A one-call summary of a customer for a customer page: its active
+         *     subscriptions, its 5 newest invoices and what it still owes.
+         *     `GET /v1/customers/{customer_id}/overview` returns it.
+         * @example {
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "active_subscriptions": [
+         *         {
+         *           "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+         *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *           "code": "acme-pro",
+         *           "display_name": "Acme Pro",
+         *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *           "items": [
+         *             {
+         *               "id": "hc_si_dauq50aq3gpgqfoq5c30",
+         *               "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *               "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+         *               "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *               "quantity": 1,
+         *               "created_at": "2026-10-01T00:00:00Z",
+         *               "updated_at": "2026-10-01T00:00:00Z"
+         *             }
+         *           ],
+         *           "status": "active",
+         *           "billing_time": "calendar",
+         *           "started_at": "2026-10-01T00:00:00Z",
+         *           "activated_at": "2026-10-01T00:00:00Z",
+         *           "cancel_at_period_end": false,
+         *           "current_billing_period_start": "2026-11-01T00:00:00Z",
+         *           "current_billing_period_end": "2026-12-01T00:00:00Z",
+         *           "next_billing_at": "2026-12-01T00:00:00Z",
+         *           "created_at": "2026-10-01T00:00:00Z",
+         *           "updated_at": "2026-11-01T00:05:00Z"
+         *         }
+         *       ],
+         *       "recent_invoices": [
+         *         {
+         *           "id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+         *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+         *           "invoice_number": "HC-000001",
+         *           "status": "finalized",
+         *           "payment_status": "pending",
+         *           "currency": "USD",
+         *           "subtotal_cents": 8650,
+         *           "discount_cents": 0,
+         *           "tax_amount_cents": 0,
+         *           "tax_rate": 0,
+         *           "tax_status": "ok",
+         *           "total_amount_cents": 8650,
+         *           "amount_due_cents": 3650,
+         *           "amount_paid_cents": 0,
+         *           "credits_applied_cents": 5000,
+         *           "billing_period_start": "2026-10-01T00:00:00Z",
+         *           "billing_period_end": "2026-11-01T00:00:00Z",
+         *           "billing_timezone": "UTC",
+         *           "issued_at": "2026-11-01T00:05:00Z",
+         *           "due_at": "2026-12-01T00:05:00Z",
+         *           "paid_out_of_band": false,
+         *           "net_payment_term_days": 30,
+         *           "billing_reason": "subscription_cycle",
+         *           "is_simulated": false,
+         *           "created_at": "2026-11-01T00:05:00Z",
+         *           "updated_at": "2026-11-01T00:05:00Z"
+         *         }
+         *       ],
+         *       "outstanding_balance": {
+         *         "total_cents": 3650,
+         *         "unpaid_count": 1,
+         *         "by_currency": [
+         *           {
+         *             "currency": "USD",
+         *             "amount_cents": 3650
+         *           }
+         *         ]
+         *       }
+         *     }
+         */
         CustomerOverview: {
+            /** @description The customer the overview is about. */
             customer_id: string;
+            /**
+             * @description The customer's subscriptions with status `active`, up to 50,
+             *     with their items. Trialing subscriptions are not listed.
+             */
             active_subscriptions: components["schemas"]["Subscription"][];
             /** @description The 5 newest invoices. */
             recent_invoices: components["schemas"]["Invoice"][];
@@ -5840,70 +7845,181 @@ export interface components {
             outstanding_balance: {
                 /**
                  * Format: int64
-                 * @description Sum of `amount_due_cents`. Amounts in different currencies are added together, so use `by_currency` to show an amount.
+                 * @description Sum of `amount_due_cents`, in minor units (cents for USD).
+                 *     Amounts in different currencies are added together, so use
+                 *     `by_currency` to show an amount.
                  */
                 total_cents: number;
+                /** @description How many invoices are counted. */
                 unpaid_count: number;
-                /** @description Amount due on the same invoices, one entry per currency, largest first. Empty when nothing is owed. */
+                /**
+                 * @description Amount due on the same invoices, one entry per currency,
+                 *     largest first. Empty when nothing is owed.
+                 */
                 by_currency: {
+                    /** @description The currency, such as `USD`. */
                     currency: string;
-                    /** Format: int64 */
+                    /**
+                     * Format: int64
+                     * @description Amount due in this currency, in its minor unit (cents for USD).
+                     */
                     amount_cents: number;
                 }[];
             };
         };
+        /**
+         * @description A card saved for a customer in Stripe, which Hardcount can charge.
+         *     The payment-method routes under
+         *     `/v1/customers/{customer_id}/payment-methods` return it, and the
+         *     `payment_method.*` webhook events carry it.
+         * @example {
+         *       "id": "hc_pm_4f8a2c9e1b7d3a6f0c5e8b21",
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "type": "card",
+         *       "card_brand": "visa",
+         *       "card_last4": "4242",
+         *       "card_exp_month": 12,
+         *       "card_exp_year": 2029,
+         *       "is_default": true,
+         *       "created_at": "2026-10-02T11:48:30Z"
+         *     }
+         */
         PaymentMethod: {
+            /** @description The payment method's ID in Hardcount, `hc_pm_` and 24 hex characters. */
             id: string;
+            /** @description The customer the card belongs to. */
             customer_id: string;
-            /** @example card */
+            /**
+             * @description The kind of payment method. Always `card` today.
+             * @example card
+             */
             type: string;
+            /**
+             * @description The card network as Stripe names it, such as `visa` or
+             *     `mastercard`. Absent when Stripe sent none.
+             */
             card_brand?: string;
+            /** @description The last 4 digits of the card number. Absent when Stripe sent none. */
             card_last4?: string;
+            /** @description The card's expiry month, 1 to 12. Absent when Stripe sent none. */
             card_exp_month?: number;
+            /** @description The card's expiry year, such as `2029`. Absent when Stripe sent none. */
             card_exp_year?: number;
+            /**
+             * @description Whether this is the card Hardcount charges. A customer with saved
+             *     cards has one default.
+             */
             is_default: boolean;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the card was saved.
+             */
             created_at: string;
         };
+        /**
+         * @description One entry in a customer's credit ledger: credit added (`grant`, or a
+         *     positive `adjustment`), drawn by an invoice (`usage`), removed (a
+         *     negative `adjustment`) or written off (`expiry`). Returned by
+         *     `POST /v1/credits/grant` and `POST /v1/credits/adjust`, and listed
+         *     by `GET /v1/credits/ledger/{customer_id}`.
+         * @example {
+         *       "id": "hc_ccl_dav2242q3gpgqfoq5c50",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "entry_type": "grant",
+         *       "currency": "USD",
+         *       "amount_cents": 5000,
+         *       "balance_after": 5000,
+         *       "description": "Welcome credit",
+         *       "expires_at": "2027-01-01T00:00:00Z",
+         *       "created_at": "2026-10-01T09:00:00Z",
+         *       "grant_kind": "promotional"
+         *     }
+         */
         CreditLedgerEntry: {
+            /** @description The entry's ID (`hc_ccl_…`). */
             id: string;
+            /** @description The account the entry belongs to. */
             tenant_id?: string;
+            /** @description The customer whose credit the entry changes (`hc_cus_…`). */
             customer_id: string;
-            /** @enum {string} */
+            /**
+             * @description - `grant`: credit added, by you with `POST /v1/credits/grant` or
+             *       by Hardcount (a prepaid-commit invoice when it is finalized, a
+             *       credit note, or a void or credit note that gave drawn credit
+             *       back).
+             *     - `usage`: credit an invoice drew.
+             *     - `expiry`: the unused rest of a grant, written off once its
+             *       `expires_at` passed.
+             *     - `adjustment`: credit added or removed with
+             *       `POST /v1/credits/adjust`, or commit credit taken back when its
+             *       invoice was voided or refunded.
+             * @enum {string}
+             */
             entry_type: "grant" | "usage" | "expiry" | "adjustment";
             /** @description The entry's currency, uppercase. Credit pays only invoices in its own currency. */
             currency: string;
             /**
              * Format: int64
-             * @description Positive adds credit, negative removes it.
+             * @description Positive adds credit, negative removes it, in the currency's
+             *     minor unit (cents for USD).
              */
             amount_cents: number;
             /**
              * Format: int64
-             * @description The customer's credit balance in this entry's currency after it, in cents.
+             * @description The customer's credit balance in this entry's currency after it,
+             *     in the currency's minor unit (cents for USD).
              */
             balance_after: number;
+            /**
+             * @description What the entry is for: the description you gave a grant or
+             *     adjustment, "Applied to invoice" and the invoice number on a
+             *     `usage` entry, or "Expired grant" and the grant's ID on an
+             *     `expiry` entry.
+             */
             description: string;
+            /**
+             * @description The invoice the entry comes from: the invoice a `usage` entry
+             *     was drawn by, the voided or credited invoice that gave credit
+             *     back, or the commit invoice that funded a grant. Absent when no
+             *     invoice caused the entry.
+             */
             invoice_id?: string;
             /**
              * Format: date-time
              * @description On a grant, its expiry. The credit can be drawn up to and
              *     including this instant; a period invoice draws it when its
              *     period ends at or before it. The dashboard sends the local
-             *     midnight after the picked day.
+             *     midnight after the picked day. Absent when the credit does not
+             *     expire.
              */
             expires_at?: string;
+            /**
+             * @description Facts Hardcount records on the entry, such as which grants a
+             *     draw took its credit from. Absent when empty.
+             */
             metadata?: {
                 [key: string]: unknown;
             };
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the entry was written. For a customer on a test clock, the clock's time.
+             */
             created_at: string;
             /**
              * Format: int64
-             * @description For entries that add credit, how much has been used or expired.
+             * @description For entries that add credit, how much has been used or expired,
+             *     in the currency's minor unit. Absent when nothing has.
              */
             consumed_cents?: number;
-            /** @enum {string} */
+            /**
+             * @description On a grant, what the credit cost the customer. `commit`:
+             *     prepaid credit granted when a commit invoice was finalized; that
+             *     invoice is `source_invoice_id`. `promotional`:
+             *     free credit you marked so; invoices draw it before any other
+             *     credit. Absent for other credit.
+             * @enum {string}
+             */
             grant_kind?: "commit" | "promotional";
             /** @description For a `commit` grant, the invoice that paid for it. */
             source_invoice_id?: string;
@@ -5913,8 +8029,12 @@ export interface components {
              *     change that produced it.
              */
             source_subscription_id?: string;
+            /** @description On a proration credit, the subscription item whose change produced it. */
             source_subscription_item_id?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description On a proration credit, when the change that produced it happened.
+             */
             source_plan_changed_at?: string;
             source_change_type?: components["schemas"]["ItemChangeType"];
             /** @description The credit note that granted this credit to the balance. */
@@ -5922,13 +8042,36 @@ export interface components {
             /** @description The voided invoice whose applied credit this entry gave back. */
             source_invoice_reversal_id?: string;
         };
-        /** @description One priced line of a subscription. It pairs a plan with a quantity. */
+        /**
+         * @description One priced line of a subscription. It pairs a plan with a quantity.
+         *     Returned inside a subscription's `items`, and by the item routes.
+         * @example {
+         *       "id": "hc_si_dauq50aq3gpgqfoq5c30",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+         *       "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *       "quantity": 1,
+         *       "created_at": "2026-10-01T09:12:44Z",
+         *       "updated_at": "2026-10-01T09:12:44Z"
+         *     }
+         */
         SubscriptionItem: {
+            /** @description The item's ID (`hc_si_…`). */
             id: string;
+            /** @description The account the item belongs to. */
             tenant_id?: string;
+            /** @description The subscription the item is on. */
             subscription_id: string;
+            /**
+             * @description The plan the item bills now. A scheduled plan change shows in
+             *     `pending_plan_id` until it takes effect.
+             */
             plan_id: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description How many of the plan the item bills: the plan's base fee is
+             *     charged this many times. At least 1.
+             */
             quantity: number;
             /** @description The item's stored metadata. Absent when empty. */
             metadata?: {
@@ -5936,24 +8079,46 @@ export interface components {
             };
             /** @description Plan the item moves to at `pending_plan_effective_at`. Absent when no change is scheduled. */
             pending_plan_id?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the scheduled plan change takes effect: the end of the
+             *     period in which it was scheduled. Absent when no change is
+             *     scheduled.
+             */
             pending_plan_effective_at?: string;
             /**
              * Format: date-time
              * @description When the plan was last changed immediately. Absent until the first such change.
              */
             plan_changed_at?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the item was added.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the item last changed.
+             */
             updated_at: string;
         };
         /**
          * @description Present on a subscription while collection is paused. New invoices
-         *     are still created, but stay drafts and are not charged.
+         *     are still created, but stay drafts and are not charged. Absent when
+         *     collection runs normally.
+         * @example {
+         *       "behavior": "keep_as_draft",
+         *       "resumes_at": "2026-12-01T00:00:00Z",
+         *       "set_by": "operator"
+         *     }
          */
         SubscriptionPauseCollection: {
-            /** @enum {string} */
+            /**
+             * @description What happens to the invoices built during the pause. Only
+             *     `keep_as_draft`: they stay drafts, so they are not finalized,
+             *     charged or dunned.
+             * @enum {string}
+             */
             behavior: "keep_as_draft";
             /**
              * Format: date-time
@@ -5978,23 +8143,61 @@ export interface components {
          *     invoice bills the period's usage so far, and no base fee. The period
          *     keeps its dates, the base fee is billed as it would be with no
          *     threshold, and the period's next invoice bills the rest of the usage.
+         *     Absent on a subscription with no thresholds. Set them with
+         *     `PUT /v1/subscriptions/{id}/billing-thresholds`.
+         * @example {
+         *       "amount_gte": 50000,
+         *       "item_thresholds": [
+         *         {
+         *           "subscription_item_id": "hc_si_dauq50aq3gpgqfoq5c30",
+         *           "usage_gte": "100000000"
+         *         }
+         *       ]
+         *     }
          */
         SubscriptionBillingThresholds: {
             /**
              * Format: int64
-             * @description Usage threshold in cents, compared with the period's usage so far (the base fee is not counted). Absent when not set.
+             * @description Usage threshold in the subscription currency's minor unit
+             *     (cents for USD), compared with the period's usage so far (the
+             *     base fee is not counted). Absent when not set.
              */
             amount_gte?: number;
+            /** @description Per-item usage quantity thresholds. Empty when only `amount_gte` is set. */
             item_thresholds: components["schemas"]["SubscriptionItemThreshold"][];
         };
+        /**
+         * @description A usage threshold on one item: when the item's usage in the period
+         *     reaches `usage_gte`, Hardcount invoices the usage so far.
+         * @example {
+         *       "subscription_item_id": "hc_si_dauq50aq3gpgqfoq5c30",
+         *       "usage_gte": "100000000"
+         *     }
+         */
         SubscriptionItemThreshold: {
+            /** @description The item of this subscription the threshold watches. */
             subscription_item_id: string;
             /** @description Usage quantity threshold, as a decimal string. */
             usage_gte: string;
         };
-        /** @description What Hardcount did to settle the rest of the period for an item change. */
+        /**
+         * @description What Hardcount did to settle the rest of the period for an item change.
+         * @example {
+         *       "old_plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *       "new_plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *       "proration_factor": 0.5161290322580645,
+         *       "amount_cents": 2529,
+         *       "type": "invoice",
+         *       "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c4k",
+         *       "credited_to_balance_cents": 0,
+         *       "reduced_open_invoices_cents": 0,
+         *       "held_on_draft_invoices_cents": 0
+         *     }
+         */
         SubscriptionItemProration: {
+            /** @description The plan the item was on before the change. The same as `new_plan_id` for a quantity change. */
             old_plan_id: string;
+            /** @description The plan the item is on after the change. */
             new_plan_id: string;
             /**
              * Format: double
@@ -6003,8 +8206,9 @@ export interface components {
             proration_factor: number;
             /**
              * Format: int64
-             * @description Gross amount, tax included: the invoice total (`invoice`), or
-             *     the whole credit for unused time (`credit` and `adjustment`).
+             * @description Gross amount, tax included, in the currency's minor unit (cents
+             *     for USD): the invoice total (`invoice`), or the whole credit for
+             *     unused time (`credit` and `adjustment`).
              *     `credited_to_balance_cents`, `reduced_open_invoices_cents` and
              *     `held_on_draft_invoices_cents` say where the credit went.
              */
@@ -6022,35 +8226,46 @@ export interface components {
             /**
              * Format: int64
              * @description The part of the credit added to the customer's balance, tax
-             *     included. On a paid invoice, all of its part. On an open invoice
-             *     paid partly with credits, the part above what it still asks for:
-             *     those credits go back to the balance. A part on an invoice whose
-             *     payment is still processing counts here; if that payment fails,
-             *     it reduces the invoice instead. 0 when `type` is `invoice`.
+             *     included, in the currency's minor unit. On a paid invoice, all
+             *     of its part. On an open invoice paid partly with credits, the
+             *     part above what it still asks for: those credits go back to the
+             *     balance. A part on an invoice whose payment is still processing
+             *     counts here; if that payment fails, it reduces the invoice
+             *     instead. 0 when `type` is `invoice`.
              */
             credited_to_balance_cents: number;
             /**
              * Format: int64
              * @description The part of the credit taken off the amount due on open
-             *     invoices, tax included. 0 when `type` is `invoice`.
+             *     invoices, tax included, in the currency's minor unit. 0 when
+             *     `type` is `invoice`.
              */
             reduced_open_invoices_cents: number;
             /**
              * Format: int64
-             * @description The part of the credit on draft invoices, tax included. It is
-             *     held until the draft is finalized, then applied by how the
-             *     invoice stands: if paid, to the customer's balance; if still
-             *     open, off what it asks for first, as above. 0 when `type` is
-             *     `invoice`.
+             * @description The part of the credit on draft invoices, tax included, in the
+             *     currency's minor unit. It is held until the draft is finalized,
+             *     then applied by how the invoice stands: if paid, to the
+             *     customer's balance; if still open, off what it asks for first,
+             *     as above. 0 when `type` is `invoice`.
              */
             held_on_draft_invoices_cents: number;
         };
         /**
          * @description The invoice an immediate change to a plan with another billing
          *     interval created for the new period it starts.
+         * @example {
+         *       "id": "hc_inv_dbj84b2q3gpgqfoq5c4k",
+         *       "invoice_number": "HC-000043",
+         *       "status": "finalized",
+         *       "total_amount_cents": 49000,
+         *       "currency": "USD"
+         *     }
          */
         SubscriptionNewPeriodInvoice: {
+            /** @description The invoice's ID (`hc_inv_…`). */
             id: string;
+            /** @description The invoice's number, as printed on it. */
             invoice_number: string;
             /**
              * @description `draft` when the invoice was not issued yet: collection is
@@ -6061,12 +8276,42 @@ export interface components {
             status: "draft" | "finalized";
             /**
              * Format: int64
-             * @description The invoice total when the change created it. On a `draft`
-             *     whose tax could not be calculated yet, it has no tax in it.
+             * @description The invoice total when the change created it, in the
+             *     currency's minor unit (cents for USD). On a `draft` whose tax
+             *     could not be calculated yet, it has no tax in it.
              */
             total_amount_cents: number;
+            /** @description The invoice's currency, uppercase (for example `USD`). */
             currency: string;
         };
+        /**
+         * @description What `PATCH /v1/subscriptions/{id}/items/{itemID}` did: the item
+         *     after the change, when the change takes effect, and how the rest
+         *     of the period was settled.
+         * @example {
+         *       "item": {
+         *         "id": "hc_si_dauq50aq3gpgqfoq5c30",
+         *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *         "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+         *         "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *         "quantity": 2,
+         *         "created_at": "2026-10-01T09:12:44Z",
+         *         "updated_at": "2026-10-16T10:30:00Z"
+         *       },
+         *       "effective_at": "2026-10-16T10:30:00Z",
+         *       "proration": {
+         *         "old_plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *         "new_plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+         *         "proration_factor": 0.5161290322580645,
+         *         "amount_cents": 2529,
+         *         "type": "invoice",
+         *         "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c4k",
+         *         "credited_to_balance_cents": 0,
+         *         "reduced_open_invoices_cents": 0,
+         *         "held_on_draft_invoices_cents": 0
+         *       }
+         *     }
+         */
         SubscriptionItemChangeResult: {
             item: components["schemas"]["SubscriptionItem"];
             /**
@@ -6077,13 +8322,45 @@ export interface components {
             proration?: components["schemas"]["SubscriptionItemProration"];
             new_period_invoice?: components["schemas"]["SubscriptionNewPeriodInvoice"];
         };
+        /**
+         * @description One row of a subscription's activity timeline
+         *     (`GET /v1/subscriptions/{id}/timeline`), built from one audit log
+         *     entry. `line` carries the row in its structured form; `description`,
+         *     `detail`, `detail_timestamp`, `error` and `status` repeat its words
+         *     for older clients.
+         * @example {
+         *       "timestamp": "2026-10-01T09:12:44Z",
+         *       "source": "audit",
+         *       "event_type": "create",
+         *       "status": "neutral",
+         *       "description": "Subscription created",
+         *       "actor_type": "api_key",
+         *       "actor_name": "Production backend",
+         *       "actor_id": "hc_key_dajqj1iq3gpgqfoq5ca0",
+         *       "line": {
+         *         "id": "hc_aud_dbj84c2q3gpgqfoq5cb0",
+         *         "kind": "subscription.created",
+         *         "title": "Subscription created",
+         *         "detail": [],
+         *         "actor": {
+         *           "kind": "api_key",
+         *           "name": "Production backend"
+         *         },
+         *         "tone": "neutral",
+         *         "occurred_at": "2026-10-01T09:12:44Z"
+         *       }
+         *     }
+         */
         SubscriptionTimelineEvent: {
             /**
              * Format: date-time
              * @description When the action was recorded (wall-clock time).
              */
             timestamp: string;
-            /** @enum {string} */
+            /**
+             * @description Where the row comes from. Always `audit`, the audit log.
+             * @enum {string}
+             */
             source: "audit";
             /** @description The audit action, e.g. `create`, `cancel`, `subscription.item_updated`. */
             event_type: string;
@@ -6107,8 +8384,17 @@ export interface components {
             detail_timestamp?: string;
             /** @description The line's problem. */
             error?: string;
+            /**
+             * @description Who acted, as the audit log records it: `user` (a dashboard
+             *     user), `api_key`, `customer`, or `system` (Hardcount itself).
+             */
             actor_type?: string;
+            /**
+             * @description The actor's name: a user's email, an API key's name or a
+             *     customer's display name. Absent when it is not known.
+             */
             actor_name?: string;
+            /** @description The actor's ID (a user's, an API key's `hc_key_…` or a customer's), or `system`. */
             actor_id?: string;
             /** @description True when the action affected a subscription on a test clock. */
             is_simulated?: boolean;
@@ -6117,6 +8403,7 @@ export interface components {
              * @description The test clock's simulated time when the action took effect.
              */
             sim_effective_at?: string;
+            /** @description The test clock `sim_effective_at` belongs to. Absent when the action was not on a test clock. */
             test_clock_id?: string;
             line: components["schemas"]["ActivityLine"];
         };
@@ -6899,29 +9186,66 @@ export interface components {
         /**
          * @description A customer's negotiated rate for one plan price. It keeps applying
          *     when the price's rate changes, and ends when the price is removed.
-         *     It takes the plan's currency.
+         *     It takes the plan's currency. The `/v1/price-overrides` routes
+         *     create, list and end overrides. Every shape field is always sent:
+         *     the ones the mode does not use are `"0"`, `0` or `[]`.
+         * @example {
+         *       "id": "hc_cpo_daof442q3gpgqfoq5cag",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+         *       "price_id": "hc_prc_dajr672q3gpgqfoq5c20",
+         *       "mode": "per_unit",
+         *       "unit_amount_cents": "0.00025",
+         *       "tiers": [],
+         *       "package_size": 0,
+         *       "package_amount_cents": "0",
+         *       "reason": "Annual commitment discount",
+         *       "active": true,
+         *       "created_at": "2026-10-15T12:30:00Z",
+         *       "updated_at": "2026-10-15T12:30:00Z"
+         *     }
          */
         CustomerPriceOverride: {
-            /** @example hc_cpo_1a2b3c4d5e6f7890 */
+            /**
+             * @description The override's ID, `hc_cpo_` and 20 characters.
+             * @example hc_cpo_daof442q3gpgqfoq5cag
+             */
             id: string;
+            /** @description The account the override belongs to. */
             tenant_id?: string;
+            /** @description The customer who pays this rate. */
             customer_id: string;
             /** @description The plan price this override replaces the rate of, for this customer. */
             price_id: string;
             /**
-             * @description As on PriceShape.
+             * @description How the override bills a quantity; see PriceShape.
              * @enum {string}
              */
             mode: "per_unit" | "graduated" | "package";
-            /** @description Price per unit in cents, as a decimal string. */
+            /**
+             * @description Price per unit, as a decimal string of cents. `"0"` unless `mode`
+             *     is `per_unit`.
+             */
             unit_amount_cents: string;
             /** @description Empty (`[]`) unless `mode` is `graduated`. */
             tiers: components["schemas"]["PriceTier"][];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The units in one package. 0 unless `mode` is `package`.
+             */
             package_size: number;
-            /** @description Price of one package in cents, as a decimal string. */
+            /**
+             * @description Price of one package, as a decimal string of cents. `"0"` unless
+             *     `mode` is `package`.
+             */
             package_amount_cents: string;
+            /** @description Your note on why the customer has this rate. Absent when none was given. */
             reason?: string;
+            /**
+             * @description True until the override is ended: by `DELETE
+             *     /v1/price-overrides/{id}`, by a new override for the same
+             *     customer and price, or by the removal of the price.
+             */
             active: boolean;
             /**
              * Format: date-time
@@ -6936,7 +9260,10 @@ export interface components {
              * @description When the override ended, in the customer's time. Absent while it is active.
              */
             deactivated_at?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the override was last written.
+             */
             updated_at: string;
         };
         DunningPolicyInput: {
@@ -7019,7 +9346,39 @@ export interface components {
             /** @description Customers explicitly assigned to this policy. Customers using it only as the default are not counted. */
             assigned_customers: number;
         };
+        /**
+         * @description Totals over every usage event that matches the filters of
+         *     `GET /v1/usage-events/aggregate`, with one row per meter.
+         * @example {
+         *       "total_events": 4210,
+         *       "total_units": "12500000",
+         *       "active_meters": 1,
+         *       "active_customers": 1,
+         *       "by_meter": [
+         *         {
+         *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+         *           "total": "12500000",
+         *           "aggregation": "sum",
+         *           "value": "12500000",
+         *           "events": 4210,
+         *           "customers": 1,
+         *           "peak": "48000",
+         *           "daily": [
+         *             {
+         *               "date": "2026-10-12",
+         *               "value": "410000"
+         *             },
+         *             {
+         *               "date": "2026-10-13",
+         *               "value": "395500"
+         *             }
+         *           ]
+         *         }
+         *       ]
+         *     }
+         */
         UsageAggregate: {
+            /** @description Number of matching events. */
             total_events: number;
             /**
              * @description Sum of all matching quantities across meters, as a decimal
@@ -7033,6 +9392,7 @@ export interface components {
             active_customers: number;
             /** @description One row per meter, largest total first. */
             by_meter: {
+                /** @description The meter (`hc_mtr_…`). */
                 meter_id: string;
                 /** @description Plain sum of reported quantities, as a decimal string. */
                 total: string;
@@ -7049,6 +9409,7 @@ export interface components {
                  *     Billing applies them per billing period.
                  */
                 value: string;
+                /** @description Number of matching events on this meter. */
                 events: number;
                 /** @description Distinct customers with events on this meter. */
                 customers: number;
@@ -7056,7 +9417,10 @@ export interface components {
                 peak: string;
                 /** @description One entry per calendar day (in `tz`) with events, oldest first. */
                 daily: {
-                    /** Format: date */
+                    /**
+                     * Format: date
+                     * @description The calendar day, `YYYY-MM-DD`, in `tz`.
+                     */
                     date: string;
                     /** @description The day's usage under the meter's aggregation. */
                     value: string;
@@ -7066,6 +9430,33 @@ export interface components {
         /**
          * @description The fields of a LiteLLM `StandardLoggingPayload` that Hardcount reads.
          *     Other fields are accepted and ignored.
+         * @example {
+         *       "id": "chatcmpl-AZx81kq4ZtR2",
+         *       "status": "success",
+         *       "call_type": "acompletion",
+         *       "model": "gpt-4o-2024-08-06",
+         *       "custom_llm_provider": "openai",
+         *       "user": "acme-42",
+         *       "usage": {
+         *         "prompt_tokens": 1200,
+         *         "completion_tokens": 350,
+         *         "total_tokens": 1550,
+         *         "prompt_tokens_details": {
+         *           "cached_tokens": 200
+         *         }
+         *       },
+         *       "cost_breakdown": {
+         *         "input_cost": 0.00275,
+         *         "output_cost": 0.0035,
+         *         "cache_read_cost": 0.00025,
+         *         "total_cost": 0.00625
+         *       },
+         *       "startTime": 1791813785.8,
+         *       "endTime": 1791813787,
+         *       "metadata": {
+         *         "team_id": "team-research"
+         *       }
+         *     }
          */
         LitellmSpendLog: {
             /** @description LiteLLM's call id. Used to build the events' idempotency keys. */
@@ -7085,26 +9476,54 @@ export interface components {
              *     skipped, and a skipped record that carries tokens is logged.
              */
             call_type?: string;
+            /**
+             * @description The model the call used, as LiteLLM names it. Each event
+             *     carries it as the `model_raw` dimension, and as `model` the
+             *     model family name when Hardcount recognises it (the name as
+             *     sent otherwise).
+             */
             model?: string;
+            /** @description The provider LiteLLM sent the call to, such as `openai`. Each event carries it as the `provider` dimension. */
             custom_llm_provider?: string;
             /** @description The customer's external_id. */
             user?: string;
             /** @description Where LiteLLM Proxy puts the caller's `user`. Used when `user` is empty. */
             end_user?: string;
+            /**
+             * @description The call's token counts. When it is absent, Hardcount reads
+             *     `metadata.usage_object`, then the top-level `prompt_tokens` and
+             *     `completion_tokens`.
+             */
             usage?: {
                 /**
                  * Format: int64
                  * @description Includes cache-read tokens.
                  */
                 prompt_tokens?: number;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description Output tokens. They become the `output` event.
+                 */
                 completion_tokens?: number;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description Accepted but not used.
+                 */
                 total_tokens?: number;
+                /** @description The breakdown of `prompt_tokens`, as LiteLLM reports it. */
                 prompt_tokens_details?: {
-                    /** Format: int64 */
+                    /**
+                     * Format: int64
+                     * @description Prompt tokens read from the provider's cache. They become
+                     *     the `cache_read` event, taken out of `input`.
+                     */
                     cached_tokens?: number;
-                    /** Format: int64 */
+                    /**
+                     * Format: int64
+                     * @description Prompt tokens written to the provider's cache. Hardcount
+                     *     takes the larger of this and
+                     *     `cache_creation_input_tokens`.
+                     */
                     cache_creation_tokens?: number;
                     /**
                      * @description Anthropic's cache writes by cache lifetime. They become
@@ -7113,13 +9532,25 @@ export interface components {
                      *     up to the cache-write count, the writes stay in `input`.
                      */
                     cache_creation_token_details?: {
-                        /** Format: int64 */
+                        /**
+                         * Format: int64
+                         * @description Cache writes with a 5-minute lifetime. They become the `cache_write_5m` event.
+                         */
                         ephemeral_5m_input_tokens?: number | null;
-                        /** Format: int64 */
+                        /**
+                         * Format: int64
+                         * @description Cache writes with a 1-hour lifetime. They become the `cache_write_1h` event.
+                         */
                         ephemeral_1h_input_tokens?: number | null;
                     };
                 };
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description Anthropic's cache-read tokens, included in prompt_tokens.
+                 *     Hardcount takes the larger of this and
+                 *     `prompt_tokens_details.cached_tokens` as the `cache_read`
+                 *     event.
+                 */
                 cache_read_input_tokens?: number;
                 /**
                  * Format: int64
@@ -7132,9 +9563,15 @@ export interface components {
              * @description Used when there is no `usage` object.
              */
             prompt_tokens?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Output tokens. Used when there is no `usage` object.
+             */
             completion_tokens?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Accepted but not used.
+             */
             total_tokens?: number;
             /** @description Accepted but not stored. */
             response_cost?: number;
@@ -7152,11 +9589,17 @@ export interface components {
              *     rate.
              */
             cost_breakdown?: {
+                /** @description The cost of the whole prompt, in dollars, cache reads and writes included. */
                 input_cost?: number;
+                /** @description The cost of the output tokens, in dollars. */
                 output_cost?: number;
+                /** @description The part of `input_cost` spent on cache reads, in dollars. */
                 cache_read_cost?: number;
+                /** @description LiteLLM's cost of the cache writes, in dollars, priced at the 5-minute rate. */
                 cache_creation_cost?: number;
+                /** @description Accepted but not used. */
                 tool_usage_cost?: number;
+                /** @description Accepted but not used. */
                 total_cost?: number;
             };
             /** @description Unix seconds. Event time when `endTime` is absent. */
@@ -7171,7 +9614,21 @@ export interface components {
                 [key: string]: unknown;
             };
         };
-        /** @description The usage rows still held for one external customer ID, event name and reason. */
+        /**
+         * @description The usage rows still held for one external customer ID, event name and reason.
+         * @example {
+         *       "external_customer_id": "globex-7",
+         *       "event_name": "tokens",
+         *       "reason": "customer_not_found",
+         *       "rows": 12,
+         *       "total_quantity": "18400",
+         *       "first_event_at": "2026-10-14T08:00:12Z",
+         *       "last_event_at": "2026-10-14T09:41:55Z",
+         *       "last_received_at": "2026-10-14T09:41:56Z",
+         *       "customer_id": "",
+         *       "meter_exists": true
+         *     }
+         */
         HeldUsageGroup: {
             /** @description The LiteLLM `user` value the rows carried. */
             external_customer_id: string;
@@ -7182,12 +9639,19 @@ export interface components {
              * @enum {string}
              */
             reason: "customer_not_found" | "meter_not_found";
+            /** @description Number of rows held in the group. */
             rows: number;
             /** @description Sum of the held quantities, as a decimal string. */
             total_quantity: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description The earliest usage time among the rows.
+             */
             first_event_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description The latest usage time among the rows.
+             */
             last_event_at: string;
             /**
              * Format: date-time
@@ -7200,9 +9664,22 @@ export interface components {
             meter_exists: boolean;
         };
         /**
-         * @description The counts are what Hardcount found when the release wrote the rows, as
-         *     for `billing_status` (see `UsageBillingStatus`). The invoice is the
+         * @description What `POST /v1/usage-events/held/release` did. The counts are what
+         *     Hardcount found when the release wrote the rows, as for
+         *     `billing_status` (see `UsageBillingStatus`). The invoice is the
          *     final answer.
+         * @example {
+         *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0k",
+         *       "released": 12,
+         *       "deduplicated": 0,
+         *       "still_held": 0,
+         *       "more_to_release": 0,
+         *       "in_open_period": 12,
+         *       "no_price": 0,
+         *       "not_on_plan": 0,
+         *       "pending_threshold_invoice": 0,
+         *       "outside_open_period": 0
+         *     }
          */
         HeldUsageReleaseResult: {
             /** @description The customer the rows were ingested for. */
@@ -7267,6 +9744,23 @@ export interface components {
              */
             outside_open_period: number;
         };
+        /**
+         * @description What `POST /v1/integrations/litellm/spend` did with the records it
+         *     received. Each record becomes up to five usage events, one per
+         *     token type; the counts below count events, except `skipped` and
+         *     `cache_hits`, which count records.
+         * @example {
+         *       "accepted": 3,
+         *       "deduplicated": 0,
+         *       "held": 0,
+         *       "skipped": 0,
+         *       "cache_hits": 0,
+         *       "after_close": 0,
+         *       "no_price": 0,
+         *       "not_on_plan": 0,
+         *       "outside_subscription": 0
+         *     }
+         */
         LitellmSpendResult: {
             /** @description Usage events newly recorded. */
             accepted: number;
@@ -7306,10 +9800,15 @@ export interface components {
              *     never counts here.
              */
             outside_subscription: number;
-            /** @description One entry per record that was not recorded. A record's events are recorded together or not at all. */
+            /**
+             * @description One entry per record that was not recorded. A record's events are
+             *     recorded together or not at all. Absent when every record was
+             *     recorded, held or skipped.
+             */
             errors?: {
                 /** @description The LiteLLM record id. */
                 id: string;
+                /** @description Why the record was not recorded, such as a missing `user`. */
                 error: string;
             }[];
         };
@@ -7820,22 +10319,55 @@ export interface components {
             /** @description False for a test-mode invoice. The page shows a test-mode banner. */
             livemode: boolean;
         };
-        /** @description What the payment-update page shows before the customer adds a card. */
+        /**
+         * @description What the payment-update page shows before the customer adds a
+         *     card: `GET /v1/public/payment-updates/{token}`. The page opens from
+         *     the link in a payment setup email, which Hardcount sends when an
+         *     invoice has no payment method to charge.
+         * @example {
+         *       "customer_name": "Acme Inc",
+         *       "invoice_number": "HC-000001",
+         *       "invoice_status": "finalized",
+         *       "amount_due_cents": 3650,
+         *       "currency": "USD",
+         *       "branding": {
+         *         "company_name": "Example Labs",
+         *         "company_email": "billing@examplelabs.example",
+         *         "logo_url": "https://examplelabs.example/logo.png",
+         *         "brand_color": "#4F46E5",
+         *         "support_url": "https://examplelabs.example/support"
+         *       }
+         *     }
+         */
         PublicPaymentUpdate: {
+            /** @description The customer's display name. */
             customer_name: string;
+            /** @description The number of the invoice the link was sent for. */
             invoice_number: string;
             invoice_status: components["schemas"]["InvoiceStatus"];
             /**
              * Format: int64
-             * @description Not cleared when the invoice is voided. Check `invoice_status` before asking for payment.
+             * @description What is due on the invoice, in the currency's minor unit (cents
+             *     for USD). Not cleared when the invoice is voided: check
+             *     `invoice_status` before asking for payment.
              */
             amount_due_cents: number;
+            /** @description The invoice's currency, such as `USD`. */
             currency: string;
+            /**
+             * @description The seller's branding from its account settings. A field the
+             *     seller has not set is absent.
+             */
             branding: {
+                /** @description The seller's company name. */
                 company_name?: string;
+                /** @description The seller's contact email. */
                 company_email?: string;
+                /** @description The address of the seller's logo. */
                 logo_url?: string;
+                /** @description The seller's brand color, such as `#4F46E5`. */
                 brand_color?: string;
+                /** @description Where the customer can get help. */
                 support_url?: string;
             };
         };
@@ -7854,7 +10386,23 @@ export interface components {
         };
         /**
          * @description One block of credit on a customer's balance (a grant or a positive
-         *     adjustment) and how much of it is left.
+         *     adjustment) and how much of it is left. Amounts are in the
+         *     currency's minor unit (cents for USD).
+         * @example {
+         *       "id": "hc_ccl_dav2242q3gpgqfoq5c50",
+         *       "entry_type": "grant",
+         *       "currency": "USD",
+         *       "grant_kind": "promotional",
+         *       "description": "Welcome credit",
+         *       "amount_cents": 5000,
+         *       "consumed_cents": 0,
+         *       "remaining_cents": 5000,
+         *       "expired_cents": 0,
+         *       "retired_cents": 0,
+         *       "deducted_cents": 0,
+         *       "expires_at": "2027-01-01T00:00:00Z",
+         *       "created_at": "2026-10-01T09:00:00Z"
+         *     }
          */
         CreditGrantBlock: {
             /** @description The ledger entry that added the credit. */
@@ -7868,34 +10416,39 @@ export interface components {
              * @enum {string}
              */
             grant_kind?: "commit" | "promotional";
+            /** @description The description of the ledger entry that added the credit. */
             description: string;
             /**
              * Format: int64
-             * @description The credit the block started with.
+             * @description The credit the block started with, in the currency's minor unit.
              */
             amount_cents: number;
             /**
              * Format: int64
-             * @description Everything drawn from the block: used by invoices, expired,
-             *     retired and deducted.
+             * @description Everything drawn from the block, in the currency's minor unit:
+             *     used by invoices, expired, retired and deducted.
              */
             consumed_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Credit left in the block, `amount_cents` minus `consumed_cents`, in the currency's minor unit.
+             */
             remaining_cents: number;
             /**
              * Format: int64
-             * @description The part that expired unused.
+             * @description The part that expired unused, in the currency's minor unit.
              */
             expired_cents: number;
             /**
              * Format: int64
              * @description Commit credit taken back when the invoice that paid for it was
-             *     voided, or refunded by a credit note.
+             *     voided, or refunded by a credit note, in the currency's minor
+             *     unit.
              */
             retired_cents: number;
             /**
              * Format: int64
-             * @description The part an operator removed with a negative adjustment.
+             * @description The part an operator removed with a negative adjustment, in the currency's minor unit.
              */
             deducted_cents: number;
             /**
@@ -7903,35 +10456,72 @@ export interface components {
              * @description The credit can be drawn up to and including this instant; a
              *     period invoice draws it when its period ends at or before it.
              *     The dashboard sends the local midnight after the picked day.
+             *     Absent when the credit does not expire.
              */
             expires_at?: string;
             /** @description For a `commit` block, the invoice that paid for it. */
             source_invoice_id?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the block was added.
+             */
             created_at: string;
         };
         /**
          * @description A customer's credit blocks, newest first, with the remaining credit
-         *     added up by currency and kind.
+         *     added up by currency and kind. Amounts are in the currency's minor
+         *     unit (cents for USD).
+         * @example {
+         *       "grants": [
+         *         {
+         *           "id": "hc_ccl_dav2242q3gpgqfoq5c50",
+         *           "entry_type": "grant",
+         *           "currency": "USD",
+         *           "grant_kind": "promotional",
+         *           "description": "Welcome credit",
+         *           "amount_cents": 5000,
+         *           "consumed_cents": 0,
+         *           "remaining_cents": 5000,
+         *           "expired_cents": 0,
+         *           "retired_cents": 0,
+         *           "deducted_cents": 0,
+         *           "expires_at": "2027-01-01T00:00:00Z",
+         *           "created_at": "2026-10-01T09:00:00Z"
+         *         }
+         *       ],
+         *       "remaining_by_currency": [
+         *         {
+         *           "currency": "USD",
+         *           "commit_remaining_cents": 0,
+         *           "promotional_remaining_cents": 5000,
+         *           "other_remaining_cents": 0
+         *         }
+         *       ]
+         *     }
          */
         CreditGrants: {
+            /**
+             * @description The customer's credit blocks, newest first. A block with nothing
+             *     left is listed only with `include_exhausted=true`.
+             */
             grants: components["schemas"]["CreditGrantBlock"][];
             /** @description One entry per currency with credit left, ordered by currency. */
             remaining_by_currency: {
+                /** @description The currency, uppercase. */
                 currency: string;
                 /**
                  * Format: int64
-                 * @description Remaining credit the customer paid for (`commit`).
+                 * @description Remaining credit the customer paid for (`commit`), in the currency's minor unit.
                  */
                 commit_remaining_cents: number;
                 /**
                  * Format: int64
-                 * @description Remaining free credit (`promotional`).
+                 * @description Remaining free credit (`promotional`), in the currency's minor unit.
                  */
                 promotional_remaining_cents: number;
                 /**
                  * Format: int64
-                 * @description Remaining credit with no kind, such as adjustments and credit-note credit.
+                 * @description Remaining credit with no kind, such as adjustments and credit-note credit, in the currency's minor unit.
                  */
                 other_remaining_cents: number;
             }[];
@@ -7978,11 +10568,38 @@ export interface components {
         };
         /**
          * @description A clock for test mode. Customers and subscriptions attached to it
-         *     are billed on its time, not the real time.
+         *     are billed on its time, not the real time. Returned by the
+         *     `/v1/test-clocks` routes.
+         * @example {
+         *       "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+         *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+         *       "name": "October renewal walk",
+         *       "frozen_time": "2026-11-02T00:00:00Z",
+         *       "status": "ready",
+         *       "created_at": "2026-10-28T15:00:00Z",
+         *       "updated_at": "2026-10-28T15:04:12Z",
+         *       "last_advance_summary": {
+         *         "advanced_from": "2026-10-01T00:00:00Z",
+         *         "advanced_to": "2026-11-02T00:00:00Z",
+         *         "invoices_generated": 1,
+         *         "trials_activated": 0,
+         *         "pauses_resumed": 0,
+         *         "thresholds_fired": 0,
+         *         "tax_retried": 0,
+         *         "charges_retried": 1,
+         *         "clawbacks_issued": 0,
+         *         "credits_expired": 0,
+         *         "dunning_advanced": 0,
+         *         "had_errors": false
+         *       }
+         *     }
          */
         TestClock: {
+            /** @description The clock's ID (`hc_tclk_…`). */
             id: string;
+            /** @description The account the clock belongs to. */
             tenant_id?: string;
+            /** @description Your name for the clock. Empty when you gave none. */
             name: string;
             /**
              * Format: date-time
@@ -7996,9 +10613,15 @@ export interface components {
              * @enum {string}
              */
             status: "ready" | "advancing" | "internal_failure";
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the clock was created, in real time.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the clock last changed, in real time.
+             */
             updated_at: string;
             /** @description Why the last advance failed. Cleared by the next successful advance. */
             last_failure_reason?: string;
@@ -8008,22 +10631,59 @@ export interface components {
          * @description What the latest advance did: the time span it covered and how many
          *     of each billing step it ran. Absent until the clock is first
          *     advanced.
+         * @example {
+         *       "advanced_from": "2026-10-01T00:00:00Z",
+         *       "advanced_to": "2026-11-02T00:00:00Z",
+         *       "invoices_generated": 1,
+         *       "trials_activated": 0,
+         *       "pauses_resumed": 0,
+         *       "thresholds_fired": 0,
+         *       "tax_retried": 0,
+         *       "charges_retried": 1,
+         *       "clawbacks_issued": 0,
+         *       "credits_expired": 0,
+         *       "dunning_advanced": 0,
+         *       "had_errors": false
+         *     }
          */
         TestClockAdvanceSummary: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description The clock's time before the advance. After a retried advance it
+             *     equals `advanced_to`.
+             */
             advanced_from: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description The clock's time after the advance.
+             */
             advanced_to: string;
+            /** @description Period invoices the advance created. */
             invoices_generated: number;
+            /** @description Subscriptions whose trial ended in the span and that became `active`. */
             trials_activated: number;
+            /** @description Collection pauses whose `resumes_at` passed in the span and that were lifted. */
             pauses_resumed: number;
+            /** @description Billing-threshold invoices issued. */
             thresholds_fired: number;
+            /** @description Invoices waiting for tax whose tax calculation was tried again. */
             tax_retried: number;
+            /** @description Invoices waiting to be charged that the advance tried to collect. */
             charges_retried: number;
+            /**
+             * @description Credit notes for unused time that were waiting for their invoice
+             *     to settle, issued now.
+             */
             clawbacks_issued: number;
+            /** @description Credit grants that expired in the span. */
             credits_expired: number;
+            /** @description Dunning runs that took a step. */
             dunning_advanced: number;
-            /** @description True when a step failed. The counts then cover only the work done before the failure. */
+            /**
+             * @description True when a step failed, which leaves the clock in
+             *     `internal_failure`. The steps after a failed one still ran, so
+             *     each count is what its step did.
+             */
             had_errors: boolean;
         };
         /**
@@ -8088,7 +10748,7 @@ export interface components {
                  *         "type": "invalid_request_error",
                  *         "code": "validation_error",
                  *         "message": "limit must be a whole number from 1 to 100",
-                 *         "request_id": "req_d42h7q5kls1g00b3c4d0",
+                 *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
                  *         "param": "limit"
                  *       }
                  *     }
@@ -8111,7 +10771,7 @@ export interface components {
                  *         "type": "authentication_error",
                  *         "code": "unauthorized",
                  *         "message": "invalid or expired API key",
-                 *         "request_id": "req_d42h7q5kls1g00b3c4d0"
+                 *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
                  *       }
                  *     }
                  */
@@ -8138,7 +10798,7 @@ export interface components {
                  *         "type": "rate_limit_error",
                  *         "code": "rate_limited",
                  *         "message": "too many requests — please retry after the rate limit resets",
-                 *         "request_id": "req_d42h7q5kls1g00b3c4d0"
+                 *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
                  *       }
                  *     }
                  */
@@ -8162,7 +10822,7 @@ export interface components {
                  *         "type": "invalid_request_error",
                  *         "code": "invalid_request",
                  *         "message": "invalid JSON body",
-                 *         "request_id": "req_d42h7q5kls1g00b3c4d0"
+                 *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
                  *       }
                  *     }
                  */
@@ -8290,25 +10950,37 @@ export interface operations {
     listCustomers: {
         parameters: {
             query?: {
+                /**
+                 * @description Only customers with this status, `active` or `archived`. Any other
+                 *     value matches no customer.
+                 */
                 status?: string;
-                /** @description Exact-match filter on the caller-assigned external ID. */
+                /** @description Only the customer with this `external_id` (exact match). */
                 external_id?: string;
-                /** @description Comma-separated customer IDs to fetch exactly. */
+                /**
+                 * @description Comma-separated customer IDs. Only those customers are returned;
+                 *     IDs not found are skipped.
+                 */
                 ids?: string;
                 /**
-                 * @description Case-insensitive substring match on display name, email,
-                 *     external ID, or ID. Matching runs post-decryption (PII
-                 *     columns are encrypted at rest), bounded to the first 5000
-                 *     rows of the tenant's filtered set; the rows and `total` stop
-                 *     there.
+                 * @description Case-insensitive substring match on display name, email, external
+                 *     ID or ID. It looks at the first 5,000 customers, in the list's
+                 *     sort order, that match the other filters; the rows and `total`
+                 *     stop there.
                  */
                 search?: string;
                 /**
-                 * @description One of display_name, email, external_id, status, created_at
-                 *     (default). A sort by display_name or email looks at 5,000
-                 *     customers at most; the rows and `total` stop there.
+                 * @description One of `display_name`, `email`, `external_id`, `status` or
+                 *     `created_at` (the default). Any other value sorts by `created_at`.
+                 *     On a server that encrypts customer data, a sort by `display_name`
+                 *     or `email` looks at the 5,000 newest customers at most; the rows
+                 *     and `total` stop there.
                  */
                 sort?: string;
+                /**
+                 * @description Sort direction, `asc` or `desc`. Default `desc`; any value other
+                 *     than `asc` sorts descending.
+                 */
                 dir?: "asc" | "desc";
                 /**
                  * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
@@ -8327,12 +10999,29 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Customer list */
+            /** @description One page of customers, and how many match. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "external_id": "acme-42",
+                     *           "display_name": "Acme Inc",
+                     *           "email": "billing@acme.example",
+                     *           "status": "active",
+                     *           "created_at": "2026-09-30T16:20:00Z",
+                     *           "updated_at": "2026-09-30T16:20:00Z"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["Customer"][];
                         total: components["schemas"]["ListTotal"];
@@ -8363,37 +11052,108 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "external_id": "acme-42",
+                 *       "display_name": "Acme Inc",
+                 *       "email": "billing@acme.example",
+                 *       "additional_emails": [
+                 *         "finance@acme.example"
+                 *       ]
+                 *     }
+                 */
                 "application/json": {
+                    /**
+                     * @description Your own ID for the customer, such as the account ID in
+                     *     your app. At most 255 characters after spaces at the ends
+                     *     are trimmed. Unique in the account and mode.
+                     */
                     external_id: string;
+                    /**
+                     * @description The name shown on invoices, emails and the dashboard. At
+                     *     most 255 characters.
+                     */
                     display_name: string;
+                    /**
+                     * @description Where billing emails go. One bare address with a dot in
+                     *     its domain, such as `billing@acme.example`: no display
+                     *     name, quotes or angle brackets.
+                     */
                     email?: string;
+                    /**
+                     * @description Addresses to copy on billing emails, at most 10. Each is
+                     *     checked like `email`, lowercased and deduplicated. None
+                     *     may equal `email`.
+                     */
                     additional_emails?: string[];
-                    /** @description Test mode only. Attaches the customer to a test clock. */
+                    /**
+                     * @description Test mode only. Runs the customer on this test clock,
+                     *     which must exist in the account and mode. Fixed after
+                     *     create.
+                     */
                     test_clock_id?: string;
                 };
             };
         };
         responses: {
-            /** @description Customer created */
+            /**
+             * @description The new customer. The create answer leaves out `email_status`,
+             *     `dunning_policy_id` and `stripe_customer_id`.
+             */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "external_id": "acme-42",
+                     *       "display_name": "Acme Inc",
+                     *       "email": "billing@acme.example",
+                     *       "additional_emails": [
+                     *         "finance@acme.example"
+                     *       ],
+                     *       "status": "active",
+                     *       "created_at": "2026-09-30T16:20:00Z",
+                     *       "updated_at": "2026-09-30T16:20:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Customer"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Customer already exists */
+            /**
+             * @description A customer with this `external_id` already exists in this account
+             *     and mode (`already_exists`, `param: external_id`).
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "already_exists",
+                     *         "message": "customer with external_id \"acme-42\" already exists",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "external_id"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             /**
-             * @description A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+             * @description A field failed validation (`validation_error`, `param` names it):
+             *     a missing or too long `external_id` or `display_name`, an invalid
+             *     `email` or `additional_emails` entry, an `additional_emails` entry
+             *     equal to `email`, or a `test_clock_id` with no clock in this
+             *     account and mode. An unknown field is refused the same way.
              *     `dunning_policy_id` is not a create field: assign a policy with
              *     `PATCH /v1/customers/{id}`.
              */
@@ -8402,6 +11162,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "invalid email: domain must contain a dot",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "email"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -8429,27 +11200,77 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Rotated */
+            /** @description The new token and the public page address. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "token": "hc_pcd_3f9a1c7e5b2d4f6a8c0e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f2a4c6e8b0d1f3a",
+                     *       "public_url": "https://api.example.com/v1/public/cost-dashboard/hc_pcd_3f9a1c7e5b2d4f6a8c0e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f2a4c6e8b0d1f3a"
+                     *     }
+                     */
                     "application/json": {
-                        /** @example hc_pcd_a3f9c4... */
+                        /**
+                         * @description The new token, `hc_pcd_` and 64 hex characters. Shown
+                         *     only in this answer.
+                         * @example hc_pcd_3f9a1c7e5b2d4f6a8c0e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f2a4c6e8b0d1f3a
+                         */
                         token: string;
-                        /** @example https://api.example.com/v1/public/cost-dashboard/hc_pcd_a3f9c4... */
+                        /**
+                         * @description `/v1/public/cost-dashboard/` and the token, after the
+                         *     server's `HARDCOUNT_API_BASE_URL` when that is set.
+                         *     Without it, the path alone.
+                         */
                         public_url: string;
                     };
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Customer not found */
+            /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field. This route takes no body
+             *     (`param` names the field).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"customer_id\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "customer_id"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -8471,16 +11292,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "external_id": "acme-42",
+                     *       "display_name": "Acme Inc",
+                     *       "email": "billing@acme.example",
+                     *       "additional_emails": [
+                     *         "finance@acme.example"
+                     *       ],
+                     *       "status": "active",
+                     *       "email_status": "unknown",
+                     *       "dunning_policy_id": "hc_dpol_dajqj1aq3gpgqfoq5c6g",
+                     *       "stripe_customer_id": "cus_RkT9qW2xYz3AbC",
+                     *       "created_at": "2026-09-30T16:20:00Z",
+                     *       "updated_at": "2026-10-15T09:12:44Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Customer"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description No customer with this ID in this tenant and mode. */
+            /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -8508,13 +11357,37 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "dunning_policy_id": "hc_dpol_dajqj1aq3gpgqfoq5c6g",
+                 *       "additional_emails": [
+                 *         "finance@acme.example"
+                 *       ]
+                 *     }
+                 */
                 "application/json": {
+                    /**
+                     * @description The new name. Spaces at the ends are trimmed. Empty or
+                     *     left out keeps the current name.
+                     */
                     display_name?: string;
+                    /**
+                     * @description The new primary email, checked as on create. Empty or left
+                     *     out keeps the current email.
+                     */
                     email?: string;
-                    /** @enum {string} */
+                    /**
+                     * @description `archived` blocks new subscriptions for the customer.
+                     *     `active` lifts that.
+                     * @enum {string}
+                     */
                     status?: "active" | "archived";
-                    /** @description Policy ID, or `""` to use the tenant default. */
+                    /** @description Policy ID, or `""` to use the account's default policy. */
                     dunning_policy_id?: string;
+                    /**
+                     * @description The new CC list, which replaces the whole list. `[]`
+                     *     clears it. Left out keeps the current list.
+                     */
                     additional_emails?: string[];
                 };
             };
@@ -8526,43 +11399,115 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "external_id": "acme-42",
+                     *       "display_name": "Acme Inc",
+                     *       "email": "billing@acme.example",
+                     *       "additional_emails": [
+                     *         "finance@acme.example"
+                     *       ],
+                     *       "status": "active",
+                     *       "email_status": "unknown",
+                     *       "dunning_policy_id": "hc_dpol_dajqj1aq3gpgqfoq5c6g",
+                     *       "stripe_customer_id": "cus_RkT9qW2xYz3AbC",
+                     *       "created_at": "2026-09-30T16:20:00Z",
+                     *       "updated_at": "2026-10-15T09:12:44Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Customer"];
                 };
             };
-            /** @description The body is not valid JSON. */
+            /** @description The body is not valid JSON, or a field has the wrong JSON type. */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Customer, or the named dunning policy, not found. */
+            /**
+             * @description No customer with this ID in this account and mode
+             *     (`customer not found`), or no dunning policy with the
+             *     `dunning_policy_id` you sent (`dunning policy not found`).
+             */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "dunning policy not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Archive refused because a subscription still bills (`invalid_state`). */
+            /**
+             * @description Archive refused because an active or trialing subscription still
+             *     bills (`invalid_state`). The message names the subscriptions.
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "This customer has 1 subscription that still bills (Acme Pro). Cancel it first; archiving doesn't stop billing.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description An email or CC entry is invalid (`param` names the field). */
+            /**
+             * @description A field failed validation (`validation_error`, `param` names it):
+             *     an invalid `email` or CC entry, a CC entry equal to the email, a
+             *     new email that is on the CC list, or a `status` other than
+             *     `active` or `archived`. An unknown field, such as `external_id`,
+             *     is refused the same way.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "this address is on the additional-emails list — remove it there first",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "email"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -8586,19 +11531,49 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "legal_name": "Acme Incorporated",
+                     *       "phone": "+1 415 555 0100",
+                     *       "address_line1": "548 Market St",
+                     *       "address_line2": "Suite 100",
+                     *       "city": "San Francisco",
+                     *       "state": "CA",
+                     *       "postal_code": "94104",
+                     *       "country": "US",
+                     *       "tax_status": "standard",
+                     *       "tax_id": "",
+                     *       "tax_id_type": "",
+                     *       "profile_status": "ready",
+                     *       "created_at": "2026-09-30T16:25:00Z",
+                     *       "updated_at": "2026-10-15T09:12:44Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["CustomerBillingProfile"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             /**
-             * @description The customer has no billing profile yet, or the customer does
-             *     not exist. Both return `billing profile not found`.
+             * @description The customer has no billing profile yet, or the customer does not
+             *     exist. Both return `billing profile not found`.
              */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "billing profile not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -8626,6 +11601,19 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "legal_name": "Acme Incorporated",
+                 *       "phone": "+1 415 555 0100",
+                 *       "address_line1": "548 Market St",
+                 *       "address_line2": "Suite 100",
+                 *       "city": "San Francisco",
+                 *       "state": "CA",
+                 *       "postal_code": "94104",
+                 *       "country": "US",
+                 *       "tax_status": "standard"
+                 *     }
+                 */
                 "application/json": components["schemas"]["CustomerBillingProfileInput"];
             };
         };
@@ -8636,34 +11624,88 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "legal_name": "Acme Incorporated",
+                     *       "phone": "+1 415 555 0100",
+                     *       "address_line1": "548 Market St",
+                     *       "address_line2": "Suite 100",
+                     *       "city": "San Francisco",
+                     *       "state": "CA",
+                     *       "postal_code": "94104",
+                     *       "country": "US",
+                     *       "tax_status": "standard",
+                     *       "tax_id": "",
+                     *       "tax_id_type": "",
+                     *       "profile_status": "ready",
+                     *       "created_at": "2026-09-30T16:25:00Z",
+                     *       "updated_at": "2026-10-15T09:12:44Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["CustomerBillingProfile"];
                 };
             };
-            /** @description The body is not valid JSON. */
+            /** @description The body is not valid JSON, or a field has the wrong JSON type. */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Customer not found. */
+            /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Currency conflicts with a billing subscription's plan currency (`invalid_state`). */
+            /**
+             * @description The currency differs from the plan currency of one of the
+             *     customer's draft, trialing or active subscriptions
+             *     (`invalid_state`).
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "billing profile currency EUR conflicts with subscription hc_sub_dauq502q3gpgqfoq5c2g's plan currency USD — invoices would relabel plan prices in EUR without conversion; cancel the subscription or keep the currency",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -8678,6 +11720,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must be an ISO-3166 alpha-2 country code (e.g. \"IN\", \"US\")",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "country"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -8706,12 +11759,52 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Sent emails. */
+            /** @description One page of the emails, and how many there are in the 30 days. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_emob_dbj84cqq3gpgqfoq5cbg",
+                     *           "email_type": "invoice",
+                     *           "recipient": "billing@acme.example",
+                     *           "status": "dispatched",
+                     *           "delivery_state": "delivered",
+                     *           "invoice_number": "HC-000001",
+                     *           "created_at": "2026-11-01T00:05:02Z",
+                     *           "dispatched_at": "2026-11-01T00:05:09Z",
+                     *           "line": {
+                     *             "id": "email:hc_emob_dbj84cqq3gpgqfoq5cbg",
+                     *             "kind": "email.invoice",
+                     *             "title": "Invoice email delivered",
+                     *             "detail": [
+                     *               [
+                     *                 {
+                     *                   "link": {
+                     *                     "kind": "invoice",
+                     *                     "id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *                     "label": "HC-000001"
+                     *                   }
+                     *                 }
+                     *               ],
+                     *               [
+                     *                 {
+                     *                   "text": "To billing@acme.example"
+                     *                 }
+                     *               ]
+                     *             ],
+                     *             "tone": "neutral",
+                     *             "occurred_at": "2026-11-01T00:05:09Z"
+                     *           }
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["SentEmail"][];
                         total: components["schemas"]["ListTotal"];
@@ -8719,12 +11812,22 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description No customer with this ID in this tenant and mode. */
+            /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -8735,9 +11838,15 @@ export interface operations {
     getCustomerUsage: {
         parameters: {
             query?: {
-                /** @description Start of the window. RFC 3339 instant or `YYYY-MM-DD` (start of that day, UTC). */
+                /**
+                 * @description Start of the window. An RFC 3339 instant, or `YYYY-MM-DD` for the
+                 *     start of that day in UTC.
+                 */
                 from?: string;
-                /** @description End of the window, exclusive. RFC 3339 instant or `YYYY-MM-DD` (23:59:59.999999 UTC that day, so the day is included). */
+                /**
+                 * @description End of the window, exclusive. An RFC 3339 instant, or `YYYY-MM-DD`
+                 *     for 23:59:59.999999 UTC that day, so the day is included.
+                 */
                 to?: string;
             };
             header?: never;
@@ -8754,25 +11863,115 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "period": {
+                     *         "from": "2026-10-12T00:00:00Z",
+                     *         "to": "2026-10-14T00:00:00Z",
+                     *         "source": "explicit"
+                     *       },
+                     *       "subscriptions": [
+                     *         {
+                     *           "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "plan_name": "Pro",
+                     *           "currency": "USD",
+                     *           "current_period_start": "2026-10-01T00:00:00Z",
+                     *           "current_period_end": "2026-11-01T00:00:00Z"
+                     *         }
+                     *       ],
+                     *       "meters": [
+                     *         {
+                     *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *           "event_name": "tokens",
+                     *           "meter_name": "Tokens",
+                     *           "unit": "tokens",
+                     *           "currency": "USD",
+                     *           "total_quantity": "2000000",
+                     *           "total_amount_cents": 600,
+                     *           "prices": [
+                     *             {
+                     *               "price_id": "hc_prc_dajr672q3gpgqfoq5c20",
+                     *               "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *               "quantity": "2000000",
+                     *               "amount_cents": 600,
+                     *               "unit_amount_decimal": "0.0003"
+                     *             }
+                     *           ]
+                     *         }
+                     *       ],
+                     *       "totals": [
+                     *         {
+                     *           "currency": "USD",
+                     *           "amount_cents": 600
+                     *         }
+                     *       ],
+                     *       "warnings": [],
+                     *       "buckets": [
+                     *         {
+                     *           "bucket_start": "2026-10-12T00:00:00Z",
+                     *           "per_meter": {
+                     *             "hc_mtr_dajr122q3gpgqfoq5c10": "800000"
+                     *           }
+                     *         },
+                     *         {
+                     *           "bucket_start": "2026-10-13T00:00:00Z",
+                     *           "per_meter": {
+                     *             "hc_mtr_dajr122q3gpgqfoq5c10": "1200000"
+                     *           }
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": components["schemas"]["CustomerUsage"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Customer not found. */
+            /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Bad or missing period (`param` is `from`, `to` or `period`). */
+            /**
+             * @description A bad or missing period. `validation_error` with `param` `from` or
+             *     `to` when a value is not RFC 3339 or `YYYY-MM-DD`, or `to` is
+             *     before `from`; with `param` `period` when only one of `from` and
+             *     `to` is sent, when `from` is not before `to`, or when the window
+             *     is longer than one year. `customer_has_no_subscription` (`param`
+             *     `period`) when no period is sent and the customer has no active or
+             *     trialing subscription with a current billing period.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "customer_has_no_subscription",
+                     *         "message": "customer has no active subscription with a current billing cycle; pass ?from= and ?to= to query usage outside a billing cycle",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "period"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -8796,16 +11995,103 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "active_subscriptions": [
+                     *         {
+                     *           "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "code": "acme-pro",
+                     *           "display_name": "Acme Pro",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "items": [
+                     *             {
+                     *               "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *               "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *               "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *               "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *               "quantity": 1,
+                     *               "created_at": "2026-10-01T00:00:00Z",
+                     *               "updated_at": "2026-10-01T00:00:00Z"
+                     *             }
+                     *           ],
+                     *           "status": "active",
+                     *           "billing_time": "calendar",
+                     *           "started_at": "2026-10-01T00:00:00Z",
+                     *           "activated_at": "2026-10-01T00:00:00Z",
+                     *           "cancel_at_period_end": false,
+                     *           "current_billing_period_start": "2026-11-01T00:00:00Z",
+                     *           "current_billing_period_end": "2026-12-01T00:00:00Z",
+                     *           "next_billing_at": "2026-12-01T00:00:00Z",
+                     *           "created_at": "2026-10-01T00:00:00Z",
+                     *           "updated_at": "2026-11-01T00:05:00Z"
+                     *         }
+                     *       ],
+                     *       "recent_invoices": [
+                     *         {
+                     *           "id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "invoice_number": "HC-000001",
+                     *           "status": "finalized",
+                     *           "payment_status": "pending",
+                     *           "currency": "USD",
+                     *           "subtotal_cents": 8650,
+                     *           "discount_cents": 0,
+                     *           "tax_amount_cents": 0,
+                     *           "tax_rate": 0,
+                     *           "tax_status": "ok",
+                     *           "total_amount_cents": 8650,
+                     *           "amount_due_cents": 3650,
+                     *           "amount_paid_cents": 0,
+                     *           "credits_applied_cents": 5000,
+                     *           "billing_period_start": "2026-10-01T00:00:00Z",
+                     *           "billing_period_end": "2026-11-01T00:00:00Z",
+                     *           "billing_timezone": "UTC",
+                     *           "issued_at": "2026-11-01T00:05:00Z",
+                     *           "due_at": "2026-12-01T00:05:00Z",
+                     *           "paid_out_of_band": false,
+                     *           "net_payment_term_days": 30,
+                     *           "billing_reason": "subscription_cycle",
+                     *           "is_simulated": false,
+                     *           "created_at": "2026-11-01T00:05:00Z",
+                     *           "updated_at": "2026-11-01T00:05:00Z"
+                     *         }
+                     *       ],
+                     *       "outstanding_balance": {
+                     *         "total_cents": 3650,
+                     *         "unpaid_count": 1,
+                     *         "by_currency": [
+                     *           {
+                     *             "currency": "USD",
+                     *             "amount_cents": 3650
+                     *           }
+                     *         ]
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["CustomerOverview"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Customer not found. */
+            /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -8834,12 +12120,41 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Payment methods. */
+            /** @description One page of payment methods, and how many there are. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_pm_4f8a2c9e1b7d3a6f0c5e8b21",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "type": "card",
+                     *           "card_brand": "visa",
+                     *           "card_last4": "4242",
+                     *           "card_exp_month": 12,
+                     *           "card_exp_year": 2029,
+                     *           "is_default": true,
+                     *           "created_at": "2026-10-02T11:48:30Z"
+                     *         },
+                     *         {
+                     *           "id": "hc_pm_4f8a2c9e1b7d3a6f0c5e8b35",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "type": "card",
+                     *           "card_brand": "mastercard",
+                     *           "card_last4": "4444",
+                     *           "card_exp_month": 3,
+                     *           "card_exp_year": 2028,
+                     *           "is_default": false,
+                     *           "created_at": "2026-09-30T16:40:00Z"
+                     *         }
+                     *       ],
+                     *       "total": 2
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["PaymentMethod"][];
                         total: components["schemas"]["ListTotal"];
@@ -8847,12 +12162,22 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Customer not found. */
+            /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -8881,6 +12206,11 @@ export interface operations {
         };
         requestBody?: {
             content: {
+                /**
+                 * @example {
+                 *       "note": "Your card on file expired. Please add a new one so we can bill October usage."
+                 *     }
+                 */
                 "application/json": {
                     /**
                      * @description Optional text shown at the top of the email. At most
@@ -8897,9 +12227,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "to": "billing@acme.example",
+                     *       "subject": "Add a payment method"
+                     *     }
+                     */
                     "application/json": {
                         /** @description The address the email was sent to. */
                         to: string;
+                        /** @description The email's subject. */
                         subject: string;
                     };
                 };
@@ -8910,16 +12247,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Customer not found. */
+            /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -8934,23 +12291,48 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "email_not_configured",
+                     *         "message": "Email isn't set up on this server, so nothing was sent.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
-             * @description `note_too_long` (more than 2000 bytes),
-             *     `missing_email` (the customer has no email), or an unknown
-             *     field (`param` names it).
+             * @description `note_too_long` (more than 2000 bytes), `missing_email` (the
+             *     customer has no email), or an unknown field (`validation_error`,
+             *     `param` names it).
              */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "missing_email",
+                     *         "message": "this customer has no email on file — add one before sending a setup link",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description This endpoint was called for this customer less than a minute ago (`cooldown_active`). */
+            /**
+             * @description `cooldown_active`: this endpoint was called for this customer less
+             *     than a minute ago. `Retry-After` gives the seconds until the
+             *     minute ends. The general rate limit answers 429 `rate_limited`
+             *     too.
+             */
             429: {
                 headers: {
                     /** @description Seconds to wait. */
@@ -8958,37 +12340,60 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "rate_limit_error",
+                     *         "code": "cooldown_active",
+                     *         "message": "a setup link was sent to this customer recently — wait before sending again",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The setup session could not be created. No email was queued. */
+            /**
+             * @description The setup session could not be created, for example because Stripe
+             *     refused it. No email was queued.
+             */
             500: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "internal_error",
+                     *         "message": "an internal error occurred",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
-             * @description The email could not be queued (`email_enqueue_failed`), or
-             *     Stripe refused to create the setup session with a message it
-             *     is safe to show (`provider_error`). Retry.
+             * @description The email could not be queued (`email_enqueue_failed`). The setup
+             *     link was created. Retry.
              */
             502: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Email sending is not set up on this server (`email_unavailable`). */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "email_enqueue_failed",
+                     *         "message": "failed to queue the setup link email — please retry; if it persists, check the email outbox dashboard",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -9015,10 +12420,17 @@ export interface operations {
         };
         requestBody?: {
             content: {
+                /**
+                 * @example {
+                 *       "return_url": "https://app.example.com/billing/card-added"
+                 *     }
+                 */
                 "application/json": {
                     /**
                      * @description Where Stripe sends the customer afterwards. Defaults to
-                     *     the dashboard's setup-complete page.
+                     *     `/payment-method-added` on the server's
+                     *     `CUSTOMER_PORTAL_URL` (`http://localhost:5173` when that
+                     *     is unset).
                      */
                     return_url?: string;
                 };
@@ -9031,6 +12443,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "url": "https://checkout.stripe.com/c/pay/cs_test_a1B2c3D4e5F6g7H8i9J0kLmNoPqRsTuVwXyZ",
+                     *       "session_id": "cs_test_a1B2c3D4e5F6g7H8i9J0kLmNoPqRsTuVwXyZ"
+                     *     }
+                     */
                     "application/json": {
                         /** @description Stripe Checkout URL. Expires on Stripe's schedule (about 24 hours). */
                         url: string;
@@ -9041,21 +12459,47 @@ export interface operations {
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Customer not found. */
+            /**
+             * @description No customer with this ID in this account and mode. The message
+             *     reads `payment_method not found`.
+             */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "payment_method not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `stripe_not_connected`: Stripe is not connected for this mode. Connect it under Settings. */
+            /**
+             * @description `stripe_not_connected`: Stripe is not connected for this mode.
+             *     Connect it under Settings.
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "stripe_not_connected",
+                     *         "message": "Stripe is not connected for this mode. Connect it under Settings, then try again.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -9065,6 +12509,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"success_url\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "success_url"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -9077,29 +12532,79 @@ export interface operations {
             header?: never;
             path: {
                 customer_id: string;
-                /** @description Hardcount payment method ID. */
+                /**
+                 * @description The payment method's Hardcount ID, `hc_pm_` and 24 hex characters
+                 *     (not the Stripe ID).
+                 */
                 pmID: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The detached payment method. */
+            /** @description The detached payment method, now with `is_default` false. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_pm_4f8a2c9e1b7d3a6f0c5e8b21",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "type": "card",
+                     *       "card_brand": "visa",
+                     *       "card_last4": "4242",
+                     *       "card_exp_month": 12,
+                     *       "card_exp_year": 2029,
+                     *       "is_default": false,
+                     *       "created_at": "2026-10-02T11:48:30Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["PaymentMethod"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description No such payment method for this customer. */
+            /** @description No such payment method for this customer, or it is already detached. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "payment_method not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field. This route takes no body
+             *     (`param` names the field).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"is_default\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "is_default"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -9122,7 +12627,10 @@ export interface operations {
             };
             path: {
                 customer_id: string;
-                /** @description Hardcount payment method ID. */
+                /**
+                 * @description The payment method's Hardcount ID, `hc_pm_` and 24 hex characters
+                 *     (not the Stripe ID).
+                 */
                 pmID: string;
             };
             cookie?: never;
@@ -9135,9 +12643,23 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_pm_4f8a2c9e1b7d3a6f0c5e8b21",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "type": "card",
+                     *       "card_brand": "visa",
+                     *       "card_last4": "4242",
+                     *       "card_exp_month": 12,
+                     *       "card_exp_year": 2029,
+                     *       "is_default": true,
+                     *       "created_at": "2026-10-02T11:48:30Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["PaymentMethod"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /** @description No such active payment method for this customer. */
             404: {
@@ -9145,6 +12667,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "payment_method not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field. This route takes no body
+             *     (`param` names the field).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"is_default\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "is_default"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -9156,111 +12711,269 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The cost-dashboard token, `hc_pcd_` and 64 hex characters. */
                 token: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Projection */
+            /** @description The customer's usage, cost and credit for the current billing period. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "livemode": false,
+                     *       "billing_period": {
+                     *         "start": "2026-10-01T00:00:00Z",
+                     *         "end": "2026-11-01T00:00:00Z",
+                     *         "source": "subscription"
+                     *       },
+                     *       "subscriptions": [
+                     *         {
+                     *           "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "plan_name": "Pro",
+                     *           "currency": "USD",
+                     *           "current_period_start": "2026-10-01T00:00:00Z",
+                     *           "current_period_end": "2026-11-01T00:00:00Z"
+                     *         }
+                     *       ],
+                     *       "usage": [
+                     *         {
+                     *           "event_name": "tokens",
+                     *           "meter_name": "Tokens",
+                     *           "unit": "tokens",
+                     *           "currency": "USD",
+                     *           "total_quantity": "12500000",
+                     *           "total_amount_cents": 3750,
+                     *           "prices": [
+                     *             {
+                     *               "quantity": "12500000",
+                     *               "amount_cents": 3750,
+                     *               "unit_amount_decimal": "0.0003"
+                     *             }
+                     *           ]
+                     *         }
+                     *       ],
+                     *       "totals": [
+                     *         {
+                     *           "currency": "USD",
+                     *           "amount_cents": 3750
+                     *         }
+                     *       ],
+                     *       "projected_total_cents": 3750,
+                     *       "credits": [
+                     *         {
+                     *           "currency": "USD",
+                     *           "balance_cents": 5000,
+                     *           "unbilled_usage_cents": 3750,
+                     *           "commit_remaining_cents": 0,
+                     *           "promotional_remaining_cents": 5000,
+                     *           "estimated_remaining_cents": 1250
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": {
+                        /** @description The customer the token belongs to. */
                         customer_id: string;
+                        /** @description The account the customer belongs to. */
                         tenant_id: string;
+                        /** @description False for a test-mode customer: show a test-mode notice. */
                         livemode: boolean;
+                        /** @description The period the usage covers. */
                         billing_period: {
-                            /** Format: date-time */
+                            /**
+                             * Format: date-time
+                             * @description Start of the period. The zero time
+                             *     `0001-01-01T00:00:00Z` when `source` is
+                             *     `no_subscription`.
+                             */
                             start: string;
-                            /** Format: date-time */
+                            /**
+                             * Format: date-time
+                             * @description End of the period, exclusive. The zero time when
+                             *     `source` is `no_subscription`.
+                             */
                             end: string;
                             /**
-                             * @description Branch on this before rendering the period. When it is `no_subscription` the customer has no active subscription, `subscriptions`, `usage` and `totals` are empty (`credits` is not), and `start`/`end` carry the zero time (`0001-01-01T00:00:00Z`) rather than a real range — display them and the page reads "January 1, year 1".
+                             * @description Check this before you show the period.
+                             *     `subscription`: the period runs from the earliest
+                             *     start to the latest end of the current billing
+                             *     periods of the customer's active and trialing
+                             *     subscriptions. `no_subscription`: the customer has
+                             *     no active or trialing subscription; `subscriptions`,
+                             *     `usage` and `totals` are empty (`credits` is not),
+                             *     and `start` and `end` hold the zero time, not a real
+                             *     range.
                              * @enum {string}
                              */
                             source: "subscription" | "no_subscription";
                         };
+                        /** @description One entry per plan of each active or trialing subscription. */
                         subscriptions: {
+                            /** @description The subscription's ID. */
                             id: string;
+                            /** @description The plan's name. */
                             plan_name: string;
+                            /** @description The plan's currency, such as `USD`. */
                             currency: string;
-                            /** Format: date-time */
+                            /**
+                             * Format: date-time
+                             * @description Start of the subscription's current billing period.
+                             */
                             current_period_start: string;
-                            /** Format: date-time */
+                            /**
+                             * Format: date-time
+                             * @description End of the subscription's current billing period, exclusive.
+                             */
                             current_period_end: string;
                         }[];
+                        /** @description One entry per meter the customer's plans price. */
                         usage: {
+                            /** @description The `event_name` usage events send for the meter. */
                             event_name: string;
+                            /** @description The meter's display name. */
                             meter_name: string;
+                            /** @description The meter's unit, such as `tokens`. */
                             unit: string;
+                            /** @description The currency of the plan whose prices took the usage. */
                             currency: string;
+                            /** @description The usage the prices took this period, as a decimal string. */
                             total_quantity: string;
-                            /** Format: int64 */
+                            /**
+                             * Format: int64
+                             * @description What the usage costs, in the currency's minor unit
+                             *     (cents for USD).
+                             */
                             total_amount_cents: number;
                             /** @description One row per price that took usage this period. */
                             prices: {
-                                /** @description The labels the price takes. Absent for a price that takes every event. */
+                                /**
+                                 * @description The labels the price takes. Absent for a
+                                 *     price that takes every event.
+                                 */
                                 dimension_match?: {
                                     [key: string]: string;
                                 };
+                                /** @description The usage this price took, as a decimal string. */
                                 quantity: string;
-                                /** Format: int64 */
+                                /**
+                                 * Format: int64
+                                 * @description What this price bills, in the currency's
+                                 *     minor unit (cents for USD).
+                                 */
                                 amount_cents: number;
-                                /** @description Per-unit price in DECIMAL CENTS (ADR-045, the Stripe unit_amount_decimal model) — NOT dollars. "0.0003" is 0.0003 CENTS per unit ($3.00 per 1M units); multiplying it by `quantity` yields CENTS, matching the sibling `amount_cents`. Reading it as dollars overstates the cost 100x. */
+                                /**
+                                 * @description Price per unit, as a decimal string of
+                                 *     cents, not dollars: "0.0003" is 0.0003 cents
+                                 *     per unit ($3.00 per 1M units). Multiplied by
+                                 *     `quantity`, it gives cents, like
+                                 *     `amount_cents`.
+                                 */
                                 unit_amount_decimal?: string;
                             }[];
                         }[];
                         /** @description One entry per currency present in `usage`. */
                         totals: {
+                            /** @description The currency, such as `USD`. */
                             currency: string;
-                            /** Format: int64 */
+                            /**
+                             * Format: int64
+                             * @description The usage cost in this currency, in its minor unit
+                             *     (cents for USD).
+                             */
                             amount_cents: number;
                         }[];
                         /**
                          * Format: int64
-                         * @description The metered cost of the current billing period so far, in cents, including usage a threshold invoice already billed. Recurring base fees are not included — an in_advance base is already invoiced at period open.
+                         * @description The metered cost of the current billing period so far,
+                         *     in minor units, including usage a threshold invoice
+                         *     already billed. It adds up every entry of `totals`,
+                         *     whatever its currency, so use `totals` when there is
+                         *     more than one. Recurring base fees are not included.
                          */
                         projected_total_cents: number;
-                        /** @description The customer's credit position, one entry per currency, ordered by currency. `balance_cents` is the ledger balance in that currency, less any grant past its expiry date that is not yet written off: credit is drawn down when an invoice is issued, so it does not move with usage. `unbilled_usage_cents` is the usage no invoice has billed yet that will be invoiced in that currency, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` differs from `projected_total_cents` after a threshold invoice: it leaves out the usage that invoice billed. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted. */
+                        /**
+                         * @description The customer's credit position, one entry per currency,
+                         *     ordered by currency. `balance_cents` is the ledger
+                         *     balance in that currency, less any grant past its expiry
+                         *     date that is not yet written off: credit is drawn down
+                         *     when an invoice is issued, so it does not move with
+                         *     usage. `unbilled_usage_cents` is the usage no invoice
+                         *     has billed yet that will be invoiced in that currency,
+                         *     and `estimated_remaining_cents` is the balance minus
+                         *     that, never below zero. These three are the same figures
+                         *     `GET /v1/credits/balance/{customer_id}/live` returns.
+                         *     `unbilled_usage_cents` differs from
+                         *     `projected_total_cents` after a threshold invoice: it
+                         *     leaves out the usage that invoice billed. It is an
+                         *     estimate: tax, base fees billed at period end and unpaid
+                         *     invoices are not subtracted.
+                         */
                         credits: {
+                            /** @description The currency of this entry. */
                             currency: string;
-                            /** Format: int64 */
+                            /**
+                             * Format: int64
+                             * @description The credit balance in this currency, in its minor
+                             *     unit (cents for USD).
+                             */
                             balance_cents: number;
-                            /** Format: int64 */
+                            /**
+                             * Format: int64
+                             * @description Usage no invoice has billed yet, in minor units.
+                             */
                             unbilled_usage_cents: number;
                             /**
                              * Format: int64
-                             * @description What is left of the customer's prepaid commit.
+                             * @description What is left of the customer's prepaid commit, in
+                             *     minor units.
                              */
                             commit_remaining_cents: number;
                             /**
                              * Format: int64
-                             * @description What is left of promotional credit.
+                             * @description What is left of promotional credit, in minor units.
                              */
                             promotional_remaining_cents: number;
-                            /** Format: int64 */
+                            /**
+                             * Format: int64
+                             * @description The balance minus unbilled usage, never below
+                             *     zero, in minor units.
+                             */
                             estimated_remaining_cents: number;
                         }[];
                     };
                 };
             };
-            /** @description Invalid token */
+            /**
+             * @description The token has the wrong prefix or matches no customer. Rotate the
+             *     token to get a working link.
+             */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
-            };
-            /** @description Rate limited (60/min/IP) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "unauthorized",
+                     *         "message": "invalid cost-dashboard token",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
                 };
-                content?: never;
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getHostedInvoice: {
@@ -9421,6 +13134,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The payment-update token, `hc_pt_` and 64 hex characters. */
                 token: string;
             };
             cookie?: never;
@@ -9433,34 +13147,70 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "customer_name": "Acme Inc",
+                     *       "invoice_number": "HC-000001",
+                     *       "invoice_status": "finalized",
+                     *       "amount_due_cents": 3650,
+                     *       "currency": "USD",
+                     *       "branding": {
+                     *         "company_name": "Example Labs",
+                     *         "company_email": "billing@examplelabs.example",
+                     *         "logo_url": "https://examplelabs.example/logo.png",
+                     *         "brand_color": "#4F46E5",
+                     *         "support_url": "https://examplelabs.example/support"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["PublicPaymentUpdate"];
                 };
             };
-            /** @description The token is unknown, expired or already used. Code `invalid_token`. */
+            /**
+             * @description The token is unknown, expired or already used, or its invoice is
+             *     gone. Code `invalid_token`.
+             */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "invalid_token",
+                     *         "message": "invalid or expired token",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The invoice or customer the token names is gone. Code `invoice_not_found` or `customer_not_found`. */
+            /**
+             * @description The invoice the token names was deleted while the request ran.
+             *     Code `invoice_not_found`.
+             */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invoice_not_found",
+                     *         "message": "this payment link is no longer valid — the invoice it references is unavailable",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Rate limited (60/min/IP) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            429: components["responses"]["RateLimited"];
         };
     };
     createPublicPaymentUpdateCheckout: {
@@ -9468,6 +13218,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The payment-update token, `hc_pt_` and 64 hex characters. */
                 token: string;
             };
             cookie?: never;
@@ -9480,43 +13231,104 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "url": "https://checkout.stripe.com/c/pay/cs_test_b2C3d4E5f6G7h8I9j0KlMnOpQrStUvWxYzA1"
+                     *     }
+                     */
                     "application/json": {
-                        /** @description Stripe Checkout URL. */
+                        /** @description Stripe Checkout URL. Send the customer there. */
                         url: string;
                     };
                 };
             };
+            400: components["responses"]["InvalidBody"];
             /** @description The token is unknown, expired or already used. Code `invalid_token`. */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "invalid_token",
+                     *         "message": "invalid or expired token",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The seller has not connected Stripe for this mode, so a card cannot be added online. Code `online_payment_unavailable`. The token still works. */
+            /**
+             * @description The seller has not connected Stripe for this mode, so a card
+             *     cannot be added online. Code `online_payment_unavailable`. The
+             *     token still works.
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "online_payment_unavailable",
+                     *         "message": "Adding a card online isn't available for this account right now. Please contact your billing administrator.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Rate limited (60/min/IP) */
-            429: {
+            /**
+             * @description The request has a body with a field. This route takes no body
+             *     (`param` names the field).
+             */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"return_url\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "return_url"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
-            /** @description Starting the session failed, at Stripe or on the server. Code `stripe_error`. */
+            429: components["responses"]["RateLimited"];
+            /**
+             * @description Starting the session failed, at Stripe or on the server. Code
+             *     `stripe_error`. The token still works, so the customer can try
+             *     again.
+             */
             502: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "stripe_error",
+                     *         "message": "We couldn't start the payment update right now. Please try the link again in a few minutes, or contact support if the problem persists.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -9542,12 +13354,29 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Meter list */
+            /** @description One page of meters, and how many there are. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "event_name": "tokens",
+                     *           "name": "Tokens",
+                     *           "unit": "tokens",
+                     *           "aggregation": "sum",
+                     *           "created_at": "2026-09-15T09:00:00Z",
+                     *           "updated_at": "2026-09-15T09:00:00Z"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["Meter"][];
                         total: components["schemas"]["ListTotal"];
@@ -9578,14 +13407,32 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "event_name": "tokens",
+                 *       "name": "Tokens",
+                 *       "unit": "tokens",
+                 *       "aggregation": "sum"
+                 *     }
+                 */
                 "application/json": {
-                    /** @description The `event_name` usage events will send for this meter. Letters, digits, `-` and `_`; at most 100 characters. */
+                    /**
+                     * @description The `event_name` usage events will send for this meter.
+                     *     Letters, digits, `-` and `_`; at most 100 characters.
+                     *     Unique in the account and mode.
+                     */
                     event_name: string;
+                    /** @description The display name, at most 255 characters. */
                     name: string;
-                    /** @default unit */
+                    /**
+                     * @description The unit of the quantity, such as `tokens` or `seconds`.
+                     *     Empty or left out is `unit`.
+                     * @default unit
+                     */
                     unit?: string;
                     /**
-                     * @description How the meter rolls its events into one quantity per billing period. Fixed once the meter has a usage event.
+                     * @description How the meter rolls its events into one quantity per
+                     *     billing period. Fixed once the meter has a usage event.
                      * @default sum
                      * @enum {string}
                      */
@@ -9594,17 +13441,78 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Meter created */
+            /** @description The new meter, with `has_usage` false. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "event_name": "tokens",
+                     *       "name": "Tokens",
+                     *       "unit": "tokens",
+                     *       "aggregation": "sum",
+                     *       "has_usage": false,
+                     *       "created_at": "2026-09-15T09:00:00Z",
+                     *       "updated_at": "2026-09-15T09:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Meter"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            /**
+             * @description A meter with this `event_name` already exists in this account and
+             *     mode (`already_exists`, `param: event_name`).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "already_exists",
+                     *         "message": "a meter with event_name \"tokens\" already exists",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "event_name"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description A field failed validation (`validation_error`, `param` names it):
+             *     a missing or too long `event_name` or `name`, an `event_name` with
+             *     other characters than letters, digits, `-` and `_`, an unknown
+             *     `aggregation`, or an unknown field.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must contain only alphanumeric characters, hyphens, and underscores",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "event_name"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -9619,22 +13527,45 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The meter */
+            /** @description The meter, with `has_usage`. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "event_name": "tokens",
+                     *       "name": "Tokens",
+                     *       "unit": "tokens",
+                     *       "aggregation": "sum",
+                     *       "has_usage": true,
+                     *       "created_at": "2026-09-15T09:00:00Z",
+                     *       "updated_at": "2026-09-15T09:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Meter"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description `not_found`: no meter with this id in this tenant and mode. */
+            /** @description `not_found`: no meter with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "meter not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -9662,32 +13593,67 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "name": "LLM tokens"
+                 *     }
+                 */
                 "application/json": {
+                    /** @description The new display name, at most 255 characters. It cannot be empty. */
                     name?: string;
+                    /** @description The new unit. Empty sets it to `unit`. */
                     unit?: string;
-                    /** @enum {string} */
+                    /**
+                     * @description The new aggregation. Refused once the meter has a usage event.
+                     * @enum {string}
+                     */
                     aggregation?: "sum" | "count" | "max" | "last";
                 };
             };
         };
         responses: {
-            /** @description Updated meter */
+            /** @description The updated meter. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "event_name": "tokens",
+                     *       "name": "LLM tokens",
+                     *       "unit": "tokens",
+                     *       "aggregation": "sum",
+                     *       "has_usage": true,
+                     *       "created_at": "2026-09-15T09:00:00Z",
+                     *       "updated_at": "2026-10-20T08:30:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Meter"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Meter not found */
+            /** @description No meter with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "meter not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             /**
              * @description `meter_has_usage`: the meter has usage events, so its
@@ -9699,15 +13665,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "meter_has_usage",
+                     *         "message": "Meter \"tokens\" has usage events, so its aggregation stays sum: its events are counted under it. To count differently, make a new meter with another event name.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Validation failure (bad aggregation, an empty name, or an unknown field) */
+            /**
+             * @description A field failed validation (`validation_error`, `param` names it):
+             *     an empty or too long `name`, an unknown `aggregation`, or an
+             *     unknown field such as `event_name`.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must be one of: sum, count, max, last",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "aggregation"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -9872,10 +13865,15 @@ export interface operations {
     getCreditGrants: {
         parameters: {
             query?: {
+                /**
+                 * @description `true` also lists the blocks with nothing left (used up,
+                 *     expired, retired or deducted). Any other value leaves them out.
+                 */
                 include_exhausted?: boolean;
             };
             header?: never;
             path: {
+                /** @description The customer's ID (`hc_cus_…`). */
                 customer_id: string;
             };
             cookie?: never;
@@ -9888,16 +13886,55 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "grants": [
+                     *         {
+                     *           "id": "hc_ccl_dav2242q3gpgqfoq5c50",
+                     *           "entry_type": "grant",
+                     *           "currency": "USD",
+                     *           "grant_kind": "promotional",
+                     *           "description": "Welcome credit",
+                     *           "amount_cents": 5000,
+                     *           "consumed_cents": 0,
+                     *           "remaining_cents": 5000,
+                     *           "expired_cents": 0,
+                     *           "retired_cents": 0,
+                     *           "deducted_cents": 0,
+                     *           "expires_at": "2027-01-01T00:00:00Z",
+                     *           "created_at": "2026-10-01T09:00:00Z"
+                     *         }
+                     *       ],
+                     *       "remaining_by_currency": [
+                     *         {
+                     *           "currency": "USD",
+                     *           "commit_remaining_cents": 0,
+                     *           "promotional_remaining_cents": 5000,
+                     *           "other_remaining_cents": 0
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": components["schemas"]["CreditGrants"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description No customer with this ID in this tenant and mode. */
+            /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -9923,7 +13960,16 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                 *       "currency": "USD",
+                 *       "amount_cents": -1000,
+                 *       "description": "Goodwill credit reversed after duplicate grant"
+                 *     }
+                 */
                 "application/json": {
+                    /** @description The customer whose credit to change (`hc_cus_…`). */
                     customer_id: string;
                     /**
                      * @description ISO 4217 code of the balance to change. Case-insensitive; stored uppercase.
@@ -9932,9 +13978,11 @@ export interface operations {
                     currency: string;
                     /**
                      * Format: int64
-                     * @description Positive adds credit, negative removes it. Not zero.
+                     * @description Positive adds credit, negative removes it, in the
+                     *     currency's minor unit (cents for USD). Not zero.
                      */
                     amount_cents: number;
+                    /** @description Why you change the balance. Shown on the ledger entry. Must not be blank. */
                     description: string;
                 };
             };
@@ -9946,6 +13994,27 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_ccl_dav2242q3gpgqfoq5c54",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "entry_type": "adjustment",
+                     *       "currency": "USD",
+                     *       "amount_cents": -1000,
+                     *       "balance_after": 4000,
+                     *       "description": "Goodwill credit reversed after duplicate grant",
+                     *       "metadata": {
+                     *         "drained_blocks": [
+                     *           {
+                     *             "block_id": "hc_ccl_dav2242q3gpgqfoq5c50",
+                     *             "take_cents": 1000
+                     *           }
+                     *         ]
+                     *       },
+                     *       "created_at": "2026-10-05T11:20:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["CreditLedgerEntry"];
                 };
             };
@@ -9955,16 +14024,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Customer not found. */
+            /** @description No customer with this `customer_id` in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -9974,6 +14063,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "Insufficient balance: only 40.00 USD is available, so 50.00 USD can't be deducted.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "amount_cents"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -10006,6 +14106,23 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "currency": "USD",
+                     *           "balance_cents": 5000,
+                     *           "total_granted": 5000,
+                     *           "total_used": 0,
+                     *           "total_expired": 0,
+                     *           "total_retired": 0,
+                     *           "total_deducted": 0
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["CreditBalance"][];
                         total: components["schemas"]["ListTotal"];
@@ -10020,6 +14137,7 @@ export interface operations {
     listCreditLedgerEntries: {
         parameters: {
             query?: {
+                /** @description Only entries of this type. */
                 entry_type?: "grant" | "usage" | "expiry" | "adjustment";
                 /** @description One of created_at (default), amount_cents, entry_type, expires_at. */
                 sort?: string;
@@ -10038,6 +14156,7 @@ export interface operations {
             };
             header?: never;
             path: {
+                /** @description The customer's ID (`hc_cus_…`). */
                 customer_id: string;
             };
             cookie?: never;
@@ -10050,6 +14169,47 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_ccl_dav2242q3gpgqfoq5c58",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "entry_type": "usage",
+                     *           "currency": "USD",
+                     *           "amount_cents": -5000,
+                     *           "balance_after": 0,
+                     *           "description": "Applied to invoice HC-000042",
+                     *           "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c40",
+                     *           "metadata": {
+                     *             "drained_blocks": [
+                     *               {
+                     *                 "block_id": "hc_ccl_dav2242q3gpgqfoq5c50",
+                     *                 "take_cents": 5000
+                     *               }
+                     *             ]
+                     *           },
+                     *           "created_at": "2026-11-01T00:05:00Z"
+                     *         },
+                     *         {
+                     *           "id": "hc_ccl_dav2242q3gpgqfoq5c50",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "entry_type": "grant",
+                     *           "currency": "USD",
+                     *           "amount_cents": 5000,
+                     *           "balance_after": 5000,
+                     *           "description": "Welcome credit",
+                     *           "expires_at": "2027-01-01T00:00:00Z",
+                     *           "created_at": "2026-10-01T09:00:00Z",
+                     *           "consumed_cents": 5000,
+                     *           "grant_kind": "promotional"
+                     *         }
+                     *       ],
+                     *       "total": 2
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["CreditLedgerEntry"][];
                         total: components["schemas"]["ListTotal"];
@@ -10057,12 +14217,22 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description No customer with this ID in this tenant and mode. */
+            /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -10768,12 +14938,49 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Plan list */
+            /** @description One page of plans, and how many there are. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "code": "pro",
+                     *           "name": "Pro",
+                     *           "description": "Base fee plus metered tokens.",
+                     *           "currency": "USD",
+                     *           "billing_interval": "monthly",
+                     *           "status": "active",
+                     *           "base_amount_cents": 4900,
+                     *           "base_bill_timing": "in_arrears",
+                     *           "prices": [
+                     *             {
+                     *               "id": "hc_prc_dajr672q3gpgqfoq5c20",
+                     *               "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *               "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *               "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *               "dimension_match": {},
+                     *               "mode": "per_unit",
+                     *               "unit_amount_cents": "0.0003",
+                     *               "tiers": [],
+                     *               "package_size": 0,
+                     *               "package_amount_cents": "0",
+                     *               "created_at": "2026-09-15T09:05:00Z",
+                     *               "updated_at": "2026-09-15T09:05:00Z"
+                     *             }
+                     *           ],
+                     *           "created_at": "2026-09-15T09:05:00Z",
+                     *           "updated_at": "2026-09-15T09:05:00Z"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["Plan"][];
                         total: components["schemas"]["ListTotal"];
@@ -10804,20 +15011,58 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "code": "pro",
+                 *       "name": "Pro",
+                 *       "description": "Base fee plus metered tokens.",
+                 *       "currency": "USD",
+                 *       "billing_interval": "monthly",
+                 *       "base_amount_cents": 4900,
+                 *       "base_bill_timing": "in_arrears",
+                 *       "prices": [
+                 *         {
+                 *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                 *           "mode": "per_unit",
+                 *           "unit_amount_cents": "0.0003"
+                 *         }
+                 *       ]
+                 *     }
+                 */
                 "application/json": {
+                    /**
+                     * @description Your short name for the plan. Letters, digits, `-` and
+                     *     `_`; at most 100 characters; unique in the account and
+                     *     mode. Fixed after create.
+                     */
                     code: string;
+                    /** @description The display name, at most 255 characters. */
                     name: string;
+                    /** @description Your description of the plan. */
                     description?: string;
+                    /**
+                     * @description ISO 4217 code, such as `USD`, stored in upper case.
+                     *     Zero-decimal currencies such as JPY are refused. Fixed
+                     *     after create.
+                     */
                     currency: string;
-                    /** @enum {string} */
+                    /**
+                     * @description How often a subscription to the plan is billed. Fixed after create.
+                     * @enum {string}
+                     */
                     billing_interval: "monthly" | "yearly";
-                    /** Format: int64 */
+                    /**
+                     * Format: int64
+                     * @description The recurring base fee per billing period, in the
+                     *     currency's minor unit (cents for USD). 0 or more; 0 when
+                     *     left out.
+                     */
                     base_amount_cents?: number;
                     /**
                      * @description Required when `base_amount_cents` is above 0. With a base
                      *     of 0 it may be left out, and the plan is in_arrears;
                      *     `in_advance` with a base of 0 is refused. See
-                     *     Plan.base_bill_timing (ADR-031).
+                     *     `base_bill_timing` on Plan.
                      * @enum {string}
                      */
                     base_bill_timing?: "in_advance" | "in_arrears";
@@ -10833,7 +15078,7 @@ export interface operations {
                     status?: "active";
                     /**
                      * @description Stripe product tax code for the base fee, such as
-                     *     `txcd_10103001`. Empty or omitted means the tenant's
+                     *     `txcd_10103001`. Empty or omitted means the account's
                      *     `default_product_tax_code`.
                      */
                     tax_code?: string;
@@ -10841,46 +15086,104 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Plan created, with its prices */
+            /** @description The new plan, with its prices. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "pro",
+                     *       "name": "Pro",
+                     *       "description": "Base fee plus metered tokens.",
+                     *       "currency": "USD",
+                     *       "billing_interval": "monthly",
+                     *       "status": "active",
+                     *       "base_amount_cents": 4900,
+                     *       "base_bill_timing": "in_arrears",
+                     *       "prices": [
+                     *         {
+                     *           "id": "hc_prc_dajr672q3gpgqfoq5c20",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *           "dimension_match": {},
+                     *           "mode": "per_unit",
+                     *           "unit_amount_cents": "0.0003",
+                     *           "tiers": [],
+                     *           "package_size": 0,
+                     *           "package_amount_cents": "0",
+                     *           "created_at": "2026-09-15T09:05:00Z",
+                     *           "updated_at": "2026-09-15T09:05:00Z"
+                     *         }
+                     *       ],
+                     *       "created_at": "2026-09-15T09:05:00Z",
+                     *       "updated_at": "2026-09-15T09:05:00Z",
+                     *       "used": false,
+                     *       "live_subscription_count": 0
+                     *     }
+                     */
                     "application/json": components["schemas"]["PlanDetail"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /**
-             * @description `price_exists`: two prices name the same meter and
-             *     `dimension_match`. `price_conflict`: two prices on one meter
-             *     could both take one event with the same number of labels, so
-             *     neither would win; the message names the other price, and
-             *     `param` names the second one. Nothing is created.
+             * @description Nothing is created. `already_exists`: a plan with this `code`
+             *     exists in this account and mode (`param: code`). `price_exists`:
+             *     two prices name the same meter and `dimension_match`.
+             *     `price_conflict`: two prices on one meter could both take one
+             *     event with the same number of labels, so neither would win; the
+             *     message names the other price. For both price codes, `param` is
+             *     `prices[i].dimension_match` for the second price.
              */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "already_exists",
+                     *         "message": "plan code \"pro\" already exists",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "code"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
-             * @description A field failed validation (a price names an unknown meter, a
-             *     rate is outside its limits, `base_bill_timing` is missing with a
-             *     base fee above 0 or is `in_advance` with a base of 0), `status`
-             *     is set to anything but `active` (a plan is created active;
-             *     archive it with PATCH), or the body has an unknown field
-             *     (`param` names it, `prices[i].` first for a price; the body must
-             *     use only the fields listed here).
+             * @description A field failed validation (a price names an unknown meter, a rate
+             *     is outside its limits, `base_bill_timing` is missing with a base
+             *     fee above 0 or is `in_advance` with a base of 0), `status` is set
+             *     to anything but `active` (a plan is created active; archive it
+             *     with PATCH), or the body has an unknown field (`param` names it,
+             *     `prices[i].` first for a price; the body must use only the fields
+             *     listed here).
              */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "is required when base_amount_cents is above 0: in_advance bills the base fee at the start of each period, in_arrears at the end",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "base_bill_timing"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -10898,22 +15201,66 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The plan, with its prices */
+            /** @description The plan, with its prices. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "pro",
+                     *       "name": "Pro",
+                     *       "description": "Base fee plus metered tokens.",
+                     *       "currency": "USD",
+                     *       "billing_interval": "monthly",
+                     *       "status": "active",
+                     *       "base_amount_cents": 4900,
+                     *       "base_bill_timing": "in_arrears",
+                     *       "prices": [
+                     *         {
+                     *           "id": "hc_prc_dajr672q3gpgqfoq5c20",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *           "dimension_match": {},
+                     *           "mode": "per_unit",
+                     *           "unit_amount_cents": "0.0003",
+                     *           "tiers": [],
+                     *           "package_size": 0,
+                     *           "package_amount_cents": "0",
+                     *           "created_at": "2026-09-15T09:05:00Z",
+                     *           "updated_at": "2026-09-15T09:05:00Z"
+                     *         }
+                     *       ],
+                     *       "created_at": "2026-09-15T09:05:00Z",
+                     *       "updated_at": "2026-09-15T09:05:00Z",
+                     *       "used": true,
+                     *       "live_subscription_count": 1
+                     *     }
+                     */
                     "application/json": components["schemas"]["PlanDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description `not_found`: no plan with this id in this tenant and mode. */
+            /** @description `not_found`: no plan with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "plan not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -10941,32 +15288,87 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "tax_code": "txcd_10103001"
+                 *     }
+                 */
                 "application/json": {
                     /** @description Whitespace is trimmed. Empty or omitted keeps the current name. */
                     name?: string;
-                    /** @description Whitespace is trimmed. Omit to keep the current description; an empty string clears it. */
+                    /**
+                     * @description Whitespace is trimmed. Omit to keep the current
+                     *     description; an empty string clears it.
+                     */
                     description?: string;
                     /**
                      * Format: int64
                      * @description 0 or more. Omit to keep the current base fee.
                      */
                     base_amount_cents?: number;
-                    /** @enum {string} */
+                    /**
+                     * @description When the base fee is billed. Omit to keep the current
+                     *     timing. Refused once a subscription has used the plan.
+                     * @enum {string}
+                     */
                     base_bill_timing?: "in_advance" | "in_arrears";
-                    /** @enum {string} */
+                    /**
+                     * @description `archived` stops new subscriptions and plan changes onto
+                     *     the plan. `active` brings it back.
+                     * @enum {string}
+                     */
                     status?: "active" | "archived";
-                    /** @description Stripe product tax code. Omit to keep the current code; an empty string clears it, and the base fee then uses the tenant's `default_product_tax_code`. */
+                    /**
+                     * @description Stripe product tax code. Omit to keep the current code; an
+                     *     empty string clears it, and the base fee then uses the
+                     *     account's `default_product_tax_code`.
+                     */
                     tax_code?: string;
                 };
             };
         };
         responses: {
-            /** @description The updated plan, with its prices */
+            /** @description The updated plan, with its prices. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "pro",
+                     *       "name": "Pro",
+                     *       "description": "Base fee plus metered tokens.",
+                     *       "currency": "USD",
+                     *       "billing_interval": "monthly",
+                     *       "status": "active",
+                     *       "base_amount_cents": 4900,
+                     *       "base_bill_timing": "in_arrears",
+                     *       "prices": [
+                     *         {
+                     *           "id": "hc_prc_dajr672q3gpgqfoq5c20",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *           "dimension_match": {},
+                     *           "mode": "per_unit",
+                     *           "unit_amount_cents": "0.0003",
+                     *           "tiers": [],
+                     *           "package_size": 0,
+                     *           "package_amount_cents": "0",
+                     *           "created_at": "2026-09-15T09:05:00Z",
+                     *           "updated_at": "2026-09-15T09:05:00Z"
+                     *         }
+                     *       ],
+                     *       "created_at": "2026-09-15T09:05:00Z",
+                     *       "updated_at": "2026-10-20T08:45:00Z",
+                     *       "tax_code": "txcd_10103001",
+                     *       "used": true,
+                     *       "live_subscription_count": 1
+                     *     }
+                     */
                     "application/json": components["schemas"]["PlanDetail"];
                 };
             };
@@ -10976,54 +15378,108 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description `not_found`: no plan with this id in this tenant and mode. */
+            /** @description `not_found`: no plan with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "plan not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
-             * @description `invalid_state`: another write changed the plan's base fee
-             *     during this one.
+             * @description `invalid_state`: another write changed the plan's base fee during
+             *     this one.
              */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "This plan changed while the request was running. Refresh the page and try again.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
-             * @description `validation_error`: the base fee changed while live
-             *     subscriptions use the plan (param `plan`), `base_bill_timing`
-             *     changed on a used plan or is `in_advance` with a base of 0, a
-             *     negative base fee, a `status` other than `active` or
-             *     `archived`, an invalid `tax_code`, or an unknown field such as
-             *     `meter_ids` (a plan's meters are its prices' meters).
+             * @description `validation_error`: the base fee changed while live subscriptions
+             *     use the plan (param `plan`), `base_bill_timing` changed on a used
+             *     plan or is `in_advance` with a base of 0, a negative base fee, a
+             *     `status` other than `active` or `archived`, an invalid `tax_code`,
+             *     or an unknown field such as `meter_ids` (a plan's meters are its
+             *     prices' meters).
              */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "1 subscription uses this plan, so its base fee is fixed. Create a new plan with the new fee instead.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "plan"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `internal_error`. Nothing is changed. */
+            /**
+             * @description `internal_error`. When it comes from reading the plan back after
+             *     the update, the update was saved: get the plan to check.
+             */
             500: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "internal_error",
+                     *         "message": "an internal error occurred",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11051,12 +15507,49 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Prices */
+            /** @description One page of prices, and how many the plan has. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_prc_dajr672q3gpgqfoq5c20",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *           "dimension_match": {},
+                     *           "mode": "per_unit",
+                     *           "unit_amount_cents": "0.0003",
+                     *           "tiers": [],
+                     *           "package_size": 0,
+                     *           "package_amount_cents": "0",
+                     *           "created_at": "2026-09-15T09:05:00Z",
+                     *           "updated_at": "2026-09-15T09:05:00Z"
+                     *         },
+                     *         {
+                     *           "id": "hc_prc_dajr672q3gpgqfoq5c2a",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *           "dimension_match": {
+                     *             "model": "claude-opus-4.5"
+                     *           },
+                     *           "mode": "per_unit",
+                     *           "unit_amount_cents": "0.0015",
+                     *           "tiers": [],
+                     *           "package_size": 0,
+                     *           "package_amount_cents": "0",
+                     *           "created_at": "2026-10-20T14:00:00Z",
+                     *           "updated_at": "2026-10-20T14:00:00Z"
+                     *         }
+                     *       ],
+                     *       "total": 2
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["PlanPrice"][];
                         total: components["schemas"]["ListTotal"];
@@ -11064,12 +15557,22 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description `not_found`: no plan with this id in this tenant and mode. */
+            /** @description `not_found`: no plan with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "plan not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11098,16 +15601,45 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                 *       "dimension_match": {
+                 *         "model": "claude-opus-4.5"
+                 *       },
+                 *       "mode": "per_unit",
+                 *       "unit_amount_cents": "0.0015"
+                 *     }
+                 */
                 "application/json": components["schemas"]["PriceInput"];
             };
         };
         responses: {
-            /** @description The price, and when it applies */
+            /** @description The price, and when it applies. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_prc_dajr672q3gpgqfoq5c2a",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *       "dimension_match": {
+                     *         "model": "claude-opus-4.5"
+                     *       },
+                     *       "mode": "per_unit",
+                     *       "unit_amount_cents": "0.0015",
+                     *       "tiers": [],
+                     *       "package_size": 0,
+                     *       "package_amount_cents": "0",
+                     *       "created_at": "2026-10-20T14:00:00Z",
+                     *       "updated_at": "2026-10-20T14:00:00Z",
+                     *       "effective": "next_period"
+                     *     }
+                     */
                     "application/json": components["schemas"]["PriceWrite"];
                 };
             };
@@ -11117,48 +15649,89 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description `not_found`: no plan with this id in this tenant and mode. */
+            /** @description `not_found`: no plan with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "plan not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
              * @description `price_exists`: the plan already has a price on this meter with
-             *     this `dimension_match`; edit it instead. `price_conflict`: a
-             *     price on the plan and meter could take the same events with the
-             *     same number of labels, so neither would win; the message names
-             *     it. Add a label to make one more specific, or give a shared
-             *     label another value. `meter_overlap`: the meter is new to a used
-             *     plan, and a customer on the plan already has it on another item,
-             *     of the same subscription or another one.
+             *     this `dimension_match`; edit it instead. `price_conflict`: a price
+             *     on the plan and meter could take the same events with the same
+             *     number of labels, so neither would win; the message names it. Add
+             *     a label to make one more specific, or give a shared label another
+             *     value. `meter_overlap`: the meter is new to a used plan, and a
+             *     customer on the plan already has it on another item, of the same
+             *     subscription or another one.
              */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "price_exists",
+                     *         "message": "Price hc_prc_dajr672q3gpgqfoq5c2a already prices this meter with the same dimension_match. Edit that price instead.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "dimension_match"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
-             * @description `validation_error`: an unknown meter, a label that is not a
-             *     string or breaks the limits, a rate outside its limits, a price
-             *     shape that cannot be billed, or an unknown field (`param` names
-             *     it).
+             * @description `validation_error`: an unknown meter, a label that is not a string
+             *     or breaks the limits, a rate outside its limits, a price shape
+             *     that cannot be billed, or an unknown field (`param` names it).
              */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "meter \"hc_mtr_dajr122q3gpgqfoq5c1v\" not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "meter_id"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11177,22 +15750,85 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The removed price, when the removal applies, and the overrides it ended */
+            /** @description The removed price, when the removal applies, and the overrides it ended. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_prc_dajr672q3gpgqfoq5c2a",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *       "dimension_match": {
+                     *         "model": "claude-opus-4.5"
+                     *       },
+                     *       "mode": "per_unit",
+                     *       "unit_amount_cents": "0.0015",
+                     *       "tiers": [],
+                     *       "package_size": 0,
+                     *       "package_amount_cents": "0",
+                     *       "created_at": "2026-10-20T14:00:00Z",
+                     *       "updated_at": "2026-10-28T10:00:00Z",
+                     *       "effective": "next_period",
+                     *       "removed": true,
+                     *       "ended_overrides": [
+                     *         {
+                     *           "id": "hc_cpo_daof442q3gpgqfoq5cb4",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c2k"
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": components["schemas"]["PriceWrite"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description `not_found`: no such plan, or no such price on it (a removed price included). */
+            /**
+             * @description `not_found`: no such plan (`plan not found`), or no such price on
+             *     it, a removed price included (`price not found`).
+             */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "price not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field. This route takes no body
+             *     (`param` names the field).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"mode\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "mode"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11221,16 +15857,39 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "mode": "per_unit",
+                 *       "unit_amount_cents": "0.00025"
+                 *     }
+                 */
                 "application/json": components["schemas"]["PriceShape"];
             };
         };
         responses: {
-            /** @description The price, and when the change applies */
+            /** @description The price, and when the change applies. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_prc_dajr672q3gpgqfoq5c20",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *       "dimension_match": {},
+                     *       "mode": "per_unit",
+                     *       "unit_amount_cents": "0.00025",
+                     *       "tiers": [],
+                     *       "package_size": 0,
+                     *       "package_amount_cents": "0",
+                     *       "created_at": "2026-09-15T09:05:00Z",
+                     *       "updated_at": "2026-10-20T14:00:00Z",
+                     *       "effective": "next_period"
+                     *     }
+                     */
                     "application/json": components["schemas"]["PriceWrite"];
                 };
             };
@@ -11240,29 +15899,63 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description `not_found`: no such plan, or no such price on it (a removed price included). */
+            /**
+             * @description `not_found`: no such plan (`plan not found`), or no such price on
+             *     it, a removed price included (`price not found`).
+             */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "price not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
-             * @description `validation_error`: a rate outside its limits, a price shape
-             *     that cannot be billed, `meter_id` or `dimension_match` (the
-             *     price's identity), or another unknown field (`param` names it).
+             * @description `validation_error`: a rate outside its limits, a price shape that
+             *     cannot be billed, `meter_id` or `dimension_match` (the price's
+             *     identity), or another unknown field (`param` names it).
              */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "is a price's identity and cannot change; add a price with the other dimension_match and remove this one",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "dimension_match"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11272,6 +15965,7 @@ export interface operations {
     listSubscriptions: {
         parameters: {
             query?: {
+                /** @description Only this customer's subscriptions (`hc_cus_…`). */
                 customer_id?: string;
                 /** @description Filter to subscriptions with a live item on this plan. */
                 plan_id?: string;
@@ -11296,8 +15990,12 @@ export interface operations {
                 collection?: "paused";
                 /** @description Case-insensitive substring match on display name or code. */
                 search?: string;
-                /** @description One of display_name, status, next_billing_at, trial_end_at, created_at (default). */
+                /**
+                 * @description One of display_name, status, next_billing_at, trial_end_at,
+                 *     created_at (default). Any other value sorts by created_at.
+                 */
                 sort?: string;
+                /** @description Sort direction, `asc` or `desc` (the default). Any other value sorts descending. */
                 dir?: "asc" | "desc";
                 /**
                  * @description Rows per page, from 1 to 100. Default 50. Any other value, or one
@@ -11322,6 +16020,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "code": "acme-pro",
+                     *           "display_name": "Acme Pro",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "items": [
+                     *             {
+                     *               "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *               "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *               "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *               "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *               "quantity": 1,
+                     *               "created_at": "2026-10-01T09:12:44Z",
+                     *               "updated_at": "2026-10-01T09:12:44Z"
+                     *             }
+                     *           ],
+                     *           "status": "active",
+                     *           "billing_time": "calendar",
+                     *           "started_at": "2026-10-01T09:12:44Z",
+                     *           "activated_at": "2026-10-01T09:12:44Z",
+                     *           "cancel_at_period_end": false,
+                     *           "current_billing_period_start": "2026-10-01T00:00:00Z",
+                     *           "current_billing_period_end": "2026-11-01T00:00:00Z",
+                     *           "current_billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+                     *           "next_billing_at": "2026-11-01T00:00:00Z",
+                     *           "created_at": "2026-10-01T09:12:44Z",
+                     *           "updated_at": "2026-10-01T09:12:44Z"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["Subscription"][];
                         total: components["schemas"]["ListTotal"];
@@ -11334,6 +16068,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "status must be one of draft, trialing, active, canceled; paused collection is not a status, use collection=paused",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11361,17 +16105,45 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "code": "acme-pro",
+                 *       "display_name": "Acme Pro",
+                 *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                 *       "items": [
+                 *         {
+                 *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                 *           "quantity": 1
+                 *         }
+                 *       ],
+                 *       "billing_time": "calendar"
+                 *     }
+                 */
                 "application/json": {
+                    /**
+                     * @description Your code for the subscription: letters, digits, hyphens
+                     *     and underscores. Unique in your account and mode.
+                     */
                     code: string;
+                    /** @description The subscription's name. Must not be blank. */
                     display_name: string;
+                    /**
+                     * @description The customer to bill (`hc_cus_…`), in this account and
+                     *     mode.
+                     */
                     customer_id: string;
                     /** @description Plan items — a subscription bills one or more plans. */
                     items: {
+                        /** @description A plan of this account (`hc_pln_…`). Each plan can appear once. */
                         plan_id: string;
-                        /** @default 1 */
+                        /**
+                         * @description How many of the plan to bill. At least 1; 0 or absent means 1.
+                         * @default 1
+                         */
                         quantity?: number;
                     }[];
                     /**
+                     * @description How monthly periods line up. See the subscription's `billing_time`.
                      * @default calendar
                      * @enum {string}
                      */
@@ -11406,25 +16178,117 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "acme-pro",
+                     *       "display_name": "Acme Pro",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "items": [
+                     *         {
+                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "quantity": 1,
+                     *           "created_at": "2026-10-01T09:12:44Z",
+                     *           "updated_at": "2026-10-01T09:12:44Z"
+                     *         }
+                     *       ],
+                     *       "status": "active",
+                     *       "billing_time": "calendar",
+                     *       "started_at": "2026-10-01T09:12:44Z",
+                     *       "activated_at": "2026-10-01T09:12:44Z",
+                     *       "cancel_at_period_end": false,
+                     *       "current_billing_period_start": "2026-10-01T00:00:00Z",
+                     *       "current_billing_period_end": "2026-11-01T00:00:00Z",
+                     *       "current_billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+                     *       "next_billing_at": "2026-11-01T00:00:00Z",
+                     *       "created_at": "2026-10-01T09:12:44Z",
+                     *       "updated_at": "2026-10-01T09:12:44Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            /** @description No customer with this `customer_id` in this account and mode (code `not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `already_exists` (`param: code`): another subscription in
+             *     this account and mode has this `code`. Code `invalid_state`: the
+             *     customer or a plan is archived; a plan bills a meter another
+             *     live subscription of the customer already bills; or the plans'
+             *     currency differs from each other, from the customer's billing
+             *     profile or from the customer's other subscriptions.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "already_exists",
+                     *         "message": "subscription code \"acme-pro\" already exists",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "code"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /**
              * @description A field failed validation (`param` names it), for example
              *     `trial_days` outside 0 to 730, `status` other than `draft`
              *     (empty and null included), or `trial_days` above 0 with
-             *     `status: draft`. Or the body has an unknown
-             *     field (`param` names it; the body must use only the fields
-             *     listed here). `start_now` is such a field since 2026-10-23: a
-             *     subscription starts now unless `status` is `draft`.
+             *     `status: draft`. Also: `code`, `display_name`, `customer_id` or
+             *     `items` missing; a `code` with other characters; a repeated or
+             *     unknown plan, or plans with different billing intervals or
+             *     base-fee timings (`param: items`); a `quantity` below 1. Or the
+             *     body has an unknown field (`param` names it; the body must use
+             *     only the fields listed here). `start_now` is such a field since
+             *     2026-10-23: a subscription starts now unless `status` is
+             *     `draft`.
              */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must be between 0 and 730",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "trial_days"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11446,6 +16310,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
             };
             cookie?: never;
@@ -11458,10 +16323,106 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "acme-pro",
+                     *       "display_name": "Acme Pro",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "items": [
+                     *         {
+                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "quantity": 1,
+                     *           "created_at": "2026-09-28T16:20:00Z",
+                     *           "updated_at": "2026-09-28T16:20:00Z"
+                     *         }
+                     *       ],
+                     *       "status": "active",
+                     *       "billing_time": "calendar",
+                     *       "started_at": "2026-10-01T09:12:44Z",
+                     *       "activated_at": "2026-10-01T09:12:44Z",
+                     *       "cancel_at_period_end": false,
+                     *       "current_billing_period_start": "2026-10-01T00:00:00Z",
+                     *       "current_billing_period_end": "2026-11-01T00:00:00Z",
+                     *       "current_billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+                     *       "next_billing_at": "2026-11-01T00:00:00Z",
+                     *       "created_at": "2026-09-28T16:20:00Z",
+                     *       "updated_at": "2026-10-01T09:12:44Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description No subscription with this ID in this account and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `invalid_state`: the subscription is not a `draft`, or its
+             *     plans' currency differs from the customer's billing profile or
+             *     other subscriptions.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "Only a draft subscription can be activated. This one is active.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field (`param` names it). This
+             *     route takes no body: send none, `{}` or `null`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"start_at\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "start_at"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -11480,6 +16441,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
             };
             cookie?: never;
@@ -11499,6 +16461,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "subscription": {
+                     *         "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *         "code": "acme-pro",
+                     *         "display_name": "Acme Pro",
+                     *         "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *         "items": [
+                     *           {
+                     *             "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *             "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *             "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *             "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *             "quantity": 1,
+                     *             "created_at": "2026-10-01T09:12:44Z",
+                     *             "updated_at": "2026-10-01T09:12:44Z"
+                     *           }
+                     *         ],
+                     *         "status": "active",
+                     *         "billing_time": "calendar",
+                     *         "started_at": "2026-10-01T09:12:44Z",
+                     *         "activated_at": "2026-10-01T09:12:44Z",
+                     *         "cancel_at_period_end": false,
+                     *         "current_billing_period_start": "2026-11-01T00:00:00Z",
+                     *         "current_billing_period_end": "2026-12-01T00:00:00Z",
+                     *         "current_billing_period_display": "Nov 1, 2026 – Nov 30, 2026",
+                     *         "next_billing_at": "2026-12-01T00:00:00Z",
+                     *         "created_at": "2026-10-01T09:12:44Z",
+                     *         "updated_at": "2026-11-01T01:42:10Z"
+                     *       },
+                     *       "invoices_generated": 1,
+                     *       "still_due": false
+                     *     }
+                     */
                     "application/json": {
                         subscription: components["schemas"]["Subscription"];
                         /**
@@ -11520,12 +16517,24 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found. */
+            /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             /**
              * @description The retry was refused. Code `billing_not_failing`: the
@@ -11537,7 +16546,42 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "billing_not_failing",
+                     *         "message": "billing is not failing on this subscription; there is nothing to retry",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field (`param` names it). This
+             *     route takes no body: send none, `{}` or `null`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"force\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "force"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -11547,6 +16591,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
             };
             cookie?: never;
@@ -11559,16 +16604,57 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "acme-pro",
+                     *       "display_name": "Acme Pro",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "items": [
+                     *         {
+                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "quantity": 1,
+                     *           "created_at": "2026-10-01T09:12:44Z",
+                     *           "updated_at": "2026-10-01T09:12:44Z"
+                     *         }
+                     *       ],
+                     *       "status": "active",
+                     *       "billing_time": "calendar",
+                     *       "started_at": "2026-10-01T09:12:44Z",
+                     *       "activated_at": "2026-10-01T09:12:44Z",
+                     *       "cancel_at_period_end": false,
+                     *       "current_billing_period_start": "2026-10-01T00:00:00Z",
+                     *       "current_billing_period_end": "2026-11-01T00:00:00Z",
+                     *       "current_billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+                     *       "next_billing_at": "2026-11-01T00:00:00Z",
+                     *       "created_at": "2026-10-01T09:12:44Z",
+                     *       "updated_at": "2026-10-01T09:12:44Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found (code `not_found`). */
+            /** @description No subscription with this ID in this account and mode (code `not_found`). */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11590,6 +16676,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
             };
             cookie?: never;
@@ -11602,16 +16689,58 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "acme-pro",
+                     *       "display_name": "Acme Pro",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "items": [
+                     *         {
+                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "quantity": 1,
+                     *           "created_at": "2026-10-01T09:12:44Z",
+                     *           "updated_at": "2026-10-01T09:12:44Z"
+                     *         }
+                     *       ],
+                     *       "status": "canceled",
+                     *       "billing_time": "calendar",
+                     *       "started_at": "2026-10-01T09:12:44Z",
+                     *       "activated_at": "2026-10-01T09:12:44Z",
+                     *       "canceled_at": "2026-10-20T16:45:00Z",
+                     *       "cancel_at_period_end": false,
+                     *       "current_billing_period_start": "2026-10-01T00:00:00Z",
+                     *       "current_billing_period_end": "2026-11-01T00:00:00Z",
+                     *       "current_billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+                     *       "next_billing_at": "2026-11-01T00:00:00Z",
+                     *       "created_at": "2026-10-01T09:12:44Z",
+                     *       "updated_at": "2026-10-20T16:45:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found. */
+            /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11625,6 +16754,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "cannot cancel canceled subscription (already terminated)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field (`param` names it). This
+             *     route takes no body: send none, `{}` or `null`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"at_period_end\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "at_period_end"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11646,12 +16808,18 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "at_period_end": true
+                 *     }
+                 */
                 "application/json": {
                     /** @description Cancel at the end of the current period (or of the trial, while trialing). */
                     at_period_end?: boolean;
@@ -11670,25 +16838,77 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "acme-pro",
+                     *       "display_name": "Acme Pro",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "items": [
+                     *         {
+                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "quantity": 1,
+                     *           "created_at": "2026-10-01T09:12:44Z",
+                     *           "updated_at": "2026-10-01T09:12:44Z"
+                     *         }
+                     *       ],
+                     *       "status": "active",
+                     *       "billing_time": "calendar",
+                     *       "started_at": "2026-10-01T09:12:44Z",
+                     *       "activated_at": "2026-10-01T09:12:44Z",
+                     *       "cancel_at_period_end": true,
+                     *       "cancel_effective_at": "2026-11-01T00:00:00Z",
+                     *       "current_billing_period_start": "2026-10-01T00:00:00Z",
+                     *       "current_billing_period_end": "2026-11-01T00:00:00Z",
+                     *       "current_billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+                     *       "next_billing_at": "2026-11-01T00:00:00Z",
+                     *       "created_at": "2026-10-01T09:12:44Z",
+                     *       "updated_at": "2026-10-20T16:45:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
-            /** @description The body is not valid JSON. */
+            /** @description The body is not valid JSON, or `cancel_at` is not an RFC 3339 date-time. */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found. */
+            /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11703,13 +16923,23 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "A canceled subscription can't be scheduled to cancel.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
              * @description Code `validation_error`: neither or both of `at_period_end` and
-             *     `cancel_at` are set, or `cancel_at` is in the past or breaks the
-             *     date rules above.
+             *     `cancel_at` are set (`param: body`), or `cancel_at` is in the
+             *     past or breaks the date rules above (`param: cancel_at`).
              *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
@@ -11717,6 +16947,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "one of at_period_end or cancel_at must be set",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "body"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11728,6 +16969,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
             };
             cookie?: never;
@@ -11740,16 +16982,57 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "acme-pro",
+                     *       "display_name": "Acme Pro",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "items": [
+                     *         {
+                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "quantity": 1,
+                     *           "created_at": "2026-10-01T09:12:44Z",
+                     *           "updated_at": "2026-10-01T09:12:44Z"
+                     *         }
+                     *       ],
+                     *       "status": "active",
+                     *       "billing_time": "calendar",
+                     *       "started_at": "2026-10-01T09:12:44Z",
+                     *       "activated_at": "2026-10-01T09:12:44Z",
+                     *       "cancel_at_period_end": false,
+                     *       "current_billing_period_start": "2026-10-01T00:00:00Z",
+                     *       "current_billing_period_end": "2026-11-01T00:00:00Z",
+                     *       "current_billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+                     *       "next_billing_at": "2026-11-01T00:00:00Z",
+                     *       "created_at": "2026-10-01T09:12:44Z",
+                     *       "updated_at": "2026-10-22T08:10:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found. */
+            /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11763,6 +17046,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "the scheduled cancel already took effect when the billing period ended; the subscription is canceled",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field (`param` names it). This
+             *     route takes no body: send none, `{}` or `null`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"at_period_end\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "at_period_end"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11784,14 +17100,25 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "behavior": "keep_as_draft",
+                 *       "resumes_at": "2026-12-01T00:00:00Z"
+                 *     }
+                 */
                 "application/json": {
-                    /** @enum {string} */
+                    /**
+                     * @description What happens to invoices built during the pause. Only
+                     *     `keep_as_draft`, which keeps them as drafts.
+                     * @enum {string}
+                     */
                     behavior: "keep_as_draft";
                     /**
                      * Format: date-time
@@ -11808,25 +17135,81 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "acme-pro",
+                     *       "display_name": "Acme Pro",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "items": [
+                     *         {
+                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "quantity": 1,
+                     *           "created_at": "2026-10-01T09:12:44Z",
+                     *           "updated_at": "2026-10-01T09:12:44Z"
+                     *         }
+                     *       ],
+                     *       "status": "active",
+                     *       "billing_time": "calendar",
+                     *       "started_at": "2026-10-01T09:12:44Z",
+                     *       "activated_at": "2026-10-01T09:12:44Z",
+                     *       "cancel_at_period_end": false,
+                     *       "pause_collection": {
+                     *         "behavior": "keep_as_draft",
+                     *         "resumes_at": "2026-12-01T00:00:00Z",
+                     *         "set_by": "operator"
+                     *       },
+                     *       "current_billing_period_start": "2026-10-01T00:00:00Z",
+                     *       "current_billing_period_end": "2026-11-01T00:00:00Z",
+                     *       "current_billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+                     *       "next_billing_at": "2026-11-01T00:00:00Z",
+                     *       "created_at": "2026-10-01T09:12:44Z",
+                     *       "updated_at": "2026-10-20T16:45:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
-            /** @description The body is not valid JSON. */
+            /** @description The body is not valid JSON, or `resumes_at` is not an RFC 3339 date-time. */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found. */
+            /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11840,6 +17223,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "Collection can't be paused on a canceled subscription.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11853,6 +17246,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must be in the future",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "resumes_at"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11864,6 +17268,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
             };
             cookie?: never;
@@ -11876,16 +17281,57 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "acme-pro",
+                     *       "display_name": "Acme Pro",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "items": [
+                     *         {
+                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "quantity": 1,
+                     *           "created_at": "2026-10-01T09:12:44Z",
+                     *           "updated_at": "2026-10-01T09:12:44Z"
+                     *         }
+                     *       ],
+                     *       "status": "active",
+                     *       "billing_time": "calendar",
+                     *       "started_at": "2026-10-01T09:12:44Z",
+                     *       "activated_at": "2026-10-01T09:12:44Z",
+                     *       "cancel_at_period_end": false,
+                     *       "current_billing_period_start": "2026-10-01T00:00:00Z",
+                     *       "current_billing_period_end": "2026-11-01T00:00:00Z",
+                     *       "current_billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+                     *       "next_billing_at": "2026-11-01T00:00:00Z",
+                     *       "created_at": "2026-10-01T09:12:44Z",
+                     *       "updated_at": "2026-10-24T11:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found. */
+            /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11898,6 +17344,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "unbilled_period",
+                     *         "message": "this subscription has a billing period that ended and is not invoiced yet; retry billing for this subscription, then try again",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field (`param` names it). This
+             *     route takes no body: send none, `{}` or `null`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"behavior\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "behavior"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11919,6 +17398,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
             };
             cookie?: never;
@@ -11931,16 +17411,59 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "acme-pro",
+                     *       "display_name": "Acme Pro",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "items": [
+                     *         {
+                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "quantity": 1,
+                     *           "created_at": "2026-10-01T09:12:44Z",
+                     *           "updated_at": "2026-10-01T09:12:44Z"
+                     *         }
+                     *       ],
+                     *       "status": "active",
+                     *       "billing_time": "calendar",
+                     *       "trial_start_at": "2026-10-01T09:12:44Z",
+                     *       "trial_end_at": "2026-10-08T10:00:00Z",
+                     *       "started_at": "2026-10-01T09:12:44Z",
+                     *       "activated_at": "2026-10-08T10:00:00Z",
+                     *       "cancel_at_period_end": false,
+                     *       "current_billing_period_start": "2026-10-08T00:00:00Z",
+                     *       "current_billing_period_end": "2026-11-01T00:00:00Z",
+                     *       "current_billing_period_display": "Oct 8, 2026 – Oct 31, 2026",
+                     *       "next_billing_at": "2026-11-01T00:00:00Z",
+                     *       "created_at": "2026-10-01T09:12:44Z",
+                     *       "updated_at": "2026-10-08T10:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found. */
+            /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11953,6 +17476,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "This subscription is scheduled to cancel. Undo the scheduled cancellation first, then end the trial.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field (`param` names it). This
+             *     route takes no body: send none, `{}` or `null`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"trial_end\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "trial_end"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -11974,12 +17530,18 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "trial_end": "2026-10-29T00:00:00Z"
+                 *     }
+                 */
                 "application/json": {
                     /**
                      * Format: date-time
@@ -11996,6 +17558,38 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "acme-pro",
+                     *       "display_name": "Acme Pro",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "items": [
+                     *         {
+                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "quantity": 1,
+                     *           "created_at": "2026-10-01T09:12:44Z",
+                     *           "updated_at": "2026-10-01T09:12:44Z"
+                     *         }
+                     *       ],
+                     *       "status": "trialing",
+                     *       "billing_time": "calendar",
+                     *       "trial_start_at": "2026-10-01T09:12:44Z",
+                     *       "trial_end_at": "2026-10-29T00:00:00Z",
+                     *       "started_at": "2026-10-01T09:12:44Z",
+                     *       "cancel_at_period_end": false,
+                     *       "current_billing_period_start": "2026-10-29T00:00:00Z",
+                     *       "current_billing_period_end": "2026-11-01T00:00:00Z",
+                     *       "current_billing_period_display": "Oct 29, 2026 – Oct 31, 2026",
+                     *       "next_billing_at": "2026-11-01T00:00:00Z",
+                     *       "created_at": "2026-10-01T09:12:44Z",
+                     *       "updated_at": "2026-10-10T12:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
@@ -12005,16 +17599,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found. */
+            /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12028,18 +17642,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "Only a trialing subscription's trial can be extended. This one is active.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
              * @description `trial_end` is missing, in the past, not after the current
-             *     `trial_end_at`, or more than 730 days after `trial_start_at`.
+             *     `trial_end_at`, or more than 730 days after `trial_start_at`
+             *     (`param: trial_end`). Also: the body has an unknown field
+             *     (`param` names it).
              */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "Pick a date after the current trial end. To end the trial sooner, use End trial now.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "trial_end"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12061,18 +17698,37 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "amount_gte": 50000,
+                 *       "item_thresholds": [
+                 *         {
+                 *           "subscription_item_id": "hc_si_dauq50aq3gpgqfoq5c30",
+                 *           "usage_gte": "100000000"
+                 *         }
+                 *       ]
+                 *     }
+                 */
                 "application/json": {
                     /**
                      * Format: int64
-                     * @description Invoice early when the period's usage so far reaches this amount, in cents of the subscription's currency. The base fee is not counted.
+                     * @description Invoice early when the period's usage so far reaches
+                     *     this amount, in the subscription currency's minor unit
+                     *     (cents for USD). The base fee is not counted. 0 or
+                     *     absent sets no amount threshold.
                      */
                     amount_gte?: number;
+                    /**
+                     * @description Per-item usage thresholds. Each item of this
+                     *     subscription can appear once. Absent or empty sets none.
+                     */
                     item_thresholds?: {
                         /** @description An item of this subscription. Each item can appear once. */
                         subscription_item_id: string;
@@ -12089,6 +17745,46 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "acme-pro",
+                     *       "display_name": "Acme Pro",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "items": [
+                     *         {
+                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "quantity": 1,
+                     *           "created_at": "2026-10-01T09:12:44Z",
+                     *           "updated_at": "2026-10-01T09:12:44Z"
+                     *         }
+                     *       ],
+                     *       "status": "active",
+                     *       "billing_time": "calendar",
+                     *       "started_at": "2026-10-01T09:12:44Z",
+                     *       "activated_at": "2026-10-01T09:12:44Z",
+                     *       "cancel_at_period_end": false,
+                     *       "billing_thresholds": {
+                     *         "amount_gte": 50000,
+                     *         "item_thresholds": [
+                     *           {
+                     *             "subscription_item_id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *             "usage_gte": "100000000"
+                     *           }
+                     *         ]
+                     *       },
+                     *       "current_billing_period_start": "2026-10-01T00:00:00Z",
+                     *       "current_billing_period_end": "2026-11-01T00:00:00Z",
+                     *       "current_billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+                     *       "next_billing_at": "2026-11-01T00:00:00Z",
+                     *       "created_at": "2026-10-01T09:12:44Z",
+                     *       "updated_at": "2026-10-05T14:30:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
@@ -12098,16 +17794,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found. */
+            /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12117,6 +17833,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "Spend thresholds can't be set on a canceled subscription.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12133,6 +17859,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "at least one of amount_gte or item_thresholds must be set; to clear use DELETE",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "billing_thresholds"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12144,6 +17881,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
             };
             cookie?: never;
@@ -12156,16 +17894,80 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "code": "acme-pro",
+                     *       "display_name": "Acme Pro",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "items": [
+                     *         {
+                     *           "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *           "quantity": 1,
+                     *           "created_at": "2026-10-01T09:12:44Z",
+                     *           "updated_at": "2026-10-01T09:12:44Z"
+                     *         }
+                     *       ],
+                     *       "status": "active",
+                     *       "billing_time": "calendar",
+                     *       "started_at": "2026-10-01T09:12:44Z",
+                     *       "activated_at": "2026-10-01T09:12:44Z",
+                     *       "cancel_at_period_end": false,
+                     *       "current_billing_period_start": "2026-10-01T00:00:00Z",
+                     *       "current_billing_period_end": "2026-11-01T00:00:00Z",
+                     *       "current_billing_period_display": "Oct 1, 2026 – Oct 31, 2026",
+                     *       "next_billing_at": "2026-11-01T00:00:00Z",
+                     *       "created_at": "2026-10-01T09:12:44Z",
+                     *       "updated_at": "2026-10-06T09:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["Subscription"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found. */
+            /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field (`param` names it). This
+             *     route takes no body: send none, `{}` or `null`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"amount_gte\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "amount_gte"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12187,16 +17989,25 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c3k",
+                 *       "quantity": 1
+                 *     }
+                 */
                 "application/json": {
+                    /** @description The plan to add (`hc_pln_…`). Not archived, and not already on the subscription. */
                     plan_id: string;
                     /**
                      * Format: int64
+                     * @description How many of the plan to bill. 0 or absent means 1.
                      * @default 1
                      */
                     quantity?: number;
@@ -12210,6 +18021,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_si_dauq50aq3gpgqfoq5c34",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c3k",
+                     *       "quantity": 1,
+                     *       "created_at": "2026-10-16T10:30:00Z",
+                     *       "updated_at": "2026-10-16T10:30:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["SubscriptionItem"];
                 };
             };
@@ -12219,16 +18041,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found. */
+            /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12249,6 +18091,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "already_exists",
+                     *         "message": "subscription already has an item for plan \"hc_pln_dajr5o2q3gpgqfoq5c3k\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "plan_id"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12263,6 +18116,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "plan_id is required",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "plan_id"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12274,7 +18138,9 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
+                /** @description The item's ID (`hc_si_…`), an item of this subscription. */
                 itemID: string;
             };
             cookie?: never;
@@ -12289,12 +18155,26 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found, or the item is not on this subscription. */
+            /**
+             * @description No subscription with this ID in this account and mode (message
+             *     `subscription not found`), or the item is not on this
+             *     subscription (`subscription item not found`).
+             */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription item not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12308,6 +18188,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "A subscription needs at least one item. To stop billing, cancel the subscription instead.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field (`param` names it). This
+             *     route takes no body: send none, `{}` or `null`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"quantity\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "quantity"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12329,13 +18242,20 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
+                /** @description The item's ID (`hc_si_…`), an item of this subscription. */
                 itemID: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "quantity": 2
+                 *     }
+                 */
                 "application/json": {
                     /**
                      * Format: int64
@@ -12359,6 +18279,31 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "item": {
+                     *         "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *         "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *         "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *         "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *         "quantity": 2,
+                     *         "created_at": "2026-10-01T09:12:44Z",
+                     *         "updated_at": "2026-10-16T10:30:00Z"
+                     *       },
+                     *       "effective_at": "2026-10-16T10:30:00Z",
+                     *       "proration": {
+                     *         "old_plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *         "new_plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *         "proration_factor": 0.5161290322580645,
+                     *         "amount_cents": 2529,
+                     *         "type": "invoice",
+                     *         "invoice_id": "hc_inv_dbj84b2q3gpgqfoq5c4k",
+                     *         "credited_to_balance_cents": 0,
+                     *         "reduced_open_invoices_cents": 0,
+                     *         "held_on_draft_invoices_cents": 0
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["SubscriptionItemChangeResult"];
                 };
             };
@@ -12368,16 +18313,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found, or the item is not on this subscription. */
+            /**
+             * @description No subscription with this ID in this account and mode (message
+             *     `subscription not found`), or the item is not on this
+             *     subscription (`subscription item not found`).
+             */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription item not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12401,14 +18370,25 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "Items can only be changed on an active subscription. This one is trialing.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
              * @description Code `validation_error`: neither or both of `quantity` and
-             *     `new_plan_id` are set; the value equals the current one;
-             *     `quantity` is less than 1; the new plan is not found; or the new
-             *     plan's billing timing or interval does not fit the subscription.
+             *     `new_plan_id` are set (`param: body`); the value equals the
+             *     current one; `quantity` is less than 1; the new plan is not
+             *     found; or the new plan's billing timing or interval does not
+             *     fit the subscription.
              *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
@@ -12416,6 +18396,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "new quantity is the same as current quantity",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "quantity"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12427,7 +18418,9 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
+                /** @description The item's ID (`hc_si_…`), an item of this subscription. */
                 itemID: string;
             };
             cookie?: never;
@@ -12440,6 +18433,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *       "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *       "quantity": 1,
+                     *       "created_at": "2026-10-01T09:12:44Z",
+                     *       "updated_at": "2026-10-18T13:05:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["SubscriptionItem"];
                 };
             };
@@ -12450,6 +18454,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription item not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12463,6 +18477,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "the pending plan change already took effect when the billing period ended",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field (`param` names it). This
+             *     route takes no body: send none, `{}` or `null`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"new_plan_id\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "new_plan_id"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12474,6 +18521,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The subscription's ID (`hc_sub_…`). */
                 id: string;
             };
             cookie?: never;
@@ -12486,6 +18534,57 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "events": [
+                     *         {
+                     *           "timestamp": "2026-10-01T09:12:44Z",
+                     *           "source": "audit",
+                     *           "event_type": "create",
+                     *           "status": "neutral",
+                     *           "description": "Subscription created",
+                     *           "actor_type": "api_key",
+                     *           "actor_name": "Production backend",
+                     *           "actor_id": "hc_key_dajqj1iq3gpgqfoq5ca0",
+                     *           "line": {
+                     *             "id": "hc_aud_dbj84c2q3gpgqfoq5cb0",
+                     *             "kind": "subscription.created",
+                     *             "title": "Subscription created",
+                     *             "detail": [],
+                     *             "actor": {
+                     *               "kind": "api_key",
+                     *               "name": "Production backend"
+                     *             },
+                     *             "tone": "neutral",
+                     *             "occurred_at": "2026-10-01T09:12:44Z"
+                     *           }
+                     *         },
+                     *         {
+                     *           "timestamp": "2026-10-20T16:45:00Z",
+                     *           "source": "audit",
+                     *           "event_type": "cancel",
+                     *           "status": "neutral",
+                     *           "description": "Subscription canceled",
+                     *           "actor_type": "user",
+                     *           "actor_name": "ops@acme.example",
+                     *           "actor_id": "hc_usr_5f2c9a01b7e34d6a8c0e1f92",
+                     *           "line": {
+                     *             "id": "hc_aud_dbj84c2q3gpgqfoq5cb8",
+                     *             "kind": "subscription.canceled",
+                     *             "title": "Subscription canceled",
+                     *             "detail": [],
+                     *             "actor": {
+                     *               "kind": "person",
+                     *               "name": "ops@acme.example"
+                     *             },
+                     *             "tone": "neutral",
+                     *             "occurred_at": "2026-10-20T16:45:00Z"
+                     *           }
+                     *         }
+                     *       ],
+                     *       "truncated": false
+                     *     }
+                     */
                     "application/json": {
                         events: components["schemas"]["SubscriptionTimelineEvent"][];
                         /** @description True when the subscription has more than 100 audit entries, so the earliest events are missing. */
@@ -12494,12 +18593,22 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Subscription not found. */
+            /** @description No subscription with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "subscription not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12509,14 +18618,16 @@ export interface operations {
     listUsageEvents: {
         parameters: {
             query?: {
+                /** @description Only this customer's events (`hc_cus_…`, the Hardcount ID, not your external ID). */
                 customer_id?: string;
+                /** @description Only this meter's events (`hc_mtr_…`). */
                 meter_id?: string;
                 /**
                  * @description Comma-separated key=value pairs matched against the event's
-                 *     dimensions via JSONB containment (multiple pairs AND).
-                 *     Values that parse as JSON booleans/numbers are matched
-                 *     typed ("cached=true", "attempt=2"); everything else as a
-                 *     string. Malformed pairs → 422. Example:
+                 *     dimensions; every pair must match. Values that read as JSON
+                 *     booleans or numbers match typed values ("cached=true",
+                 *     "attempt=2"); everything else matches as a string. A malformed
+                 *     pair is refused with 422. Example:
                  *     `model=gpt-4o,token_type=input`.
                  */
                 dimensions?: string;
@@ -12547,6 +18658,45 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_evt_db6eh6qq3gpgqfoq5c3k",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *           "quantity": "350",
+                     *           "dimensions": {
+                     *             "model": "gpt-4o",
+                     *             "token_type": "output"
+                     *           },
+                     *           "idempotency_key": "req-7f3a9c-out",
+                     *           "timestamp": "2026-10-12T14:03:07Z",
+                     *           "origin": "api",
+                     *           "provider_cost_cents": "0.35",
+                     *           "provider_cost_source": "table"
+                     *         },
+                     *         {
+                     *           "id": "hc_evt_db6eh6qq3gpgqfoq5c3g",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *           "quantity": "1200",
+                     *           "dimensions": {
+                     *             "model": "gpt-4o",
+                     *             "token_type": "input"
+                     *           },
+                     *           "idempotency_key": "req-7f3a9c",
+                     *           "timestamp": "2026-10-12T14:03:07Z",
+                     *           "origin": "api",
+                     *           "provider_cost_cents": "0.3",
+                     *           "provider_cost_source": "table"
+                     *         }
+                     *       ],
+                     *       "total": 4210
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["UsageEvent"][];
                         total: components["schemas"]["ListTotal"];
@@ -12560,6 +18710,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must be RFC3339 (e.g. 2026-01-01T00:00:00Z) or YYYY-MM-DD",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "from"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12575,6 +18736,19 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "external_customer_id": "acme-42",
+                 *       "event_name": "tokens",
+                 *       "quantity": 1200,
+                 *       "dimensions": {
+                 *         "model": "gpt-4o",
+                 *         "token_type": "input"
+                 *       },
+                 *       "idempotency_key": "req-7f3a9c",
+                 *       "timestamp": "2026-10-12T14:03:07Z"
+                 *     }
+                 */
                 "application/json": {
                     /** @description The customer's external_id (your identifier), not the internal hc_cus_ id. */
                     external_customer_id: string;
@@ -12596,7 +18770,7 @@ export interface operations {
                     /**
                      * @description Your unique ID for this event. Pick it once, before the
                      *     first send, and send the same key on every retry of the
-                     *     event. Keys are unique per tenant and mode (live or
+                     *     event. Keys are unique per account and mode (live or
                      *     test), forever. An event whose key was already used is
                      *     not stored again: the first event wins and the new body
                      *     is discarded. So never reuse a key for a different
@@ -12607,7 +18781,17 @@ export interface operations {
                      *     routes ignore the `Idempotency-Key` header.
                      */
                     idempotency_key: string;
-                    /** Format: date-time */
+                    /**
+                     * Format: date-time
+                     * @description When the usage happened, as an RFC 3339 string. Leave it
+                     *     out to use the time Hardcount receives the event (the
+                     *     clock's time for a customer on a test clock). It may be
+                     *     at most 5 minutes ahead of that time. Any past time is
+                     *     accepted, but an event in a period that is already
+                     *     invoiced is stored and not billed (`billing_status:
+                     *     after_close`). A value that is not an RFC 3339 string is
+                     *     refused with 422 and `param: timestamp`.
+                     */
                     timestamp?: string;
                 };
             };
@@ -12623,6 +18807,24 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_evt_db6eh6qq3gpgqfoq5c3g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *       "quantity": "1200",
+                     *       "dimensions": {
+                     *         "model": "gpt-4o",
+                     *         "token_type": "input"
+                     *       },
+                     *       "idempotency_key": "req-7f3a9c",
+                     *       "timestamp": "2026-10-12T14:03:07Z",
+                     *       "origin": "api",
+                     *       "provider_cost_cents": "0.3",
+                     *       "provider_cost_source": "table"
+                     *     }
+                     */
                     "application/json": components["schemas"]["UsageEvent"];
                 };
             };
@@ -12636,6 +18838,24 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_evt_db6eh6qq3gpgqfoq5c3g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *       "quantity": "1200",
+                     *       "dimensions": {
+                     *         "model": "gpt-4o",
+                     *         "token_type": "input"
+                     *       },
+                     *       "idempotency_key": "req-7f3a9c",
+                     *       "timestamp": "2026-10-12T14:03:07Z",
+                     *       "origin": "api",
+                     *       "provider_cost_cents": "0.3",
+                     *       "provider_cost_source": "table"
+                     *     }
+                     */
                     "application/json": components["schemas"]["UsageEvent"];
                 };
             };
@@ -12645,16 +18865,32 @@ export interface operations {
              * @description Validation failed and nothing was stored. `param` names the
              *     field: `idempotency_key` when it is missing, blank or longer
              *     than 255 characters, `quantity` when it is missing or not as
-             *     described above, `external_customer_id` or `event_name` for an
-             *     unknown customer or meter, `timestamp` for a malformed one, and
-             *     `properties` when it has a key (it was renamed `dimensions`;
-             *     `null` or `{}` is ignored).
+             *     described above, `external_customer_id` or `event_name` when
+             *     missing or for an unknown customer or meter, `timestamp` for a
+             *     malformed one or one more than 5 minutes ahead, `dimensions`
+             *     for more than 16 keys or a value that is an object or an
+             *     array, and `properties` when it has a key (it was renamed
+             *     `dimensions`; `null` or `{}` is ignored). An unknown field is
+             *     refused the same way.
              */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "idempotency_key is required — give each event its own key and send the same key when you retry that event",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "idempotency_key"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
             /**
@@ -12667,6 +18903,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "ingest_unavailable",
+                     *         "message": "usage store temporarily unavailable — nothing was recorded; retry the request",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12681,6 +18927,32 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example [
+                 *       {
+                 *         "external_customer_id": "acme-42",
+                 *         "event_name": "tokens",
+                 *         "quantity": 1200,
+                 *         "dimensions": {
+                 *           "model": "gpt-4o",
+                 *           "token_type": "input"
+                 *         },
+                 *         "idempotency_key": "req-7f3a9c",
+                 *         "timestamp": "2026-10-12T14:03:07Z"
+                 *       },
+                 *       {
+                 *         "external_customer_id": "acme-42",
+                 *         "event_name": "tokens",
+                 *         "quantity": 350,
+                 *         "dimensions": {
+                 *           "model": "gpt-4o",
+                 *           "token_type": "output"
+                 *         },
+                 *         "idempotency_key": "req-7f3a9c-out",
+                 *         "timestamp": "2026-10-12T14:03:07Z"
+                 *       }
+                 *     ]
+                 */
                 "application/json": {
                     /** @description The customer's external_id (your identifier), not the internal hc_cus_ id. */
                     external_customer_id: string;
@@ -12695,24 +18967,30 @@ export interface operations {
                      *     other value, fails validation.
                      */
                     quantity: number | string;
+                    /** @description Scalar labels of the event, at most 16. A price takes an event whose labels include the price's `dimension_match`. */
                     dimensions?: {
                         [key: string]: unknown;
                     };
                     /**
                      * @description Your unique ID for this event. Pick it once, before the
                      *     first send, and send the same key on every retry of the
-                     *     event. Keys are unique per tenant and mode (live or
+                     *     event. Keys are unique per account and mode (live or
                      *     test), forever. An event whose key was already used is
                      *     not stored again: the first event wins and the new body
                      *     is discarded. So never reuse a key for a different
                      *     event, such as a batch index or a timestamp that can
                      *     repeat, or that usage is lost. Empty or whitespace-only
-                     *     keys are refused with 422, and so are keys longer than
+                     *     keys fail validation, and so do keys longer than
                      *     255 characters. This is the only dedup key: the usage
                      *     routes ignore the `Idempotency-Key` header.
                      */
                     idempotency_key: string;
-                    /** Format: date-time */
+                    /**
+                     * Format: date-time
+                     * @description When the usage happened, as an RFC 3339 string. Leave
+                     *     it out to use the time Hardcount receives the batch.
+                     *     The same rules as for `POST /v1/usage-events` apply.
+                     */
                     timestamp?: string;
                 }[];
             };
@@ -12724,30 +19002,116 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "ingested": 2,
+                     *       "deduplicated": 0,
+                     *       "total": 2,
+                     *       "after_close": 0,
+                     *       "no_price": 0,
+                     *       "not_on_plan": 0,
+                     *       "outside_subscription": 0,
+                     *       "results": [
+                     *         {
+                     *           "status": "ingested"
+                     *         },
+                     *         {
+                     *           "status": "ingested"
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": components["schemas"]["UsageEventBatchResult"];
                 };
             };
-            400: components["responses"]["InvalidBody"];
+            /**
+             * @description Code `invalid_request`: the body is not a JSON array of event
+             *     objects, or an event has a field of the wrong JSON type
+             *     (message `expected JSON array of events`); the array is empty
+             *     (`at least one event is required`); or it holds more than 1,000
+             *     events (`maximum 1000 events per batch`). Nothing was ingested.
+             */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "maximum 1000 events per batch",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
-            /** @description Request body over the 1MB cap — send smaller batches. */
+            /**
+             * @description Code `batch_too_large`: the request body is over the 1 MB cap
+             *     (1,048,576 bytes). Nothing was ingested; send smaller batches.
+             */
             413: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "batch_too_large",
+                     *         "message": "request body exceeds 1048576 bytes — send smaller batches",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             /**
              * @description Batch rejected — one or more events failed validation and
-             *     NOTHING was ingested. The body is the error envelope (code
+             *     nothing was ingested. The body is the error envelope (code
              *     `batch_rejected`) plus `errors[]`, which names every failing
-             *     index (`event[i]: reason`), `ingested: 0` and `total`. Fix them
+             *     index (`event[i]: reason`), `ingested: 0` and `total`. An
+             *     unknown field in an event is one of those failures. Fix them
              *     and retry the whole batch.
              */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "batch_rejected",
+                     *         "message": "batch rejected — nothing was ingested; fix the listed events and retry the whole batch",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       },
+                     *       "errors": [
+                     *         "event[1]: idempotency_key is required — give each event its own key and send the same key when you retry that event"
+                     *       ],
+                     *       "ingested": 0,
+                     *       "total": 2
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"] & {
+                        /**
+                         * @description One entry per failing event, `event[i]: reason`,
+                         *     where `i` is its index in the request.
+                         */
+                        errors: string[];
+                        /** @description Always 0. A rejected batch writes nothing. */
+                        ingested: number;
+                        /** @description Events in the request. */
+                        total: number;
+                    };
+                };
             };
             429: components["responses"]["RateLimited"];
             /**
@@ -12760,6 +19124,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "ingest_unavailable",
+                     *         "message": "usage store temporarily unavailable — nothing was recorded; retry the request",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12774,6 +19148,19 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "external_customer_id": "acme-42",
+                 *       "event_name": "tokens",
+                 *       "quantity": "48000",
+                 *       "dimensions": {
+                 *         "model": "gpt-4o",
+                 *         "token_type": "input"
+                 *       },
+                 *       "idempotency_key": "import-2026-09-30-0001",
+                 *       "timestamp": "2026-09-30T23:10:00Z"
+                 *     }
+                 */
                 "application/json": {
                     /** @description The customer's external_id (your identifier), not the internal hc_cus_ id. */
                     external_customer_id: string;
@@ -12795,7 +19182,7 @@ export interface operations {
                     /**
                      * @description Your unique ID for this event. Pick it once, before the
                      *     first send, and send the same key on every retry of the
-                     *     event. Keys are unique per tenant and mode (live or
+                     *     event. Keys are unique per account and mode (live or
                      *     test), forever. An event whose key was already used is
                      *     not stored again: the first event wins and the new body
                      *     is discarded. So never reuse a key for a different
@@ -12822,6 +19209,24 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_evt_db6eh6qq3gpgqfoq5c3o",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *       "quantity": "48000",
+                     *       "dimensions": {
+                     *         "model": "gpt-4o",
+                     *         "token_type": "input"
+                     *       },
+                     *       "idempotency_key": "import-2026-09-30-0001",
+                     *       "timestamp": "2026-09-30T23:10:00Z",
+                     *       "origin": "backfill",
+                     *       "provider_cost_cents": "12",
+                     *       "provider_cost_source": "table"
+                     *     }
+                     */
                     "application/json": components["schemas"]["UsageEvent"];
                 };
             };
@@ -12835,6 +19240,25 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_evt_db6eh6qq3gpgqfoq5c3o",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *       "quantity": "48000",
+                     *       "dimensions": {
+                     *         "model": "gpt-4o",
+                     *         "token_type": "input"
+                     *       },
+                     *       "idempotency_key": "import-2026-09-30-0001",
+                     *       "timestamp": "2026-09-30T23:10:00Z",
+                     *       "origin": "backfill",
+                     *       "provider_cost_cents": "12",
+                     *       "provider_cost_source": "table",
+                     *       "billing_status": "outside_subscription"
+                     *     }
+                     */
                     "application/json": components["schemas"]["UsageEvent"];
                 };
             };
@@ -12844,6 +19268,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12864,6 +19298,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must not be in the future for backfill — use POST /usage-events for real-time ingest",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "timestamp"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12878,6 +19323,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "ingest_unavailable",
+                     *         "message": "usage store temporarily unavailable — nothing was recorded; retry the request",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12898,6 +19353,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "external_customer_id": "globex-7",
+                     *           "event_name": "tokens",
+                     *           "reason": "customer_not_found",
+                     *           "rows": 12,
+                     *           "total_quantity": "18400",
+                     *           "first_event_at": "2026-10-14T08:00:12Z",
+                     *           "last_event_at": "2026-10-14T09:41:55Z",
+                     *           "last_received_at": "2026-10-14T09:41:56Z",
+                     *           "customer_id": "",
+                     *           "meter_exists": true
+                     *         }
+                     *       ],
+                     *       "total_customers": 1,
+                     *       "total_rows": 12
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["HeldUsageGroup"][];
                         /** @description External customer IDs with rows held, including those not listed in `data`. */
@@ -12920,6 +19395,11 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "external_customer_id": "globex-7"
+                 *     }
+                 */
                 "application/json": {
                     /** @description The external ID the rows were held under. */
                     external_customer_id: string;
@@ -12939,17 +19419,47 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0k",
+                     *       "released": 12,
+                     *       "deduplicated": 0,
+                     *       "still_held": 0,
+                     *       "more_to_release": 0,
+                     *       "in_open_period": 12,
+                     *       "no_price": 0,
+                     *       "not_on_plan": 0,
+                     *       "pending_threshold_invoice": 0,
+                     *       "outside_open_period": 0
+                     *     }
+                     */
                     "application/json": components["schemas"]["HeldUsageReleaseResult"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description `validation_error`: no customer has that external ID yet and no `customer_id` was given, or `customer_id` was not found. */
+            /**
+             * @description `validation_error`: `external_customer_id` is missing; no
+             *     customer has that external ID yet and no `customer_id` was
+             *     given; `customer_id` was not found; or the body has an unknown
+             *     field (`param` names it).
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "no customer has external ID \"globex-7\" yet — create it, or pass customer_id to release into another customer",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "external_customer_id"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -12965,7 +19475,14 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "external_customer_id": "globex-7",
+                 *       "event_name": "tokens"
+                 *     }
+                 */
                 "application/json": {
+                    /** @description The external ID the rows were held under. */
                     external_customer_id: string;
                     /** @description Discard only the rows with this `event_name`. Omit for all. */
                     event_name?: string;
@@ -12979,7 +19496,13 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "discarded": 12
+                     *     }
+                     */
                     "application/json": {
+                        /** @description Held rows marked discarded. 0 when none were held. */
                         discarded: number;
                     };
                 };
@@ -12992,6 +19515,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "external_customer_id is required",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "external_customer_id"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -13001,7 +19535,9 @@ export interface operations {
     aggregateUsageEvents: {
         parameters: {
             query?: {
+                /** @description Only this customer's events (`hc_cus_…`, the Hardcount ID, not your external ID). */
                 customer_id?: string;
+                /** @description Only this meter's events (`hc_mtr_…`). */
                 meter_id?: string;
                 /** @description Events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC. */
                 from?: string;
@@ -13031,6 +19567,35 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "total_events": 4210,
+                     *       "total_units": "12500000",
+                     *       "active_meters": 1,
+                     *       "active_customers": 1,
+                     *       "by_meter": [
+                     *         {
+                     *           "meter_id": "hc_mtr_dajr122q3gpgqfoq5c10",
+                     *           "total": "12500000",
+                     *           "aggregation": "sum",
+                     *           "value": "12500000",
+                     *           "events": 4210,
+                     *           "customers": 1,
+                     *           "peak": "48000",
+                     *           "daily": [
+                     *             {
+                     *               "date": "2026-10-12",
+                     *               "value": "410000"
+                     *             },
+                     *             {
+                     *               "date": "2026-10-13",
+                     *               "value": "395500"
+                     *             }
+                     *           ]
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": components["schemas"]["UsageAggregate"];
                 };
             };
@@ -13041,6 +19606,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "tz: unknown time zone \"Europe/Berln\" (use an IANA name such as Europe/Berlin)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -15281,8 +21856,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "invoices_generated": 3,
+                     *       "errors": []
+                     *     }
+                     */
                     "application/json": {
+                        /** @description Invoices the run created, on a partial run too. */
                         invoices_generated: number;
+                        /** @description One entry per failure, listed in the 206 response. Empty on a 200. */
                         errors: string[];
                     };
                 };
@@ -15305,13 +21888,46 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "invoices_generated": 2,
+                     *       "errors": [
+                     *         "subscription hc_sub_dauq502q3gpgqfoq5c2k: billing failed"
+                     *       ]
+                     *     }
+                     */
                     "application/json": {
+                        /** @description Invoices the run created, on a partial run too. */
                         invoices_generated: number;
+                        /** @description One entry per failure, listed in the 206 response. Empty on a 200. */
                         errors: string[];
                     };
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /**
+             * @description The request has a body with a field (`param` names it). This
+             *     route takes no body: send none, `{}` or `null`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"customer_id\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "customer_id"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -15335,12 +21951,41 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Rates */
+            /** @description One page of rates, and how many there are. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_pcr_9c3e5a7b1d2f4e6a8c0b2d4f",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "provider": "anthropic",
+                     *           "model": "claude-sonnet-4.5",
+                     *           "token_type": "input",
+                     *           "unit_cost_cents": "0.0002",
+                     *           "currency": "USD",
+                     *           "created_at": "2026-09-15T09:10:00Z",
+                     *           "updated_at": "2026-09-15T09:10:00Z"
+                     *         },
+                     *         {
+                     *           "id": "hc_pcr_9c3e5a7b1d2f4e6a8c0b2d61",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "provider": "anthropic",
+                     *           "model": "claude-sonnet-4.5",
+                     *           "token_type": "output",
+                     *           "unit_cost_cents": "0.001",
+                     *           "currency": "USD",
+                     *           "created_at": "2026-09-15T09:10:00Z",
+                     *           "updated_at": "2026-09-15T09:10:00Z"
+                     *         }
+                     *       ],
+                     *       "total": 2
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["ProviderCostRate"][];
                         total: components["schemas"]["ListTotal"];
@@ -15371,11 +22016,32 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "provider": "anthropic",
+                 *       "model": "claude-sonnet-4.5",
+                 *       "token_type": "input",
+                 *       "unit_cost_cents": "0.0002"
+                 *     }
+                 */
                 "application/json": {
+                    /**
+                     * @description The provider, such as `anthropic`. Stored in lower case;
+                     *     it must equal the `provider` label of the usage events it
+                     *     costs.
+                     */
                     provider: string;
-                    /** @description Model family token or raw snapshot id — raw ids match first at ingest. */
+                    /**
+                     * @description The model, such as `claude-sonnet-4.5`, or a raw model
+                     *     snapshot id. An event's `model_raw` label is matched
+                     *     first, then its `model` label.
+                     */
                     model: string;
-                    /** @description ADR-044 role — input / output / cache_read. */
+                    /**
+                     * @description The kind of token, such as `input`, `output` or
+                     *     `cache_read`. Stored in lower case; it must equal the
+                     *     `token_type` label of the usage events it costs.
+                     */
                     token_type: string;
                     /** @description US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens). 0 or more, under 10^10, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. */
                     unit_cost_cents: string;
@@ -15390,23 +22056,54 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upserted rate */
+            /** @description The rate as stored. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_pcr_9c3e5a7b1d2f4e6a8c0b2d4f",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "provider": "anthropic",
+                     *       "model": "claude-sonnet-4.5",
+                     *       "token_type": "input",
+                     *       "unit_cost_cents": "0.0002",
+                     *       "currency": "USD",
+                     *       "created_at": "2026-09-15T09:10:00Z",
+                     *       "updated_at": "2026-09-15T09:10:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["ProviderCostRate"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description `validation_error`: a required field is missing, `unit_cost_cents` is not a number or is outside its limits, `currency` is not USD, or the body has an unknown field such as `cost_per_token` (`param` names the field; the body must use only the fields listed here). */
+            /**
+             * @description `validation_error`: a required field is missing (`param` then
+             *     lists `provider, model, token_type` together, or
+             *     `unit_cost_cents`), `unit_cost_cents` is not a number or is
+             *     outside its limits, `currency` is not USD, or the body has an
+             *     unknown field such as `cost_per_token` (`param` names the field;
+             *     the body must use only the fields listed here).
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unit_cost_cents has more than 12 decimal places",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "unit_cost_cents"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -15418,29 +22115,79 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The rate's ID, `hc_pcr_` and 24 hex characters. */
                 id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Deleted */
+            /** @description Deleted. No body. */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            /** @description No rate with this ID in this account and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "provider_cost_rate not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field. This route takes no body
+             *     (`param` names the field).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"provider\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "provider"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
     getCustomerMargin: {
         parameters: {
             query?: {
-                /** @description Window start, inclusive. RFC 3339. Default is 30 days before the customer's current time. */
+                /**
+                 * @description Window start, inclusive. RFC 3339. Default is 30 days before the
+                 *     customer's current time.
+                 */
                 from?: string;
-                /** @description Window end, exclusive. RFC 3339. Default is the customer's current time (test clock time for a customer on a test clock). */
+                /**
+                 * @description Window end, exclusive. RFC 3339. Default is the customer's current
+                 *     time (test clock time for a customer on a test clock).
+                 */
                 to?: string;
             };
             header?: never;
@@ -15451,40 +22198,100 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Margin report */
+            /** @description The margin report. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "from": "2026-10-01T00:00:00Z",
+                     *       "to": "2026-11-01T00:00:00Z",
+                     *       "revenue_cents": 3750,
+                     *       "revenue_currency": "USD",
+                     *       "cost_cents": "2500",
+                     *       "cost_currency": "USD",
+                     *       "margin_bps": 3333,
+                     *       "costed_events": 4210,
+                     *       "cost_rates_configured": true,
+                     *       "by_model": [
+                     *         {
+                     *           "model": "claude-sonnet-4.5",
+                     *           "cost_cents": "2500",
+                     *           "attributed": false
+                     *         }
+                     *       ],
+                     *       "unattributed_revenue_cents": 3750,
+                     *       "unresolved_events": 0
+                     *     }
+                     */
                     "application/json": components["schemas"]["MarginReport"];
                 };
             };
-            /** @description `from` or `to` is not RFC 3339, or `from` is not before `to`. */
+            /**
+             * @description `invalid_request`: `from` or `to` is not RFC 3339, or `from` is
+             *     not before `to`.
+             */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "from: must be RFC3339",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Customer not found. */
+            /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The window is longer than one year. */
+            /**
+             * @description The window is longer than one year (`validation_error`,
+             *     `param: period`).
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "rate usage window: window must be ≤ 1 year",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "period"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -15510,7 +22317,18 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                 *       "currency": "USD",
+                 *       "amount_cents": 5000,
+                 *       "description": "Welcome credit",
+                 *       "expires_at": "2027-01-01T00:00:00Z",
+                 *       "grant_kind": "promotional"
+                 *     }
+                 */
                 "application/json": {
+                    /** @description The customer to grant credit to (`hc_cus_…`). */
                     customer_id: string;
                     /**
                      * @description ISO 4217 code of the credit. Required. Case-insensitive;
@@ -15519,8 +22337,17 @@ export interface operations {
                      * @example USD
                      */
                     currency: string;
-                    /** Format: int64 */
+                    /**
+                     * Format: int64
+                     * @description The credit to add, in the currency's minor unit (cents
+                     *     for USD). From 1 to 100000000 (1,000,000.00).
+                     */
                     amount_cents: number;
+                    /**
+                     * @description What the credit is for, shown on the ledger entry.
+                     *     Required: a grant without one, or with a blank one, is
+                     *     refused with 422. At most 500 characters.
+                     */
                     description?: string;
                     /**
                      * Format: date-time
@@ -15532,11 +22359,11 @@ export interface operations {
                      */
                     expires_at?: string;
                     /**
-                     * @description Optional cost-basis class (ADR-078). `promotional` marks
-                     *     free/marketing credits, drained BEFORE all paid-class
-                     *     blocks. Omitted = unclassified (drains in the paid
-                     *     class). `commit` is reserved for the invoice-finalize
-                     *     funding path and rejected here.
+                     * @description Optional cost-basis class. `promotional` marks free or
+                     *     marketing credit, which invoices draw before any other
+                     *     credit. Omitted means unclassified credit. `commit` is
+                     *     refused here: commit credit comes only from finalizing a
+                     *     commit invoice.
                      * @enum {string}
                      */
                     grant_kind?: "promotional";
@@ -15550,17 +22377,70 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_ccl_dav2242q3gpgqfoq5c50",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "entry_type": "grant",
+                     *       "currency": "USD",
+                     *       "amount_cents": 5000,
+                     *       "balance_after": 5000,
+                     *       "description": "Welcome credit",
+                     *       "expires_at": "2027-01-01T00:00:00Z",
+                     *       "created_at": "2026-10-01T09:00:00Z",
+                     *       "grant_kind": "promotional"
+                     *     }
+                     */
                     "application/json": components["schemas"]["CreditLedgerEntry"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description A field failed validation (a missing or unsupported `currency` has `param` `currency`), or the body has an unknown field (`param` names it; the body must use only the fields listed here). */
+            /** @description No customer with this `customer_id` in this account and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description A field failed validation (`param` names it): `customer_id` or
+             *     `description` missing; a missing or unsupported `currency`;
+             *     `amount_cents` not above 0 or above 100000000; a `description`
+             *     over 500 characters; an `expires_at` not in the future; a
+             *     `grant_kind` other than `promotional`. Or the body has an unknown
+             *     field (`param` names it; the body must use only the fields
+             *     listed here).
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "must be greater than 0",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "amount_cents"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -15572,6 +22452,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The customer's ID (`hc_cus_…`). */
                 customer_id: string;
             };
             cookie?: never;
@@ -15584,18 +22465,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "currency": "USD",
+                     *           "balance_cents": 5000,
+                     *           "total_granted": 5000,
+                     *           "total_used": 0,
+                     *           "total_expired": 0,
+                     *           "total_retired": 0,
+                     *           "total_deducted": 0
+                     *         }
+                     *       ]
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["CreditBalance"][];
                     };
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description No customer with this ID in this tenant and mode. */
+            /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -15607,6 +22514,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The customer's ID (`hc_cus_…`). */
                 customer_id: string;
             };
             cookie?: never;
@@ -15619,16 +22527,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "balances": [
+                     *         {
+                     *           "currency": "USD",
+                     *           "balance_cents": 5000,
+                     *           "unbilled_usage_cents": 2400,
+                     *           "estimated_remaining_cents": 2600
+                     *         }
+                     *       ],
+                     *       "computed_at": "2026-10-20T12:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["CreditLiveBalance"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Customer not found in this tenant and mode */
+            /** @description No customer with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -15659,6 +22593,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "name": "October renewal walk",
+                     *           "frozen_time": "2026-11-02T00:00:00Z",
+                     *           "status": "ready",
+                     *           "created_at": "2026-10-28T15:00:00Z",
+                     *           "updated_at": "2026-10-28T15:04:12Z",
+                     *           "last_advance_summary": {
+                     *             "advanced_from": "2026-10-01T00:00:00Z",
+                     *             "advanced_to": "2026-11-02T00:00:00Z",
+                     *             "invoices_generated": 1,
+                     *             "trials_activated": 0,
+                     *             "pauses_resumed": 0,
+                     *             "thresholds_fired": 0,
+                     *             "tax_retried": 0,
+                     *             "charges_retried": 1,
+                     *             "clawbacks_issued": 0,
+                     *             "credits_expired": 0,
+                     *             "dunning_advanced": 0,
+                     *             "had_errors": false
+                     *           }
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["TestClock"][];
                         total: components["schemas"]["ListTotal"];
@@ -15666,12 +22630,22 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Caller is in live mode */
+            /** @description Caller is in live mode, or the key lacks the `testclock:write` permission. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "test clocks are only available in test mode — use a test-mode API key (hc_secret_test_...)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -15698,9 +22672,19 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "name": "October renewal walk",
+                 *       "frozen_time": "2026-10-01T00:00:00Z"
+                 *     }
+                 */
                 "application/json": {
+                    /** @description Your name for the clock. Optional; at most 200 characters. */
                     name?: string;
-                    /** Format: date-time */
+                    /**
+                     * Format: date-time
+                     * @description The clock's starting time, RFC 3339. Any instant, past or future.
+                     */
                     frozen_time: string;
                 };
             };
@@ -15712,11 +22696,65 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "name": "October renewal walk",
+                     *       "frozen_time": "2026-10-01T00:00:00Z",
+                     *       "status": "ready",
+                     *       "created_at": "2026-10-28T15:00:00Z",
+                     *       "updated_at": "2026-10-28T15:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["TestClock"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
+            /** @description Caller is in live mode, or the key lacks the `testclock:write` permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "test clocks are only available in test mode — use a test-mode API key (hc_secret_test_...)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `frozen_time` is missing, or `name` is longer than 200
+             *     characters (`param` names the field). Or the body has an
+             *     unknown field (`param` names it).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "frozen_time is required",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "frozen_time"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -15725,6 +22763,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The clock's ID (`hc_tclk_…`). */
                 id: string;
             };
             cookie?: never;
@@ -15737,16 +22776,72 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "name": "October renewal walk",
+                     *       "frozen_time": "2026-11-02T00:00:00Z",
+                     *       "status": "ready",
+                     *       "created_at": "2026-10-28T15:00:00Z",
+                     *       "updated_at": "2026-10-28T15:04:12Z",
+                     *       "last_advance_summary": {
+                     *         "advanced_from": "2026-10-01T00:00:00Z",
+                     *         "advanced_to": "2026-11-02T00:00:00Z",
+                     *         "invoices_generated": 1,
+                     *         "trials_activated": 0,
+                     *         "pauses_resumed": 0,
+                     *         "thresholds_fired": 0,
+                     *         "tax_retried": 0,
+                     *         "charges_retried": 1,
+                     *         "clawbacks_issued": 0,
+                     *         "credits_expired": 0,
+                     *         "dunning_advanced": 0,
+                     *         "had_errors": false
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["TestClock"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Clock not found */
+            /** @description Caller is in live mode, or the key lacks the `testclock:write` permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "test clocks are only available in test mode — use a test-mode API key (hc_secret_test_...)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No test clock with this ID in this account. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "test_clock not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -15756,6 +22851,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The clock's ID (`hc_tclk_…`). */
                 id: string;
             };
             cookie?: never;
@@ -15768,13 +22864,82 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "status": "deleted"
+                     *     }
+                     */
                     "application/json": {
-                        /** @enum {string} */
+                        /**
+                         * @description Always `deleted`.
+                         * @enum {string}
+                         */
                         status: "deleted";
                     };
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description Caller is in live mode, or the key lacks the `testclock:write` permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "test clocks are only available in test mode — use a test-mode API key (hc_secret_test_...)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No test clock with this ID in this account, including one already deleted. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "test_clock not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field (`param` names it). This
+             *     route takes no body: send none, `{}` or `null`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"force\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "force"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -15794,6 +22959,7 @@ export interface operations {
             };
             header?: never;
             path: {
+                /** @description The clock's ID (`hc_tclk_…`). */
                 id: string;
             };
             cookie?: never;
@@ -15806,6 +22972,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "code": "acme-pro",
+                     *           "display_name": "Acme Pro",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "items": [
+                     *             {
+                     *               "id": "hc_si_dauq50aq3gpgqfoq5c30",
+                     *               "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *               "subscription_id": "hc_sub_dauq502q3gpgqfoq5c2g",
+                     *               "plan_id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
+                     *               "quantity": 1,
+                     *               "created_at": "2026-10-01T00:00:00Z",
+                     *               "updated_at": "2026-10-01T00:00:00Z"
+                     *             }
+                     *           ],
+                     *           "status": "active",
+                     *           "billing_time": "calendar",
+                     *           "started_at": "2026-10-01T00:00:00Z",
+                     *           "activated_at": "2026-10-01T00:00:00Z",
+                     *           "cancel_at_period_end": false,
+                     *           "current_billing_period_start": "2026-11-01T00:00:00Z",
+                     *           "current_billing_period_end": "2026-12-01T00:00:00Z",
+                     *           "current_billing_period_display": "Nov 1, 2026 – Nov 30, 2026",
+                     *           "next_billing_at": "2026-12-01T00:00:00Z",
+                     *           "test_clock_id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *           "created_at": "2026-10-01T00:00:00Z",
+                     *           "updated_at": "2026-11-01T00:00:00Z"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["Subscription"][];
                         total: components["schemas"]["ListTotal"];
@@ -15813,12 +23016,43 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Clock not found */
+            /** @description Caller is in live mode, or the key lacks the `testclock:write` permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "test clocks are only available in test mode — use a test-mode API key (hc_secret_test_...)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No test clock with this ID in this account. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "test_clock not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
@@ -15839,14 +23073,24 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The clock's ID (`hc_tclk_…`). */
                 id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "frozen_time": "2026-11-02T00:00:00Z"
+                 *     }
+                 */
                 "application/json": {
-                    /** Format: date-time */
+                    /**
+                     * Format: date-time
+                     * @description The clock's new time, RFC 3339. Must be after its
+                     *     current `frozen_time` and at most one year after it.
+                     */
                     frozen_time: string;
                 };
             };
@@ -15858,24 +23102,106 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "name": "October renewal walk",
+                     *       "frozen_time": "2026-11-02T00:00:00Z",
+                     *       "status": "advancing",
+                     *       "created_at": "2026-10-28T15:00:00Z",
+                     *       "updated_at": "2026-10-28T15:04:10Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["TestClock"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Clock is not in `ready` state */
+            /** @description Caller is in live mode, or the key lacks the `testclock:write` permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "test clocks are only available in test mode — use a test-mode API key (hc_secret_test_...)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No test clock with this ID in this account. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "test_clock not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `invalid_state`: the clock is not `ready`. It is still
+             *     `advancing`, or in `internal_failure` (retry the advance
+             *     instead).
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "clock is advancing, must be ready to advance",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
-            /** @description New frozen_time is not strictly after the current frozen_time, or is more than one year after it */
+            /**
+             * @description `frozen_time` is missing, not strictly after the current
+             *     `frozen_time`, or more than one year after it
+             *     (`param: frozen_time`). Or the body has an unknown field.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "advance cannot exceed 1 year per call — chunk longer ranges into successive advances",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "frozen_time"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -15895,6 +23221,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The clock's ID (`hc_tclk_…`). */
                 id: string;
             };
             cookie?: never;
@@ -15907,23 +23234,114 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "name": "October renewal walk",
+                     *       "frozen_time": "2026-11-02T00:00:00Z",
+                     *       "status": "advancing",
+                     *       "created_at": "2026-10-28T15:00:00Z",
+                     *       "updated_at": "2026-10-28T15:20:31Z",
+                     *       "last_advance_summary": {
+                     *         "advanced_from": "2026-10-01T00:00:00Z",
+                     *         "advanced_to": "2026-11-02T00:00:00Z",
+                     *         "invoices_generated": 1,
+                     *         "trials_activated": 0,
+                     *         "pauses_resumed": 0,
+                     *         "thresholds_fired": 0,
+                     *         "tax_retried": 0,
+                     *         "charges_retried": 0,
+                     *         "clawbacks_issued": 0,
+                     *         "credits_expired": 0,
+                     *         "dunning_advanced": 0,
+                     *         "had_errors": true
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["TestClock"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Clock not found */
+            /** @description Caller is in live mode, or the key lacks the `testclock:write` permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "test clocks are only available in test mode — use a test-mode API key (hc_secret_test_...)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No test clock with this ID in this account. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "test_clock not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
-            /** @description Clock is not in `internal_failure` state */
+            /** @description Code `invalid_state`. The clock is not in `internal_failure`. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "retry only valid on clocks in internal_failure (current: ready)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field (`param` names it). This
+             *     route takes no body: send none, `{}` or `null`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"frozen_time\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "frozen_time"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -15944,6 +23362,7 @@ export interface operations {
             };
             header?: never;
             path: {
+                /** @description The clock's ID (`hc_tclk_…`). */
                 id: string;
             };
             cookie?: never;
@@ -15956,6 +23375,25 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "external_id": "acme-42",
+                     *           "display_name": "Acme Inc",
+                     *           "email": "billing@acme.example",
+                     *           "status": "active",
+                     *           "email_status": "unknown",
+                     *           "test_clock_id": "hc_tclk_dauj402q3gpgqfoq5c9g",
+                     *           "created_at": "2026-10-28T15:01:00Z",
+                     *           "updated_at": "2026-10-28T15:01:00Z"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["Customer"][];
                         total: components["schemas"]["ListTotal"];
@@ -15969,6 +23407,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "authentication_error",
+                     *         "code": "forbidden",
+                     *         "message": "test clocks are only available in test mode — use a test-mode API key (hc_secret_test_...)",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -15978,6 +23426,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "test_clock not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -16005,12 +23463,155 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Recipe catalog with per-tenant install state */
+            /** @description One page of recipes, and how many there are. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "key": "replicate_style",
+                     *           "version": "7.0.0",
+                     *           "name": "GPU compute pricing (per-second)",
+                     *           "summary": "Ready-made pricing for reselling GPU compute. Bills each customer per\nsecond of GPU time, at a separate rate for each GPU type (H100, A100,\nA40, T4, CPU), on a monthly plan.\n",
+                     *           "description": "Sets up everything you need to bill customers for GPU compute time:\n\n  • A usage meter that counts GPU-seconds. Each event you send must\n    carry the seconds consumed since that job's previous report (a\n    per-interval delta), not a cumulative running total — the meter\n    sums deltas, and cumulative totals would under-bill whenever two\n    jobs share a GPU class\n  • A per-second price for each GPU type — H100, A100 (80GB), A40, T4,\n    and CPU\n  • A monthly plan your customers subscribe to\n\nPrices start at Replicate's public per-second rates — a starting point\nyou'll edit to your own margins after setup. Before installing, you can\nset the currency and the plan's name.\n",
+                     *           "overridable": [
+                     *             {
+                     *               "key": "currency",
+                     *               "type": "string",
+                     *               "default": "USD",
+                     *               "enum": [
+                     *                 "USD",
+                     *                 "EUR",
+                     *                 "GBP"
+                     *               ]
+                     *             },
+                     *             {
+                     *               "key": "plan_name",
+                     *               "type": "string",
+                     *               "default": "GPU Compute",
+                     *               "max_length": 80
+                     *             },
+                     *             {
+                     *               "key": "plan_code",
+                     *               "type": "string",
+                     *               "default": "gpu_compute_pro",
+                     *               "pattern": "^[a-z][a-z0-9_]*$"
+                     *             }
+                     *           ],
+                     *           "meters": [
+                     *             {
+                     *               "event_name": "gpu_seconds",
+                     *               "name": "GPU seconds",
+                     *               "unit": "seconds",
+                     *               "aggregation": "sum"
+                     *             }
+                     *           ],
+                     *           "plans": [
+                     *             {
+                     *               "code": "gpu_compute_pro",
+                     *               "name": "GPU Compute",
+                     *               "currency": "USD",
+                     *               "billing_interval": "monthly",
+                     *               "base_amount_cents": 0,
+                     *               "prices": [
+                     *                 {
+                     *                   "meter": "gpu_seconds",
+                     *                   "dimension_match": {
+                     *                     "gpu_type": "h100"
+                     *                   },
+                     *                   "mode": "per_unit",
+                     *                   "unit_amount_cents": "0.1525",
+                     *                   "tiers": [],
+                     *                   "package_size": 0,
+                     *                   "package_amount_cents": "0"
+                     *                 },
+                     *                 {
+                     *                   "meter": "gpu_seconds",
+                     *                   "dimension_match": {
+                     *                     "gpu_type": "a100"
+                     *                   },
+                     *                   "mode": "per_unit",
+                     *                   "unit_amount_cents": "0.14",
+                     *                   "tiers": [],
+                     *                   "package_size": 0,
+                     *                   "package_amount_cents": "0"
+                     *                 },
+                     *                 {
+                     *                   "meter": "gpu_seconds",
+                     *                   "dimension_match": {
+                     *                     "gpu_type": "a40"
+                     *                   },
+                     *                   "mode": "per_unit",
+                     *                   "unit_amount_cents": "0.0575",
+                     *                   "tiers": [],
+                     *                   "package_size": 0,
+                     *                   "package_amount_cents": "0"
+                     *                 },
+                     *                 {
+                     *                   "meter": "gpu_seconds",
+                     *                   "dimension_match": {
+                     *                     "gpu_type": "t4"
+                     *                   },
+                     *                   "mode": "per_unit",
+                     *                   "unit_amount_cents": "0.0225",
+                     *                   "tiers": [],
+                     *                   "package_size": 0,
+                     *                   "package_amount_cents": "0"
+                     *                 },
+                     *                 {
+                     *                   "meter": "gpu_seconds",
+                     *                   "dimension_match": {
+                     *                     "gpu_type": "cpu"
+                     *                   },
+                     *                   "mode": "per_unit",
+                     *                   "unit_amount_cents": "0.01",
+                     *                   "tiers": [],
+                     *                   "package_size": 0,
+                     *                   "package_amount_cents": "0"
+                     *                 }
+                     *               ]
+                     *             }
+                     *           ],
+                     *           "creates": {
+                     *             "meters": 1,
+                     *             "plans": 1,
+                     *             "prices": 5
+                     *           },
+                     *           "instantiated": {
+                     *             "id": "hc_rec_6b1d3f5a7c9e0b2d4f6a8c1e",
+                     *             "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *             "recipe_key": "replicate_style",
+                     *             "recipe_version": "7.0.0",
+                     *             "overrides": {
+                     *               "plan_name": "GPU Pro"
+                     *             },
+                     *             "created_objects": {
+                     *               "meter_ids": [
+                     *                 "hc_mtr_dajr122q3gpgqfoq5c18"
+                     *               ],
+                     *               "plan_ids": [
+                     *                 "hc_pln_dajr5o2q3gpgqfoq5c1s"
+                     *               ],
+                     *               "price_ids": [
+                     *                 "hc_prc_dajr672q3gpgqfoq5c3a",
+                     *                 "hc_prc_dajr672q3gpgqfoq5c3b",
+                     *                 "hc_prc_dajr672q3gpgqfoq5c3c",
+                     *                 "hc_prc_dajr672q3gpgqfoq5c3d",
+                     *                 "hc_prc_dajr672q3gpgqfoq5c3e"
+                     *               ]
+                     *             },
+                     *             "created_at": "2026-10-05T10:00:00Z",
+                     *             "created_by": "hc_key_dajqj1iq3gpgqfoq5ca0"
+                     *           }
+                     *         }
+                     *       ],
+                     *       "total": 3
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["RecipeListItem"][];
                         total: components["schemas"]["ListTotal"];
@@ -16042,12 +23643,45 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Install badges for this tenant (session's livemode) */
+            /** @description One page of install records, and how many there are. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_rec_6b1d3f5a7c9e0b2d4f6a8c1e",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "recipe_key": "replicate_style",
+                     *           "recipe_version": "7.0.0",
+                     *           "overrides": {
+                     *             "plan_name": "GPU Pro"
+                     *           },
+                     *           "created_objects": {
+                     *             "meter_ids": [
+                     *               "hc_mtr_dajr122q3gpgqfoq5c18"
+                     *             ],
+                     *             "plan_ids": [
+                     *               "hc_pln_dajr5o2q3gpgqfoq5c1s"
+                     *             ],
+                     *             "price_ids": [
+                     *               "hc_prc_dajr672q3gpgqfoq5c3a",
+                     *               "hc_prc_dajr672q3gpgqfoq5c3b",
+                     *               "hc_prc_dajr672q3gpgqfoq5c3c",
+                     *               "hc_prc_dajr672q3gpgqfoq5c3d",
+                     *               "hc_prc_dajr672q3gpgqfoq5c3e"
+                     *             ]
+                     *           },
+                     *           "created_at": "2026-10-05T10:00:00Z",
+                     *           "created_by": "hc_key_dajqj1iq3gpgqfoq5ca0"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["RecipeInstance"][];
                         total: components["schemas"]["ListTotal"];
@@ -16064,28 +23698,153 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The recipe's key, such as `replicate_style`. */
                 key: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Recipe template with creates summary */
+            /** @description The recipe, with how many objects it makes. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "key": "replicate_style",
+                     *       "version": "7.0.0",
+                     *       "name": "GPU compute pricing (per-second)",
+                     *       "summary": "Ready-made pricing for reselling GPU compute. Bills each customer per\nsecond of GPU time, at a separate rate for each GPU type (H100, A100,\nA40, T4, CPU), on a monthly plan.\n",
+                     *       "description": "Sets up everything you need to bill customers for GPU compute time:\n\n  • A usage meter that counts GPU-seconds. Each event you send must\n    carry the seconds consumed since that job's previous report (a\n    per-interval delta), not a cumulative running total — the meter\n    sums deltas, and cumulative totals would under-bill whenever two\n    jobs share a GPU class\n  • A per-second price for each GPU type — H100, A100 (80GB), A40, T4,\n    and CPU\n  • A monthly plan your customers subscribe to\n\nPrices start at Replicate's public per-second rates — a starting point\nyou'll edit to your own margins after setup. Before installing, you can\nset the currency and the plan's name.\n",
+                     *       "overridable": [
+                     *         {
+                     *           "key": "currency",
+                     *           "type": "string",
+                     *           "default": "USD",
+                     *           "enum": [
+                     *             "USD",
+                     *             "EUR",
+                     *             "GBP"
+                     *           ]
+                     *         },
+                     *         {
+                     *           "key": "plan_name",
+                     *           "type": "string",
+                     *           "default": "GPU Compute",
+                     *           "max_length": 80
+                     *         },
+                     *         {
+                     *           "key": "plan_code",
+                     *           "type": "string",
+                     *           "default": "gpu_compute_pro",
+                     *           "pattern": "^[a-z][a-z0-9_]*$"
+                     *         }
+                     *       ],
+                     *       "meters": [
+                     *         {
+                     *           "event_name": "gpu_seconds",
+                     *           "name": "GPU seconds",
+                     *           "unit": "seconds",
+                     *           "aggregation": "sum"
+                     *         }
+                     *       ],
+                     *       "plans": [
+                     *         {
+                     *           "code": "gpu_compute_pro",
+                     *           "name": "GPU Compute",
+                     *           "currency": "USD",
+                     *           "billing_interval": "monthly",
+                     *           "base_amount_cents": 0,
+                     *           "prices": [
+                     *             {
+                     *               "meter": "gpu_seconds",
+                     *               "dimension_match": {
+                     *                 "gpu_type": "h100"
+                     *               },
+                     *               "mode": "per_unit",
+                     *               "unit_amount_cents": "0.1525",
+                     *               "tiers": [],
+                     *               "package_size": 0,
+                     *               "package_amount_cents": "0"
+                     *             },
+                     *             {
+                     *               "meter": "gpu_seconds",
+                     *               "dimension_match": {
+                     *                 "gpu_type": "a100"
+                     *               },
+                     *               "mode": "per_unit",
+                     *               "unit_amount_cents": "0.14",
+                     *               "tiers": [],
+                     *               "package_size": 0,
+                     *               "package_amount_cents": "0"
+                     *             },
+                     *             {
+                     *               "meter": "gpu_seconds",
+                     *               "dimension_match": {
+                     *                 "gpu_type": "a40"
+                     *               },
+                     *               "mode": "per_unit",
+                     *               "unit_amount_cents": "0.0575",
+                     *               "tiers": [],
+                     *               "package_size": 0,
+                     *               "package_amount_cents": "0"
+                     *             },
+                     *             {
+                     *               "meter": "gpu_seconds",
+                     *               "dimension_match": {
+                     *                 "gpu_type": "t4"
+                     *               },
+                     *               "mode": "per_unit",
+                     *               "unit_amount_cents": "0.0225",
+                     *               "tiers": [],
+                     *               "package_size": 0,
+                     *               "package_amount_cents": "0"
+                     *             },
+                     *             {
+                     *               "meter": "gpu_seconds",
+                     *               "dimension_match": {
+                     *                 "gpu_type": "cpu"
+                     *               },
+                     *               "mode": "per_unit",
+                     *               "unit_amount_cents": "0.01",
+                     *               "tiers": [],
+                     *               "package_size": 0,
+                     *               "package_amount_cents": "0"
+                     *             }
+                     *           ]
+                     *         }
+                     *       ],
+                     *       "creates": {
+                     *         "meters": 1,
+                     *         "plans": 1,
+                     *         "prices": 5
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["RecipeDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Unknown recipe key */
+            /** @description No recipe with this key. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "recipe not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -16105,13 +23864,27 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The recipe's key, such as `replicate_style`. */
                 key: string;
             };
             cookie?: never;
         };
         requestBody?: {
             content: {
+                /**
+                 * @example {
+                 *       "overrides": {
+                 *         "plan_name": "GPU Pro"
+                 *       }
+                 *     }
+                 */
                 "application/json": {
+                    /**
+                     * @description Values for the recipe's `overridable` keys, such as
+                     *     `{"currency": "EUR"}`. A key the recipe does not list, or
+                     *     a value that breaks the key's rules, is refused with 422.
+                     *     Keys you leave out take their defaults.
+                     */
                     overrides?: {
                         [key: string]: unknown;
                     };
@@ -16119,30 +23892,141 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Rendered object graph */
+            /** @description What an install would create. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "key": "replicate_style",
+                     *       "version": "7.0.0",
+                     *       "objects": {
+                     *         "meters": [
+                     *           {
+                     *             "event_name": "gpu_seconds",
+                     *             "name": "GPU seconds",
+                     *             "unit": "seconds",
+                     *             "aggregation": "sum"
+                     *           }
+                     *         ],
+                     *         "plans": [
+                     *           {
+                     *             "code": "gpu_compute_pro",
+                     *             "name": "GPU Pro",
+                     *             "currency": "USD",
+                     *             "billing_interval": "monthly",
+                     *             "base_amount_cents": 0,
+                     *             "prices": [
+                     *               {
+                     *                 "meter": "gpu_seconds",
+                     *                 "dimension_match": {
+                     *                   "gpu_type": "h100"
+                     *                 },
+                     *                 "mode": "per_unit",
+                     *                 "unit_amount_cents": "0.1525",
+                     *                 "tiers": [],
+                     *                 "package_size": 0,
+                     *                 "package_amount_cents": "0"
+                     *               },
+                     *               {
+                     *                 "meter": "gpu_seconds",
+                     *                 "dimension_match": {
+                     *                   "gpu_type": "a100"
+                     *                 },
+                     *                 "mode": "per_unit",
+                     *                 "unit_amount_cents": "0.14",
+                     *                 "tiers": [],
+                     *                 "package_size": 0,
+                     *                 "package_amount_cents": "0"
+                     *               },
+                     *               {
+                     *                 "meter": "gpu_seconds",
+                     *                 "dimension_match": {
+                     *                   "gpu_type": "a40"
+                     *                 },
+                     *                 "mode": "per_unit",
+                     *                 "unit_amount_cents": "0.0575",
+                     *                 "tiers": [],
+                     *                 "package_size": 0,
+                     *                 "package_amount_cents": "0"
+                     *               },
+                     *               {
+                     *                 "meter": "gpu_seconds",
+                     *                 "dimension_match": {
+                     *                   "gpu_type": "t4"
+                     *                 },
+                     *                 "mode": "per_unit",
+                     *                 "unit_amount_cents": "0.0225",
+                     *                 "tiers": [],
+                     *                 "package_size": 0,
+                     *                 "package_amount_cents": "0"
+                     *               },
+                     *               {
+                     *                 "meter": "gpu_seconds",
+                     *                 "dimension_match": {
+                     *                   "gpu_type": "cpu"
+                     *                 },
+                     *                 "mode": "per_unit",
+                     *                 "unit_amount_cents": "0.01",
+                     *                 "tiers": [],
+                     *                 "package_size": 0,
+                     *                 "package_amount_cents": "0"
+                     *               }
+                     *             ]
+                     *           }
+                     *         ]
+                     *       },
+                     *       "warnings": []
+                     *     }
+                     */
                     "application/json": components["schemas"]["RecipePreviewResult"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Unknown recipe key */
+            /** @description No recipe with this key. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "recipe not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
-            /** @description Overrides failed the recipe's overridable schema */
+            /**
+             * @description An override failed the recipe's rules, or the body has an unknown
+             *     field (`validation_error`, `param` is `overrides` or the field).
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown override key \"plan_price\" for recipe \"replicate_style\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "overrides"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -16162,13 +24046,27 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description The recipe's key, such as `replicate_style`. */
                 key: string;
             };
             cookie?: never;
         };
         requestBody?: {
             content: {
+                /**
+                 * @example {
+                 *       "overrides": {
+                 *         "plan_name": "GPU Pro"
+                 *       }
+                 *     }
+                 */
                 "application/json": {
+                    /**
+                     * @description Values for the recipe's `overridable` keys, such as
+                     *     `{"currency": "EUR"}`. A key the recipe does not list, or
+                     *     a value that breaks the key's rules, is refused with 422.
+                     *     Keys you leave out take their defaults.
+                     */
                     overrides?: {
                         [key: string]: unknown;
                     };
@@ -16176,37 +24074,115 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Install badge (fresh, or existing on idempotent re-apply) */
+            /**
+             * @description The install record: a new one, or the existing one when the recipe
+             *     was already installed.
+             */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_rec_6b1d3f5a7c9e0b2d4f6a8c1e",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "recipe_key": "replicate_style",
+                     *       "recipe_version": "7.0.0",
+                     *       "overrides": {
+                     *         "plan_name": "GPU Pro"
+                     *       },
+                     *       "created_objects": {
+                     *         "meter_ids": [
+                     *           "hc_mtr_dajr122q3gpgqfoq5c18"
+                     *         ],
+                     *         "plan_ids": [
+                     *           "hc_pln_dajr5o2q3gpgqfoq5c1s"
+                     *         ],
+                     *         "price_ids": [
+                     *           "hc_prc_dajr672q3gpgqfoq5c3a",
+                     *           "hc_prc_dajr672q3gpgqfoq5c3b",
+                     *           "hc_prc_dajr672q3gpgqfoq5c3c",
+                     *           "hc_prc_dajr672q3gpgqfoq5c3d",
+                     *           "hc_prc_dajr672q3gpgqfoq5c3e"
+                     *         ]
+                     *       },
+                     *       "created_at": "2026-10-05T10:00:00Z",
+                     *       "created_by": "hc_key_dajqj1iq3gpgqfoq5ca0"
+                     *     }
+                     */
                     "application/json": components["schemas"]["RecipeInstance"];
                 };
             };
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description Unknown recipe key */
+            /** @description No recipe with this key. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "recipe not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
-            /** @description Nothing is installed. Either a meter with the recipe's `event_name` has another aggregation, so the recipe cannot use it, or another install that ran at the same time created the meter, the plan code or this recipe's install first (retry). */
+            /**
+             * @description Nothing is installed (`already_exists`). Either a meter with the
+             *     recipe's `event_name` has another aggregation, so the recipe
+             *     cannot use it (`param: meter`), or another install that ran at the
+             *     same time created the meter, the plan code or this recipe's
+             *     install first (retry).
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "already_exists",
+                     *         "message": "Meter \"gpu_seconds\" already exists and adds up usage another way (usage aggregation: recipe wants sum, existing is max), so the recipe can\"\"t use it. Its aggregation can change only until the meter has a usage event; after that it is fixed.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "meter"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
-            /** @description Overrides failed the recipe's overridable schema */
+            /**
+             * @description An override failed the recipe's rules, or the body has an unknown
+             *     field (`validation_error`, `param` is `overrides` or the field).
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "override \"currency\" value \"JPY\" not in allowed enum [USD EUR GBP]",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "overrides"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -17069,12 +25045,34 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Overrides */
+            /** @description One page of active overrides, and how many match. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "hc_cpo_daof442q3gpgqfoq5cag",
+                     *           "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *           "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *           "price_id": "hc_prc_dajr672q3gpgqfoq5c20",
+                     *           "mode": "per_unit",
+                     *           "unit_amount_cents": "0.00025",
+                     *           "tiers": [],
+                     *           "package_size": 0,
+                     *           "package_amount_cents": "0",
+                     *           "reason": "Annual commitment discount",
+                     *           "active": true,
+                     *           "created_at": "2026-10-15T12:30:00Z",
+                     *           "updated_at": "2026-10-15T12:30:00Z"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
                     "application/json": {
                         data: components["schemas"]["CustomerPriceOverride"][];
                         total: components["schemas"]["ListTotal"];
@@ -17105,7 +25103,20 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                 *       "price_id": "hc_prc_dajr672q3gpgqfoq5c20",
+                 *       "mode": "per_unit",
+                 *       "unit_amount_cents": "0.00025",
+                 *       "reason": "Annual commitment discount"
+                 *     }
+                 */
                 "application/json": {
+                    /**
+                     * @description The customer who gets the rate. It must be a customer in
+                     *     this account and mode.
+                     */
                     customer_id: string;
                     /** @description The plan price to override. */
                     price_id: string;
@@ -17118,7 +25129,11 @@ export interface operations {
                     unit_amount_cents?: string;
                     /** @description Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. */
                     tiers?: {
-                        /** Format: int64 */
+                        /**
+                         * Format: int64
+                         * @description The tier's upper bound in whole units. `null` on the
+                         *     last tier, and only there.
+                         */
                         up_to?: number | null;
                         /** @description Price per unit in cents in this tier, as a decimal string, with the limits of `unit_amount_cents`. A refusal names `tiers[i].unit_amount_cents` (i counts from 0). */
                         unit_amount_cents?: string;
@@ -17130,17 +25145,38 @@ export interface operations {
                     package_size?: number;
                     /** @description Price of one package in cents, as a decimal string, with the limits of `unit_amount_cents`. Used when `mode` is `package`. */
                     package_amount_cents?: string;
+                    /**
+                     * @description Your note on why the customer has this rate, such as a
+                     *     contract reference. Spaces at the ends are trimmed.
+                     */
                     reason?: string;
                 };
             };
         };
         responses: {
-            /** @description The new override */
+            /** @description The new override. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_cpo_daof442q3gpgqfoq5cag",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "price_id": "hc_prc_dajr672q3gpgqfoq5c20",
+                     *       "mode": "per_unit",
+                     *       "unit_amount_cents": "0.00025",
+                     *       "tiers": [],
+                     *       "package_size": 0,
+                     *       "package_amount_cents": "0",
+                     *       "reason": "Annual commitment discount",
+                     *       "active": true,
+                     *       "created_at": "2026-10-15T12:30:00Z",
+                     *       "updated_at": "2026-10-15T12:30:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["CustomerPriceOverride"];
                 };
             };
@@ -17150,45 +25186,85 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description `not_found`: no customer with this id in this tenant and mode. */
+            /** @description `not_found`: no customer with this ID in this account and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "customer not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
-             * @description `already_exists`: another request created an override for the
-             *     same customer and price at the same moment. Retry.
-             *     `invalid_state`: the price was removed from its plan.
+             * @description `already_exists`: another request created an override for the same
+             *     customer and price at the same moment. Retry. `invalid_state`: the
+             *     price was removed from its plan.
              */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_state",
+                     *         "message": "Price hc_prc_dajr672q3gpgqfoq5c20 was removed from its plan, so it takes no part from now on. Override a price the plan has.",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
             /**
-             * @description `validation_error`: a missing field, an unknown price, a
-             *     rate that is not a number or is outside its limits, a price
-             *     shape that cannot be billed (bad
-             *     tier table, package size of 0), or an unknown field at any depth
-             *     (`param` names it; the body must use only the fields listed
-             *     here).
+             * @description `validation_error`: a missing field, an unknown price, a rate that
+             *     is not a number or is outside its limits, a price shape that
+             *     cannot be billed (bad tier table, package size of 0), or an
+             *     unknown field at any depth (`param` names it; the body must use
+             *     only the fields listed here).
              */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "price \"hc_prc_dajr672q3gpgqfoq5c2v\" not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "price_id"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -17206,22 +25282,77 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The override, now with `active` false. */
+            /** @description The override, now with `active` false and `deactivated_at` set. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "id": "hc_cpo_daof442q3gpgqfoq5cag",
+                     *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
+                     *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
+                     *       "price_id": "hc_prc_dajr672q3gpgqfoq5c20",
+                     *       "mode": "per_unit",
+                     *       "unit_amount_cents": "0.00025",
+                     *       "tiers": [],
+                     *       "package_size": 0,
+                     *       "package_amount_cents": "0",
+                     *       "reason": "Annual commitment discount",
+                     *       "active": false,
+                     *       "created_at": "2026-10-15T12:30:00Z",
+                     *       "updated_at": "2026-10-28T09:00:00Z",
+                     *       "deactivated_at": "2026-10-28T09:00:00Z"
+                     *     }
+                     */
                     "application/json": components["schemas"]["CustomerPriceOverride"];
                 };
             };
+            400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
-            /** @description `not_found`: no active override with this id (it may already be ended). */
+            /**
+             * @description `not_found`: no active override with this ID (it may already be
+             *     ended).
+             */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "not_found",
+                     *         "message": "price_override not found",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The request has a body with a field. This route takes no body
+             *     (`param` names the field).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "validation_error",
+                     *         "message": "unknown field \"reason\"",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "reason"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -17237,6 +25368,35 @@ export interface operations {
         };
         requestBody: {
             content: {
+                /**
+                 * @example {
+                 *       "id": "chatcmpl-AZx81kq4ZtR2",
+                 *       "status": "success",
+                 *       "call_type": "acompletion",
+                 *       "model": "gpt-4o-2024-08-06",
+                 *       "custom_llm_provider": "openai",
+                 *       "user": "acme-42",
+                 *       "usage": {
+                 *         "prompt_tokens": 1200,
+                 *         "completion_tokens": 350,
+                 *         "total_tokens": 1550,
+                 *         "prompt_tokens_details": {
+                 *           "cached_tokens": 200
+                 *         }
+                 *       },
+                 *       "cost_breakdown": {
+                 *         "input_cost": 0.00275,
+                 *         "output_cost": 0.0035,
+                 *         "cache_read_cost": 0.00025,
+                 *         "total_cost": 0.00625
+                 *       },
+                 *       "startTime": 1791813785.8,
+                 *       "endTime": 1791813787,
+                 *       "metadata": {
+                 *         "team_id": "team-research"
+                 *       }
+                 *     }
+                 */
                 "application/json": components["schemas"]["LitellmSpendLog"] | components["schemas"]["LitellmSpendLog"][] | {
                     events: components["schemas"]["LitellmSpendLog"][];
                 };
@@ -17249,15 +25409,38 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "accepted": 3,
+                     *       "deduplicated": 0,
+                     *       "held": 0,
+                     *       "skipped": 0,
+                     *       "cache_hits": 0,
+                     *       "after_close": 0,
+                     *       "no_price": 0,
+                     *       "not_on_plan": 0,
+                     *       "outside_subscription": 0
+                     *     }
+                     */
                     "application/json": components["schemas"]["LitellmSpendResult"];
                 };
             };
-            /** @description `invalid_request`: empty body or not valid JSON. */
+            /** @description `invalid_request`: empty body, not valid JSON, or a body over 1 MB. */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "invalid_request_error",
+                     *         "code": "invalid_request",
+                     *         "message": "invalid JSON body",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };
@@ -17273,6 +25456,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "type": "api_error",
+                     *         "code": "ingest_unavailable",
+                     *         "message": "usage store temporarily unavailable — retry the whole batch; rows already recorded replay as deduplicated",
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *       }
+                     *     }
+                     */
                     "application/json": components["schemas"]["Error"];
                 };
             };

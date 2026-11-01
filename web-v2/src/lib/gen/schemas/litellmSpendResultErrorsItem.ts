@@ -14,5 +14,6 @@
 export type LitellmSpendResultErrorsItem = {
   /** The LiteLLM record id. */
   id: string;
+  /** Why the record was not recorded, such as a missing `user`. */
   error: string;
 };

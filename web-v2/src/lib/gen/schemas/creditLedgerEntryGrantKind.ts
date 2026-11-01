@@ -11,6 +11,13 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * On a grant, what the credit cost the customer. `commit`:
+ * prepaid credit granted when a commit invoice was finalized; that
+ * invoice is `source_invoice_id`. `promotional`:
+ * free credit you marked so; invoices draw it before any other
+ * credit. Absent for other credit.
+ */
 export type CreditLedgerEntryGrantKind = typeof CreditLedgerEntryGrantKind[keyof typeof CreditLedgerEntryGrantKind];
 
 

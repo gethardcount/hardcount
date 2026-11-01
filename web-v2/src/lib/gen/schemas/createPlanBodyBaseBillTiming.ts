@@ -15,7 +15,7 @@
  * Required when `base_amount_cents` is above 0. With a base
  * of 0 it may be left out, and the plan is in_arrears;
  * `in_advance` with a base of 0 is refused. See
- * Plan.base_bill_timing (ADR-031).
+ * `base_bill_timing` on Plan.
  */
 export type CreatePlanBodyBaseBillTiming = typeof CreatePlanBodyBaseBillTiming[keyof typeof CreatePlanBodyBaseBillTiming];
 

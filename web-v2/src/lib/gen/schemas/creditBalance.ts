@@ -12,21 +12,23 @@
  */
 
 /**
- * A customer's credit balance in one currency and where that credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents.
+ * A customer's credit balance in one currency and where that credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents. All amounts are in the currency's minor unit (cents for USD).
  */
 export interface CreditBalance {
+  /** The customer (`hc_cus_…`). */
   customer_id: string;
   /** The currency of this balance, uppercase. Each credit ledger entry stores its own currency, and credit pays only invoices in that currency. A customer with credit in two currencies has two balances; they are never added together or converted. */
   currency: string;
+  /** The credit left: the sum of the customer's ledger entries in this currency, in its minor unit (cents for USD). A grant past its expiry still counts here until the expiry run writes it off. */
   balance_cents: number;
-  /** Every credit added: grants, positive adjustments, and credit a void or credit note gave back as new credit. Credit a void or credit note put back on the grant it was drawn from is not added again. */
+  /** Every credit added, in the currency's minor unit: grants, positive adjustments, and credit a void or credit note gave back as new credit. Credit a void or credit note put back on the grant it was drawn from is not added again. */
   total_granted: number;
-  /** Credit applied to invoices, less what a void or credit note put back on the grant it was drawn from. */
+  /** Credit applied to invoices, less what a void or credit note put back on the grant it was drawn from, in the currency's minor unit. */
   total_used: number;
-  /** Credit written off by expiry. */
+  /** Credit written off by expiry, in the currency's minor unit. */
   total_expired: number;
-  /** Prepaid commit credit taken back because the invoice that funded it was voided or refunded by a credit note. */
+  /** Prepaid commit credit taken back because the invoice that funded it was voided or refunded by a credit note, in the currency's minor unit. */
   total_retired: number;
-  /** Credit an operator deducted (a negative adjustment). */
+  /** Credit an operator deducted (a negative adjustment), in the currency's minor unit. */
   total_deducted: number;
 }

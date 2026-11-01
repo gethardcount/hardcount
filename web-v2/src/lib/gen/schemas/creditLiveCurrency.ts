@@ -12,14 +12,15 @@
  */
 
 /**
- * The live position in one currency. `balance_cents` is the credit the customer can spend in it: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet and that will be invoiced in this currency. `estimated_remaining_cents` is the first minus the second, never below zero.
+ * The live position in one currency, in its minor unit (cents for USD). `balance_cents` is the credit the customer can spend in it: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet and that will be invoiced in this currency. `estimated_remaining_cents` is the first minus the second, never below zero.
  */
 export interface CreditLiveCurrency {
+  /** The currency of this position, uppercase (for example `USD`). */
   currency: string;
-  /** Settled ledger balance in this currency, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant). Can be negative. */
+  /** Settled ledger balance in this currency, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant), in the currency's minor unit. Can be negative. */
   balance_cents: number;
-  /** Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends. */
+  /** Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it, in the currency's minor unit. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends. */
   unbilled_usage_cents: number;
-  /** `balance_cents` minus `unbilled_usage_cents`, floored at zero. To see how far past zero a customer is, subtract the two parts yourself. */
+  /** `balance_cents` minus `unbilled_usage_cents`, floored at zero, in the currency's minor unit. To see how far past zero a customer is, subtract the two parts yourself. */
   estimated_remaining_cents: number;
 }

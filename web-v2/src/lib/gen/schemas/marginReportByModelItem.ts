@@ -12,12 +12,31 @@
  */
 
 export type MarginReportByModelItem = {
+  /**
+     * The model, from the events' `model` label (else their
+     * `model_raw` label, else `(unknown)`), or from the price's
+     * `dimension_match` for revenue with no stamped cost.
+     */
   model: string;
   /** This model's stamped provider cost in US cents, as a decimal string. */
   cost_cents: string;
+  /**
+     * The revenue of the prices that name this model, in the
+     * minor unit of `revenue_currency`. Absent when the row is
+     * not attributed or the revenue is 0.
+     */
   revenue_cents?: number;
-  /** True only when the price that billed the usage names this model — margin is never heuristically allocated. */
+  /**
+     * True only when the price that billed the usage names this
+     * model, so revenue is never split by a guess.
+     */
   attributed: boolean;
-  /** This model's (revenue − cost) / revenue in basis points, by the same formula as the report's margin_bps. Omitted whenever the report's margin_bps is omitted for currency or unresolved_events, and when the row is not attributed or has no provider cost of its own. */
+  /**
+     * This model's (revenue − cost) / revenue in basis points, by
+     * the same formula as the report's `margin_bps`. Absent
+     * whenever the report's `margin_bps` is absent for currency or
+     * `unresolved_events`, and when the row is not attributed or
+     * has no provider cost of its own.
+     */
   margin_bps?: number;
 };

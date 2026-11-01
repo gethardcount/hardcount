@@ -11,4 +11,8 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The labels an event must carry for the price to take it. `{}`
+ * takes every event of the meter.
+ */
 export type RecipePriceDimensionMatch = {[key: string]: string};

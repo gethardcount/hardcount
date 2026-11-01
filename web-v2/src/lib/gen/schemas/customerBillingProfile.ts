@@ -13,24 +13,39 @@
 import type { CustomerBillingProfileInput } from './customerBillingProfileInput';
 import type { CustomerBillingProfileProfileStatus } from './customerBillingProfileProfileStatus';
 
+/**
+ * A customer's stored billing profile, as the billing-profile routes
+ * return it. Empty text fields are left out, except `tax_id` and
+ * `tax_id_type`, which are always sent (`""` when unset).
+ */
 export type CustomerBillingProfile = CustomerBillingProfileInput & {
+  /** The customer this profile belongs to. */
   customer_id: string;
+  /** The account the customer belongs to. */
   tenant_id?: string;
   /**
      * Set by the server. `ready` when legal name, address line
-     * 1, city and country are all set.
+     * 1, city and country are all set, so the invoice can print
+     * a full Bill to block. Otherwise `incomplete`.
      */
   profile_status: CustomerBillingProfileProfileStatus;
+  /** When the profile was first saved. */
   created_at: string;
+  /** When the profile was last saved. */
   updated_at: string;
 } & Required<Pick<CustomerBillingProfileInput & {
+  /** The customer this profile belongs to. */
   customer_id: string;
+  /** The account the customer belongs to. */
   tenant_id?: string;
   /**
      * Set by the server. `ready` when legal name, address line
-     * 1, city and country are all set.
+     * 1, city and country are all set, so the invoice can print
+     * a full Bill to block. Otherwise `incomplete`.
      */
   profile_status: CustomerBillingProfileProfileStatus;
+  /** When the profile was first saved. */
   created_at: string;
+  /** When the profile was last saved. */
   updated_at: string;
 }, 'tax_status' | 'tax_id' | 'tax_id_type'>>;

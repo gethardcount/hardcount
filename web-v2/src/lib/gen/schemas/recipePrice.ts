@@ -14,14 +14,23 @@ import type { PriceShape } from './priceShape';
 import type { RecipePriceDimensionMatch } from './recipePriceDimensionMatch';
 
 /**
- * One usage price of a recipe plan. It takes the plan's currency.
+ * One usage price of a recipe plan. It takes the plan's currency. Every
+ * shape field is sent.
  */
 export type RecipePrice = PriceShape & {
   /** The `event_name` of the recipe meter the price is on. */
   meter: string;
+  /**
+     * The labels an event must carry for the price to take it. `{}`
+     * takes every event of the meter.
+     */
   dimension_match: RecipePriceDimensionMatch;
 } & Required<Pick<PriceShape & {
   /** The `event_name` of the recipe meter the price is on. */
   meter: string;
+  /**
+     * The labels an event must carry for the price to take it. `{}`
+     * takes every event of the meter.
+     */
   dimension_match: RecipePriceDimensionMatch;
 }, 'unit_amount_cents' | 'tiers' | 'package_size' | 'package_amount_cents'>>;

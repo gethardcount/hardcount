@@ -12,6 +12,11 @@
  */
 import type { UsageEventBatchEventResult } from './usageEventBatchEventResult';
 
+/**
+ * What `POST /v1/usage-events/batch` wrote: how many events were new,
+ * how many were already stored, and one result per event in the order
+ * sent.
+ */
 export interface UsageEventBatchResult {
   /** Newly written events. */
   ingested: number;

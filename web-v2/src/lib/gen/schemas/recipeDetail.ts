@@ -13,6 +13,9 @@
 import type { Recipe } from './recipe';
 import type { RecipeCreates } from './recipeCreates';
 
+/**
+ * A recipe as `GET /v1/recipes/{key}` returns it, with how many objects it makes.
+ */
 export type RecipeDetail = Recipe & {
   creates: RecipeCreates;
 };

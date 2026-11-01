@@ -12,6 +12,11 @@
  */
 
 export type CustomerUsageTotalsItem = {
+  /** The currency, such as `USD`. */
   currency: string;
+  /**
+     * The usage cost of every meter in this currency, in the
+     * currency's minor unit (cents for USD).
+     */
   amount_cents: number;
 };

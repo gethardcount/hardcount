@@ -17,16 +17,44 @@ import type { GetPublicCostDashboard200TotalsItem } from './getPublicCostDashboa
 import type { GetPublicCostDashboard200UsageItem } from './getPublicCostDashboard200UsageItem';
 
 export type GetPublicCostDashboard200 = {
+  /** The customer the token belongs to. */
   customer_id: string;
+  /** The account the customer belongs to. */
   tenant_id: string;
+  /** False for a test-mode customer: show a test-mode notice. */
   livemode: boolean;
+  /** The period the usage covers. */
   billing_period: GetPublicCostDashboard200BillingPeriod;
+  /** One entry per plan of each active or trialing subscription. */
   subscriptions: GetPublicCostDashboard200SubscriptionsItem[];
+  /** One entry per meter the customer's plans price. */
   usage: GetPublicCostDashboard200UsageItem[];
   /** One entry per currency present in `usage`. */
   totals: GetPublicCostDashboard200TotalsItem[];
-  /** The metered cost of the current billing period so far, in cents, including usage a threshold invoice already billed. Recurring base fees are not included — an in_advance base is already invoiced at period open. */
+  /**
+     * The metered cost of the current billing period so far,
+     * in minor units, including usage a threshold invoice
+     * already billed. It adds up every entry of `totals`,
+     * whatever its currency, so use `totals` when there is
+     * more than one. Recurring base fees are not included.
+     */
   projected_total_cents: number;
-  /** The customer's credit position, one entry per currency, ordered by currency. `balance_cents` is the ledger balance in that currency, less any grant past its expiry date that is not yet written off: credit is drawn down when an invoice is issued, so it does not move with usage. `unbilled_usage_cents` is the usage no invoice has billed yet that will be invoiced in that currency, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` differs from `projected_total_cents` after a threshold invoice: it leaves out the usage that invoice billed. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted. */
+  /**
+     * The customer's credit position, one entry per currency,
+     * ordered by currency. `balance_cents` is the ledger
+     * balance in that currency, less any grant past its expiry
+     * date that is not yet written off: credit is drawn down
+     * when an invoice is issued, so it does not move with
+     * usage. `unbilled_usage_cents` is the usage no invoice
+     * has billed yet that will be invoiced in that currency,
+     * and `estimated_remaining_cents` is the balance minus
+     * that, never below zero. These three are the same figures
+     * `GET /v1/credits/balance/{customer_id}/live` returns.
+     * `unbilled_usage_cents` differs from
+     * `projected_total_cents` after a threshold invoice: it
+     * leaves out the usage that invoice billed. It is an
+     * estimate: tax, base fees billed at period end and unpaid
+     * invoices are not subtracted.
+     */
   credits: GetPublicCostDashboard200CreditsItem[];
 };

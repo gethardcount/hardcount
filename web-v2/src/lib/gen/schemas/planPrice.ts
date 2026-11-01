@@ -18,12 +18,18 @@ import type { PriceTier } from './priceTier';
  * One usage price of a plan: a meter, the events it takes
  * (`dimension_match`) and its rate. The price takes the plan's
  * currency. Its id stays the same when its rate changes; its meter
- * and `dimension_match` are its identity and never change.
+ * and `dimension_match` are its identity and never change. Every
+ * shape field is always sent: the ones the mode does not use are
+ * `"0"`, `0` or `[]`.
  */
 export interface PlanPrice {
+  /** The price's ID, `hc_prc_` and 20 characters. */
   id: string;
+  /** The account the price belongs to. */
   tenant_id?: string;
+  /** The plan the price belongs to. */
   plan_id: string;
+  /** The meter whose usage the price bills. */
   meter_id: string;
   /**
      * The labels an event must carry for this price to take it, for
@@ -32,15 +38,23 @@ export interface PlanPrice {
      * an event carries, the one with the most labels takes it.
      */
   dimension_match: PlanPriceDimensionMatch;
-  /** As on PriceShape. */
+  /** How the price bills a quantity; see PriceShape. */
   mode: PlanPriceMode;
-  /** Price per unit in cents, as a decimal string. */
+  /**
+     * Price per unit, as a decimal string of cents. `"0"` unless `mode`
+     * is `per_unit`.
+     */
   unit_amount_cents: string;
   /** Empty (`[]`) unless `mode` is `graduated`. */
   tiers: PriceTier[];
+  /** The units in one package. 0 unless `mode` is `package`. */
   package_size: number;
-  /** Price of one package in cents, as a decimal string. */
+  /**
+     * Price of one package, as a decimal string of cents. `"0"` unless
+     * `mode` is `package`.
+     */
   package_amount_cents: string;
+  /** When the price was first added to the plan. */
   created_at: string;
   /** When the content shown was saved. */
   updated_at: string;

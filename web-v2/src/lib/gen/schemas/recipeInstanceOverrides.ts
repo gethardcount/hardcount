@@ -11,4 +11,8 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The overrides the install was sent, as sent (`{}` when none).
+ * Defaults are not filled in.
+ */
 export type RecipeInstanceOverrides = { [key: string]: unknown };

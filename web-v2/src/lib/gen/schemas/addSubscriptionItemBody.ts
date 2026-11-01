@@ -12,7 +12,11 @@
  */
 
 export type AddSubscriptionItemBody = {
+  /** The plan to add (`hc_pln_…`). Not archived, and not already on the subscription. */
   plan_id: string;
-  /** @minimum 1 */
+  /**
+     * How many of the plan to bill. 0 or absent means 1.
+     * @minimum 1
+     */
   quantity?: number;
 };

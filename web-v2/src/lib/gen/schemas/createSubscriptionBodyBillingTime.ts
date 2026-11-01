@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * How monthly periods line up. See the subscription's `billing_time`.
+ */
 export type CreateSubscriptionBodyBillingTime = typeof CreateSubscriptionBodyBillingTime[keyof typeof CreateSubscriptionBodyBillingTime];
 
 

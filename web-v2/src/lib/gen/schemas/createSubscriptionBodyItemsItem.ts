@@ -12,6 +12,8 @@
  */
 
 export type CreateSubscriptionBodyItemsItem = {
+  /** A plan of this account (`hc_pln_…`). Each plan can appear once. */
   plan_id: string;
+  /** How many of the plan to bill. At least 1; 0 or absent means 1. */
   quantity?: number;
 };

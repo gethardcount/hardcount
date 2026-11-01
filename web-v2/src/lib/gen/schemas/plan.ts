@@ -15,32 +15,67 @@ import type { PlanBillingInterval } from './planBillingInterval';
 import type { PlanPrice } from './planPrice';
 import type { PlanStatus } from './planStatus';
 
+/**
+ * A plan is what a subscription buys: a recurring base fee and the
+ * usage prices of its meters, in one currency and billing interval.
+ * `GET /v1/plans` lists plans in this shape. Get, create and update
+ * answer a `PlanDetail`, which adds two fields.
+ */
 export interface Plan {
+  /** The plan's ID, `hc_pln_` and 20 characters. */
   id: string;
+  /** The account the plan belongs to. */
   tenant_id?: string;
+  /**
+     * Your short name for the plan. Letters, digits, `-` and `_`, at
+     * most 100 characters, unique in the account and mode. Fixed
+     * after create.
+     */
   code: string;
+  /** The plan's display name, at most 255 characters. */
   name: string;
+  /**
+     * ISO 4217 code in upper case, such as `USD`. Fixed after create.
+     * The plan's prices take it.
+     */
   currency: string;
+  /** How often a subscription to the plan is billed. Fixed after create. */
   billing_interval: PlanBillingInterval;
+  /**
+     * An archived plan takes no new subscriptions and no plan change
+     * onto it. Subscriptions already on it keep billing.
+     */
   status: PlanStatus;
+  /**
+     * The recurring base fee per billing period, in the currency's minor
+     * unit (cents for USD). 0 for a usage-only plan.
+     */
   base_amount_cents: number;
   /**
-     * When the recurring base fee is invoiced relative to the period it covers.
-     * in_arrears: base + usage billed at period end.
-     * in_advance: base billed at period start (day 1 on create; cycle-close invoice
-     * carries upcoming period's base + elapsed period's usage). Usage lines are
-     * always arrears regardless of this field. A plan with no base fee is
-     * in_arrears. See ADR-031.
+     * When the base fee is invoiced, relative to the period it
+     * covers. `in_arrears`: the base fee and the usage are billed at
+     * the period end. `in_advance`: the base fee is billed at the
+     * period start; the first invoice comes when the subscription
+     * starts, and each cycle invoice carries the next period's base
+     * fee with the past period's usage. Usage is always billed at
+     * the period end. A plan with no base fee is `in_arrears`.
      */
   base_bill_timing: PlanBaseBillTiming;
   /**
-     * The plan's usage prices from now on. A plan's meters are the
-     * meters it has a price for.
+     * The plan's usage prices from now on, in the order they were
+     * added. A plan's meters are the meters it has a price for.
      */
   prices: PlanPrice[];
+  /** Your description of the plan. Absent when empty. */
   description?: string;
-  /** Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`. */
+  /**
+     * The Stripe product tax code of the base fee, such as
+     * `txcd_10103001`. Absent when the plan uses the account's
+     * `default_product_tax_code`.
+     */
   tax_code?: string;
+  /** When the plan was created. */
   created_at: string;
+  /** When the plan was last changed. */
   updated_at: string;
 }

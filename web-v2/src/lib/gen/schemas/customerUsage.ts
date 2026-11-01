@@ -16,7 +16,13 @@ import type { CustomerUsagePeriod } from './customerUsagePeriod';
 import type { CustomerUsageSubscriptionsItem } from './customerUsageSubscriptionsItem';
 import type { CustomerUsageTotalsItem } from './customerUsageTotalsItem';
 
+/**
+ * A customer's usage and its cost over a window, priced the way the
+ * invoice prices it: `GET /v1/customers/{id}/usage`. Only active and
+ * trialing subscriptions are counted. Quantities are decimal strings.
+ */
 export interface CustomerUsage {
+  /** The customer the usage belongs to. */
   customer_id: string;
   /**
      * The window the response covers. With no `from` and `to`
@@ -33,6 +39,7 @@ export interface CustomerUsage {
      * same `id`.
      */
   subscriptions: CustomerUsageSubscriptionsItem[];
+  /** One entry per meter the customer's plans price, with or without usage. */
   meters: CustomerUsageMeter[];
   /** One entry per currency. */
   totals: CustomerUsageTotalsItem[];

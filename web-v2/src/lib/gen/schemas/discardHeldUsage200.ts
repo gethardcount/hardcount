@@ -12,5 +12,6 @@
  */
 
 export type DiscardHeldUsage200 = {
+  /** Held rows marked discarded. 0 when none were held. */
   discarded: number;
 };

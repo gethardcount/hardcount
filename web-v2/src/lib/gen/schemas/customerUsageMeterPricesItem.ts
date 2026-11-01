@@ -13,19 +13,29 @@
 import type { CustomerUsageMeterPricesItemDimensionMatch } from './customerUsageMeterPricesItemDimensionMatch';
 
 export type CustomerUsageMeterPricesItem = {
-  /** Absent on a `no_price` row. */
+  /** The plan price that took the usage. Absent on a `no_price` row. */
   price_id?: string;
+  /** The plan the price belongs to. */
   plan_id: string;
   /** The labels the price takes. Absent for a price that takes every event. */
   dimension_match?: CustomerUsageMeterPricesItemDimensionMatch;
-  /** Decimal string. */
+  /** The usage this price took, as a decimal string. */
   quantity: string;
+  /**
+     * What this price bills for the usage, in the currency's minor
+     * unit (cents for USD).
+     */
   amount_cents: number;
-  /** Price per unit in cents, as a decimal string; the same figure the invoice line shows. */
+  /**
+     * Price per unit, as a decimal string of cents; the same
+     * figure the invoice line shows. Absent on a `no_price`
+     * row.
+     */
   unit_amount_decimal?: string;
   /**
      * True for usage no price of the plan took. Hardcount bills
      * nothing for it, and it is left out of the meter's totals.
+     * Absent on other rows.
      */
   no_price?: boolean;
 };

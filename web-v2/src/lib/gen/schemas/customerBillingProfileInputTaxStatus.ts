@@ -12,7 +12,10 @@
  */
 
 /**
- * Defaults to `standard`.
+ * `standard`: tax is worked out as usual. `exempt`: no tax, and
+ * the invoice shows `tax_exempt_reason`. `reverse_charge`: no tax,
+ * and the invoice tells the buyer to account for it. Defaults to
+ * `standard`.
  */
 export type CustomerBillingProfileInputTaxStatus = typeof CustomerBillingProfileInputTaxStatus[keyof typeof CustomerBillingProfileInputTaxStatus];
 

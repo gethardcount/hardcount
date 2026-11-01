@@ -11,4 +11,10 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Values for the recipe's `overridable` keys, such as
+ * `{"currency": "EUR"}`. A key the recipe does not list, or
+ * a value that breaks the key's rules, is refused with 422.
+ * Keys you leave out take their defaults.
+ */
 export type InstantiateRecipeBodyOverrides = { [key: string]: unknown };

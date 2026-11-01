@@ -17,6 +17,12 @@ import type { RecipePlan } from './recipePlan';
  * What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation.
  */
 export interface RecipePreviewObjects {
+  /** The meters the install creates or reuses. */
   meters: RecipeMeter[];
+  /**
+     * The plans the install creates, with the overrides applied. An
+     * install that finds a plan's code taken gives the new plan the
+     * first free code with `_2`, `_3` and so on added.
+     */
   plans: RecipePlan[];
 }

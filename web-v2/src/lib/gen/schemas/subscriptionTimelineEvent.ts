@@ -14,9 +14,17 @@ import type { ActivityLine } from './activityLine';
 import type { SubscriptionTimelineEventSource } from './subscriptionTimelineEventSource';
 import type { SubscriptionTimelineEventStatus } from './subscriptionTimelineEventStatus';
 
+/**
+ * One row of a subscription's activity timeline
+ * (`GET /v1/subscriptions/{id}/timeline`), built from one audit log
+ * entry. `line` carries the row in its structured form; `description`,
+ * `detail`, `detail_timestamp`, `error` and `status` repeat its words
+ * for older clients.
+ */
 export interface SubscriptionTimelineEvent {
   /** When the action was recorded (wall-clock time). */
   timestamp: string;
+  /** Where the row comes from. Always `audit`, the audit log. */
   source: SubscriptionTimelineEventSource;
   /** The audit action, e.g. `create`, `cancel`, `subscription.item_updated`. */
   event_type: string;
@@ -34,13 +42,23 @@ export interface SubscriptionTimelineEvent {
   detail_timestamp?: string;
   /** The line's problem. */
   error?: string;
+  /**
+     * Who acted, as the audit log records it: `user` (a dashboard
+     * user), `api_key`, `customer`, or `system` (Hardcount itself).
+     */
   actor_type?: string;
+  /**
+     * The actor's name: a user's email, an API key's name or a
+     * customer's display name. Absent when it is not known.
+     */
   actor_name?: string;
+  /** The actor's ID (a user's, an API key's `hc_key_…` or a customer's), or `system`. */
   actor_id?: string;
   /** True when the action affected a subscription on a test clock. */
   is_simulated?: boolean;
   /** The test clock's simulated time when the action took effect. */
   sim_effective_at?: string;
+  /** The test clock `sim_effective_at` belongs to. Absent when the action was not on a test clock. */
   test_clock_id?: string;
   line: ActivityLine;
 }

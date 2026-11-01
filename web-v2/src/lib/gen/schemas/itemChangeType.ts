@@ -12,9 +12,10 @@
  */
 
 /**
- * Classifies per-item proration artifacts so the dedup index can
- * distinguish a plan-change and a quantity-change that happen to
- * share the same `(subscription, item, timestamp)`.
+ * The kind of subscription item change that produced a proration:
+ * `plan` (the item moved to another plan), `quantity` (its quantity
+ * changed), `add` (the item was added) or `remove` (the item was
+ * removed).
  */
 export type ItemChangeType = typeof ItemChangeType[keyof typeof ItemChangeType];
 

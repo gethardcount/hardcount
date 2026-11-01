@@ -18,8 +18,14 @@
  * up to the cache-write count, the writes stay in `input`.
  */
 export type LitellmSpendLogUsagePromptTokensDetailsCacheCreationTokenDetails = {
-  /** @nullable */
+  /**
+     * Cache writes with a 5-minute lifetime. They become the `cache_write_5m` event.
+     * @nullable
+     */
   ephemeral_5m_input_tokens?: number | null;
-  /** @nullable */
+  /**
+     * Cache writes with a 1-hour lifetime. They become the `cache_write_1h` event.
+     * @nullable
+     */
   ephemeral_1h_input_tokens?: number | null;
 };

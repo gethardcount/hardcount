@@ -3724,68 +3724,80 @@ type BootstrapResult struct {
 	Tenant        Tenant `json:"tenant"`
 }
 
-// CreditBalance A customer's credit balance in one currency and where that credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents.
+// CreditBalance A customer's credit balance in one currency and where that credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents. All amounts are in the currency's minor unit (cents for USD).
 type CreditBalance struct {
+	// BalanceCents The credit left: the sum of the customer's ledger entries in this currency, in its minor unit (cents for USD). A grant past its expiry still counts here until the expiry run writes it off.
 	BalanceCents int64 `json:"balance_cents"`
 
 	// Currency The currency of this balance, uppercase. Each credit ledger entry stores its own currency, and credit pays only invoices in that currency. A customer with credit in two currencies has two balances; they are never added together or converted.
-	Currency   string `json:"currency"`
+	Currency string `json:"currency"`
+
+	// CustomerId The customer (`hc_cus_…`).
 	CustomerId string `json:"customer_id"`
 
-	// TotalDeducted Credit an operator deducted (a negative adjustment).
+	// TotalDeducted Credit an operator deducted (a negative adjustment), in the currency's minor unit.
 	TotalDeducted int64 `json:"total_deducted"`
 
-	// TotalExpired Credit written off by expiry.
+	// TotalExpired Credit written off by expiry, in the currency's minor unit.
 	TotalExpired int64 `json:"total_expired"`
 
-	// TotalGranted Every credit added: grants, positive adjustments, and credit a void or credit note gave back as new credit. Credit a void or credit note put back on the grant it was drawn from is not added again.
+	// TotalGranted Every credit added, in the currency's minor unit: grants, positive adjustments, and credit a void or credit note gave back as new credit. Credit a void or credit note put back on the grant it was drawn from is not added again.
 	TotalGranted int64 `json:"total_granted"`
 
-	// TotalRetired Prepaid commit credit taken back because the invoice that funded it was voided or refunded by a credit note.
+	// TotalRetired Prepaid commit credit taken back because the invoice that funded it was voided or refunded by a credit note, in the currency's minor unit.
 	TotalRetired int64 `json:"total_retired"`
 
-	// TotalUsed Credit applied to invoices, less what a void or credit note put back on the grant it was drawn from.
+	// TotalUsed Credit applied to invoices, less what a void or credit note put back on the grant it was drawn from, in the currency's minor unit.
 	TotalUsed int64 `json:"total_used"`
 }
 
 // CreditGrantBlock One block of credit on a customer's balance (a grant or a positive
-// adjustment) and how much of it is left.
+// adjustment) and how much of it is left. Amounts are in the
+// currency's minor unit (cents for USD).
 type CreditGrantBlock struct {
-	// AmountCents The credit the block started with.
+	// AmountCents The credit the block started with, in the currency's minor unit.
 	AmountCents int64 `json:"amount_cents"`
 
-	// ConsumedCents Everything drawn from the block: used by invoices, expired,
-	// retired and deducted.
-	ConsumedCents int64     `json:"consumed_cents"`
-	CreatedAt     time.Time `json:"created_at"`
+	// ConsumedCents Everything drawn from the block, in the currency's minor unit:
+	// used by invoices, expired, retired and deducted.
+	ConsumedCents int64 `json:"consumed_cents"`
+
+	// CreatedAt When the block was added.
+	CreatedAt time.Time `json:"created_at"`
 
 	// Currency The block's currency, uppercase.
 	Currency string `json:"currency"`
 
-	// DeductedCents The part an operator removed with a negative adjustment.
-	DeductedCents int64  `json:"deducted_cents"`
-	Description   string `json:"description"`
+	// DeductedCents The part an operator removed with a negative adjustment, in the currency's minor unit.
+	DeductedCents int64 `json:"deducted_cents"`
+
+	// Description The description of the ledger entry that added the credit.
+	Description string `json:"description"`
 
 	// EntryType `grant` or `adjustment`.
 	EntryType string `json:"entry_type"`
 
-	// ExpiredCents The part that expired unused.
+	// ExpiredCents The part that expired unused, in the currency's minor unit.
 	ExpiredCents int64 `json:"expired_cents"`
 
 	// ExpiresAt The credit can be drawn up to and including this instant; a
 	// period invoice draws it when its period ends at or before it.
 	// The dashboard sends the local midnight after the picked day.
+	// Absent when the credit does not expire.
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
 
 	// GrantKind Absent for unclassified credit.
 	GrantKind CreditGrantBlockGrantKind `json:"grant_kind,omitempty"`
 
 	// Id The ledger entry that added the credit.
-	Id             string `json:"id"`
-	RemainingCents int64  `json:"remaining_cents"`
+	Id string `json:"id"`
+
+	// RemainingCents Credit left in the block, `amount_cents` minus `consumed_cents`, in the currency's minor unit.
+	RemainingCents int64 `json:"remaining_cents"`
 
 	// RetiredCents Commit credit taken back when the invoice that paid for it was
-	// voided, or refunded by a credit note.
+	// voided, or refunded by a credit note, in the currency's minor
+	// unit.
 	RetiredCents int64 `json:"retired_cents"`
 
 	// SourceInvoiceId For a `commit` block, the invoice that paid for it.
@@ -3796,55 +3808,105 @@ type CreditGrantBlock struct {
 type CreditGrantBlockGrantKind string
 
 // CreditGrants A customer's credit blocks, newest first, with the remaining credit
-// added up by currency and kind.
+// added up by currency and kind. Amounts are in the currency's minor
+// unit (cents for USD).
 type CreditGrants struct {
+	// Grants The customer's credit blocks, newest first. A block with nothing
+	// left is listed only with `include_exhausted=true`.
 	Grants []CreditGrantBlock `json:"grants"`
 
 	// RemainingByCurrency One entry per currency with credit left, ordered by currency.
 	RemainingByCurrency []struct {
-		// CommitRemainingCents Remaining credit the customer paid for (`commit`).
-		CommitRemainingCents int64  `json:"commit_remaining_cents"`
-		Currency             string `json:"currency"`
+		// CommitRemainingCents Remaining credit the customer paid for (`commit`), in the currency's minor unit.
+		CommitRemainingCents int64 `json:"commit_remaining_cents"`
 
-		// OtherRemainingCents Remaining credit with no kind, such as adjustments and credit-note credit.
+		// Currency The currency, uppercase.
+		Currency string `json:"currency"`
+
+		// OtherRemainingCents Remaining credit with no kind, such as adjustments and credit-note credit, in the currency's minor unit.
 		OtherRemainingCents int64 `json:"other_remaining_cents"`
 
-		// PromotionalRemainingCents Remaining free credit (`promotional`).
+		// PromotionalRemainingCents Remaining free credit (`promotional`), in the currency's minor unit.
 		PromotionalRemainingCents int64 `json:"promotional_remaining_cents"`
 	} `json:"remaining_by_currency"`
 }
 
-// CreditLedgerEntry defines model for CreditLedgerEntry.
+// CreditLedgerEntry One entry in a customer's credit ledger: credit added (`grant`, or a
+// positive `adjustment`), drawn by an invoice (`usage`), removed (a
+// negative `adjustment`) or written off (`expiry`). Returned by
+// `POST /v1/credits/grant` and `POST /v1/credits/adjust`, and listed
+// by `GET /v1/credits/ledger/{customer_id}`.
 type CreditLedgerEntry struct {
-	// AmountCents Positive adds credit, negative removes it.
+	// AmountCents Positive adds credit, negative removes it, in the currency's
+	// minor unit (cents for USD).
 	AmountCents int64 `json:"amount_cents"`
 
-	// BalanceAfter The customer's credit balance in this entry's currency after it, in cents.
+	// BalanceAfter The customer's credit balance in this entry's currency after it,
+	// in the currency's minor unit (cents for USD).
 	BalanceAfter int64 `json:"balance_after"`
 
-	// ConsumedCents For entries that add credit, how much has been used or expired.
-	ConsumedCents int64     `json:"consumed_cents,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	// ConsumedCents For entries that add credit, how much has been used or expired,
+	// in the currency's minor unit. Absent when nothing has.
+	ConsumedCents int64 `json:"consumed_cents,omitempty"`
+
+	// CreatedAt When the entry was written. For a customer on a test clock, the clock's time.
+	CreatedAt time.Time `json:"created_at"`
 
 	// Currency The entry's currency, uppercase. Credit pays only invoices in its own currency.
-	Currency    string                     `json:"currency"`
-	CustomerId  string                     `json:"customer_id"`
-	Description string                     `json:"description"`
-	EntryType   CreditLedgerEntryEntryType `json:"entry_type"`
+	Currency string `json:"currency"`
+
+	// CustomerId The customer whose credit the entry changes (`hc_cus_…`).
+	CustomerId string `json:"customer_id"`
+
+	// Description What the entry is for: the description you gave a grant or
+	// adjustment, "Applied to invoice" and the invoice number on a
+	// `usage` entry, or "Expired grant" and the grant's ID on an
+	// `expiry` entry.
+	Description string `json:"description"`
+
+	// EntryType - `grant`: credit added, by you with `POST /v1/credits/grant` or
+	//   by Hardcount (a prepaid-commit invoice when it is finalized, a
+	//   credit note, or a void or credit note that gave drawn credit
+	//   back).
+	// - `usage`: credit an invoice drew.
+	// - `expiry`: the unused rest of a grant, written off once its
+	//   `expires_at` passed.
+	// - `adjustment`: credit added or removed with
+	//   `POST /v1/credits/adjust`, or commit credit taken back when its
+	//   invoice was voided or refunded.
+	EntryType CreditLedgerEntryEntryType `json:"entry_type"`
 
 	// ExpiresAt On a grant, its expiry. The credit can be drawn up to and
 	// including this instant; a period invoice draws it when its
 	// period ends at or before it. The dashboard sends the local
-	// midnight after the picked day.
-	ExpiresAt time.Time                  `json:"expires_at,omitempty"`
-	GrantKind CreditLedgerEntryGrantKind `json:"grant_kind,omitempty"`
-	Id        string                     `json:"id"`
-	InvoiceId string                     `json:"invoice_id,omitempty"`
-	Metadata  map[string]interface{}     `json:"metadata,omitempty"`
+	// midnight after the picked day. Absent when the credit does not
+	// expire.
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
 
-	// SourceChangeType Classifies per-item proration artifacts so the dedup index can
-	// distinguish a plan-change and a quantity-change that happen to
-	// share the same `(subscription, item, timestamp)`.
+	// GrantKind On a grant, what the credit cost the customer. `commit`:
+	// prepaid credit granted when a commit invoice was finalized; that
+	// invoice is `source_invoice_id`. `promotional`:
+	// free credit you marked so; invoices draw it before any other
+	// credit. Absent for other credit.
+	GrantKind CreditLedgerEntryGrantKind `json:"grant_kind,omitempty"`
+
+	// Id The entry's ID (`hc_ccl_…`).
+	Id string `json:"id"`
+
+	// InvoiceId The invoice the entry comes from: the invoice a `usage` entry
+	// was drawn by, the voided or credited invoice that gave credit
+	// back, or the commit invoice that funded a grant. Absent when no
+	// invoice caused the entry.
+	InvoiceId string `json:"invoice_id,omitempty"`
+
+	// Metadata Facts Hardcount records on the entry, such as which grants a
+	// draw took its credit from. Absent when empty.
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// SourceChangeType The kind of subscription item change that produced a proration:
+	// `plan` (the item moved to another plan), `quantity` (its quantity
+	// changed), `add` (the item was added) or `remove` (the item was
+	// removed).
 	SourceChangeType ItemChangeType `json:"source_change_type,omitempty"`
 
 	// SourceCreditNoteId The credit note that granted this credit to the balance.
@@ -3854,43 +3916,67 @@ type CreditLedgerEntry struct {
 	SourceInvoiceId string `json:"source_invoice_id,omitempty"`
 
 	// SourceInvoiceReversalId The voided invoice whose applied credit this entry gave back.
-	SourceInvoiceReversalId string    `json:"source_invoice_reversal_id,omitempty"`
-	SourcePlanChangedAt     time.Time `json:"source_plan_changed_at,omitempty"`
+	SourceInvoiceReversalId string `json:"source_invoice_reversal_id,omitempty"`
+
+	// SourcePlanChangedAt On a proration credit, when the change that produced it happened.
+	SourcePlanChangedAt time.Time `json:"source_plan_changed_at,omitempty"`
 
 	// SourceSubscriptionId With `source_subscription_item_id`, `source_plan_changed_at` and
 	// `source_change_type`, set on a proration credit: the subscription
 	// change that produced it.
-	SourceSubscriptionId     string `json:"source_subscription_id,omitempty"`
+	SourceSubscriptionId string `json:"source_subscription_id,omitempty"`
+
+	// SourceSubscriptionItemId On a proration credit, the subscription item whose change produced it.
 	SourceSubscriptionItemId string `json:"source_subscription_item_id,omitempty"`
-	TenantId                 string `json:"tenant_id,omitempty"`
+
+	// TenantId The account the entry belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
 }
 
-// CreditLedgerEntryEntryType defines model for CreditLedgerEntry.EntryType.
+// CreditLedgerEntryEntryType - `grant`: credit added, by you with `POST /v1/credits/grant` or
+//
+//		by Hardcount (a prepaid-commit invoice when it is finalized, a
+//		credit note, or a void or credit note that gave drawn credit
+//		back).
+//	  - `usage`: credit an invoice drew.
+//	  - `expiry`: the unused rest of a grant, written off once its
+//	    `expires_at` passed.
+//	  - `adjustment`: credit added or removed with
+//	    `POST /v1/credits/adjust`, or commit credit taken back when its
+//	    invoice was voided or refunded.
 type CreditLedgerEntryEntryType string
 
-// CreditLedgerEntryGrantKind defines model for CreditLedgerEntry.GrantKind.
+// CreditLedgerEntryGrantKind On a grant, what the credit cost the customer. `commit`:
+// prepaid credit granted when a commit invoice was finalized; that
+// invoice is `source_invoice_id`. `promotional`:
+// free credit you marked so; invoices draw it before any other
+// credit. Absent for other credit.
 type CreditLedgerEntryGrantKind string
 
-// CreditLiveBalance A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency a live subscription will invoice usage in. Amounts in two currencies are never added together.
+// CreditLiveBalance A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency a live subscription will invoice usage in. Amounts in two currencies are never added together. Returned by `GET /v1/credits/balance/{customer_id}/live`; nothing is stored.
 type CreditLiveBalance struct {
 	// Balances Ordered by currency.
 	Balances []CreditLiveCurrency `json:"balances"`
 
 	// ComputedAt When the server computed these figures.
 	ComputedAt time.Time `json:"computed_at"`
-	CustomerId string    `json:"customer_id"`
+
+	// CustomerId The customer (`hc_cus_…`).
+	CustomerId string `json:"customer_id"`
 }
 
-// CreditLiveCurrency The live position in one currency. `balance_cents` is the credit the customer can spend in it: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet and that will be invoiced in this currency. `estimated_remaining_cents` is the first minus the second, never below zero.
+// CreditLiveCurrency The live position in one currency, in its minor unit (cents for USD). `balance_cents` is the credit the customer can spend in it: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet and that will be invoiced in this currency. `estimated_remaining_cents` is the first minus the second, never below zero.
 type CreditLiveCurrency struct {
-	// BalanceCents Settled ledger balance in this currency, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant). Can be negative.
-	BalanceCents int64  `json:"balance_cents"`
-	Currency     string `json:"currency"`
+	// BalanceCents Settled ledger balance in this currency, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant), in the currency's minor unit. Can be negative.
+	BalanceCents int64 `json:"balance_cents"`
 
-	// EstimatedRemainingCents `balance_cents` minus `unbilled_usage_cents`, floored at zero. To see how far past zero a customer is, subtract the two parts yourself.
+	// Currency The currency of this position, uppercase (for example `USD`).
+	Currency string `json:"currency"`
+
+	// EstimatedRemainingCents `balance_cents` minus `unbilled_usage_cents`, floored at zero, in the currency's minor unit. To see how far past zero a customer is, subtract the two parts yourself.
 	EstimatedRemainingCents int64 `json:"estimated_remaining_cents"`
 
-	// UnbilledUsageCents Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
+	// UnbilledUsageCents Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it, in the currency's minor unit. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
 	UnbilledUsageCents int64 `json:"unbilled_usage_cents"`
 }
 
@@ -4004,149 +4090,271 @@ type CreditNoteStats struct {
 	VoidedCount int `json:"voided_count"`
 }
 
-// Customer defines model for Customer.
+// Customer A customer you bill: the person or company that subscriptions,
+// invoices, credits and payment methods belong to. Create, list, get
+// and update customers under `/v1/customers`. The
+// `customer.email_bounced` and `customer.email_complained` webhook
+// events carry this object too.
+//
+// Not every route fills every optional field. Get and update return
+// the whole record. The list and create answers leave out
+// `email_status`, the bounce fields, `dunning_policy_id` and
+// `stripe_customer_id`, and the list also leaves out
+// `additional_emails`.
 type Customer struct {
-	// AdditionalEmails CC'd on billing documents and billing-state emails (invoice,
-	// receipt, dunning, payment failed, credit note) — never on
-	// credential-bearing emails (setup links, resets, invites).
-	// Normalized to lowercase bare addresses, deduped, capped at 10,
-	// never equal to the primary email. Stored encrypted at rest.
-	AdditionalEmails []string  `json:"additional_emails,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	DisplayName      string    `json:"display_name"`
+	// AdditionalEmails Addresses copied (CC) on billing documents and billing emails:
+	// invoice, receipt, payment reminder, failed payment and credit
+	// note. Never on emails that carry a link to act on the account,
+	// such as a payment-method link. Lowercase bare addresses, no
+	// duplicates, at most 10, never the primary `email`. Absent when
+	// the list is empty.
+	AdditionalEmails []string `json:"additional_emails,omitempty"`
 
-	// DunningPolicyId Assigned dunning policy; absent means the tenant default.
-	DunningPolicyId    string    `json:"dunning_policy_id,omitempty"`
-	Email              string    `json:"email,omitempty"`
-	EmailBounceReason  string    `json:"email_bounce_reason,omitempty"`
+	// CreatedAt When the customer was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// DisplayName The name shown on invoices, emails and the dashboard. At most 255 characters.
+	DisplayName string `json:"display_name"`
+
+	// DunningPolicyId The dunning policy (the plan for retrying failed payments) this
+	// customer uses. Absent when the customer uses the account's
+	// default policy.
+	DunningPolicyId string `json:"dunning_policy_id,omitempty"`
+
+	// Email Where billing emails go: invoices, receipts, payment reminders
+	// and payment-method links. Absent when the customer has none.
+	Email string `json:"email,omitempty"`
+
+	// EmailBounceReason The reason the email provider gave with the last bounce or spam
+	// report. Absent until one is recorded.
+	EmailBounceReason string `json:"email_bounce_reason,omitempty"`
+
+	// EmailLastBouncedAt When the last bounce or spam report was recorded. Absent until one is.
 	EmailLastBouncedAt time.Time `json:"email_last_bounced_at,omitempty"`
 
-	// EmailStatus Deliverability of `email`, learned from bounce and complaint reports.
+	// EmailStatus Whether `email` receives mail, learned from bounce and spam
+	// reports. `unknown` until a report arrives. `bounced` or
+	// `complained` after one, and Hardcount then stops emailing the
+	// address. Changing `email` sets it back to `unknown`. Hardcount
+	// does not set `ok` today.
 	EmailStatus CustomerEmailStatus `json:"email_status,omitempty"`
-	ExternalId  string              `json:"external_id"`
-	Id          string              `json:"id"`
-	Livemode    bool                `json:"livemode,omitempty"`
-	Status      CustomerStatus      `json:"status"`
 
-	// StripeCustomerId The Stripe customer. Absent until the first payment-method action.
+	// ExternalId Your own ID for the customer, such as the account ID in your
+	// app. Unique in the account and mode, at most 255 characters,
+	// and fixed after create.
+	ExternalId string `json:"external_id"`
+
+	// Id The customer's ID, `hc_cus_` and 20 characters.
+	Id string `json:"id"`
+
+	// Livemode Whether the customer is in live mode. The customer routes and
+	// webhook events leave it out: use the mode of your API key.
+	Livemode bool `json:"livemode,omitempty"`
+
+	// Status `archived` blocks new subscriptions for the customer. Its
+	// unpaid invoices stay collectible.
+	Status CustomerStatus `json:"status"`
+
+	// StripeCustomerId The Stripe customer linked to this customer. Absent until the
+	// first payment-method action, such as a payment-method link,
+	// creates it.
 	StripeCustomerId string `json:"stripe_customer_id,omitempty"`
-	TenantId         string `json:"tenant_id,omitempty"`
 
-	// TestClockId Test clock this customer is pinned to (test mode only). When set,
-	// the customer — and any invoices/subscriptions created for it —
-	// run on the clock's simulated time. Empty for live customers. The
-	// dashboard reads it to show the "test clock" badge + simulated-time
-	// banner on the customer and its invoices.
-	TestClockId string    `json:"test_clock_id,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// TenantId The account the customer belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TestClockId The test clock the customer was created on (test mode only).
+	// Its subscriptions and invoices then run on the clock's
+	// simulated time. Set at create and fixed after. Absent for a
+	// customer with no test clock.
+	TestClockId string `json:"test_clock_id,omitempty"`
+
+	// UpdatedAt When the customer was last changed.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// CustomerEmailStatus Deliverability of `email`, learned from bounce and complaint reports.
+// CustomerEmailStatus Whether `email` receives mail, learned from bounce and spam
+// reports. `unknown` until a report arrives. `bounced` or
+// `complained` after one, and Hardcount then stops emailing the
+// address. Changing `email` sets it back to `unknown`. Hardcount
+// does not set `ok` today.
 type CustomerEmailStatus string
 
-// CustomerStatus defines model for Customer.Status.
+// CustomerStatus `archived` blocks new subscriptions for the customer. Its
+// unpaid invoices stay collectible.
 type CustomerStatus string
 
 // CustomerBillingProfile defines model for CustomerBillingProfile.
 type CustomerBillingProfile struct {
+	// AddressLine1 First line of the billing address.
 	AddressLine1 string `json:"address_line1,omitempty"`
-	AddressLine2 string `json:"address_line2,omitempty"`
-	City         string `json:"city,omitempty"`
 
-	// Country ISO 3166 alpha-2 code, such as `US` or `IN`.
-	Country   string    `json:"country,omitempty"`
+	// AddressLine2 Second line of the billing address.
+	AddressLine2 string `json:"address_line2,omitempty"`
+
+	// City City of the billing address.
+	City string `json:"city,omitempty"`
+
+	// Country ISO 3166 alpha-2 code, such as `US` or `IN`. Stored in upper case.
+	Country string `json:"country,omitempty"`
+
+	// CreatedAt When the profile was first saved.
 	CreatedAt time.Time `json:"created_at"`
 
 	// Currency ISO 4217 code, such as `USD`. When set, invoices for this
-	// customer use it instead of the plan currency.
-	Currency   string `json:"currency,omitempty"`
+	// customer use it instead of the plan currency. Stored in upper
+	// case. Zero-decimal currencies such as JPY are refused.
+	Currency string `json:"currency,omitempty"`
+
+	// CustomerId The customer this profile belongs to.
 	CustomerId string `json:"customer_id"`
-	LegalName  string `json:"legal_name,omitempty"`
 
-	// Phone 7 to 20 characters of digits, spaces, `+`, `-`, `(`, `)`.
-	Phone      string `json:"phone,omitempty"`
-	PostalCode string `json:"postal_code,omitempty"`
-
-	// ProfileStatus Set by the server. `ready` when legal name, address line
-	// 1, city and country are all set.
-	ProfileStatus CustomerBillingProfileProfileStatus `json:"profile_status"`
-	State         string                              `json:"state,omitempty"`
-
-	// TaxExemptReason Required when `tax_status` is `exempt`.
-	TaxExemptReason string `json:"tax_exempt_reason,omitempty"`
-
-	// TaxId Buyer tax ID. Required when `tax_status` is `reverse_charge`.
-	TaxId string `json:"tax_id"`
-
-	// TaxIdType Tax ID kind, stored as its Stripe code (for example `eu_vat`, `in_gst`).
-	TaxIdType string `json:"tax_id_type"`
-
-	// TaxStatus Defaults to `standard`.
-	TaxStatus CustomerBillingProfileTaxStatus `json:"tax_status"`
-	TenantId  string                          `json:"tenant_id,omitempty"`
-	UpdatedAt time.Time                       `json:"updated_at"`
-}
-
-// CustomerBillingProfileProfileStatus Set by the server. `ready` when legal name, address line
-// 1, city and country are all set.
-type CustomerBillingProfileProfileStatus string
-
-// CustomerBillingProfileTaxStatus Defaults to `standard`.
-type CustomerBillingProfileTaxStatus string
-
-// CustomerBillingProfileInput The billing details printed on invoices and used for tax. The
-// whole profile is replaced on every write.
-type CustomerBillingProfileInput struct {
-	AddressLine1 string `json:"address_line1,omitempty"`
-	AddressLine2 string `json:"address_line2,omitempty"`
-	City         string `json:"city,omitempty"`
-
-	// Country ISO 3166 alpha-2 code, such as `US` or `IN`.
-	Country string `json:"country,omitempty"`
-
-	// Currency ISO 4217 code, such as `USD`. When set, invoices for this
-	// customer use it instead of the plan currency.
-	Currency  string `json:"currency,omitempty"`
+	// LegalName The customer's legal name, printed in the invoice's Bill to block.
 	LegalName string `json:"legal_name,omitempty"`
 
 	// Phone 7 to 20 characters of digits, spaces, `+`, `-`, `(`, `)`.
-	Phone      string `json:"phone,omitempty"`
-	PostalCode string `json:"postal_code,omitempty"`
-	State      string `json:"state,omitempty"`
+	Phone string `json:"phone,omitempty"`
 
-	// TaxExemptReason Required when `tax_status` is `exempt`.
+	// PostalCode Postal code of the billing address, where the country has one.
+	PostalCode string `json:"postal_code,omitempty"`
+
+	// ProfileStatus Set by the server. `ready` when legal name, address line
+	// 1, city and country are all set, so the invoice can print
+	// a full Bill to block. Otherwise `incomplete`.
+	ProfileStatus CustomerBillingProfileProfileStatus `json:"profile_status"`
+
+	// State State, province or region of the billing address, where the country has one.
+	State string `json:"state,omitempty"`
+
+	// TaxExemptReason Why the customer pays no tax, such as a reseller certificate.
+	// Required when `tax_status` is `exempt`.
 	TaxExemptReason string `json:"tax_exempt_reason,omitempty"`
 
-	// TaxId Buyer tax ID. Required when `tax_status` is `reverse_charge`.
+	// TaxId The buyer's tax ID, stored in upper case. Required when
+	// `tax_status` is `reverse_charge`. For `eu_vat`, `in_gst` and
+	// `au_abn` its format is checked.
+	TaxId string `json:"tax_id"`
+
+	// TaxIdType The kind of tax ID, as its Stripe code (for example `eu_vat`,
+	// `in_gst`, `au_abn`). `vat`, `gstin` and `abn` are read as those
+	// codes.
+	TaxIdType string `json:"tax_id_type"`
+
+	// TaxStatus `standard`: tax is worked out as usual. `exempt`: no tax, and
+	// the invoice shows `tax_exempt_reason`. `reverse_charge`: no tax,
+	// and the invoice tells the buyer to account for it. Defaults to
+	// `standard`.
+	TaxStatus CustomerBillingProfileTaxStatus `json:"tax_status"`
+
+	// TenantId The account the customer belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the profile was last saved.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CustomerBillingProfileProfileStatus Set by the server. `ready` when legal name, address line
+// 1, city and country are all set, so the invoice can print
+// a full Bill to block. Otherwise `incomplete`.
+type CustomerBillingProfileProfileStatus string
+
+// CustomerBillingProfileTaxStatus `standard`: tax is worked out as usual. `exempt`: no tax, and
+// the invoice shows `tax_exempt_reason`. `reverse_charge`: no tax,
+// and the invoice tells the buyer to account for it. Defaults to
+// `standard`.
+type CustomerBillingProfileTaxStatus string
+
+// CustomerBillingProfileInput The billing details printed on invoices and used for tax: the body
+// of `PUT /v1/customers/{id}/billing-profile`. The whole profile is
+// replaced on every write, so a field you leave out is stored empty.
+type CustomerBillingProfileInput struct {
+	// AddressLine1 First line of the billing address.
+	AddressLine1 string `json:"address_line1,omitempty"`
+
+	// AddressLine2 Second line of the billing address.
+	AddressLine2 string `json:"address_line2,omitempty"`
+
+	// City City of the billing address.
+	City string `json:"city,omitempty"`
+
+	// Country ISO 3166 alpha-2 code, such as `US` or `IN`. Stored in upper case.
+	Country string `json:"country,omitempty"`
+
+	// Currency ISO 4217 code, such as `USD`. When set, invoices for this
+	// customer use it instead of the plan currency. Stored in upper
+	// case. Zero-decimal currencies such as JPY are refused.
+	Currency string `json:"currency,omitempty"`
+
+	// LegalName The customer's legal name, printed in the invoice's Bill to block.
+	LegalName string `json:"legal_name,omitempty"`
+
+	// Phone 7 to 20 characters of digits, spaces, `+`, `-`, `(`, `)`.
+	Phone string `json:"phone,omitempty"`
+
+	// PostalCode Postal code of the billing address, where the country has one.
+	PostalCode string `json:"postal_code,omitempty"`
+
+	// State State, province or region of the billing address, where the country has one.
+	State string `json:"state,omitempty"`
+
+	// TaxExemptReason Why the customer pays no tax, such as a reseller certificate.
+	// Required when `tax_status` is `exempt`.
+	TaxExemptReason string `json:"tax_exempt_reason,omitempty"`
+
+	// TaxId The buyer's tax ID, stored in upper case. Required when
+	// `tax_status` is `reverse_charge`. For `eu_vat`, `in_gst` and
+	// `au_abn` its format is checked.
 	TaxId string `json:"tax_id,omitempty"`
 
-	// TaxIdType Tax ID kind, stored as its Stripe code (for example `eu_vat`, `in_gst`).
+	// TaxIdType The kind of tax ID, as its Stripe code (for example `eu_vat`,
+	// `in_gst`, `au_abn`). `vat`, `gstin` and `abn` are read as those
+	// codes.
 	TaxIdType string `json:"tax_id_type,omitempty"`
 
-	// TaxStatus Defaults to `standard`.
+	// TaxStatus `standard`: tax is worked out as usual. `exempt`: no tax, and
+	// the invoice shows `tax_exempt_reason`. `reverse_charge`: no tax,
+	// and the invoice tells the buyer to account for it. Defaults to
+	// `standard`.
 	TaxStatus CustomerBillingProfileInputTaxStatus `json:"tax_status,omitempty"`
 }
 
-// CustomerBillingProfileInputTaxStatus Defaults to `standard`.
+// CustomerBillingProfileInputTaxStatus `standard`: tax is worked out as usual. `exempt`: no tax, and
+// the invoice shows `tax_exempt_reason`. `reverse_charge`: no tax,
+// and the invoice tells the buyer to account for it. Defaults to
+// `standard`.
 type CustomerBillingProfileInputTaxStatus string
 
-// CustomerOverview defines model for CustomerOverview.
+// CustomerOverview A one-call summary of a customer for a customer page: its active
+// subscriptions, its 5 newest invoices and what it still owes.
+// `GET /v1/customers/{customer_id}/overview` returns it.
 type CustomerOverview struct {
+	// ActiveSubscriptions The customer's subscriptions with status `active`, up to 50,
+	// with their items. Trialing subscriptions are not listed.
 	ActiveSubscriptions []Subscription `json:"active_subscriptions"`
-	CustomerId          string         `json:"customer_id"`
+
+	// CustomerId The customer the overview is about.
+	CustomerId string `json:"customer_id"`
 
 	// OutstandingBalance Invoices that are not draft, voided or uncollectible and
 	// whose payment is pending, failed or unknown.
 	OutstandingBalance struct {
-		// ByCurrency Amount due on the same invoices, one entry per currency, largest first. Empty when nothing is owed.
+		// ByCurrency Amount due on the same invoices, one entry per currency,
+		// largest first. Empty when nothing is owed.
 		ByCurrency []struct {
-			AmountCents int64  `json:"amount_cents"`
-			Currency    string `json:"currency"`
+			// AmountCents Amount due in this currency, in its minor unit (cents for USD).
+			AmountCents int64 `json:"amount_cents"`
+
+			// Currency The currency, such as `USD`.
+			Currency string `json:"currency"`
 		} `json:"by_currency"`
 
-		// TotalCents Sum of `amount_due_cents`. Amounts in different currencies are added together, so use `by_currency` to show an amount.
-		TotalCents  int64 `json:"total_cents"`
-		UnpaidCount int   `json:"unpaid_count"`
+		// TotalCents Sum of `amount_due_cents`, in minor units (cents for USD).
+		// Amounts in different currencies are added together, so use
+		// `by_currency` to show an amount.
+		TotalCents int64 `json:"total_cents"`
+
+		// UnpaidCount How many invoices are counted.
+		UnpaidCount int `json:"unpaid_count"`
 	} `json:"outstanding_balance"`
 
 	// RecentInvoices The 5 newest invoices.
@@ -4155,55 +4363,85 @@ type CustomerOverview struct {
 
 // CustomerPriceOverride A customer's negotiated rate for one plan price. It keeps applying
 // when the price's rate changes, and ends when the price is removed.
-// It takes the plan's currency.
+// It takes the plan's currency. The `/v1/price-overrides` routes
+// create, list and end overrides. Every shape field is always sent:
+// the ones the mode does not use are `"0"`, `0` or `[]`.
 type CustomerPriceOverride struct {
+	// Active True until the override is ended: by `DELETE
+	// /v1/price-overrides/{id}`, by a new override for the same
+	// customer and price, or by the removal of the price.
 	Active bool `json:"active"`
 
 	// CreatedAt When the override starts, in the customer's time: wall time, or
 	// its test clock's time. A subscription already on the plan gets
 	// it from its next period; one that first joins the plan in a
 	// period after this instant gets it from the join.
-	CreatedAt  time.Time `json:"created_at"`
-	CustomerId string    `json:"customer_id"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// CustomerId The customer who pays this rate.
+	CustomerId string `json:"customer_id"`
 
 	// DeactivatedAt When the override ended, in the customer's time. Absent while it is active.
 	DeactivatedAt time.Time `json:"deactivated_at,omitempty"`
-	Id            string    `json:"id"`
 
-	// Mode As on PriceShape.
+	// Id The override's ID, `hc_cpo_` and 20 characters.
+	Id string `json:"id"`
+
+	// Mode How the override bills a quantity; see PriceShape.
 	Mode CustomerPriceOverrideMode `json:"mode"`
 
-	// PackageAmountCents Price of one package in cents, as a decimal string.
+	// PackageAmountCents Price of one package, as a decimal string of cents. `"0"` unless
+	// `mode` is `package`.
 	PackageAmountCents string `json:"package_amount_cents"`
-	PackageSize        int64  `json:"package_size"`
+
+	// PackageSize The units in one package. 0 unless `mode` is `package`.
+	PackageSize int64 `json:"package_size"`
 
 	// PriceId The plan price this override replaces the rate of, for this customer.
-	PriceId  string `json:"price_id"`
-	Reason   string `json:"reason,omitempty"`
+	PriceId string `json:"price_id"`
+
+	// Reason Your note on why the customer has this rate. Absent when none was given.
+	Reason string `json:"reason,omitempty"`
+
+	// TenantId The account the override belongs to.
 	TenantId string `json:"tenant_id,omitempty"`
 
 	// Tiers Empty (`[]`) unless `mode` is `graduated`.
 	Tiers []PriceTier `json:"tiers"`
 
-	// UnitAmountCents Price per unit in cents, as a decimal string.
-	UnitAmountCents string    `json:"unit_amount_cents"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	// UnitAmountCents Price per unit, as a decimal string of cents. `"0"` unless `mode`
+	// is `per_unit`.
+	UnitAmountCents string `json:"unit_amount_cents"`
+
+	// UpdatedAt When the override was last written.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// CustomerPriceOverrideMode As on PriceShape.
+// CustomerPriceOverrideMode How the override bills a quantity; see PriceShape.
 type CustomerPriceOverrideMode string
 
-// CustomerUsage defines model for CustomerUsage.
+// CustomerUsage A customer's usage and its cost over a window, priced the way the
+// invoice prices it: `GET /v1/customers/{id}/usage`. Only active and
+// trialing subscriptions are counted. Quantities are decimal strings.
 type CustomerUsage struct {
 	// Buckets One entry per UTC day in the period, including days with no usage.
 	Buckets []struct {
+		// BucketStart The start of the UTC day.
 		BucketStart time.Time `json:"bucket_start"`
 
-		// PerMeter Quantity per meter ID for that day, as a decimal string.
+		// PerMeter Quantity per meter ID for that day, as a decimal string:
+		// the sum of the day's event quantities, including usage
+		// no price takes. So the days need not add up to a meter's
+		// `total_quantity`, which uses the meter's aggregation.
+		// Empty on a day with no usage.
 		PerMeter map[string]string `json:"per_meter"`
 	} `json:"buckets"`
-	CustomerId string               `json:"customer_id"`
-	Meters     []CustomerUsageMeter `json:"meters"`
+
+	// CustomerId The customer the usage belongs to.
+	CustomerId string `json:"customer_id"`
+
+	// Meters One entry per meter the customer's plans price, with or without usage.
+	Meters []CustomerUsageMeter `json:"meters"`
 
 	// Period The window the response covers. With no `from` and `to`
 	// (`current_billing_cycle`), each subscription is rated over its
@@ -4212,6 +4450,7 @@ type CustomerUsage struct {
 	// totals and daily `buckets` cover its own subscription's whole
 	// period, including usage a threshold invoice already billed.
 	Period struct {
+		// From Start of the window, inclusive.
 		From time.Time `json:"from"`
 
 		// Source `current_billing_cycle`: no `from` and `to` were sent, and
@@ -4223,25 +4462,42 @@ type CustomerUsage struct {
 		// subscription's usage in the window is priced at the
 		// prices of its current billing period.
 		Source CustomerUsagePeriodSource `json:"source"`
-		To     time.Time                 `json:"to"`
+
+		// To End of the window, exclusive.
+		To time.Time `json:"to"`
 	} `json:"period"`
 
 	// Subscriptions One entry per item of each active or trialing subscription. A
 	// subscription with several plans appears once per plan, with the
 	// same `id`.
 	Subscriptions []struct {
-		Currency           string    `json:"currency"`
-		CurrentPeriodEnd   time.Time `json:"current_period_end"`
+		// Currency The plan's currency, such as `USD`.
+		Currency string `json:"currency"`
+
+		// CurrentPeriodEnd End of the subscription's current billing period, exclusive.
+		CurrentPeriodEnd time.Time `json:"current_period_end"`
+
+		// CurrentPeriodStart Start of the subscription's current billing period.
 		CurrentPeriodStart time.Time `json:"current_period_start"`
-		Id                 string    `json:"id"`
-		PlanId             string    `json:"plan_id"`
-		PlanName           string    `json:"plan_name"`
+
+		// Id The subscription's ID.
+		Id string `json:"id"`
+
+		// PlanId The plan of this item.
+		PlanId string `json:"plan_id"`
+
+		// PlanName The plan's name.
+		PlanName string `json:"plan_name"`
 	} `json:"subscriptions"`
 
 	// Totals One entry per currency.
 	Totals []struct {
-		AmountCents int64  `json:"amount_cents"`
-		Currency    string `json:"currency"`
+		// AmountCents The usage cost of every meter in this currency, in the
+		// currency's minor unit (cents for USD).
+		AmountCents int64 `json:"amount_cents"`
+
+		// Currency The currency, such as `USD`.
+		Currency string `json:"currency"`
 	} `json:"totals"`
 
 	// Warnings Problems found working out this usage, in words, such as usage
@@ -4259,17 +4515,28 @@ type CustomerUsage struct {
 // prices of its current billing period.
 type CustomerUsagePeriodSource string
 
-// CustomerUsageMeter defines model for CustomerUsageMeter.
+// CustomerUsageMeter One meter in a customer's usage report: its usage over the window
+// and what that usage costs, split by the price that took it.
 type CustomerUsageMeter struct {
-	Currency  string `json:"currency"`
+	// Currency The currency of the plan whose prices took the usage. Empty when
+	// no usage was priced.
+	Currency string `json:"currency"`
+
+	// EventName The `event_name` usage events send for this meter.
 	EventName string `json:"event_name"`
-	MeterId   string `json:"meter_id"`
+
+	// MeterId The meter's ID.
+	MeterId string `json:"meter_id"`
+
+	// MeterName The meter's display name.
 	MeterName string `json:"meter_name"`
 
 	// Prices One row per (plan, price) that took usage, and a `no_price` row
 	// per plan for the usage no price of that plan took. Two plans can
 	// price one meter differently.
 	Prices []struct {
+		// AmountCents What this price bills for the usage, in the currency's minor
+		// unit (cents for USD).
 		AmountCents int64 `json:"amount_cents"`
 
 		// DimensionMatch The labels the price takes. Absent for a price that takes every event.
@@ -4277,23 +4544,34 @@ type CustomerUsageMeter struct {
 
 		// NoPrice True for usage no price of the plan took. Hardcount bills
 		// nothing for it, and it is left out of the meter's totals.
-		NoPrice bool   `json:"no_price,omitempty"`
-		PlanId  string `json:"plan_id"`
+		// Absent on other rows.
+		NoPrice bool `json:"no_price,omitempty"`
 
-		// PriceId Absent on a `no_price` row.
+		// PlanId The plan the price belongs to.
+		PlanId string `json:"plan_id"`
+
+		// PriceId The plan price that took the usage. Absent on a `no_price` row.
 		PriceId string `json:"price_id,omitempty"`
 
-		// Quantity Decimal string.
+		// Quantity The usage this price took, as a decimal string.
 		Quantity string `json:"quantity"`
 
-		// UnitAmountDecimal Price per unit in cents, as a decimal string; the same figure the invoice line shows.
+		// UnitAmountDecimal Price per unit, as a decimal string of cents; the same
+		// figure the invoice line shows. Absent on a `no_price`
+		// row.
 		UnitAmountDecimal string `json:"unit_amount_decimal,omitempty"`
 	} `json:"prices"`
+
+	// TotalAmountCents What the usage costs, in the currency's minor unit (cents for
+	// USD). Usage no price took is left out.
 	TotalAmountCents int64 `json:"total_amount_cents"`
 
-	// TotalQuantity Decimal string.
+	// TotalQuantity The usage the meter's prices took, as a decimal string, under
+	// the meter's aggregation. Usage no price took is left out.
 	TotalQuantity string `json:"total_quantity"`
-	Unit          string `json:"unit"`
+
+	// Unit The meter's unit, such as `tokens`.
+	Unit string `json:"unit"`
 }
 
 // DisputeWebhookEventData The `data` of the outbound webhook events `payment.dispute_opened`
@@ -4635,9 +4913,13 @@ type HeldUsageGroup struct {
 	EventName string `json:"event_name"`
 
 	// ExternalCustomerId The LiteLLM `user` value the rows carried.
-	ExternalCustomerId string    `json:"external_customer_id"`
-	FirstEventAt       time.Time `json:"first_event_at"`
-	LastEventAt        time.Time `json:"last_event_at"`
+	ExternalCustomerId string `json:"external_customer_id"`
+
+	// FirstEventAt The earliest usage time among the rows.
+	FirstEventAt time.Time `json:"first_event_at"`
+
+	// LastEventAt The latest usage time among the rows.
+	LastEventAt time.Time `json:"last_event_at"`
 
 	// LastReceivedAt When Hardcount last received a row for this group.
 	LastReceivedAt time.Time `json:"last_received_at"`
@@ -4647,7 +4929,9 @@ type HeldUsageGroup struct {
 
 	// Reason What was missing when the rows arrived.
 	Reason HeldUsageGroupReason `json:"reason"`
-	Rows   int                  `json:"rows"`
+
+	// Rows Number of rows held in the group.
+	Rows int `json:"rows"`
 
 	// TotalQuantity Sum of the held quantities, as a decimal string.
 	TotalQuantity string `json:"total_quantity"`
@@ -4656,8 +4940,9 @@ type HeldUsageGroup struct {
 // HeldUsageGroupReason What was missing when the rows arrived.
 type HeldUsageGroupReason string
 
-// HeldUsageReleaseResult The counts are what Hardcount found when the release wrote the rows, as
-// for `billing_status` (see `UsageBillingStatus`). The invoice is the
+// HeldUsageReleaseResult What `POST /v1/usage-events/held/release` did. The counts are what
+// Hardcount found when the release wrote the rows, as for
+// `billing_status` (see `UsageBillingStatus`). The invoice is the
 // final answer.
 type HeldUsageReleaseResult struct {
 	// CustomerId The customer the rows were ingested for.
@@ -4983,9 +5268,10 @@ type Invoice struct {
 	// a refusal. Absent when there is nothing to say.
 	RecoveryWarning RecoveryWarning `json:"recovery_warning,omitempty"`
 
-	// SourceChangeType Classifies per-item proration artifacts so the dedup index can
-	// distinguish a plan-change and a quantity-change that happen to
-	// share the same `(subscription, item, timestamp)`.
+	// SourceChangeType The kind of subscription item change that produced a proration:
+	// `plan` (the item moved to another plan), `quantity` (its quantity
+	// changed), `add` (the item was added) or `remove` (the item was
+	// removed).
 	SourceChangeType         ItemChangeType `json:"source_change_type,omitempty"`
 	SourcePlanChangedAt      time.Time      `json:"source_plan_changed_at,omitempty"`
 	SourceSubscriptionItemId string         `json:"source_subscription_item_id,omitempty"`
@@ -5501,9 +5787,10 @@ type InvoiceWithLineItems struct {
 	LineItems []InvoiceLineItem `json:"line_items"`
 }
 
-// ItemChangeType Classifies per-item proration artifacts so the dedup index can
-// distinguish a plan-change and a quantity-change that happen to
-// share the same `(subscription, item, timestamp)`.
+// ItemChangeType The kind of subscription item change that produced a proration:
+// `plan` (the item moved to another plan), `quantity` (its quantity
+// changed), `add` (the item was added) or `remove` (the item was
+// removed).
 type ItemChangeType string
 
 // ListTotal How many rows match the request's filters, on every page, not only
@@ -5523,8 +5810,10 @@ type LitellmSpendLog struct {
 	// Hardcount does not bill (images, audio, realtime, moderation,
 	// batches, files, A2A, response retrieval, ...); those are
 	// skipped, and a skipped record that carries tokens is logged.
-	CallType         string `json:"call_type,omitempty"`
-	CompletionTokens int64  `json:"completion_tokens,omitempty"`
+	CallType string `json:"call_type,omitempty"`
+
+	// CompletionTokens Output tokens. Used when there is no `usage` object.
+	CompletionTokens int64 `json:"completion_tokens,omitempty"`
 
 	// CostBreakdown The provider's own cost, in dollars. When present, each event's
 	// provider cost comes from its part (input, output, cache read or
@@ -5538,13 +5827,26 @@ type LitellmSpendLog struct {
 	// always do: LiteLLM prices `cache_creation_cost` at the 5-minute
 	// rate.
 	CostBreakdown struct {
+		// CacheCreationCost LiteLLM's cost of the cache writes, in dollars, priced at the 5-minute rate.
 		CacheCreationCost float32 `json:"cache_creation_cost,omitempty"`
-		CacheReadCost     float32 `json:"cache_read_cost,omitempty"`
-		InputCost         float32 `json:"input_cost,omitempty"`
-		OutputCost        float32 `json:"output_cost,omitempty"`
-		ToolUsageCost     float32 `json:"tool_usage_cost,omitempty"`
-		TotalCost         float32 `json:"total_cost,omitempty"`
+
+		// CacheReadCost The part of `input_cost` spent on cache reads, in dollars.
+		CacheReadCost float32 `json:"cache_read_cost,omitempty"`
+
+		// InputCost The cost of the whole prompt, in dollars, cache reads and writes included.
+		InputCost float32 `json:"input_cost,omitempty"`
+
+		// OutputCost The cost of the output tokens, in dollars.
+		OutputCost float32 `json:"output_cost,omitempty"`
+
+		// ToolUsageCost Accepted but not used.
+		ToolUsageCost float32 `json:"tool_usage_cost,omitempty"`
+
+		// TotalCost Accepted but not used.
+		TotalCost float32 `json:"total_cost,omitempty"`
 	} `json:"cost_breakdown,omitempty"`
+
+	// CustomLlmProvider The provider LiteLLM sent the call to, such as `openai`. Each event carries it as the `provider` dimension.
 	CustomLlmProvider string `json:"custom_llm_provider,omitempty"`
 
 	// EndTime Unix seconds. The event time. With neither, the customer's current time is used.
@@ -5559,7 +5861,12 @@ type LitellmSpendLog struct {
 	// Metadata `team_id` and `request_tags` become event dimensions;
 	// `usage_object` is read for token counts; other keys are ignored.
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
-	Model    string                 `json:"model,omitempty"`
+
+	// Model The model the call used, as LiteLLM names it. Each event
+	// carries it as the `model_raw` dimension, and as `model` the
+	// model family name when Hardcount recognises it (the name as
+	// sent otherwise).
+	Model string `json:"model,omitempty"`
 
 	// PromptTokens Used when there is no `usage` object.
 	PromptTokens int64 `json:"prompt_tokens,omitempty"`
@@ -5571,28 +5878,55 @@ type LitellmSpendLog struct {
 	StartTime float32 `json:"startTime,omitempty"`
 
 	// Status A `failure` record (a call the provider refused or that timed out) is skipped, whatever token counts it carries.
-	Status      string `json:"status,omitempty"`
-	TotalTokens int64  `json:"total_tokens,omitempty"`
-	Usage       struct {
+	Status string `json:"status,omitempty"`
+
+	// TotalTokens Accepted but not used.
+	TotalTokens int64 `json:"total_tokens,omitempty"`
+
+	// Usage The call's token counts. When it is absent, Hardcount reads
+	// `metadata.usage_object`, then the top-level `prompt_tokens` and
+	// `completion_tokens`.
+	Usage struct {
 		// CacheCreationInputTokens Cache-write tokens, included in prompt_tokens. Split into `cache_write_5m` and `cache_write_1h` by `prompt_tokens_details.cache_creation_token_details`.
 		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
-		CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
-		CompletionTokens         int64 `json:"completion_tokens,omitempty"`
+
+		// CacheReadInputTokens Anthropic's cache-read tokens, included in prompt_tokens.
+		// Hardcount takes the larger of this and
+		// `prompt_tokens_details.cached_tokens` as the `cache_read`
+		// event.
+		CacheReadInputTokens int64 `json:"cache_read_input_tokens,omitempty"`
+
+		// CompletionTokens Output tokens. They become the `output` event.
+		CompletionTokens int64 `json:"completion_tokens,omitempty"`
 
 		// PromptTokens Includes cache-read tokens.
-		PromptTokens        int64 `json:"prompt_tokens,omitempty"`
+		PromptTokens int64 `json:"prompt_tokens,omitempty"`
+
+		// PromptTokensDetails The breakdown of `prompt_tokens`, as LiteLLM reports it.
 		PromptTokensDetails struct {
 			// CacheCreationTokenDetails Anthropic's cache writes by cache lifetime. They become
 			// `cache_write_5m` and `cache_write_1h` events, taken out
 			// of `input`. Without this split, or when it does not add
 			// up to the cache-write count, the writes stay in `input`.
 			CacheCreationTokenDetails struct {
+				// Ephemeral1hInputTokens Cache writes with a 1-hour lifetime. They become the `cache_write_1h` event.
 				Ephemeral1hInputTokens int64 `json:"ephemeral_1h_input_tokens,omitempty"`
+
+				// Ephemeral5mInputTokens Cache writes with a 5-minute lifetime. They become the `cache_write_5m` event.
 				Ephemeral5mInputTokens int64 `json:"ephemeral_5m_input_tokens,omitempty"`
 			} `json:"cache_creation_token_details,omitempty"`
+
+			// CacheCreationTokens Prompt tokens written to the provider's cache. Hardcount
+			// takes the larger of this and
+			// `cache_creation_input_tokens`.
 			CacheCreationTokens int64 `json:"cache_creation_tokens,omitempty"`
-			CachedTokens        int64 `json:"cached_tokens,omitempty"`
+
+			// CachedTokens Prompt tokens read from the provider's cache. They become
+			// the `cache_read` event, taken out of `input`.
+			CachedTokens int64 `json:"cached_tokens,omitempty"`
 		} `json:"prompt_tokens_details,omitempty"`
+
+		// TotalTokens Accepted but not used.
 		TotalTokens int64 `json:"total_tokens,omitempty"`
 	} `json:"usage,omitempty"`
 
@@ -5600,7 +5934,10 @@ type LitellmSpendLog struct {
 	User string `json:"user,omitempty"`
 }
 
-// LitellmSpendResult defines model for LitellmSpendResult.
+// LitellmSpendResult What `POST /v1/integrations/litellm/spend` did with the records it
+// received. Each record becomes up to five usage events, one per
+// token type; the counts below count events, except `skipped` and
+// `cache_hits`, which count records.
 type LitellmSpendResult struct {
 	// Accepted Usage events newly recorded.
 	Accepted int `json:"accepted"`
@@ -5616,8 +5953,11 @@ type LitellmSpendResult struct {
 	// Deduplicated Usage events already recorded, or already held, by an earlier delivery.
 	Deduplicated int `json:"deduplicated"`
 
-	// Errors One entry per record that was not recorded. A record's events are recorded together or not at all.
+	// Errors One entry per record that was not recorded. A record's events are
+	// recorded together or not at all. Absent when every record was
+	// recorded, held or skipped.
 	Errors []struct {
+		// Error Why the record was not recorded, such as a missing `user`.
 		Error string `json:"error"`
 
 		// Id The LiteLLM record id.
@@ -5648,47 +5988,91 @@ type LitellmSpendResult struct {
 	Skipped int `json:"skipped"`
 }
 
-// MarginReport defines model for MarginReport.
+// MarginReport One customer's usage revenue against what that usage cost you at
+// your AI providers, for a window: `GET /v1/customers/{id}/margin`.
+// It looks only at usage: base fees, credits and tax are not in it.
+// Revenue is shown per model only where the price that billed the
+// usage names the model in its `dimension_match`; other revenue is
+// reported as unattributed, never split by a guess.
 type MarginReport struct {
+	// ByModel One row per model that has stamped cost or attributed revenue in
+	// the window, largest revenue first, then largest cost.
 	ByModel []struct {
-		// Attributed True only when the price that billed the usage names this model — margin is never heuristically allocated.
+		// Attributed True only when the price that billed the usage names this
+		// model, so revenue is never split by a guess.
 		Attributed bool `json:"attributed"`
 
 		// CostCents This model's stamped provider cost in US cents, as a decimal string.
 		CostCents string `json:"cost_cents"`
 
-		// MarginBps This model's (revenue − cost) / revenue in basis points, by the same formula as the report's margin_bps. Omitted whenever the report's margin_bps is omitted for currency or unresolved_events, and when the row is not attributed or has no provider cost of its own.
-		MarginBps    int64  `json:"margin_bps,omitempty"`
-		Model        string `json:"model"`
-		RevenueCents int64  `json:"revenue_cents,omitempty"`
+		// MarginBps This model's (revenue − cost) / revenue in basis points, by
+		// the same formula as the report's `margin_bps`. Absent
+		// whenever the report's `margin_bps` is absent for currency or
+		// `unresolved_events`, and when the row is not attributed or
+		// has no provider cost of its own.
+		MarginBps int64 `json:"margin_bps,omitempty"`
+
+		// Model The model, from the events' `model` label (else their
+		// `model_raw` label, else `(unknown)`), or from the price's
+		// `dimension_match` for revenue with no stamped cost.
+		Model string `json:"model"`
+
+		// RevenueCents The revenue of the prices that name this model, in the
+		// minor unit of `revenue_currency`. Absent when the row is
+		// not attributed or the revenue is 0.
+		RevenueCents int64 `json:"revenue_cents,omitempty"`
 	} `json:"by_model"`
 
 	// CostCents Total stamped provider cost in US cents, as a decimal string (e.g. "275.75").
 	CostCents string `json:"cost_cents"`
 
-	// CostCurrency Currency of cost_cents. Always USD.
+	// CostCurrency Currency of `cost_cents`. Always USD.
 	CostCurrency string `json:"cost_currency"`
 
-	// CostRatesConfigured Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up.
+	// CostRatesConfigured Whether the account has any provider cost rate in this mode. False
+	// with `costed_events` 0 means no rates are set up.
 	CostRatesConfigured bool `json:"cost_rates_configured"`
 
-	// CostedEvents Events in the window that carry a stamped provider cost (zero cost included). 0 means the cost side is unknown.
-	CostedEvents int64     `json:"costed_events"`
-	CustomerId   string    `json:"customer_id"`
-	From         time.Time `json:"from"`
+	// CostedEvents Events in the window that carry a stamped provider cost (zero cost
+	// included). 0 means the cost side is unknown.
+	CostedEvents int64 `json:"costed_events"`
 
-	// MarginBps (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, when costed_events is 0 (no provider cost known), or when unresolved_events is above 0 (part of the cost unknown, so the margin would read too high).
+	// CustomerId The customer the report is about.
+	CustomerId string `json:"customer_id"`
+
+	// From Start of the window, inclusive.
+	From time.Time `json:"from"`
+
+	// MarginBps (revenue − cost) / revenue in basis points (100 = 1%). Absent
+	// when revenue is 0, when `revenue_currency` is not
+	// `cost_currency`, when `costed_events` is 0 (no provider cost
+	// known), or when `unresolved_events` is above 0 (part of the
+	// cost unknown, so the margin would read too high).
 	MarginBps int64 `json:"margin_bps,omitempty"`
 
-	// RevenueCents Total rated usage revenue in the window, an estimate at each subscription's current prices. Only active and trialing subscriptions are counted.
+	// RevenueCents Total rated usage revenue in the window, in the minor unit of
+	// `revenue_currency` (cents for USD). It is an estimate at each
+	// subscription's current prices. Only active and trialing
+	// subscriptions are counted.
 	RevenueCents int64 `json:"revenue_cents"`
 
-	// RevenueCurrency Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter.
-	RevenueCurrency          string    `json:"revenue_currency,omitempty"`
-	To                       time.Time `json:"to"`
-	UnattributedRevenueCents int64     `json:"unattributed_revenue_cents"`
+	// RevenueCurrency Currency of `revenue_cents` (the currency of the customer's
+	// prices). Absent when the window's revenue spans more than one
+	// currency, or the customer has no priced meter.
+	RevenueCurrency string `json:"revenue_currency,omitempty"`
 
-	// UnresolvedEvents Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `unit_cost_cents`, was too large to record (about $9.2 trillion or more, either sign).
+	// To End of the window, exclusive.
+	To time.Time `json:"to"`
+
+	// UnattributedRevenueCents The revenue of prices that name no model, in the minor unit of
+	// `revenue_currency` (cents for USD).
+	UnattributedRevenueCents int64 `json:"unattributed_revenue_cents"`
+
+	// UnresolvedEvents Usage events in the window that carry `provider`, `model` and
+	// `token_type` labels but have no cost: no rate matched (add a
+	// rate to cost new events), or the cost, quantity ×
+	// `unit_cost_cents`, was too large to record (about $9.2 trillion
+	// or more, either sign).
 	UnresolvedEvents int64 `json:"unresolved_events"`
 }
 
@@ -5712,16 +6096,25 @@ type MemberInvitation struct {
 // MemberInvitationStatus Server-derived; treat as authoritative.
 type MemberInvitationStatus string
 
-// Meter defines model for Meter.
+// Meter A meter counts one kind of usage: every usage event that sends its
+// `event_name`. A meter has no price of its own. Plans price it
+// (`/v1/plans/{id}/prices`). Create, list, get and update meters
+// under `/v1/meters`.
 type Meter struct {
 	// Aggregation How the meter rolls its events into one quantity per billing
-	// period. Every price of the meter bills under it. `last`
-	// is the latest event by timestamp, then by id. Fixed once the
-	// meter has a usage event (see `has_usage`).
+	// period: `sum` adds the quantities, `count` counts the events,
+	// `max` takes the highest quantity, and `last` takes the latest
+	// event's quantity, by timestamp, then by id. Every price of the
+	// meter bills under it. Fixed once the meter has a usage event
+	// (see `has_usage`).
 	Aggregation MeterAggregation `json:"aggregation"`
-	CreatedAt   time.Time        `json:"created_at"`
 
-	// EventName The `event_name` usage events send for this meter.
+	// CreatedAt When the meter was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// EventName The `event_name` usage events send for this meter. Letters,
+	// digits, `-` and `_`, at most 100 characters. Unique in the
+	// account and mode, and fixed after create.
 	EventName string `json:"event_name"`
 
 	// HasUsage Whether the meter has usage events. Once it has, its
@@ -5729,109 +6122,207 @@ type Meter struct {
 	// does not count until it is released. Returned when you create,
 	// get or update one meter; the meter list leaves it out. A create
 	// or update that succeeded leaves it out if it could not be read.
-	HasUsage  bool      `json:"has_usage,omitempty"`
-	Id        string    `json:"id"`
-	Name      string    `json:"name"`
-	TenantId  string    `json:"tenant_id,omitempty"`
-	Unit      string    `json:"unit"`
+	HasUsage bool `json:"has_usage,omitempty"`
+
+	// Id The meter's ID, `hc_mtr_` and 20 characters.
+	Id string `json:"id"`
+
+	// Name The meter's display name, at most 255 characters.
+	Name string `json:"name"`
+
+	// TenantId The account the meter belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// Unit The unit of the quantity, such as `tokens` or `seconds`.
+	// `unit` when none was given.
+	Unit string `json:"unit"`
+
+	// UpdatedAt When the meter was last changed.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // MeterAggregation How the meter rolls its events into one quantity per billing
-// period. Every price of the meter bills under it. `last`
-// is the latest event by timestamp, then by id. Fixed once the
-// meter has a usage event (see `has_usage`).
+// period: `sum` adds the quantities, `count` counts the events,
+// `max` takes the highest quantity, and `last` takes the latest
+// event's quantity, by timestamp, then by id. Every price of the
+// meter bills under it. Fixed once the meter has a usage event
+// (see `has_usage`).
 type MeterAggregation string
 
-// PaymentMethod defines model for PaymentMethod.
+// PaymentMethod A card saved for a customer in Stripe, which Hardcount can charge.
+// The payment-method routes under
+// `/v1/customers/{customer_id}/payment-methods` return it, and the
+// `payment_method.*` webhook events carry it.
 type PaymentMethod struct {
-	CardBrand    string    `json:"card_brand,omitempty"`
-	CardExpMonth int       `json:"card_exp_month,omitempty"`
-	CardExpYear  int       `json:"card_exp_year,omitempty"`
-	CardLast4    string    `json:"card_last4,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	CustomerId   string    `json:"customer_id"`
-	Id           string    `json:"id"`
-	IsDefault    bool      `json:"is_default"`
-	Type         string    `json:"type"`
+	// CardBrand The card network as Stripe names it, such as `visa` or
+	// `mastercard`. Absent when Stripe sent none.
+	CardBrand string `json:"card_brand,omitempty"`
+
+	// CardExpMonth The card's expiry month, 1 to 12. Absent when Stripe sent none.
+	CardExpMonth int `json:"card_exp_month,omitempty"`
+
+	// CardExpYear The card's expiry year, such as `2029`. Absent when Stripe sent none.
+	CardExpYear int `json:"card_exp_year,omitempty"`
+
+	// CardLast4 The last 4 digits of the card number. Absent when Stripe sent none.
+	CardLast4 string `json:"card_last4,omitempty"`
+
+	// CreatedAt When the card was saved.
+	CreatedAt time.Time `json:"created_at"`
+
+	// CustomerId The customer the card belongs to.
+	CustomerId string `json:"customer_id"`
+
+	// Id The payment method's ID in Hardcount, `hc_pm_` and 24 hex characters.
+	Id string `json:"id"`
+
+	// IsDefault Whether this is the card Hardcount charges. A customer with saved
+	// cards has one default.
+	IsDefault bool `json:"is_default"`
+
+	// Type The kind of payment method. Always `card` today.
+	Type string `json:"type"`
 }
 
-// Plan defines model for Plan.
+// Plan A plan is what a subscription buys: a recurring base fee and the
+// usage prices of its meters, in one currency and billing interval.
+// `GET /v1/plans` lists plans in this shape. Get, create and update
+// answer a `PlanDetail`, which adds two fields.
 type Plan struct {
+	// BaseAmountCents The recurring base fee per billing period, in the currency's minor
+	// unit (cents for USD). 0 for a usage-only plan.
 	BaseAmountCents int64 `json:"base_amount_cents"`
 
-	// BaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
-	// in_arrears: base + usage billed at period end.
-	// in_advance: base billed at period start (day 1 on create; cycle-close invoice
-	// carries upcoming period's base + elapsed period's usage). Usage lines are
-	// always arrears regardless of this field. A plan with no base fee is
-	// in_arrears. See ADR-031.
-	BaseBillTiming  PlanBaseBillTiming  `json:"base_bill_timing"`
+	// BaseBillTiming When the base fee is invoiced, relative to the period it
+	// covers. `in_arrears`: the base fee and the usage are billed at
+	// the period end. `in_advance`: the base fee is billed at the
+	// period start; the first invoice comes when the subscription
+	// starts, and each cycle invoice carries the next period's base
+	// fee with the past period's usage. Usage is always billed at
+	// the period end. A plan with no base fee is `in_arrears`.
+	BaseBillTiming PlanBaseBillTiming `json:"base_bill_timing"`
+
+	// BillingInterval How often a subscription to the plan is billed. Fixed after create.
 	BillingInterval PlanBillingInterval `json:"billing_interval"`
-	Code            string              `json:"code"`
-	CreatedAt       time.Time           `json:"created_at"`
-	Currency        string              `json:"currency"`
-	Description     string              `json:"description,omitempty"`
-	Id              string              `json:"id"`
-	Name            string              `json:"name"`
 
-	// Prices The plan's usage prices from now on. A plan's meters are the
-	// meters it has a price for.
+	// Code Your short name for the plan. Letters, digits, `-` and `_`, at
+	// most 100 characters, unique in the account and mode. Fixed
+	// after create.
+	Code string `json:"code"`
+
+	// CreatedAt When the plan was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Currency ISO 4217 code in upper case, such as `USD`. Fixed after create.
+	// The plan's prices take it.
+	Currency string `json:"currency"`
+
+	// Description Your description of the plan. Absent when empty.
+	Description string `json:"description,omitempty"`
+
+	// Id The plan's ID, `hc_pln_` and 20 characters.
+	Id string `json:"id"`
+
+	// Name The plan's display name, at most 255 characters.
+	Name string `json:"name"`
+
+	// Prices The plan's usage prices from now on, in the order they were
+	// added. A plan's meters are the meters it has a price for.
 	Prices []PlanPrice `json:"prices"`
-	Status PlanStatus  `json:"status"`
 
-	// TaxCode Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`.
-	TaxCode   string    `json:"tax_code,omitempty"`
-	TenantId  string    `json:"tenant_id,omitempty"`
+	// Status An archived plan takes no new subscriptions and no plan change
+	// onto it. Subscriptions already on it keep billing.
+	Status PlanStatus `json:"status"`
+
+	// TaxCode The Stripe product tax code of the base fee, such as
+	// `txcd_10103001`. Absent when the plan uses the account's
+	// `default_product_tax_code`.
+	TaxCode string `json:"tax_code,omitempty"`
+
+	// TenantId The account the plan belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the plan was last changed.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// PlanBaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
-// in_arrears: base + usage billed at period end.
-// in_advance: base billed at period start (day 1 on create; cycle-close invoice
-// carries upcoming period's base + elapsed period's usage). Usage lines are
-// always arrears regardless of this field. A plan with no base fee is
-// in_arrears. See ADR-031.
+// PlanBaseBillTiming When the base fee is invoiced, relative to the period it
+// covers. `in_arrears`: the base fee and the usage are billed at
+// the period end. `in_advance`: the base fee is billed at the
+// period start; the first invoice comes when the subscription
+// starts, and each cycle invoice carries the next period's base
+// fee with the past period's usage. Usage is always billed at
+// the period end. A plan with no base fee is `in_arrears`.
 type PlanBaseBillTiming string
 
-// PlanBillingInterval defines model for Plan.BillingInterval.
+// PlanBillingInterval How often a subscription to the plan is billed. Fixed after create.
 type PlanBillingInterval string
 
-// PlanStatus defines model for Plan.Status.
+// PlanStatus An archived plan takes no new subscriptions and no plan change
+// onto it. Subscriptions already on it keep billing.
 type PlanStatus string
 
 // PlanDetail defines model for PlanDetail.
 type PlanDetail struct {
+	// BaseAmountCents The recurring base fee per billing period, in the currency's minor
+	// unit (cents for USD). 0 for a usage-only plan.
 	BaseAmountCents int64 `json:"base_amount_cents"`
 
-	// BaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
-	// in_arrears: base + usage billed at period end.
-	// in_advance: base billed at period start (day 1 on create; cycle-close invoice
-	// carries upcoming period's base + elapsed period's usage). Usage lines are
-	// always arrears regardless of this field. A plan with no base fee is
-	// in_arrears. See ADR-031.
-	BaseBillTiming  PlanDetailBaseBillTiming  `json:"base_bill_timing"`
+	// BaseBillTiming When the base fee is invoiced, relative to the period it
+	// covers. `in_arrears`: the base fee and the usage are billed at
+	// the period end. `in_advance`: the base fee is billed at the
+	// period start; the first invoice comes when the subscription
+	// starts, and each cycle invoice carries the next period's base
+	// fee with the past period's usage. Usage is always billed at
+	// the period end. A plan with no base fee is `in_arrears`.
+	BaseBillTiming PlanDetailBaseBillTiming `json:"base_bill_timing"`
+
+	// BillingInterval How often a subscription to the plan is billed. Fixed after create.
 	BillingInterval PlanDetailBillingInterval `json:"billing_interval"`
-	Code            string                    `json:"code"`
-	CreatedAt       time.Time                 `json:"created_at"`
-	Currency        string                    `json:"currency"`
-	Description     string                    `json:"description,omitempty"`
-	Id              string                    `json:"id"`
+
+	// Code Your short name for the plan. Letters, digits, `-` and `_`, at
+	// most 100 characters, unique in the account and mode. Fixed
+	// after create.
+	Code string `json:"code"`
+
+	// CreatedAt When the plan was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Currency ISO 4217 code in upper case, such as `USD`. Fixed after create.
+	// The plan's prices take it.
+	Currency string `json:"currency"`
+
+	// Description Your description of the plan. Absent when empty.
+	Description string `json:"description,omitempty"`
+
+	// Id The plan's ID, `hc_pln_` and 20 characters.
+	Id string `json:"id"`
 
 	// LiveSubscriptionCount Subscriptions on this plan that are not canceled. While it
 	// is above 0, `base_amount_cents` cannot change (see Update
-	// plan).
-	LiveSubscriptionCount int    `json:"live_subscription_count"`
-	Name                  string `json:"name"`
+	// plan). Always 0 on the answer to a create.
+	LiveSubscriptionCount int `json:"live_subscription_count"`
 
-	// Prices The plan's usage prices from now on. A plan's meters are the
-	// meters it has a price for.
-	Prices []PlanPrice      `json:"prices"`
+	// Name The plan's display name, at most 255 characters.
+	Name string `json:"name"`
+
+	// Prices The plan's usage prices from now on, in the order they were
+	// added. A plan's meters are the meters it has a price for.
+	Prices []PlanPrice `json:"prices"`
+
+	// Status An archived plan takes no new subscriptions and no plan change
+	// onto it. Subscriptions already on it keep billing.
 	Status PlanDetailStatus `json:"status"`
 
-	// TaxCode Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`.
-	TaxCode   string    `json:"tax_code,omitempty"`
-	TenantId  string    `json:"tenant_id,omitempty"`
+	// TaxCode The Stripe product tax code of the base fee, such as
+	// `txcd_10103001`. Absent when the plan uses the account's
+	// `default_product_tax_code`.
+	TaxCode string `json:"tax_code,omitempty"`
+
+	// TenantId The account the plan belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the plan was last changed.
 	UpdatedAt time.Time `json:"updated_at"`
 
 	// Used Whether a subscription has ever used the plan (canceled ones
@@ -5842,25 +6333,30 @@ type PlanDetail struct {
 	Used bool `json:"used"`
 }
 
-// PlanDetailBaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
-// in_arrears: base + usage billed at period end.
-// in_advance: base billed at period start (day 1 on create; cycle-close invoice
-// carries upcoming period's base + elapsed period's usage). Usage lines are
-// always arrears regardless of this field. A plan with no base fee is
-// in_arrears. See ADR-031.
+// PlanDetailBaseBillTiming When the base fee is invoiced, relative to the period it
+// covers. `in_arrears`: the base fee and the usage are billed at
+// the period end. `in_advance`: the base fee is billed at the
+// period start; the first invoice comes when the subscription
+// starts, and each cycle invoice carries the next period's base
+// fee with the past period's usage. Usage is always billed at
+// the period end. A plan with no base fee is `in_arrears`.
 type PlanDetailBaseBillTiming string
 
-// PlanDetailBillingInterval defines model for PlanDetail.BillingInterval.
+// PlanDetailBillingInterval How often a subscription to the plan is billed. Fixed after create.
 type PlanDetailBillingInterval string
 
-// PlanDetailStatus defines model for PlanDetail.Status.
+// PlanDetailStatus An archived plan takes no new subscriptions and no plan change
+// onto it. Subscriptions already on it keep billing.
 type PlanDetailStatus string
 
 // PlanPrice One usage price of a plan: a meter, the events it takes
 // (`dimension_match`) and its rate. The price takes the plan's
 // currency. Its id stays the same when its rate changes; its meter
-// and `dimension_match` are its identity and never change.
+// and `dimension_match` are its identity and never change. Every
+// shape field is always sent: the ones the mode does not use are
+// `"0"`, `0` or `[]`.
 type PlanPrice struct {
+	// CreatedAt When the price was first added to the plan.
 	CreatedAt time.Time `json:"created_at"`
 
 	// DimensionMatch The labels an event must carry for this price to take it, for
@@ -5868,29 +6364,41 @@ type PlanPrice struct {
 	// `{}` takes every event of the meter. Of the prices whose labels
 	// an event carries, the one with the most labels takes it.
 	DimensionMatch map[string]string `json:"dimension_match"`
-	Id             string            `json:"id"`
-	MeterId        string            `json:"meter_id"`
 
-	// Mode As on PriceShape.
+	// Id The price's ID, `hc_prc_` and 20 characters.
+	Id string `json:"id"`
+
+	// MeterId The meter whose usage the price bills.
+	MeterId string `json:"meter_id"`
+
+	// Mode How the price bills a quantity; see PriceShape.
 	Mode PlanPriceMode `json:"mode"`
 
-	// PackageAmountCents Price of one package in cents, as a decimal string.
+	// PackageAmountCents Price of one package, as a decimal string of cents. `"0"` unless
+	// `mode` is `package`.
 	PackageAmountCents string `json:"package_amount_cents"`
-	PackageSize        int64  `json:"package_size"`
-	PlanId             string `json:"plan_id"`
-	TenantId           string `json:"tenant_id,omitempty"`
+
+	// PackageSize The units in one package. 0 unless `mode` is `package`.
+	PackageSize int64 `json:"package_size"`
+
+	// PlanId The plan the price belongs to.
+	PlanId string `json:"plan_id"`
+
+	// TenantId The account the price belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
 
 	// Tiers Empty (`[]`) unless `mode` is `graduated`.
 	Tiers []PriceTier `json:"tiers"`
 
-	// UnitAmountCents Price per unit in cents, as a decimal string.
+	// UnitAmountCents Price per unit, as a decimal string of cents. `"0"` unless `mode`
+	// is `per_unit`.
 	UnitAmountCents string `json:"unit_amount_cents"`
 
 	// UpdatedAt When the content shown was saved.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// PlanPriceMode As on PriceShape.
+// PlanPriceMode How the price bills a quantity; see PriceShape.
 type PlanPriceMode string
 
 // PriceInput defines model for PriceInput.
@@ -5902,7 +6410,10 @@ type PriceInput struct {
 	// one event with the same number of labels are refused (409
 	// `price_conflict`).
 	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
-	MeterId        string            `json:"meter_id"`
+
+	// MeterId The meter whose usage the price bills. It must be a meter in
+	// this account and mode.
+	MeterId string `json:"meter_id"`
 
 	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
 	Mode PriceInputMode `json:"mode"`
@@ -5910,7 +6421,7 @@ type PriceInput struct {
 	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`.
 	PackageAmountCents string `json:"package_amount_cents,omitempty"`
 
-	// PackageSize Used when `mode` is `package`. Must be above 0.
+	// PackageSize Used when `mode` is `package`. The units in one package, above 0.
 	PackageSize int64 `json:"package_size,omitempty"`
 
 	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0).
@@ -5923,9 +6434,11 @@ type PriceInput struct {
 // PriceInputMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
 type PriceInputMode string
 
-// PriceShape How a price bills a quantity. Send only the mode's fields: a field the
-// mode does not use must be 0 or left out (`tiers`: `[]` or left out),
-// or the request is refused with 422 and `param` naming it.
+// PriceShape How a price bills a quantity: its mode and the mode's fields. It is
+// the body of `PATCH /v1/plans/{id}/prices/{price_id}` and part of
+// every price you add. Send only the mode's fields: a field the mode
+// does not use must be 0 or left out (`tiers`: `[]` or left out), or
+// the request is refused with 422 and `param` naming it.
 type PriceShape struct {
 	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
 	Mode PriceShapeMode `json:"mode"`
@@ -5933,7 +6446,7 @@ type PriceShape struct {
 	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`.
 	PackageAmountCents string `json:"package_amount_cents,omitempty"`
 
-	// PackageSize Used when `mode` is `package`. Must be above 0.
+	// PackageSize Used when `mode` is `package`. The units in one package, above 0.
 	PackageSize int64 `json:"package_size,omitempty"`
 
 	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0).
@@ -5946,9 +6459,10 @@ type PriceShape struct {
 // PriceShapeMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
 type PriceShapeMode string
 
-// PriceTier defines model for PriceTier.
+// PriceTier One tier of a graduated price.
 type PriceTier struct {
-	// UnitAmountCents Price per unit in cents in this tier, as a decimal string.
+	// UnitAmountCents Price per unit in cents in this tier, as a decimal string. `"0"`
+	// makes the tier free.
 	UnitAmountCents string `json:"unit_amount_cents"`
 
 	// UpTo The tier's upper bound in whole units: the tier prices the quantity above the previous tier's bound, up to this one. `null` on the last tier, which has no upper bound. Only the last tier is `null`, and it must be.
@@ -5957,85 +6471,152 @@ type PriceTier struct {
 
 // PriceWrite defines model for PriceWrite.
 type PriceWrite struct {
+	// CreatedAt When the price was first added to the plan.
 	CreatedAt time.Time `json:"created_at"`
 
 	// DimensionMatch The labels an event must carry for this price to take it, for
 	// example `{"model": "claude-opus-4.5", "token_type": "input"}`.
 	// `{}` takes every event of the meter. Of the prices whose labels
 	// an event carries, the one with the most labels takes it.
-	DimensionMatch map[string]string   `json:"dimension_match"`
-	Effective      PriceWriteEffective `json:"effective"`
+	DimensionMatch map[string]string `json:"dimension_match"`
 
-	// EndedOverrides On a removal, the customer overrides of the price it ended.
-	// Each ends when the removal takes effect for its customer.
+	// Effective When the write applies, as explained above.
+	Effective PriceWriteEffective `json:"effective"`
+
+	// EndedOverrides On a removal, the customer overrides of the price it ended
+	// (`[]` when there were none). Each ends when the removal
+	// takes effect for its customer. Absent on an add or a
+	// change.
 	EndedOverrides []struct {
+		// CustomerId The customer the override was for.
 		CustomerId string `json:"customer_id"`
-		Id         string `json:"id"`
+
+		// Id The ended override's ID.
+		Id string `json:"id"`
 	} `json:"ended_overrides,omitempty"`
-	Id      string `json:"id"`
+
+	// Id The price's ID, `hc_prc_` and 20 characters.
+	Id string `json:"id"`
+
+	// MeterId The meter whose usage the price bills.
 	MeterId string `json:"meter_id"`
 
-	// Mode As on PriceShape.
+	// Mode How the price bills a quantity; see PriceShape.
 	Mode PriceWriteMode `json:"mode"`
 
-	// PackageAmountCents Price of one package in cents, as a decimal string.
+	// PackageAmountCents Price of one package, as a decimal string of cents. `"0"` unless
+	// `mode` is `package`.
 	PackageAmountCents string `json:"package_amount_cents"`
-	PackageSize        int64  `json:"package_size"`
-	PlanId             string `json:"plan_id"`
 
-	// Removed True on the answer to a removal.
-	Removed  bool   `json:"removed,omitempty"`
+	// PackageSize The units in one package. 0 unless `mode` is `package`.
+	PackageSize int64 `json:"package_size"`
+
+	// PlanId The plan the price belongs to.
+	PlanId string `json:"plan_id"`
+
+	// Removed True on the answer to a removal. Absent otherwise.
+	Removed bool `json:"removed,omitempty"`
+
+	// TenantId The account the price belongs to.
 	TenantId string `json:"tenant_id,omitempty"`
 
 	// Tiers Empty (`[]`) unless `mode` is `graduated`.
 	Tiers []PriceTier `json:"tiers"`
 
-	// UnitAmountCents Price per unit in cents, as a decimal string.
+	// UnitAmountCents Price per unit, as a decimal string of cents. `"0"` unless `mode`
+	// is `per_unit`.
 	UnitAmountCents string `json:"unit_amount_cents"`
 
 	// UpdatedAt When the content shown was saved.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// PriceWriteEffective defines model for PriceWrite.Effective.
+// PriceWriteEffective When the write applies, as explained above.
 type PriceWriteEffective string
 
-// PriceWriteMode As on PriceShape.
+// PriceWriteMode How the price bills a quantity; see PriceShape.
 type PriceWriteMode string
 
-// ProviderCostRate defines model for ProviderCostRate.
+// ProviderCostRate What you pay an upstream AI provider per token, for one provider,
+// model and token type. When a usage event with matching `provider`,
+// `model` and `token_type` labels arrives, Hardcount stamps this cost
+// on it, unless the event already brings a cost the provider
+// reported. The margin report adds the stamps up. Editing or deleting
+// a rate changes only events that arrive later. The
+// `/v1/provider-costs` routes manage rates.
 type ProviderCostRate struct {
+	// CreatedAt When the rate was first set.
 	CreatedAt time.Time `json:"created_at"`
 
 	// Currency Always USD. Cost and margin count every rate in US cents.
-	Currency  ProviderCostRateCurrency `json:"currency"`
-	Id        string                   `json:"id"`
-	Model     string                   `json:"model"`
-	Provider  string                   `json:"provider"`
-	TenantId  string                   `json:"tenant_id,omitempty"`
-	TokenType string                   `json:"token_type"`
+	Currency ProviderCostRateCurrency `json:"currency"`
 
-	// UnitCostCents US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens).
-	UnitCostCents string    `json:"unit_cost_cents"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	// Id The rate's ID, `hc_pcr_` and 24 hex characters.
+	Id string `json:"id"`
+
+	// Model The model, such as `claude-sonnet-4.5`. An event matches on its
+	// `model_raw` label first, then on its `model` label.
+	Model string `json:"model"`
+
+	// Provider The provider, in lower case, such as `anthropic`. It must equal
+	// the `provider` label of the usage events it costs.
+	Provider string `json:"provider"`
+
+	// TenantId The account the rate belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TokenType The kind of token, in lower case, such as `input`, `output` or
+	// `cache_read`. It must equal the `token_type` label of the usage
+	// events it costs.
+	TokenType string `json:"token_type"`
+
+	// UnitCostCents US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per
+	// 1,000,000 tokens).
+	UnitCostCents string `json:"unit_cost_cents"`
+
+	// UpdatedAt When the rate was last set.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // ProviderCostRateCurrency Always USD. Cost and margin count every rate in US cents.
 type ProviderCostRateCurrency string
 
-// PublicPaymentUpdate What the payment-update page shows before the customer adds a card.
+// PublicPaymentUpdate What the payment-update page shows before the customer adds a
+// card: `GET /v1/public/payment-updates/{token}`. The page opens from
+// the link in a payment setup email, which Hardcount sends when an
+// invoice has no payment method to charge.
 type PublicPaymentUpdate struct {
-	// AmountDueCents Not cleared when the invoice is voided. Check `invoice_status` before asking for payment.
+	// AmountDueCents What is due on the invoice, in the currency's minor unit (cents
+	// for USD). Not cleared when the invoice is voided: check
+	// `invoice_status` before asking for payment.
 	AmountDueCents int64 `json:"amount_due_cents"`
-	Branding       struct {
-		BrandColor   string `json:"brand_color,omitempty"`
+
+	// Branding The seller's branding from its account settings. A field the
+	// seller has not set is absent.
+	Branding struct {
+		// BrandColor The seller's brand color, such as `#4F46E5`.
+		BrandColor string `json:"brand_color,omitempty"`
+
+		// CompanyEmail The seller's contact email.
 		CompanyEmail string `json:"company_email,omitempty"`
-		CompanyName  string `json:"company_name,omitempty"`
-		LogoUrl      string `json:"logo_url,omitempty"`
-		SupportUrl   string `json:"support_url,omitempty"`
+
+		// CompanyName The seller's company name.
+		CompanyName string `json:"company_name,omitempty"`
+
+		// LogoUrl The address of the seller's logo.
+		LogoUrl string `json:"logo_url,omitempty"`
+
+		// SupportUrl Where the customer can get help.
+		SupportUrl string `json:"support_url,omitempty"`
 	} `json:"branding"`
-	Currency      string `json:"currency"`
-	CustomerName  string `json:"customer_name"`
+
+	// Currency The invoice's currency, such as `USD`.
+	Currency string `json:"currency"`
+
+	// CustomerName The customer's display name.
+	CustomerName string `json:"customer_name"`
+
+	// InvoiceNumber The number of the invoice the link was sent for.
 	InvoiceNumber string `json:"invoice_number"`
 
 	// InvoiceStatus Lifecycle state of the invoice. `uncollectible` marks an invoice
@@ -6058,29 +6639,53 @@ type ReadinessReport struct {
 // ReadinessReportStatus defines model for ReadinessReport.Status.
 type ReadinessReportStatus string
 
-// Recipe A recipe template as served by list/detail: the full parsed YAML, its meters and its plans with their prices, not just display metadata. A recipe creates nothing else.
+// Recipe A ready-made pricing setup built into Hardcount: its meters, and its plans with their prices, with every overridable value at its default. Installing it creates those objects. A recipe creates nothing else.
 type Recipe struct {
-	Description string           `json:"description,omitempty"`
-	Key         string           `json:"key"`
-	Meters      []RecipeMeter    `json:"meters"`
-	Name        string           `json:"name"`
+	// Description A longer description. Absent when the recipe has none.
+	Description string `json:"description,omitempty"`
+
+	// Key The recipe's key, used in the recipe routes, such as `replicate_style`.
+	Key string `json:"key"`
+
+	// Meters The meters the recipe creates or reuses.
+	Meters []RecipeMeter `json:"meters"`
+
+	// Name The recipe's display name.
+	Name string `json:"name"`
+
+	// Overridable The values you can set before installing.
 	Overridable []RecipeOverride `json:"overridable"`
-	Plans       []RecipePlan     `json:"plans"`
-	Summary     string           `json:"summary"`
-	Version     string           `json:"version"`
+
+	// Plans The plans the recipe creates, with their prices.
+	Plans []RecipePlan `json:"plans"`
+
+	// Summary A short description of what the recipe sets up.
+	Summary string `json:"summary"`
+
+	// Version The recipe's version.
+	Version string `json:"version"`
 }
 
-// RecipeCreatedObjects Per-role map of entity IDs a recipe apply produced (including ADOPTED meters — apply reconnects to an existing meter rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
+// RecipeCreatedObjects The IDs of the objects an install made, by kind. `meter_ids` also holds a meter the install reused rather than made. Each list is absent when empty.
 type RecipeCreatedObjects struct {
+	// MeterIds The meters the install made or reused.
 	MeterIds []string `json:"meter_ids,omitempty"`
-	PlanIds  []string `json:"plan_ids,omitempty"`
+
+	// PlanIds The plans the install made.
+	PlanIds []string `json:"plan_ids,omitempty"`
+
+	// PriceIds The prices the install put on its plans.
 	PriceIds []string `json:"price_ids,omitempty"`
 }
 
-// RecipeCreates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
+// RecipeCreates How many objects a recipe makes when installed, by kind. A recipe makes only meters, plans and prices.
 type RecipeCreates struct {
+	// Meters The meters the recipe declares. An install reuses a matching meter
+	// instead of making a new one.
 	Meters int `json:"meters"`
-	Plans  int `json:"plans"`
+
+	// Plans The plans an install creates.
+	Plans int `json:"plans"`
 
 	// Prices The prices the install puts on its plans.
 	Prices int `json:"prices"`
@@ -6088,114 +6693,204 @@ type RecipeCreates struct {
 
 // RecipeDetail defines model for RecipeDetail.
 type RecipeDetail struct {
-	// Creates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
-	Creates     RecipeCreates    `json:"creates"`
-	Description string           `json:"description,omitempty"`
-	Key         string           `json:"key"`
-	Meters      []RecipeMeter    `json:"meters"`
-	Name        string           `json:"name"`
+	// Creates How many objects a recipe makes when installed, by kind. A recipe makes only meters, plans and prices.
+	Creates RecipeCreates `json:"creates"`
+
+	// Description A longer description. Absent when the recipe has none.
+	Description string `json:"description,omitempty"`
+
+	// Key The recipe's key, used in the recipe routes, such as `replicate_style`.
+	Key string `json:"key"`
+
+	// Meters The meters the recipe creates or reuses.
+	Meters []RecipeMeter `json:"meters"`
+
+	// Name The recipe's display name.
+	Name string `json:"name"`
+
+	// Overridable The values you can set before installing.
 	Overridable []RecipeOverride `json:"overridable"`
-	Plans       []RecipePlan     `json:"plans"`
-	Summary     string           `json:"summary"`
-	Version     string           `json:"version"`
+
+	// Plans The plans the recipe creates, with their prices.
+	Plans []RecipePlan `json:"plans"`
+
+	// Summary A short description of what the recipe sets up.
+	Summary string `json:"summary"`
+
+	// Version The recipe's version.
+	Version string `json:"version"`
 }
 
-// RecipeInstance The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses.
+// RecipeInstance The record that a recipe was installed in this account and mode, and what the install made. A recipe is installed once per mode; installing it again returns this record. Its fields are `recipe_key` and `recipe_version`, not the recipe's own `key` and `version`.
 type RecipeInstance struct {
+	// CreatedAt When the recipe was installed.
 	CreatedAt time.Time `json:"created_at"`
 
-	// CreatedBy Operator email or API key ID. Omitted when empty.
+	// CreatedBy The ID of the API key that installed the recipe. Absent for an
+	// install from a dashboard session.
 	CreatedBy string `json:"created_by,omitempty"`
 
-	// CreatedObjects Per-role map of entity IDs a recipe apply produced (including ADOPTED meters — apply reconnects to an existing meter rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
-	CreatedObjects RecipeCreatedObjects   `json:"created_objects"`
-	Id             string                 `json:"id"`
-	Overrides      map[string]interface{} `json:"overrides"`
-	RecipeKey      string                 `json:"recipe_key"`
-	RecipeVersion  string                 `json:"recipe_version"`
+	// CreatedObjects The IDs of the objects an install made, by kind. `meter_ids` also holds a meter the install reused rather than made. Each list is absent when empty.
+	CreatedObjects RecipeCreatedObjects `json:"created_objects"`
 
-	// TenantId Omitted when empty.
+	// Id The install's ID, `hc_rec_` and 24 hex characters.
+	Id string `json:"id"`
+
+	// Overrides The overrides the install was sent, as sent (`{}` when none).
+	// Defaults are not filled in.
+	Overrides map[string]interface{} `json:"overrides"`
+
+	// RecipeKey The `key` of the recipe installed.
+	RecipeKey string `json:"recipe_key"`
+
+	// RecipeVersion The recipe's `version` at the install.
+	RecipeVersion string `json:"recipe_version"`
+
+	// TenantId The account the recipe was installed in.
 	TenantId string `json:"tenant_id,omitempty"`
 }
 
 // RecipeListItem defines model for RecipeListItem.
 type RecipeListItem struct {
-	// Creates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
-	Creates     RecipeCreates `json:"creates"`
-	Description string        `json:"description,omitempty"`
+	// Creates How many objects a recipe makes when installed, by kind. A recipe makes only meters, plans and prices.
+	Creates RecipeCreates `json:"creates"`
 
-	// Instantiated The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses.
-	Instantiated RecipeInstance   `json:"instantiated,omitempty"`
-	Key          string           `json:"key"`
-	Meters       []RecipeMeter    `json:"meters"`
-	Name         string           `json:"name"`
-	Overridable  []RecipeOverride `json:"overridable"`
-	Plans        []RecipePlan     `json:"plans"`
-	Summary      string           `json:"summary"`
-	Version      string           `json:"version"`
+	// Description A longer description. Absent when the recipe has none.
+	Description string `json:"description,omitempty"`
+
+	// Instantiated The record that a recipe was installed in this account and mode, and what the install made. A recipe is installed once per mode; installing it again returns this record. Its fields are `recipe_key` and `recipe_version`, not the recipe's own `key` and `version`.
+	Instantiated RecipeInstance `json:"instantiated,omitempty"`
+
+	// Key The recipe's key, used in the recipe routes, such as `replicate_style`.
+	Key string `json:"key"`
+
+	// Meters The meters the recipe creates or reuses.
+	Meters []RecipeMeter `json:"meters"`
+
+	// Name The recipe's display name.
+	Name string `json:"name"`
+
+	// Overridable The values you can set before installing.
+	Overridable []RecipeOverride `json:"overridable"`
+
+	// Plans The plans the recipe creates, with their prices.
+	Plans []RecipePlan `json:"plans"`
+
+	// Summary A short description of what the recipe sets up.
+	Summary string `json:"summary"`
+
+	// Version The recipe's version.
+	Version string `json:"version"`
 }
 
-// RecipeMeter defines model for RecipeMeter.
+// RecipeMeter A meter a recipe creates, or reuses when one with the same
+// `event_name` and aggregation exists.
 type RecipeMeter struct {
+	// Aggregation How the meter rolls its events into one quantity per period, one
+	// of `sum`, `count`, `max` or `last`.
 	Aggregation string `json:"aggregation"`
-	EventName   string `json:"event_name"`
-	Name        string `json:"name"`
-	Unit        string `json:"unit"`
+
+	// EventName The `event_name` usage events send for the meter.
+	EventName string `json:"event_name"`
+
+	// Name The meter's display name.
+	Name string `json:"name"`
+
+	// Unit The unit of the quantity, such as `seconds`.
+	Unit string `json:"unit"`
 }
 
-// RecipeOverride One override key declared in a recipe's `overridable` list. Drives validation at instantiate time and the override form in the dashboard's preview dialog.
+// RecipeOverride One value of a recipe you can set before you install it, such as the currency or the plan's name. The recipe's `overridable` list holds them; preview and install check `overrides` against them.
 type RecipeOverride struct {
 	// Default Default value applied when the override is not supplied.
-	Default   interface{}        `json:"default"`
-	Enum      []string           `json:"enum,omitempty"`
-	Key       string             `json:"key"`
-	MaxLength int                `json:"max_length,omitempty"`
-	Pattern   string             `json:"pattern,omitempty"`
-	Type      RecipeOverrideType `json:"type"`
+	Default interface{} `json:"default"`
+
+	// Enum The only values allowed. Absent when any value of the type is allowed.
+	Enum []string `json:"enum,omitempty"`
+
+	// Key The name to use in `overrides`, such as `currency`.
+	Key string `json:"key"`
+
+	// MaxLength The most bytes a string value may have. Absent when there is no limit.
+	MaxLength int `json:"max_length,omitempty"`
+
+	// Pattern A regular expression a string value must match. Absent when there is none.
+	Pattern string `json:"pattern,omitempty"`
+
+	// Type The JSON type the value must have. `int` takes any JSON number.
+	Type RecipeOverrideType `json:"type"`
 }
 
-// RecipeOverrideType defines model for RecipeOverride.Type.
+// RecipeOverrideType The JSON type the value must have. `int` takes any JSON number.
 type RecipeOverrideType string
 
-// RecipePlan defines model for RecipePlan.
+// RecipePlan A plan a recipe creates, with its usage prices. An install always
+// creates a new plan.
 type RecipePlan struct {
+	// BaseAmountCents The plan's recurring base fee, in the currency's minor unit (cents for USD).
 	BaseAmountCents int64 `json:"base_amount_cents"`
 
-	// BaseBillTiming Optional when the base fee is 0; the plan is then in_arrears (ADR-031).
-	BaseBillTiming  RecipePlanBaseBillTiming  `json:"base_bill_timing,omitempty"`
+	// BaseBillTiming When the base fee is billed; see Plan. Absent when the recipe
+	// leaves it out, which it may only with a base fee of 0. The plan is
+	// then `in_arrears`.
+	BaseBillTiming RecipePlanBaseBillTiming `json:"base_bill_timing,omitempty"`
+
+	// BillingInterval How often a subscription to the plan is billed.
 	BillingInterval RecipePlanBillingInterval `json:"billing_interval"`
-	Code            string                    `json:"code"`
-	Currency        string                    `json:"currency"`
-	Name            string                    `json:"name"`
+
+	// Code The plan's code. When a plan with this code exists, the install
+	// gives the new plan the first free code with `_2`, `_3` and so
+	// on added.
+	Code string `json:"code"`
+
+	// Currency The plan's currency, such as `USD`.
+	Currency string `json:"currency"`
+
+	// Name The plan's name.
+	Name string `json:"name"`
 
 	// Prices The plan's usage prices. Each takes the plan's currency.
 	Prices []RecipePrice `json:"prices"`
 }
 
-// RecipePlanBaseBillTiming Optional when the base fee is 0; the plan is then in_arrears (ADR-031).
+// RecipePlanBaseBillTiming When the base fee is billed; see Plan. Absent when the recipe
+// leaves it out, which it may only with a base fee of 0. The plan is
+// then `in_arrears`.
 type RecipePlanBaseBillTiming string
 
-// RecipePlanBillingInterval defines model for RecipePlan.BillingInterval.
+// RecipePlanBillingInterval How often a subscription to the plan is billed.
 type RecipePlanBillingInterval string
 
 // RecipePreviewObjects What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation.
 type RecipePreviewObjects struct {
+	// Meters The meters the install creates or reuses.
 	Meters []RecipeMeter `json:"meters"`
-	Plans  []RecipePlan  `json:"plans"`
+
+	// Plans The plans the install creates, with the overrides applied. An
+	// install that finds a plan's code taken gives the new plan the
+	// first free code with `_2`, `_3` and so on added.
+	Plans []RecipePlan `json:"plans"`
 }
 
-// RecipePreviewResult defines model for RecipePreviewResult.
+// RecipePreviewResult The answer to `POST /v1/recipes/{key}/preview`: what installing the recipe with your overrides would create. Nothing is written.
 type RecipePreviewResult struct {
+	// Key The recipe's key.
 	Key string `json:"key"`
 
 	// Objects What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation.
-	Objects  RecipePreviewObjects `json:"objects"`
-	Version  string               `json:"version"`
-	Warnings []string             `json:"warnings"`
+	Objects RecipePreviewObjects `json:"objects"`
+
+	// Version The recipe's version.
+	Version string `json:"version"`
+
+	// Warnings Problems that would not stop the install. Always empty today.
+	Warnings []string `json:"warnings"`
 }
 
 // RecipePrice defines model for RecipePrice.
 type RecipePrice struct {
+	// DimensionMatch The labels an event must carry for the price to take it. `{}`
+	// takes every event of the meter.
 	DimensionMatch map[string]string `json:"dimension_match"`
 
 	// Meter The `event_name` of the recipe meter the price is on.
@@ -6207,7 +6902,7 @@ type RecipePrice struct {
 	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`.
 	PackageAmountCents string `json:"package_amount_cents,omitempty"`
 
-	// PackageSize Used when `mode` is `package`. Must be above 0.
+	// PackageSize Used when `mode` is `package`. The units in one package, above 0.
 	PackageSize int64 `json:"package_size,omitempty"`
 
 	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0).
@@ -6250,39 +6945,68 @@ type RecoveryWarning struct {
 // RecoveryWarningCode defines model for RecoveryWarning.Code.
 type RecoveryWarningCode string
 
-// SentEmail defines model for SentEmail.
+// SentEmail One billing email Hardcount sent, or tried to send, to a customer
+// about one of its invoices. `GET /v1/customers/{id}/sent-emails`
+// lists them.
 type SentEmail struct {
+	// CreatedAt When the email was queued.
 	CreatedAt time.Time `json:"created_at"`
 
-	// DeliveryState What the email provider reported back, if anything.
+	// DeliveryState What the email provider reported back about delivery.
+	// `unknown` until it reports.
 	DeliveryState SentEmailDeliveryState `json:"delivery_state"`
-	DispatchedAt  time.Time              `json:"dispatched_at,omitempty"`
-	EmailType     SentEmailEmailType     `json:"email_type"`
-	Id            string                 `json:"id"`
-	InvoiceNumber string                 `json:"invoice_number,omitempty"`
-	LastError     string                 `json:"last_error,omitempty"`
 
-	// Line The email in the words of the activity line standard (ADR-128),
-	// the same as on the invoice's payment timeline: its name and
-	// what happened to it ("Receipt email delivered"), why it was not
+	// DispatchedAt When the mail server accepted the email. Absent until then.
+	DispatchedAt time.Time `json:"dispatched_at,omitempty"`
+
+	// EmailType Which email it is: the invoice, a payment receipt, a failed
+	// payment notice, a request to add a payment method, a payment
+	// reminder (`dunning_warning`), a final notice
+	// (`dunning_escalation`), or a credit note.
+	EmailType SentEmailEmailType `json:"email_type"`
+
+	// Id The email's ID, `hc_emob_` and 20 characters.
+	Id string `json:"id"`
+
+	// InvoiceNumber The number of the invoice the email is about.
+	InvoiceNumber string `json:"invoice_number,omitempty"`
+
+	// LastError Why the last send attempt failed. Absent when no attempt failed.
+	LastError string `json:"last_error,omitempty"`
+
+	// Line The email in the words of the activity line standard, the same
+	// as on the invoice's payment timeline: its name and what
+	// happened to it ("Receipt email delivered"), why it was not
 	// sent, the invoice it was about, and who it went to. Dated at the
 	// time on the customer's test clock that caused it, with the real
 	// send time as `recorded_at`. Present for every email type this
 	// list returns.
-	Line      ActivityLine `json:"line,omitempty"`
-	Recipient string       `json:"recipient"`
+	Line ActivityLine `json:"line,omitempty"`
 
-	// Status Hardcount's send state. `dispatched` means the mail server accepted it.
+	// Recipient The address the email was sent to.
+	Recipient string `json:"recipient"`
+
+	// Status Hardcount's send state. `pending`: queued. `dispatched`: the
+	// mail server accepted it. `failed`: it could not be sent.
+	// `skipped`: Hardcount did not send it, because the invoice was
+	// already paid, voided or uncollectible, or no longer exists.
 	Status SentEmailStatus `json:"status"`
 }
 
-// SentEmailDeliveryState What the email provider reported back, if anything.
+// SentEmailDeliveryState What the email provider reported back about delivery.
+// `unknown` until it reports.
 type SentEmailDeliveryState string
 
-// SentEmailEmailType defines model for SentEmail.EmailType.
+// SentEmailEmailType Which email it is: the invoice, a payment receipt, a failed
+// payment notice, a request to add a payment method, a payment
+// reminder (`dunning_warning`), a final notice
+// (`dunning_escalation`), or a credit note.
 type SentEmailEmailType string
 
-// SentEmailStatus Hardcount's send state. `dispatched` means the mail server accepted it.
+// SentEmailStatus Hardcount's send state. `pending`: queued. `dispatched`: the
+// mail server accepted it. `failed`: it could not be sent.
+// `skipped`: Hardcount did not send it, because the invoice was
+// already paid, voided or uncollectible, or no longer exists.
 type SentEmailStatus string
 
 // StripeConnection defines model for StripeConnection.
@@ -6354,8 +7078,18 @@ type StripeRefundWebhookEventData struct {
 	Refund InvoiceStripeRefund `json:"refund"`
 }
 
-// Subscription defines model for Subscription.
+// Subscription A customer's subscription: the plans it bills (its `items`), its
+// status and its current billing period. Every route under
+// `/v1/subscriptions` that returns a subscription returns this
+// object, with its items.
+//
+// A subscription bills in one currency, the currency of its plans.
+// All its items share one billing interval and one base-fee timing.
+// Hardcount invoices each period when it ends.
 type Subscription struct {
+	// ActivatedAt When the subscription became `active`: at creation without a
+	// trial, at activation of a draft, or when its trial ended.
+	// Absent on a draft and while it trials.
 	ActivatedAt time.Time `json:"activated_at,omitempty"`
 
 	// BillingAnchorDay Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions.
@@ -6379,92 +7113,217 @@ type Subscription struct {
 	// invoice bills the period's usage so far, and no base fee. The period
 	// keeps its dates, the base fee is billed as it would be with no
 	// threshold, and the period's next invoice bills the rest of the usage.
+	// Absent on a subscription with no thresholds. Set them with
+	// `PUT /v1/subscriptions/{id}/billing-thresholds`.
 	BillingThresholds SubscriptionBillingThresholds `json:"billing_thresholds,omitempty"`
-	BillingTime       SubscriptionBillingTime       `json:"billing_time"`
 
-	// CancelAt A scheduled cancel time, if one is set.
+	// BillingTime How monthly periods line up. `calendar`: every period ends on
+	// the 1st of a month, in your account's billing time zone, so the
+	// first period runs from the start day to the next 1st.
+	// `anniversary`: each period starts on the day of the month the
+	// subscription started (the last day of a shorter month). A plan
+	// billed yearly always bills from its start date, whatever this
+	// says.
+	BillingTime SubscriptionBillingTime `json:"billing_time"`
+
+	// CancelAt The instant a cancel is scheduled for, when it was scheduled
+	// with `cancel_at`. Absent when none is set, and after the
+	// subscription is canceled.
 	CancelAt time.Time `json:"cancel_at,omitempty"`
 
-	// CancelAtPeriodEnd True when the subscription cancels at the end of the current period.
+	// CancelAtPeriodEnd True when the subscription cancels at the end of the current
+	// period, or, while it trials, at the end of the trial. False
+	// after the subscription is canceled.
 	CancelAtPeriodEnd bool `json:"cancel_at_period_end"`
 
-	// CancelEffectiveAt When a scheduled cancel takes effect. Absent when no cancel is scheduled.
+	// CancelEffectiveAt When a scheduled cancel takes effect: `cancel_at` when set;
+	// otherwise, with `cancel_at_period_end`, `trial_end_at` while
+	// the subscription trials and `current_billing_period_end`
+	// after. Absent when no cancel is scheduled.
 	CancelEffectiveAt time.Time `json:"cancel_effective_at,omitempty"`
 
 	// CanceledAt When the subscription was canceled. Absent until then.
 	CanceledAt time.Time `json:"canceled_at,omitempty"`
-	Code       string    `json:"code"`
-	CreatedAt  time.Time `json:"created_at"`
 
-	// CurrentBillingPeriodDisplay The current period as text, with the last day included, in the tenant's billing time zone.
+	// Code Your code for the subscription: letters, digits, hyphens and
+	// underscores. Unique in your account and mode (live or test).
+	Code string `json:"code"`
+
+	// CreatedAt When the subscription was created. For a customer on a test clock, the clock's time.
+	CreatedAt time.Time `json:"created_at"`
+
+	// CurrentBillingPeriodDisplay The current period as text, with the last day included, in your
+	// account's billing time zone, for example "Oct 1, 2026 – Oct 31,
+	// 2026". Absent when the subscription has no current period, and
+	// when the time zone could not be read.
 	CurrentBillingPeriodDisplay string `json:"current_billing_period_display,omitempty"`
 
-	// CurrentBillingPeriodEnd End of the current period (exclusive).
-	CurrentBillingPeriodEnd   time.Time `json:"current_billing_period_end,omitempty"`
+	// CurrentBillingPeriodEnd End of the current period (exclusive): the start of the next
+	// one. While the subscription trials, the end of the first paid
+	// period. Absent on a draft.
+	CurrentBillingPeriodEnd time.Time `json:"current_billing_period_end,omitempty"`
+
+	// CurrentBillingPeriodStart Start of the current billing period, at the beginning of a day
+	// in your account's billing time zone. While the subscription
+	// trials, it is the start of the first paid period, which begins
+	// when the trial ends. Absent on a draft.
 	CurrentBillingPeriodStart time.Time `json:"current_billing_period_start,omitempty"`
-	CustomerId                string    `json:"customer_id"`
-	DisplayName               string    `json:"display_name"`
-	Id                        string    `json:"id"`
+
+	// CustomerId The customer the subscription bills (`hc_cus_…`).
+	CustomerId string `json:"customer_id"`
+
+	// DisplayName The subscription's name, as shown in the dashboard.
+	DisplayName string `json:"display_name"`
+
+	// Id The subscription's ID (`hc_sub_…`).
+	Id string `json:"id"`
 
 	// Items The subscription's priced lines. Each item names its plan.
-	Items         []SubscriptionItem `json:"items,omitempty"`
-	NextBillingAt time.Time          `json:"next_billing_at,omitempty"`
+	Items []SubscriptionItem `json:"items,omitempty"`
+
+	// NextBillingAt When the current period's invoice is due to be built: the end
+	// of the current period. The billing run builds it once the
+	// invoice grace after that time has passed. Absent on a draft.
+	NextBillingAt time.Time `json:"next_billing_at,omitempty"`
 
 	// PauseCollection Present on a subscription while collection is paused. New invoices
-	// are still created, but stay drafts and are not charged.
+	// are still created, but stay drafts and are not charged. Absent when
+	// collection runs normally.
 	PauseCollection SubscriptionPauseCollection `json:"pause_collection,omitempty"`
-	StartedAt       time.Time                   `json:"started_at,omitempty"`
-	Status          SubscriptionStatus          `json:"status"`
-	TenantId        string                      `json:"tenant_id,omitempty"`
-	TestClockId     string                      `json:"test_clock_id,omitempty"`
-	TrialEndAt      time.Time                   `json:"trial_end_at,omitempty"`
-	TrialStartAt    time.Time                   `json:"trial_start_at,omitempty"`
-	UpdatedAt       time.Time                   `json:"updated_at"`
+
+	// StartedAt When the subscription started: when it was created, or, for a
+	// draft, when it was activated. Absent on a draft.
+	StartedAt time.Time `json:"started_at,omitempty"`
+
+	// Status Where the subscription is in its life.
+	//
+	// - `draft`: created with `status: draft`. It has no billing
+	//   period and bills nothing until you activate it with
+	//   `POST /v1/subscriptions/{id}/activate`.
+	// - `trialing`: in a free trial until `trial_end_at`. Usage in
+	//   the trial is not billed. When the trial ends, Hardcount makes
+	//   the subscription `active` and its first paid period starts.
+	//   If a cancel is scheduled for the trial end, it becomes
+	//   `canceled` instead, with no charge.
+	// - `active`: billing. Each period is invoiced when it ends.
+	// - `canceled`: ended at `canceled_at`. It bills nothing more,
+	//   and no route makes it `active` again.
+	//
+	// A paused collection is not a status: see `pause_collection`.
+	Status SubscriptionStatus `json:"status"`
+
+	// TenantId The account the subscription belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TestClockId The test clock the subscription runs on (test mode only),
+	// taken from its customer when it was created. Absent when the
+	// customer is not on a test clock.
+	TestClockId string `json:"test_clock_id,omitempty"`
+
+	// TrialEndAt When the trial ends, or ended. The first paid period starts at
+	// the beginning of that day in your account's billing time zone.
+	// Absent when the subscription had no trial.
+	TrialEndAt time.Time `json:"trial_end_at,omitempty"`
+
+	// TrialStartAt When the trial started. Absent when the subscription had no trial.
+	TrialStartAt time.Time `json:"trial_start_at,omitempty"`
+
+	// UpdatedAt When the subscription last changed.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// SubscriptionBillingTime defines model for Subscription.BillingTime.
+// SubscriptionBillingTime How monthly periods line up. `calendar`: every period ends on
+// the 1st of a month, in your account's billing time zone, so the
+// first period runs from the start day to the next 1st.
+// `anniversary`: each period starts on the day of the month the
+// subscription started (the last day of a shorter month). A plan
+// billed yearly always bills from its start date, whatever this
+// says.
 type SubscriptionBillingTime string
 
-// SubscriptionStatus defines model for Subscription.Status.
+// SubscriptionStatus Where the subscription is in its life.
+//
+//   - `draft`: created with `status: draft`. It has no billing
+//     period and bills nothing until you activate it with
+//     `POST /v1/subscriptions/{id}/activate`.
+//   - `trialing`: in a free trial until `trial_end_at`. Usage in
+//     the trial is not billed. When the trial ends, Hardcount makes
+//     the subscription `active` and its first paid period starts.
+//     If a cancel is scheduled for the trial end, it becomes
+//     `canceled` instead, with no charge.
+//   - `active`: billing. Each period is invoiced when it ends.
+//   - `canceled`: ended at `canceled_at`. It bills nothing more,
+//     and no route makes it `active` again.
+//
+// A paused collection is not a status: see `pause_collection`.
 type SubscriptionStatus string
 
 // SubscriptionBillingThresholds Limits that make Hardcount invoice before the period ends. A threshold
 // invoice bills the period's usage so far, and no base fee. The period
 // keeps its dates, the base fee is billed as it would be with no
 // threshold, and the period's next invoice bills the rest of the usage.
+// Absent on a subscription with no thresholds. Set them with
+// `PUT /v1/subscriptions/{id}/billing-thresholds`.
 type SubscriptionBillingThresholds struct {
-	// AmountGte Usage threshold in cents, compared with the period's usage so far (the base fee is not counted). Absent when not set.
-	AmountGte      int64                       `json:"amount_gte,omitempty"`
+	// AmountGte Usage threshold in the subscription currency's minor unit
+	// (cents for USD), compared with the period's usage so far (the
+	// base fee is not counted). Absent when not set.
+	AmountGte int64 `json:"amount_gte,omitempty"`
+
+	// ItemThresholds Per-item usage quantity thresholds. Empty when only `amount_gte` is set.
 	ItemThresholds []SubscriptionItemThreshold `json:"item_thresholds"`
 }
 
 // SubscriptionItem One priced line of a subscription. It pairs a plan with a quantity.
+// Returned inside a subscription's `items`, and by the item routes.
 type SubscriptionItem struct {
+	// CreatedAt When the item was added.
 	CreatedAt time.Time `json:"created_at"`
-	Id        string    `json:"id"`
+
+	// Id The item's ID (`hc_si_…`).
+	Id string `json:"id"`
 
 	// Metadata The item's stored metadata. Absent when empty.
-	Metadata               map[string]interface{} `json:"metadata,omitempty"`
-	PendingPlanEffectiveAt time.Time              `json:"pending_plan_effective_at,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// PendingPlanEffectiveAt When the scheduled plan change takes effect: the end of the
+	// period in which it was scheduled. Absent when no change is
+	// scheduled.
+	PendingPlanEffectiveAt time.Time `json:"pending_plan_effective_at,omitempty"`
 
 	// PendingPlanId Plan the item moves to at `pending_plan_effective_at`. Absent when no change is scheduled.
 	PendingPlanId string `json:"pending_plan_id,omitempty"`
 
 	// PlanChangedAt When the plan was last changed immediately. Absent until the first such change.
-	PlanChangedAt  time.Time `json:"plan_changed_at,omitempty"`
-	PlanId         string    `json:"plan_id"`
-	Quantity       int64     `json:"quantity"`
-	SubscriptionId string    `json:"subscription_id"`
-	TenantId       string    `json:"tenant_id,omitempty"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	PlanChangedAt time.Time `json:"plan_changed_at,omitempty"`
+
+	// PlanId The plan the item bills now. A scheduled plan change shows in
+	// `pending_plan_id` until it takes effect.
+	PlanId string `json:"plan_id"`
+
+	// Quantity How many of the plan the item bills: the plan's base fee is
+	// charged this many times. At least 1.
+	Quantity int64 `json:"quantity"`
+
+	// SubscriptionId The subscription the item is on.
+	SubscriptionId string `json:"subscription_id"`
+
+	// TenantId The account the item belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the item last changed.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// SubscriptionItemChangeResult defines model for SubscriptionItemChangeResult.
+// SubscriptionItemChangeResult What `PATCH /v1/subscriptions/{id}/items/{itemID}` did: the item
+// after the change, when the change takes effect, and how the rest
+// of the period was settled.
 type SubscriptionItemChangeResult struct {
 	// EffectiveAt When the change takes effect. For a scheduled plan change, the end of the current period.
 	EffectiveAt time.Time `json:"effective_at"`
 
 	// Item One priced line of a subscription. It pairs a plan with a quantity.
+	// Returned inside a subscription's `items`, and by the item routes.
 	Item SubscriptionItem `json:"item"`
 
 	// NewPeriodInvoice The invoice an immediate change to a plan with another billing
@@ -6477,37 +7336,44 @@ type SubscriptionItemChangeResult struct {
 
 // SubscriptionItemProration What Hardcount did to settle the rest of the period for an item change.
 type SubscriptionItemProration struct {
-	// AmountCents Gross amount, tax included: the invoice total (`invoice`), or
-	// the whole credit for unused time (`credit` and `adjustment`).
+	// AmountCents Gross amount, tax included, in the currency's minor unit (cents
+	// for USD): the invoice total (`invoice`), or the whole credit for
+	// unused time (`credit` and `adjustment`).
 	// `credited_to_balance_cents`, `reduced_open_invoices_cents` and
 	// `held_on_draft_invoices_cents` say where the credit went.
 	AmountCents int64 `json:"amount_cents"`
 
 	// CreditedToBalanceCents The part of the credit added to the customer's balance, tax
-	// included. On a paid invoice, all of its part. On an open invoice
-	// paid partly with credits, the part above what it still asks for:
-	// those credits go back to the balance. A part on an invoice whose
-	// payment is still processing counts here; if that payment fails,
-	// it reduces the invoice instead. 0 when `type` is `invoice`.
+	// included, in the currency's minor unit. On a paid invoice, all
+	// of its part. On an open invoice paid partly with credits, the
+	// part above what it still asks for: those credits go back to the
+	// balance. A part on an invoice whose payment is still processing
+	// counts here; if that payment fails, it reduces the invoice
+	// instead. 0 when `type` is `invoice`.
 	CreditedToBalanceCents int64 `json:"credited_to_balance_cents"`
 
-	// HeldOnDraftInvoicesCents The part of the credit on draft invoices, tax included. It is
-	// held until the draft is finalized, then applied by how the
-	// invoice stands: if paid, to the customer's balance; if still
-	// open, off what it asks for first, as above. 0 when `type` is
-	// `invoice`.
+	// HeldOnDraftInvoicesCents The part of the credit on draft invoices, tax included, in the
+	// currency's minor unit. It is held until the draft is finalized,
+	// then applied by how the invoice stands: if paid, to the
+	// customer's balance; if still open, off what it asks for first,
+	// as above. 0 when `type` is `invoice`.
 	HeldOnDraftInvoicesCents int64 `json:"held_on_draft_invoices_cents"`
 
 	// InvoiceId The proration invoice. Present when `type` is `invoice`.
 	InvoiceId string `json:"invoice_id,omitempty"`
+
+	// NewPlanId The plan the item is on after the change.
 	NewPlanId string `json:"new_plan_id"`
+
+	// OldPlanId The plan the item was on before the change. The same as `new_plan_id` for a quantity change.
 	OldPlanId string `json:"old_plan_id"`
 
 	// ProrationFactor Share of the full billing cycle that was left, from 0 to 1.
 	ProrationFactor float64 `json:"proration_factor"`
 
 	// ReducedOpenInvoicesCents The part of the credit taken off the amount due on open
-	// invoices, tax included. 0 when `type` is `invoice`.
+	// invoices, tax included, in the currency's minor unit. 0 when
+	// `type` is `invoice`.
 	ReducedOpenInvoicesCents int64 `json:"reduced_open_invoices_cents"`
 
 	// Type `invoice`: a proration invoice was created. `credit`: some of
@@ -6523,8 +7389,10 @@ type SubscriptionItemProration struct {
 // none of it went to the balance.
 type SubscriptionItemProrationType string
 
-// SubscriptionItemThreshold defines model for SubscriptionItemThreshold.
+// SubscriptionItemThreshold A usage threshold on one item: when the item's usage in the period
+// reaches `usage_gte`, Hardcount invoices the usage so far.
 type SubscriptionItemThreshold struct {
+	// SubscriptionItemId The item of this subscription the threshold watches.
 	SubscriptionItemId string `json:"subscription_item_id"`
 
 	// UsageGte Usage quantity threshold, as a decimal string.
@@ -6534,8 +7402,13 @@ type SubscriptionItemThreshold struct {
 // SubscriptionNewPeriodInvoice The invoice an immediate change to a plan with another billing
 // interval created for the new period it starts.
 type SubscriptionNewPeriodInvoice struct {
-	Currency      string `json:"currency"`
-	Id            string `json:"id"`
+	// Currency The invoice's currency, uppercase (for example `USD`).
+	Currency string `json:"currency"`
+
+	// Id The invoice's ID (`hc_inv_…`).
+	Id string `json:"id"`
+
+	// InvoiceNumber The invoice's number, as printed on it.
 	InvoiceNumber string `json:"invoice_number"`
 
 	// Status `draft` when the invoice was not issued yet: collection is
@@ -6543,8 +7416,9 @@ type SubscriptionNewPeriodInvoice struct {
 	// then change before it is finalized.
 	Status SubscriptionNewPeriodInvoiceStatus `json:"status"`
 
-	// TotalAmountCents The invoice total when the change created it. On a `draft`
-	// whose tax could not be calculated yet, it has no tax in it.
+	// TotalAmountCents The invoice total when the change created it, in the
+	// currency's minor unit (cents for USD). On a `draft` whose tax
+	// could not be calculated yet, it has no tax in it.
 	TotalAmountCents int64 `json:"total_amount_cents"`
 }
 
@@ -6554,8 +7428,12 @@ type SubscriptionNewPeriodInvoice struct {
 type SubscriptionNewPeriodInvoiceStatus string
 
 // SubscriptionPauseCollection Present on a subscription while collection is paused. New invoices
-// are still created, but stay drafts and are not charged.
+// are still created, but stay drafts and are not charged. Absent when
+// collection runs normally.
 type SubscriptionPauseCollection struct {
+	// Behavior What happens to the invoices built during the pause. Only
+	// `keep_as_draft`: they stay drafts, so they are not finalized,
+	// charged or dunned.
 	Behavior SubscriptionPauseCollectionBehavior `json:"behavior"`
 
 	// ResumesAt When collection resumes. Absent when the pause lasts until it is
@@ -6572,7 +7450,9 @@ type SubscriptionPauseCollection struct {
 	SetBy SubscriptionPauseCollectionSetBy `json:"set_by,omitempty"`
 }
 
-// SubscriptionPauseCollectionBehavior defines model for SubscriptionPauseCollection.Behavior.
+// SubscriptionPauseCollectionBehavior What happens to the invoices built during the pause. Only
+// `keep_as_draft`: they stay drafts, so they are not finalized,
+// charged or dunned.
 type SubscriptionPauseCollectionBehavior string
 
 // SubscriptionPauseCollectionSetBy Who paused collection. `operator`: you, through the API or the
@@ -6583,10 +7463,21 @@ type SubscriptionPauseCollectionBehavior string
 // that ended during the pause keep their draft invoices.
 type SubscriptionPauseCollectionSetBy string
 
-// SubscriptionTimelineEvent defines model for SubscriptionTimelineEvent.
+// SubscriptionTimelineEvent One row of a subscription's activity timeline
+// (`GET /v1/subscriptions/{id}/timeline`), built from one audit log
+// entry. `line` carries the row in its structured form; `description`,
+// `detail`, `detail_timestamp`, `error` and `status` repeat its words
+// for older clients.
 type SubscriptionTimelineEvent struct {
-	ActorId   string `json:"actor_id,omitempty"`
+	// ActorId The actor's ID (a user's, an API key's `hc_key_…` or a customer's), or `system`.
+	ActorId string `json:"actor_id,omitempty"`
+
+	// ActorName The actor's name: a user's email, an API key's name or a
+	// customer's display name. Absent when it is not known.
 	ActorName string `json:"actor_name,omitempty"`
+
+	// ActorType Who acted, as the audit log records it: `user` (a dashboard
+	// user), `api_key`, `customer`, or `system` (Hardcount itself).
 	ActorType string `json:"actor_type,omitempty"`
 
 	// Description The line's title, for example "Subscription canceled".
@@ -6618,18 +7509,22 @@ type SubscriptionTimelineEvent struct {
 	Line ActivityLine `json:"line"`
 
 	// SimEffectiveAt The test clock's simulated time when the action took effect.
-	SimEffectiveAt time.Time                       `json:"sim_effective_at,omitempty"`
-	Source         SubscriptionTimelineEventSource `json:"source"`
+	SimEffectiveAt time.Time `json:"sim_effective_at,omitempty"`
+
+	// Source Where the row comes from. Always `audit`, the audit log.
+	Source SubscriptionTimelineEventSource `json:"source"`
 
 	// Status The line's tone in older words, read by the dashboard's dot.
-	Status      SubscriptionTimelineEventStatus `json:"status"`
-	TestClockId string                          `json:"test_clock_id,omitempty"`
+	Status SubscriptionTimelineEventStatus `json:"status"`
+
+	// TestClockId The test clock `sim_effective_at` belongs to. Absent when the action was not on a test clock.
+	TestClockId string `json:"test_clock_id,omitempty"`
 
 	// Timestamp When the action was recorded (wall-clock time).
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// SubscriptionTimelineEventSource defines model for SubscriptionTimelineEvent.Source.
+// SubscriptionTimelineEventSource Where the row comes from. Always `audit`, the audit log.
 type SubscriptionTimelineEventSource string
 
 // SubscriptionTimelineEventStatus The line's tone in older words, read by the dashboard's dot.
@@ -6840,13 +7735,17 @@ type TenantSettingsInputTaxOnFailure string
 type TenantSettingsInputTaxProvider string
 
 // TestClock A clock for test mode. Customers and subscriptions attached to it
-// are billed on its time, not the real time.
+// are billed on its time, not the real time. Returned by the
+// `/v1/test-clocks` routes.
 type TestClock struct {
+	// CreatedAt When the clock was created, in real time.
 	CreatedAt time.Time `json:"created_at"`
 
 	// FrozenTime The clock's current time.
 	FrozenTime time.Time `json:"frozen_time"`
-	Id         string    `json:"id"`
+
+	// Id The clock's ID (`hc_tclk_…`).
+	Id string `json:"id"`
 
 	// LastAdvanceSummary What the latest advance did: the time span it covered and how many
 	// of each billing step it ran. Absent until the clock is first
@@ -6855,14 +7754,20 @@ type TestClock struct {
 
 	// LastFailureReason Why the last advance failed. Cleared by the next successful advance.
 	LastFailureReason string `json:"last_failure_reason,omitempty"`
-	Name              string `json:"name"`
+
+	// Name Your name for the clock. Empty when you gave none.
+	Name string `json:"name"`
 
 	// Status `ready`: it can be advanced or deleted. `advancing`: billing is
 	// catching up to the new time. `internal_failure`: the last advance
 	// failed partway; resume it with `POST /v1/test-clocks/{id}/retry-advance`.
-	Status    TestClockStatus `json:"status"`
-	TenantId  string          `json:"tenant_id,omitempty"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	Status TestClockStatus `json:"status"`
+
+	// TenantId The account the clock belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// UpdatedAt When the clock last changed, in real time.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // TestClockStatus `ready`: it can be advanced or deleted. `advancing`: billing is
@@ -6874,23 +7779,49 @@ type TestClockStatus string
 // of each billing step it ran. Absent until the clock is first
 // advanced.
 type TestClockAdvanceSummary struct {
-	AdvancedFrom    time.Time `json:"advanced_from"`
-	AdvancedTo      time.Time `json:"advanced_to"`
-	ChargesRetried  int       `json:"charges_retried"`
-	ClawbacksIssued int       `json:"clawbacks_issued"`
-	CreditsExpired  int       `json:"credits_expired"`
-	DunningAdvanced int       `json:"dunning_advanced"`
+	// AdvancedFrom The clock's time before the advance. After a retried advance it
+	// equals `advanced_to`.
+	AdvancedFrom time.Time `json:"advanced_from"`
 
-	// HadErrors True when a step failed. The counts then cover only the work done before the failure.
-	HadErrors         bool `json:"had_errors"`
-	InvoicesGenerated int  `json:"invoices_generated"`
-	PausesResumed     int  `json:"pauses_resumed"`
-	TaxRetried        int  `json:"tax_retried"`
-	ThresholdsFired   int  `json:"thresholds_fired"`
-	TrialsActivated   int  `json:"trials_activated"`
+	// AdvancedTo The clock's time after the advance.
+	AdvancedTo time.Time `json:"advanced_to"`
+
+	// ChargesRetried Invoices waiting to be charged that the advance tried to collect.
+	ChargesRetried int `json:"charges_retried"`
+
+	// ClawbacksIssued Credit notes for unused time that were waiting for their invoice
+	// to settle, issued now.
+	ClawbacksIssued int `json:"clawbacks_issued"`
+
+	// CreditsExpired Credit grants that expired in the span.
+	CreditsExpired int `json:"credits_expired"`
+
+	// DunningAdvanced Dunning runs that took a step.
+	DunningAdvanced int `json:"dunning_advanced"`
+
+	// HadErrors True when a step failed, which leaves the clock in
+	// `internal_failure`. The steps after a failed one still ran, so
+	// each count is what its step did.
+	HadErrors bool `json:"had_errors"`
+
+	// InvoicesGenerated Period invoices the advance created.
+	InvoicesGenerated int `json:"invoices_generated"`
+
+	// PausesResumed Collection pauses whose `resumes_at` passed in the span and that were lifted.
+	PausesResumed int `json:"pauses_resumed"`
+
+	// TaxRetried Invoices waiting for tax whose tax calculation was tried again.
+	TaxRetried int `json:"tax_retried"`
+
+	// ThresholdsFired Billing-threshold invoices issued.
+	ThresholdsFired int `json:"thresholds_fired"`
+
+	// TrialsActivated Subscriptions whose trial ended in the span and that became `active`.
+	TrialsActivated int `json:"trials_activated"`
 }
 
-// UsageAggregate defines model for UsageAggregate.
+// UsageAggregate Totals over every usage event that matches the filters of
+// `GET /v1/usage-events/aggregate`, with one row per meter.
 type UsageAggregate struct {
 	// ActiveCustomers Distinct customers among the matching events.
 	ActiveCustomers int `json:"active_customers"`
@@ -6910,12 +7841,17 @@ type UsageAggregate struct {
 
 		// Daily One entry per calendar day (in `tz`) with events, oldest first.
 		Daily []struct {
+			// Date The calendar day, `YYYY-MM-DD`, in `tz`.
 			Date openapi_types.Date `json:"date"`
 
 			// Value The day's usage under the meter's aggregation.
 			Value string `json:"value"`
 		} `json:"daily"`
-		Events  int    `json:"events"`
+
+		// Events Number of matching events on this meter.
+		Events int `json:"events"`
+
+		// MeterId The meter (`hc_mtr_…`).
 		MeterId string `json:"meter_id"`
 
 		// Peak Highest single reported quantity, as a decimal string.
@@ -6930,6 +7866,8 @@ type UsageAggregate struct {
 		// Billing applies them per billing period.
 		Value string `json:"value"`
 	} `json:"by_meter"`
+
+	// TotalEvents Number of matching events.
 	TotalEvents int `json:"total_events"`
 
 	// TotalUnits Sum of all matching quantities across meters, as a decimal
@@ -6975,7 +7913,11 @@ type UsageAggregate struct {
 // request is in flight. Absent on a replay and on a read.
 type UsageBillingStatus string
 
-// UsageEvent defines model for UsageEvent.
+// UsageEvent One usage event: a quantity of one meter's usage, for one customer,
+// at one time. Returned by `POST /v1/usage-events` and
+// `POST /v1/usage-events/backfill`, and listed by
+// `GET /v1/usage-events`. An event counts toward the billing period
+// its `timestamp` falls in.
 type UsageEvent struct {
 	// BillingStatus What Hardcount found when the event arrived. It checked the event
 	// against the customer's subscriptions, the plans and prices in force,
@@ -7013,13 +7955,27 @@ type UsageEvent struct {
 	// request read the prices, and a subscription change saved while the
 	// request is in flight. Absent on a replay and on a read.
 	BillingStatus UsageBillingStatus `json:"billing_status,omitempty"`
-	CustomerId    string             `json:"customer_id"`
+
+	// CustomerId The customer the event was recorded for (`hc_cus_…`): the
+	// customer whose `external_id` you sent as
+	// `external_customer_id`.
+	CustomerId string `json:"customer_id"`
 
 	// Dimensions The dimension values sent with the event. Absent when none were sent.
-	Dimensions     map[string]interface{} `json:"dimensions,omitempty"`
-	Id             string                 `json:"id"`
-	IdempotencyKey string                 `json:"idempotency_key,omitempty"`
-	MeterId        string                 `json:"meter_id"`
+	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
+
+	// Id The event's ID (`hc_evt_…`).
+	Id string `json:"id"`
+
+	// IdempotencyKey The key the event was sent with. Hardcount keeps one event per
+	// key in each account and mode (live or test), with no expiry: an
+	// event sent later with the same key is not stored again, however
+	// long after. Absent on an event stored without a key.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+
+	// MeterId The meter the event counts toward (`hc_mtr_…`): the meter whose
+	// `event_name` you sent.
+	MeterId string `json:"meter_id"`
 
 	// Origin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
 	Origin UsageEventOrigin `json:"origin,omitempty"`
@@ -7038,8 +7994,18 @@ type UsageEvent struct {
 	ProviderCostSource UsageEventProviderCostSource `json:"provider_cost_source,omitempty"`
 
 	// Quantity Exact quantity as a decimal string (e.g. "1.5").
-	Quantity  string    `json:"quantity"`
-	TenantId  string    `json:"tenant_id,omitempty"`
+	Quantity string `json:"quantity"`
+
+	// TenantId The account the event belongs to.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// Timestamp When the usage happened. It decides which billing period the
+	// event counts toward. An event sent without `timestamp` is
+	// stamped with the time Hardcount received it, or, for a customer
+	// on a test clock, with the clock's time. A live event may be at
+	// most 5 minutes ahead of that time. There is no limit on how far
+	// back it goes, but an event in a period whose invoice is already
+	// built is stored and not billed (see `billing_status`).
 	Timestamp time.Time `json:"timestamp"`
 }
 
@@ -7052,7 +8018,7 @@ type UsageEventOrigin string
 // the cost is unknown.
 type UsageEventProviderCostSource string
 
-// UsageEventBatchEventResult defines model for UsageEventBatchEventResult.
+// UsageEventBatchEventResult What the batch did with one of its events.
 type UsageEventBatchEventResult struct {
 	// BillingStatus What Hardcount found when the event arrived. It checked the event
 	// against the customer's subscriptions, the plans and prices in force,
@@ -7102,7 +8068,9 @@ type UsageEventBatchEventResult struct {
 // this batch, so it was not stored again.
 type UsageEventBatchEventResultStatus string
 
-// UsageEventBatchResult defines model for UsageEventBatchResult.
+// UsageEventBatchResult What `POST /v1/usage-events/batch` wrote: how many events were new,
+// how many were already stored, and one result per event in the order
+// sent.
 type UsageEventBatchResult struct {
 	// AfterClose Of `ingested`, the events answered `billing_status` `after_close`.
 	AfterClose int `json:"after_close"`
@@ -7709,12 +8677,17 @@ type VoidCreditNoteParams struct {
 
 // AdjustCreditsJSONBody defines parameters for AdjustCredits.
 type AdjustCreditsJSONBody struct {
-	// AmountCents Positive adds credit, negative removes it. Not zero.
+	// AmountCents Positive adds credit, negative removes it, in the
+	// currency's minor unit (cents for USD). Not zero.
 	AmountCents int64 `json:"amount_cents"`
 
 	// Currency ISO 4217 code of the balance to change. Case-insensitive; stored uppercase.
-	Currency    string `json:"currency"`
-	CustomerId  string `json:"customer_id"`
+	Currency string `json:"currency"`
+
+	// CustomerId The customer whose credit to change (`hc_cus_…`).
+	CustomerId string `json:"customer_id"`
+
+	// Description Why you change the balance. Shown on the ledger entry. Must not be blank.
 	Description string `json:"description"`
 }
 
@@ -7742,13 +8715,21 @@ type ListCreditBalancesParams struct {
 
 // GrantCreditsJSONBody defines parameters for GrantCredits.
 type GrantCreditsJSONBody struct {
+	// AmountCents The credit to add, in the currency's minor unit (cents
+	// for USD). From 1 to 100000000 (1,000,000.00).
 	AmountCents int64 `json:"amount_cents"`
 
 	// Currency ISO 4217 code of the credit. Required. Case-insensitive;
 	// stored uppercase. Zero-decimal currencies (such as JPY)
 	// are not supported yet.
-	Currency    string `json:"currency"`
-	CustomerId  string `json:"customer_id"`
+	Currency string `json:"currency"`
+
+	// CustomerId The customer to grant credit to (`hc_cus_…`).
+	CustomerId string `json:"customer_id"`
+
+	// Description What the credit is for, shown on the ledger entry.
+	// Required: a grant without one, or with a blank one, is
+	// refused with 422. At most 500 characters.
 	Description string `json:"description,omitempty"`
 
 	// ExpiresAt Optional expiry; must be in the future. Omitted = never
@@ -7758,11 +8739,11 @@ type GrantCreditsJSONBody struct {
 	// after the picked day.
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
 
-	// GrantKind Optional cost-basis class (ADR-078). `promotional` marks
-	// free/marketing credits, drained BEFORE all paid-class
-	// blocks. Omitted = unclassified (drains in the paid
-	// class). `commit` is reserved for the invoice-finalize
-	// funding path and rejected here.
+	// GrantKind Optional cost-basis class. `promotional` marks free or
+	// marketing credit, which invoices draw before any other
+	// credit. Omitted means unclassified credit. `commit` is
+	// refused here: commit credit comes only from finalizing a
+	// commit invoice.
 	GrantKind GrantCreditsJSONBodyGrantKind `json:"grant_kind,omitempty"`
 }
 
@@ -7782,11 +8763,14 @@ type GrantCreditsJSONBodyGrantKind string
 
 // GetCreditGrantsParams defines parameters for GetCreditGrants.
 type GetCreditGrantsParams struct {
+	// IncludeExhausted `true` also lists the blocks with nothing left (used up,
+	// expired, retired or deducted). Any other value leaves them out.
 	IncludeExhausted bool `form:"include_exhausted,omitempty" json:"include_exhausted,omitempty"`
 }
 
 // ListCreditLedgerEntriesParams defines parameters for ListCreditLedgerEntries.
 type ListCreditLedgerEntriesParams struct {
+	// EntryType Only entries of this type.
 	EntryType ListCreditLedgerEntriesParamsEntryType `form:"entry_type,omitempty" json:"entry_type,omitempty"`
 
 	// Sort One of created_at (default), amount_cents, entry_type, expires_at.
@@ -7812,26 +8796,33 @@ type ListCreditLedgerEntriesParamsDir string
 
 // ListCustomersParams defines parameters for ListCustomers.
 type ListCustomersParams struct {
+	// Status Only customers with this status, `active` or `archived`. Any other
+	// value matches no customer.
 	Status string `form:"status,omitempty" json:"status,omitempty"`
 
-	// ExternalId Exact-match filter on the caller-assigned external ID.
+	// ExternalId Only the customer with this `external_id` (exact match).
 	ExternalId string `form:"external_id,omitempty" json:"external_id,omitempty"`
 
-	// Ids Comma-separated customer IDs to fetch exactly.
+	// Ids Comma-separated customer IDs. Only those customers are returned;
+	// IDs not found are skipped.
 	Ids string `form:"ids,omitempty" json:"ids,omitempty"`
 
-	// Search Case-insensitive substring match on display name, email,
-	// external ID, or ID. Matching runs post-decryption (PII
-	// columns are encrypted at rest), bounded to the first 5000
-	// rows of the tenant's filtered set; the rows and `total` stop
-	// there.
+	// Search Case-insensitive substring match on display name, email, external
+	// ID or ID. It looks at the first 5,000 customers, in the list's
+	// sort order, that match the other filters; the rows and `total`
+	// stop there.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
-	// Sort One of display_name, email, external_id, status, created_at
-	// (default). A sort by display_name or email looks at 5,000
-	// customers at most; the rows and `total` stop there.
-	Sort string                 `form:"sort,omitempty" json:"sort,omitempty"`
-	Dir  ListCustomersParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+	// Sort One of `display_name`, `email`, `external_id`, `status` or
+	// `created_at` (the default). Any other value sorts by `created_at`.
+	// On a server that encrypts customer data, a sort by `display_name`
+	// or `email` looks at the 5,000 newest customers at most; the rows
+	// and `total` stop there.
+	Sort string `form:"sort,omitempty" json:"sort,omitempty"`
+
+	// Dir Sort direction, `asc` or `desc`. Default `desc`; any value other
+	// than `asc` sorts descending.
+	Dir ListCustomersParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
@@ -7847,12 +8838,28 @@ type ListCustomersParamsDir string
 
 // CreateCustomerJSONBody defines parameters for CreateCustomer.
 type CreateCustomerJSONBody struct {
+	// AdditionalEmails Addresses to copy on billing emails, at most 10. Each is
+	// checked like `email`, lowercased and deduplicated. None
+	// may equal `email`.
 	AdditionalEmails []string `json:"additional_emails,omitempty"`
-	DisplayName      string   `json:"display_name"`
-	Email            string   `json:"email,omitempty"`
-	ExternalId       string   `json:"external_id"`
 
-	// TestClockId Test mode only. Attaches the customer to a test clock.
+	// DisplayName The name shown on invoices, emails and the dashboard. At
+	// most 255 characters.
+	DisplayName string `json:"display_name"`
+
+	// Email Where billing emails go. One bare address with a dot in
+	// its domain, such as `billing@acme.example`: no display
+	// name, quotes or angle brackets.
+	Email string `json:"email,omitempty"`
+
+	// ExternalId Your own ID for the customer, such as the account ID in
+	// your app. At most 255 characters after spaces at the ends
+	// are trimmed. Unique in the account and mode.
+	ExternalId string `json:"external_id"`
+
+	// TestClockId Test mode only. Runs the customer on this test clock,
+	// which must exist in the account and mode. Fixed after
+	// create.
 	TestClockId string `json:"test_clock_id,omitempty"`
 }
 
@@ -7899,7 +8906,9 @@ type SendCustomerPaymentSetupEmailParams struct {
 // CreateCustomerPaymentSetupSessionJSONBody defines parameters for CreateCustomerPaymentSetupSession.
 type CreateCustomerPaymentSetupSessionJSONBody struct {
 	// ReturnUrl Where Stripe sends the customer afterwards. Defaults to
-	// the dashboard's setup-complete page.
+	// `/payment-method-added` on the server's
+	// `CUSTOMER_PORTAL_URL` (`http://localhost:5173` when that
+	// is unset).
 	ReturnUrl string `json:"return_url,omitempty"`
 }
 
@@ -7927,13 +8936,24 @@ type SetCustomerDefaultPaymentMethodParams struct {
 
 // UpdateCustomerJSONBody defines parameters for UpdateCustomer.
 type UpdateCustomerJSONBody struct {
+	// AdditionalEmails The new CC list, which replaces the whole list. `[]`
+	// clears it. Left out keeps the current list.
 	AdditionalEmails []string `json:"additional_emails,omitempty"`
-	DisplayName      string   `json:"display_name,omitempty"`
 
-	// DunningPolicyId Policy ID, or `""` to use the tenant default.
-	DunningPolicyId string                       `json:"dunning_policy_id,omitempty"`
-	Email           string                       `json:"email,omitempty"`
-	Status          UpdateCustomerJSONBodyStatus `json:"status,omitempty"`
+	// DisplayName The new name. Spaces at the ends are trimmed. Empty or
+	// left out keeps the current name.
+	DisplayName string `json:"display_name,omitempty"`
+
+	// DunningPolicyId Policy ID, or `""` to use the account's default policy.
+	DunningPolicyId string `json:"dunning_policy_id,omitempty"`
+
+	// Email The new primary email, checked as on create. Empty or left
+	// out keeps the current email.
+	Email string `json:"email,omitempty"`
+
+	// Status `archived` blocks new subscriptions for the customer.
+	// `active` lifts that.
+	Status UpdateCustomerJSONBodyStatus `json:"status,omitempty"`
 }
 
 // UpdateCustomerParams defines parameters for UpdateCustomer.
@@ -7963,10 +8983,12 @@ type UpsertCustomerBillingProfileParams struct {
 
 // GetCustomerMarginParams defines parameters for GetCustomerMargin.
 type GetCustomerMarginParams struct {
-	// From Window start, inclusive. RFC 3339. Default is 30 days before the customer's current time.
+	// From Window start, inclusive. RFC 3339. Default is 30 days before the
+	// customer's current time.
 	From time.Time `form:"from,omitempty" json:"from,omitempty"`
 
-	// To Window end, exclusive. RFC 3339. Default is the customer's current time (test clock time for a customer on a test clock).
+	// To Window end, exclusive. RFC 3339. Default is the customer's current
+	// time (test clock time for a customer on a test clock).
 	To time.Time `form:"to,omitempty" json:"to,omitempty"`
 }
 
@@ -7994,10 +9016,12 @@ type ListCustomerSentEmailsParams struct {
 
 // GetCustomerUsageParams defines parameters for GetCustomerUsage.
 type GetCustomerUsageParams struct {
-	// From Start of the window. RFC 3339 instant or `YYYY-MM-DD` (start of that day, UTC).
+	// From Start of the window. An RFC 3339 instant, or `YYYY-MM-DD` for the
+	// start of that day in UTC.
 	From string `form:"from,omitempty" json:"from,omitempty"`
 
-	// To End of the window, exclusive. RFC 3339 instant or `YYYY-MM-DD` (23:59:59.999999 UTC that day, so the day is included).
+	// To End of the window, exclusive. An RFC 3339 instant, or `YYYY-MM-DD`
+	// for 23:59:59.999999 UTC that day, so the day is included.
 	To string `form:"to,omitempty" json:"to,omitempty"`
 }
 
@@ -8471,13 +9495,21 @@ type ListMetersParams struct {
 
 // CreateMeterJSONBody defines parameters for CreateMeter.
 type CreateMeterJSONBody struct {
-	// Aggregation How the meter rolls its events into one quantity per billing period. Fixed once the meter has a usage event.
+	// Aggregation How the meter rolls its events into one quantity per
+	// billing period. Fixed once the meter has a usage event.
 	Aggregation CreateMeterJSONBodyAggregation `json:"aggregation,omitempty"`
 
-	// EventName The `event_name` usage events will send for this meter. Letters, digits, `-` and `_`; at most 100 characters.
+	// EventName The `event_name` usage events will send for this meter.
+	// Letters, digits, `-` and `_`; at most 100 characters.
+	// Unique in the account and mode.
 	EventName string `json:"event_name"`
-	Name      string `json:"name"`
-	Unit      string `json:"unit,omitempty"`
+
+	// Name The display name, at most 255 characters.
+	Name string `json:"name"`
+
+	// Unit The unit of the quantity, such as `tokens` or `seconds`.
+	// Empty or left out is `unit`.
+	Unit string `json:"unit,omitempty"`
 }
 
 // CreateMeterParams defines parameters for CreateMeter.
@@ -8496,9 +9528,14 @@ type CreateMeterJSONBodyAggregation string
 
 // UpdateMeterJSONBody defines parameters for UpdateMeter.
 type UpdateMeterJSONBody struct {
+	// Aggregation The new aggregation. Refused once the meter has a usage event.
 	Aggregation UpdateMeterJSONBodyAggregation `json:"aggregation,omitempty"`
-	Name        string                         `json:"name,omitempty"`
-	Unit        string                         `json:"unit,omitempty"`
+
+	// Name The new display name, at most 255 characters. It cannot be empty.
+	Name string `json:"name,omitempty"`
+
+	// Unit The new unit. Empty sets it to `unit`.
+	Unit string `json:"unit,omitempty"`
 }
 
 // UpdateMeterParams defines parameters for UpdateMeter.
@@ -8528,18 +9565,35 @@ type ListPlansParams struct {
 
 // CreatePlanJSONBody defines parameters for CreatePlan.
 type CreatePlanJSONBody struct {
+	// BaseAmountCents The recurring base fee per billing period, in the
+	// currency's minor unit (cents for USD). 0 or more; 0 when
+	// left out.
 	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
 
 	// BaseBillTiming Required when `base_amount_cents` is above 0. With a base
 	// of 0 it may be left out, and the plan is in_arrears;
 	// `in_advance` with a base of 0 is refused. See
-	// Plan.base_bill_timing (ADR-031).
-	BaseBillTiming  CreatePlanJSONBodyBaseBillTiming  `json:"base_bill_timing,omitempty"`
+	// `base_bill_timing` on Plan.
+	BaseBillTiming CreatePlanJSONBodyBaseBillTiming `json:"base_bill_timing,omitempty"`
+
+	// BillingInterval How often a subscription to the plan is billed. Fixed after create.
 	BillingInterval CreatePlanJSONBodyBillingInterval `json:"billing_interval"`
-	Code            string                            `json:"code"`
-	Currency        string                            `json:"currency"`
-	Description     string                            `json:"description,omitempty"`
-	Name            string                            `json:"name"`
+
+	// Code Your short name for the plan. Letters, digits, `-` and
+	// `_`; at most 100 characters; unique in the account and
+	// mode. Fixed after create.
+	Code string `json:"code"`
+
+	// Currency ISO 4217 code, such as `USD`, stored in upper case.
+	// Zero-decimal currencies such as JPY are refused. Fixed
+	// after create.
+	Currency string `json:"currency"`
+
+	// Description Your description of the plan.
+	Description string `json:"description,omitempty"`
+
+	// Name The display name, at most 255 characters.
+	Name string `json:"name"`
 
 	// Prices The plan's usage prices, created with it in one request.
 	// Each takes the plan's currency.
@@ -8549,7 +9603,7 @@ type CreatePlanJSONBody struct {
 	Status CreatePlanJSONBodyStatus `json:"status,omitempty"`
 
 	// TaxCode Stripe product tax code for the base fee, such as
-	// `txcd_10103001`. Empty or omitted means the tenant's
+	// `txcd_10103001`. Empty or omitted means the account's
 	// `default_product_tax_code`.
 	TaxCode string `json:"tax_code,omitempty"`
 }
@@ -8577,17 +9631,26 @@ type CreatePlanJSONBodyStatus string
 // UpdatePlanJSONBody defines parameters for UpdatePlan.
 type UpdatePlanJSONBody struct {
 	// BaseAmountCents 0 or more. Omit to keep the current base fee.
-	BaseAmountCents int64                            `json:"base_amount_cents,omitempty"`
-	BaseBillTiming  UpdatePlanJSONBodyBaseBillTiming `json:"base_bill_timing,omitempty"`
+	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
 
-	// Description Whitespace is trimmed. Omit to keep the current description; an empty string clears it.
+	// BaseBillTiming When the base fee is billed. Omit to keep the current
+	// timing. Refused once a subscription has used the plan.
+	BaseBillTiming UpdatePlanJSONBodyBaseBillTiming `json:"base_bill_timing,omitempty"`
+
+	// Description Whitespace is trimmed. Omit to keep the current
+	// description; an empty string clears it.
 	Description string `json:"description,omitempty"`
 
 	// Name Whitespace is trimmed. Empty or omitted keeps the current name.
-	Name   string                   `json:"name,omitempty"`
+	Name string `json:"name,omitempty"`
+
+	// Status `archived` stops new subscriptions and plan changes onto
+	// the plan. `active` brings it back.
 	Status UpdatePlanJSONBodyStatus `json:"status,omitempty"`
 
-	// TaxCode Stripe product tax code. Omit to keep the current code; an empty string clears it, and the base fee then uses the tenant's `default_product_tax_code`.
+	// TaxCode Stripe product tax code. Omit to keep the current code; an
+	// empty string clears it, and the base fee then uses the
+	// account's `default_product_tax_code`.
 	TaxCode string `json:"tax_code,omitempty"`
 }
 
@@ -8660,6 +9723,8 @@ type ListPriceOverridesParams struct {
 
 // CreatePriceOverrideJSONBody defines parameters for CreatePriceOverride.
 type CreatePriceOverrideJSONBody struct {
+	// CustomerId The customer who gets the rate. It must be a customer in
+	// this account and mode.
 	CustomerId string `json:"customer_id"`
 
 	// Mode As on PriceShape, also for the fields a mode does not use.
@@ -8673,13 +9738,19 @@ type CreatePriceOverrideJSONBody struct {
 
 	// PriceId The plan price to override.
 	PriceId string `json:"price_id"`
-	Reason  string `json:"reason,omitempty"`
+
+	// Reason Your note on why the customer has this rate, such as a
+	// contract reference. Spaces at the ends are trimmed.
+	Reason string `json:"reason,omitempty"`
 
 	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`.
 	Tiers []struct {
 		// UnitAmountCents Price per unit in cents in this tier, as a decimal string, with the limits of `unit_amount_cents`. A refusal names `tiers[i].unit_amount_cents` (i counts from 0).
 		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-		UpTo            int64  `json:"up_to,omitempty"`
+
+		// UpTo The tier's upper bound in whole units. `null` on the
+		// last tier, and only there.
+		UpTo int64 `json:"up_to,omitempty"`
 	} `json:"tiers,omitempty"`
 
 	// UnitAmountCents Price per unit in cents, as a decimal string. Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field.
@@ -8717,11 +9788,19 @@ type UpsertProviderCostJSONBody struct {
 	// in. Any other value is 422.
 	Currency UpsertProviderCostJSONBodyCurrency `json:"currency,omitempty"`
 
-	// Model Model family token or raw snapshot id — raw ids match first at ingest.
-	Model    string `json:"model"`
+	// Model The model, such as `claude-sonnet-4.5`, or a raw model
+	// snapshot id. An event's `model_raw` label is matched
+	// first, then its `model` label.
+	Model string `json:"model"`
+
+	// Provider The provider, such as `anthropic`. Stored in lower case;
+	// it must equal the `provider` label of the usage events it
+	// costs.
 	Provider string `json:"provider"`
 
-	// TokenType ADR-044 role — input / output / cache_read.
+	// TokenType The kind of token, such as `input`, `output` or
+	// `cache_read`. Stored in lower case; it must equal the
+	// `token_type` label of the usage events it costs.
 	TokenType string `json:"token_type"`
 
 	// UnitCostCents US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens). 0 or more, under 10^10, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read.
@@ -8769,6 +9848,10 @@ type ListRecipeInstancesParams struct {
 
 // InstantiateRecipeJSONBody defines parameters for InstantiateRecipe.
 type InstantiateRecipeJSONBody struct {
+	// Overrides Values for the recipe's `overridable` keys, such as
+	// `{"currency": "EUR"}`. A key the recipe does not list, or
+	// a value that breaks the key's rules, is refused with 422.
+	// Keys you leave out take their defaults.
 	Overrides map[string]interface{} `json:"overrides,omitempty"`
 }
 
@@ -8785,6 +9868,10 @@ type InstantiateRecipeParams struct {
 
 // PreviewRecipeJSONBody defines parameters for PreviewRecipe.
 type PreviewRecipeJSONBody struct {
+	// Overrides Values for the recipe's `overridable` keys, such as
+	// `{"currency": "EUR"}`. A key the recipe does not list, or
+	// a value that breaks the key's rules, is refused with 422.
+	// Keys you leave out take their defaults.
 	Overrides map[string]interface{} `json:"overrides,omitempty"`
 }
 
@@ -8878,6 +9965,7 @@ type SetStripeWebhookSecretParamsMode string
 
 // ListSubscriptionsParams defines parameters for ListSubscriptions.
 type ListSubscriptionsParams struct {
+	// CustomerId Only this customer's subscriptions (`hc_cus_…`).
 	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
 
 	// PlanId Filter to subscriptions with a live item on this plan.
@@ -8902,9 +9990,12 @@ type ListSubscriptionsParams struct {
 	// Search Case-insensitive substring match on display name or code.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
-	// Sort One of display_name, status, next_billing_at, trial_end_at, created_at (default).
-	Sort string                     `form:"sort,omitempty" json:"sort,omitempty"`
-	Dir  ListSubscriptionsParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+	// Sort One of display_name, status, next_billing_at, trial_end_at,
+	// created_at (default). Any other value sorts by created_at.
+	Sort string `form:"sort,omitempty" json:"sort,omitempty"`
+
+	// Dir Sort direction, `asc` or `desc` (the default). Any other value sorts descending.
+	Dir ListSubscriptionsParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
@@ -8929,15 +10020,27 @@ type ListSubscriptionsParamsDir string
 
 // CreateSubscriptionJSONBody defines parameters for CreateSubscription.
 type CreateSubscriptionJSONBody struct {
+	// BillingTime How monthly periods line up. See the subscription's `billing_time`.
 	BillingTime CreateSubscriptionJSONBodyBillingTime `json:"billing_time,omitempty"`
-	Code        string                                `json:"code"`
-	CustomerId  string                                `json:"customer_id"`
-	DisplayName string                                `json:"display_name"`
+
+	// Code Your code for the subscription: letters, digits, hyphens
+	// and underscores. Unique in your account and mode.
+	Code string `json:"code"`
+
+	// CustomerId The customer to bill (`hc_cus_…`), in this account and
+	// mode.
+	CustomerId string `json:"customer_id"`
+
+	// DisplayName The subscription's name. Must not be blank.
+	DisplayName string `json:"display_name"`
 
 	// Items Plan items — a subscription bills one or more plans.
 	Items []struct {
-		PlanId   string `json:"plan_id"`
-		Quantity int    `json:"quantity,omitempty"`
+		// PlanId A plan of this account (`hc_pln_…`). Each plan can appear once.
+		PlanId string `json:"plan_id"`
+
+		// Quantity How many of the plan to bill. At least 1; 0 or absent means 1.
+		Quantity int `json:"quantity,omitempty"`
 	} `json:"items"`
 
 	// Status Leave it out and the subscription starts now. Without
@@ -8988,8 +10091,14 @@ type ActivateSubscriptionParams struct {
 
 // SetSubscriptionBillingThresholdsJSONBody defines parameters for SetSubscriptionBillingThresholds.
 type SetSubscriptionBillingThresholdsJSONBody struct {
-	// AmountGte Invoice early when the period's usage so far reaches this amount, in cents of the subscription's currency. The base fee is not counted.
-	AmountGte      int64 `json:"amount_gte,omitempty"`
+	// AmountGte Invoice early when the period's usage so far reaches
+	// this amount, in the subscription currency's minor unit
+	// (cents for USD). The base fee is not counted. 0 or
+	// absent sets no amount threshold.
+	AmountGte int64 `json:"amount_gte,omitempty"`
+
+	// ItemThresholds Per-item usage thresholds. Each item of this
+	// subscription can appear once. Absent or empty sets none.
 	ItemThresholds []struct {
 		// SubscriptionItemId An item of this subscription. Each item can appear once.
 		SubscriptionItemId string `json:"subscription_item_id"`
@@ -9051,8 +10160,11 @@ type ExtendSubscriptionTrialParams struct {
 
 // AddSubscriptionItemJSONBody defines parameters for AddSubscriptionItem.
 type AddSubscriptionItemJSONBody struct {
-	PlanId   string `json:"plan_id"`
-	Quantity int64  `json:"quantity,omitempty"`
+	// PlanId The plan to add (`hc_pln_…`). Not archived, and not already on the subscription.
+	PlanId string `json:"plan_id"`
+
+	// Quantity How many of the plan to bill. 0 or absent means 1.
+	Quantity int64 `json:"quantity,omitempty"`
 }
 
 // AddSubscriptionItemParams defines parameters for AddSubscriptionItem.
@@ -9091,6 +10203,8 @@ type UpdateSubscriptionItemParams struct {
 
 // PauseSubscriptionCollectionJSONBody defines parameters for PauseSubscriptionCollection.
 type PauseSubscriptionCollectionJSONBody struct {
+	// Behavior What happens to invoices built during the pause. Only
+	// `keep_as_draft`, which keeps them as drafts.
 	Behavior PauseSubscriptionCollectionJSONBodyBehavior `json:"behavior"`
 
 	// ResumesAt When collection resumes. Must be in the future.
@@ -9155,8 +10269,11 @@ type ListTestClocksParams struct {
 
 // CreateTestClockJSONBody defines parameters for CreateTestClock.
 type CreateTestClockJSONBody struct {
+	// FrozenTime The clock's starting time, RFC 3339. Any instant, past or future.
 	FrozenTime time.Time `json:"frozen_time"`
-	Name       string    `json:"name,omitempty"`
+
+	// Name Your name for the clock. Optional; at most 200 characters.
+	Name string `json:"name,omitempty"`
 }
 
 // CreateTestClockParams defines parameters for CreateTestClock.
@@ -9175,6 +10292,8 @@ type DeleteTestClock200JSONResponseBodyStatus string
 
 // AdvanceTestClockJSONBody defines parameters for AdvanceTestClock.
 type AdvanceTestClockJSONBody struct {
+	// FrozenTime The clock's new time, RFC 3339. Must be after its
+	// current `frozen_time` and at most one year after it.
 	FrozenTime time.Time `json:"frozen_time"`
 }
 
@@ -9224,14 +10343,17 @@ type ListTestClockSubscriptionsParams struct {
 
 // ListUsageEventsParams defines parameters for ListUsageEvents.
 type ListUsageEventsParams struct {
+	// CustomerId Only this customer's events (`hc_cus_…`, the Hardcount ID, not your external ID).
 	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
-	MeterId    string `form:"meter_id,omitempty" json:"meter_id,omitempty"`
+
+	// MeterId Only this meter's events (`hc_mtr_…`).
+	MeterId string `form:"meter_id,omitempty" json:"meter_id,omitempty"`
 
 	// Dimensions Comma-separated key=value pairs matched against the event's
-	// dimensions via JSONB containment (multiple pairs AND).
-	// Values that parse as JSON booleans/numbers are matched
-	// typed ("cached=true", "attempt=2"); everything else as a
-	// string. Malformed pairs → 422. Example:
+	// dimensions; every pair must match. Values that read as JSON
+	// booleans or numbers match typed values ("cached=true",
+	// "attempt=2"); everything else matches as a string. A malformed
+	// pair is refused with 422. Example:
 	// `model=gpt-4o,token_type=input`.
 	Dimensions string `form:"dimensions,omitempty" json:"dimensions,omitempty"`
 
@@ -9263,7 +10385,7 @@ type CreateUsageEventJSONBody struct {
 
 	// IdempotencyKey Your unique ID for this event. Pick it once, before the
 	// first send, and send the same key on every retry of the
-	// event. Keys are unique per tenant and mode (live or
+	// event. Keys are unique per account and mode (live or
 	// test), forever. An event whose key was already used is
 	// not stored again: the first event wins and the new body
 	// is discarded. So never reuse a key for a different
@@ -9280,8 +10402,17 @@ type CreateUsageEventJSONBody struct {
 	// is at most 100 characters. A negative value is a
 	// correction. A missing quantity, or any other value, is
 	// refused with 422 and `param: quantity`.
-	Quantity  CreateUsageEventJSONBody_Quantity `json:"quantity"`
-	Timestamp time.Time                         `json:"timestamp,omitempty"`
+	Quantity CreateUsageEventJSONBody_Quantity `json:"quantity"`
+
+	// Timestamp When the usage happened, as an RFC 3339 string. Leave it
+	// out to use the time Hardcount receives the event (the
+	// clock's time for a customer on a test clock). It may be
+	// at most 5 minutes ahead of that time. Any past time is
+	// accepted, but an event in a period that is already
+	// invoiced is stored and not billed (`billing_status:
+	// after_close`). A value that is not an RFC 3339 string is
+	// refused with 422 and `param: timestamp`.
+	Timestamp time.Time `json:"timestamp,omitempty"`
 }
 
 // CreateUsageEventJSONBodyQuantity0 defines parameters for CreateUsageEvent.
@@ -9297,8 +10428,11 @@ type CreateUsageEventJSONBody_Quantity struct {
 
 // AggregateUsageEventsParams defines parameters for AggregateUsageEvents.
 type AggregateUsageEventsParams struct {
+	// CustomerId Only this customer's events (`hc_cus_…`, the Hardcount ID, not your external ID).
 	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
-	MeterId    string `form:"meter_id,omitempty" json:"meter_id,omitempty"`
+
+	// MeterId Only this meter's events (`hc_mtr_…`).
+	MeterId string `form:"meter_id,omitempty" json:"meter_id,omitempty"`
 
 	// From Events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
 	From string `form:"from,omitempty" json:"from,omitempty"`
@@ -9329,7 +10463,7 @@ type BackfillUsageEventJSONBody struct {
 
 	// IdempotencyKey Your unique ID for this event. Pick it once, before the
 	// first send, and send the same key on every retry of the
-	// event. Keys are unique per tenant and mode (live or
+	// event. Keys are unique per account and mode (live or
 	// test), forever. An event whose key was already used is
 	// not stored again: the first event wins and the new body
 	// is discarded. So never reuse a key for a different
@@ -9365,6 +10499,7 @@ type BackfillUsageEventJSONBody_Quantity struct {
 
 // CreateUsageEventBatchJSONBody defines parameters for CreateUsageEventBatch.
 type CreateUsageEventBatchJSONBody = []struct {
+	// Dimensions Scalar labels of the event, at most 16. A price takes an event whose labels include the price's `dimension_match`.
 	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
 
 	// EventName The meter's `event_name` (e.g. "tokens").
@@ -9375,13 +10510,13 @@ type CreateUsageEventBatchJSONBody = []struct {
 
 	// IdempotencyKey Your unique ID for this event. Pick it once, before the
 	// first send, and send the same key on every retry of the
-	// event. Keys are unique per tenant and mode (live or
+	// event. Keys are unique per account and mode (live or
 	// test), forever. An event whose key was already used is
 	// not stored again: the first event wins and the new body
 	// is discarded. So never reuse a key for a different
 	// event, such as a batch index or a timestamp that can
 	// repeat, or that usage is lost. Empty or whitespace-only
-	// keys are refused with 422, and so are keys longer than
+	// keys fail validation, and so do keys longer than
 	// 255 characters. This is the only dedup key: the usage
 	// routes ignore the `Idempotency-Key` header.
 	IdempotencyKey string `json:"idempotency_key"`
@@ -9392,8 +10527,12 @@ type CreateUsageEventBatchJSONBody = []struct {
 	// 10^26, and it is at most 100 characters. A negative
 	// value is a correction. A missing quantity, or any
 	// other value, fails validation.
-	Quantity  CreateUsageEventBatchJSONBody_Quantity `json:"quantity"`
-	Timestamp time.Time                              `json:"timestamp,omitempty"`
+	Quantity CreateUsageEventBatchJSONBody_Quantity `json:"quantity"`
+
+	// Timestamp When the usage happened, as an RFC 3339 string. Leave
+	// it out to use the time Hardcount receives the batch.
+	// The same rules as for `POST /v1/usage-events` apply.
+	Timestamp time.Time `json:"timestamp,omitempty"`
 }
 
 // CreateUsageEventBatchJSONBodyQuantity0 defines parameters for CreateUsageEventBatch.
@@ -9410,7 +10549,9 @@ type CreateUsageEventBatchJSONBody_Quantity struct {
 // DiscardHeldUsageJSONBody defines parameters for DiscardHeldUsage.
 type DiscardHeldUsageJSONBody struct {
 	// EventName Discard only the rows with this `event_name`. Omit for all.
-	EventName          string `json:"event_name,omitempty"`
+	EventName string `json:"event_name,omitempty"`
+
+	// ExternalCustomerId The external ID the rows were held under.
 	ExternalCustomerId string `json:"external_customer_id"`
 }
 
@@ -10084,7 +11225,7 @@ type ServerInterface interface {
 	// Request a password reset link
 	// (POST /v1/auth/password-reset/request)
 	RequestPasswordReset(w http.ResponseWriter, r *http.Request)
-	// Trigger billing cycle
+	// Run billing now
 	// (POST /v1/billing/run)
 	RunBilling(w http.ResponseWriter, r *http.Request, params RunBillingParams)
 	// Set up a new installation
@@ -10123,19 +11264,19 @@ type ServerInterface interface {
 	// Add or remove credit
 	// (POST /v1/credits/adjust)
 	AdjustCredits(w http.ResponseWriter, r *http.Request, params AdjustCreditsParams)
-	// Get customer credit balance
+	// Get a customer's credit balance
 	// (GET /v1/credits/balance/{customer_id})
 	GetCreditBalance(w http.ResponseWriter, r *http.Request, customerId string)
-	// Get customer live credit balance
+	// Get a customer's live credit balance
 	// (GET /v1/credits/balance/{customer_id}/live)
 	GetLiveCreditBalance(w http.ResponseWriter, r *http.Request, customerId string)
-	// List credit balances for all customers
+	// List credit balances
 	// (GET /v1/credits/balances)
 	ListCreditBalances(w http.ResponseWriter, r *http.Request, params ListCreditBalancesParams)
-	// Grant credits to customer
+	// Grant credit to a customer
 	// (POST /v1/credits/grant)
 	GrantCredits(w http.ResponseWriter, r *http.Request, params GrantCreditsParams)
-	// Per-grant burndown + kind subtotals
+	// List a customer's credit grants
 	// (GET /v1/credits/grants/{customer_id})
 	GetCreditGrants(w http.ResponseWriter, r *http.Request, customerId string, params GetCreditGrantsParams)
 	// List a customer's credit ledger
@@ -10144,7 +11285,7 @@ type ServerInterface interface {
 	// List customers
 	// (GET /v1/customers)
 	ListCustomers(w http.ResponseWriter, r *http.Request, params ListCustomersParams)
-	// Create customer
+	// Create a customer
 	// (POST /v1/customers)
 	CreateCustomer(w http.ResponseWriter, r *http.Request, params CreateCustomerParams)
 	// Get a customer overview
@@ -10165,10 +11306,10 @@ type ServerInterface interface {
 	// Make a payment method the default
 	// (POST /v1/customers/{customer_id}/payment-methods/{pmID}/default)
 	SetCustomerDefaultPaymentMethod(w http.ResponseWriter, r *http.Request, customerId string, pmid string, params SetCustomerDefaultPaymentMethodParams)
-	// Get customer
+	// Get a customer
 	// (GET /v1/customers/{id})
 	GetCustomer(w http.ResponseWriter, r *http.Request, id string)
-	// Update customer
+	// Update a customer
 	// (PATCH /v1/customers/{id})
 	UpdateCustomer(w http.ResponseWriter, r *http.Request, id string, params UpdateCustomerParams)
 	// Get the customer's billing profile
@@ -10177,10 +11318,10 @@ type ServerInterface interface {
 	// Create or replace the customer's billing profile
 	// (PUT /v1/customers/{id}/billing-profile)
 	UpsertCustomerBillingProfile(w http.ResponseWriter, r *http.Request, id string, params UpsertCustomerBillingProfileParams)
-	// Per-customer margin report (operator only)
+	// Get a customer's margin report
 	// (GET /v1/customers/{id}/margin)
 	GetCustomerMargin(w http.ResponseWriter, r *http.Request, id string, params GetCustomerMarginParams)
-	// Rotate the public cost-dashboard token (ADR-032)
+	// Rotate the customer's public cost-dashboard link
 	// (POST /v1/customers/{id}/rotate-cost-dashboard-token)
 	RotateCustomerCostDashboardToken(w http.ResponseWriter, r *http.Request, id string, params RotateCustomerCostDashboardTokenParams)
 	// List emails sent to the customer
@@ -10234,7 +11375,7 @@ type ServerInterface interface {
 	// Export usage events as CSV
 	// (GET /v1/exports/usage-events.csv)
 	ExportUsageEventsCsv(w http.ResponseWriter, r *http.Request, params ExportUsageEventsCsvParams)
-	// Ingest LiteLLM spend logs
+	// Receive LiteLLM spend logs
 	// (POST /v1/integrations/litellm/spend)
 	IngestLitellmSpend(w http.ResponseWriter, r *http.Request)
 	// List invoices
@@ -10312,25 +11453,25 @@ type ServerInterface interface {
 	// List meters
 	// (GET /v1/meters)
 	ListMeters(w http.ResponseWriter, r *http.Request, params ListMetersParams)
-	// Create meter
+	// Create a meter
 	// (POST /v1/meters)
 	CreateMeter(w http.ResponseWriter, r *http.Request, params CreateMeterParams)
-	// Get meter
+	// Get a meter
 	// (GET /v1/meters/{id})
 	GetMeter(w http.ResponseWriter, r *http.Request, id string)
-	// Update meter
+	// Update a meter
 	// (PATCH /v1/meters/{id})
 	UpdateMeter(w http.ResponseWriter, r *http.Request, id string, params UpdateMeterParams)
 	// List plans
 	// (GET /v1/plans)
 	ListPlans(w http.ResponseWriter, r *http.Request, params ListPlansParams)
-	// Create plan
+	// Create a plan
 	// (POST /v1/plans)
 	CreatePlan(w http.ResponseWriter, r *http.Request, params CreatePlanParams)
-	// Get plan
+	// Get a plan
 	// (GET /v1/plans/{id})
 	GetPlan(w http.ResponseWriter, r *http.Request, id string)
-	// Update plan
+	// Update a plan
 	// (PATCH /v1/plans/{id})
 	UpdatePlan(w http.ResponseWriter, r *http.Request, id string, params UpdatePlanParams)
 	// List a plan's prices
@@ -10363,7 +11504,7 @@ type ServerInterface interface {
 	// Delete a provider cost rate
 	// (DELETE /v1/provider-costs/{id})
 	DeleteProviderCost(w http.ResponseWriter, r *http.Request, id string)
-	// Public cost-dashboard projection (ADR-032)
+	// Get a customer's public cost dashboard
 	// (GET /v1/public/cost-dashboard/{token})
 	GetPublicCostDashboard(w http.ResponseWriter, r *http.Request, token string)
 	// Data behind the hosted invoice page
@@ -10375,7 +11516,7 @@ type ServerInterface interface {
 	// Download the hosted invoice PDF
 	// (GET /v1/public/invoices/{token}/pdf)
 	GetHostedInvoicePdf(w http.ResponseWriter, r *http.Request, token string)
-	// Data behind the payment-update page
+	// Get what the payment-update page shows
 	// (GET /v1/public/payment-updates/{token})
 	GetPublicPaymentUpdate(w http.ResponseWriter, r *http.Request, token string)
 	// Start adding a card in Stripe Checkout
@@ -10384,16 +11525,16 @@ type ServerInterface interface {
 	// List recipes
 	// (GET /v1/recipes)
 	ListRecipes(w http.ResponseWriter, r *http.Request, params ListRecipesParams)
-	// List installed recipe instances
+	// List installed recipes
 	// (GET /v1/recipes/instances)
 	ListRecipeInstances(w http.ResponseWriter, r *http.Request, params ListRecipeInstancesParams)
-	// Get recipe
+	// Get a recipe
 	// (GET /v1/recipes/{key})
 	GetRecipe(w http.ResponseWriter, r *http.Request, key string)
-	// Instantiate recipe (idempotent apply)
+	// Install a recipe
 	// (POST /v1/recipes/{key}/instantiate)
 	InstantiateRecipe(w http.ResponseWriter, r *http.Request, key string, params InstantiateRecipeParams)
-	// Preview recipe
+	// Preview a recipe
 	// (POST /v1/recipes/{key}/preview)
 	PreviewRecipe(w http.ResponseWriter, r *http.Request, key string, params PreviewRecipeParams)
 	// Get workspace settings
@@ -10423,13 +11564,13 @@ type ServerInterface interface {
 	// List subscriptions
 	// (GET /v1/subscriptions)
 	ListSubscriptions(w http.ResponseWriter, r *http.Request, params ListSubscriptionsParams)
-	// Create subscription
+	// Create a subscription
 	// (POST /v1/subscriptions)
 	CreateSubscription(w http.ResponseWriter, r *http.Request, params CreateSubscriptionParams)
-	// Get subscription
+	// Get a subscription
 	// (GET /v1/subscriptions/{id})
 	GetSubscription(w http.ResponseWriter, r *http.Request, id string)
-	// Activate draft subscription
+	// Activate a draft subscription
 	// (POST /v1/subscriptions/{id}/activate)
 	ActivateSubscription(w http.ResponseWriter, r *http.Request, id string, params ActivateSubscriptionParams)
 	// Clear billing thresholds
@@ -10438,22 +11579,22 @@ type ServerInterface interface {
 	// Set billing thresholds
 	// (PUT /v1/subscriptions/{id}/billing-thresholds)
 	SetSubscriptionBillingThresholds(w http.ResponseWriter, r *http.Request, id string, params SetSubscriptionBillingThresholdsParams)
-	// Cancel subscription now
+	// Cancel a subscription now
 	// (POST /v1/subscriptions/{id}/cancel)
 	CancelSubscription(w http.ResponseWriter, r *http.Request, id string, params CancelSubscriptionParams)
-	// End trial now
+	// End a trial now
 	// (POST /v1/subscriptions/{id}/end-trial)
 	EndSubscriptionTrial(w http.ResponseWriter, r *http.Request, id string, params EndSubscriptionTrialParams)
-	// Extend trial
+	// Extend a trial
 	// (POST /v1/subscriptions/{id}/extend-trial)
 	ExtendSubscriptionTrial(w http.ResponseWriter, r *http.Request, id string, params ExtendSubscriptionTrialParams)
-	// Add subscription item
+	// Add an item to a subscription
 	// (POST /v1/subscriptions/{id}/items)
 	AddSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, params AddSubscriptionItemParams)
-	// Remove subscription item
+	// Remove a subscription item
 	// (DELETE /v1/subscriptions/{id}/items/{itemID})
 	RemoveSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, itemID string)
-	// Change subscription item
+	// Change a subscription item
 	// (PATCH /v1/subscriptions/{id}/items/{itemID})
 	UpdateSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, itemID string, params UpdateSubscriptionItemParams)
 	// Cancel a scheduled plan change
@@ -10465,7 +11606,7 @@ type ServerInterface interface {
 	// Pause collection
 	// (PUT /v1/subscriptions/{id}/pause-collection)
 	PauseSubscriptionCollection(w http.ResponseWriter, r *http.Request, id string, params PauseSubscriptionCollectionParams)
-	// Retry billing on a subscription whose billing is failing
+	// Retry a subscription's failed billing
 	// (POST /v1/subscriptions/{id}/retry-billing)
 	RetrySubscriptionBilling(w http.ResponseWriter, r *http.Request, id string, params RetrySubscriptionBillingParams)
 	// Schedule a cancel
@@ -10474,46 +11615,46 @@ type ServerInterface interface {
 	// Clear a scheduled cancel
 	// (DELETE /v1/subscriptions/{id}/scheduled-cancel)
 	ClearSubscriptionScheduledCancel(w http.ResponseWriter, r *http.Request, id string)
-	// Get subscription activity timeline
+	// Get a subscription's activity timeline
 	// (GET /v1/subscriptions/{id}/timeline)
 	GetSubscriptionTimeline(w http.ResponseWriter, r *http.Request, id string)
-	// List test clocks for the active tenant
+	// List test clocks
 	// (GET /v1/test-clocks)
 	ListTestClocks(w http.ResponseWriter, r *http.Request, params ListTestClocksParams)
 	// Create a test clock
 	// (POST /v1/test-clocks)
 	CreateTestClock(w http.ResponseWriter, r *http.Request, params CreateTestClockParams)
-	// Delete a test clock (cascades to pinned subscriptions)
+	// Delete a test clock and its simulated data
 	// (DELETE /v1/test-clocks/{id})
 	DeleteTestClock(w http.ResponseWriter, r *http.Request, id string)
-	// Get a test clock by id
+	// Get a test clock
 	// (GET /v1/test-clocks/{id})
 	GetTestClock(w http.ResponseWriter, r *http.Request, id string)
-	// Advance the clock to a new frozen_time
+	// Advance a test clock
 	// (POST /v1/test-clocks/{id}/advance)
 	AdvanceTestClock(w http.ResponseWriter, r *http.Request, id string, params AdvanceTestClockParams)
 	// List customers attached to a test clock
 	// (GET /v1/test-clocks/{id}/customers)
 	ListTestClockCustomers(w http.ResponseWriter, r *http.Request, id string, params ListTestClockCustomersParams)
-	// Retry catchup on a clock parked in internal_failure
+	// Retry a failed test clock advance
 	// (POST /v1/test-clocks/{id}/retry-advance)
 	RetryTestClockAdvance(w http.ResponseWriter, r *http.Request, id string, params RetryTestClockAdvanceParams)
-	// List subscriptions pinned to this clock
+	// List a test clock's subscriptions
 	// (GET /v1/test-clocks/{id}/subscriptions)
 	ListTestClockSubscriptions(w http.ResponseWriter, r *http.Request, id string, params ListTestClockSubscriptionsParams)
 	// List usage events
 	// (GET /v1/usage-events)
 	ListUsageEvents(w http.ResponseWriter, r *http.Request, params ListUsageEventsParams)
-	// Ingest usage event
+	// Send a usage event
 	// (POST /v1/usage-events)
 	CreateUsageEvent(w http.ResponseWriter, r *http.Request)
-	// Usage totals
+	// Get usage totals
 	// (GET /v1/usage-events/aggregate)
 	AggregateUsageEvents(w http.ResponseWriter, r *http.Request, params AggregateUsageEventsParams)
 	// Backfill a past usage event
 	// (POST /v1/usage-events/backfill)
 	BackfillUsageEvent(w http.ResponseWriter, r *http.Request)
-	// Batch ingest usage events (max 1000, all-or-nothing)
+	// Send a batch of usage events
 	// (POST /v1/usage-events/batch)
 	CreateUsageEventBatch(w http.ResponseWriter, r *http.Request)
 	// List held usage
@@ -10705,7 +11846,7 @@ func (_ Unimplemented) RequestPasswordReset(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Trigger billing cycle
+// Run billing now
 // (POST /v1/billing/run)
 func (_ Unimplemented) RunBilling(w http.ResponseWriter, r *http.Request, params RunBillingParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -10783,31 +11924,31 @@ func (_ Unimplemented) AdjustCredits(w http.ResponseWriter, r *http.Request, par
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get customer credit balance
+// Get a customer's credit balance
 // (GET /v1/credits/balance/{customer_id})
 func (_ Unimplemented) GetCreditBalance(w http.ResponseWriter, r *http.Request, customerId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get customer live credit balance
+// Get a customer's live credit balance
 // (GET /v1/credits/balance/{customer_id}/live)
 func (_ Unimplemented) GetLiveCreditBalance(w http.ResponseWriter, r *http.Request, customerId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List credit balances for all customers
+// List credit balances
 // (GET /v1/credits/balances)
 func (_ Unimplemented) ListCreditBalances(w http.ResponseWriter, r *http.Request, params ListCreditBalancesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Grant credits to customer
+// Grant credit to a customer
 // (POST /v1/credits/grant)
 func (_ Unimplemented) GrantCredits(w http.ResponseWriter, r *http.Request, params GrantCreditsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Per-grant burndown + kind subtotals
+// List a customer's credit grants
 // (GET /v1/credits/grants/{customer_id})
 func (_ Unimplemented) GetCreditGrants(w http.ResponseWriter, r *http.Request, customerId string, params GetCreditGrantsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -10825,7 +11966,7 @@ func (_ Unimplemented) ListCustomers(w http.ResponseWriter, r *http.Request, par
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Create customer
+// Create a customer
 // (POST /v1/customers)
 func (_ Unimplemented) CreateCustomer(w http.ResponseWriter, r *http.Request, params CreateCustomerParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -10867,13 +12008,13 @@ func (_ Unimplemented) SetCustomerDefaultPaymentMethod(w http.ResponseWriter, r 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get customer
+// Get a customer
 // (GET /v1/customers/{id})
 func (_ Unimplemented) GetCustomer(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Update customer
+// Update a customer
 // (PATCH /v1/customers/{id})
 func (_ Unimplemented) UpdateCustomer(w http.ResponseWriter, r *http.Request, id string, params UpdateCustomerParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -10891,13 +12032,13 @@ func (_ Unimplemented) UpsertCustomerBillingProfile(w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Per-customer margin report (operator only)
+// Get a customer's margin report
 // (GET /v1/customers/{id}/margin)
 func (_ Unimplemented) GetCustomerMargin(w http.ResponseWriter, r *http.Request, id string, params GetCustomerMarginParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Rotate the public cost-dashboard token (ADR-032)
+// Rotate the customer's public cost-dashboard link
 // (POST /v1/customers/{id}/rotate-cost-dashboard-token)
 func (_ Unimplemented) RotateCustomerCostDashboardToken(w http.ResponseWriter, r *http.Request, id string, params RotateCustomerCostDashboardTokenParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11005,7 +12146,7 @@ func (_ Unimplemented) ExportUsageEventsCsv(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Ingest LiteLLM spend logs
+// Receive LiteLLM spend logs
 // (POST /v1/integrations/litellm/spend)
 func (_ Unimplemented) IngestLitellmSpend(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11161,19 +12302,19 @@ func (_ Unimplemented) ListMeters(w http.ResponseWriter, r *http.Request, params
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Create meter
+// Create a meter
 // (POST /v1/meters)
 func (_ Unimplemented) CreateMeter(w http.ResponseWriter, r *http.Request, params CreateMeterParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get meter
+// Get a meter
 // (GET /v1/meters/{id})
 func (_ Unimplemented) GetMeter(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Update meter
+// Update a meter
 // (PATCH /v1/meters/{id})
 func (_ Unimplemented) UpdateMeter(w http.ResponseWriter, r *http.Request, id string, params UpdateMeterParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11185,19 +12326,19 @@ func (_ Unimplemented) ListPlans(w http.ResponseWriter, r *http.Request, params 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Create plan
+// Create a plan
 // (POST /v1/plans)
 func (_ Unimplemented) CreatePlan(w http.ResponseWriter, r *http.Request, params CreatePlanParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get plan
+// Get a plan
 // (GET /v1/plans/{id})
 func (_ Unimplemented) GetPlan(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Update plan
+// Update a plan
 // (PATCH /v1/plans/{id})
 func (_ Unimplemented) UpdatePlan(w http.ResponseWriter, r *http.Request, id string, params UpdatePlanParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11263,7 +12404,7 @@ func (_ Unimplemented) DeleteProviderCost(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Public cost-dashboard projection (ADR-032)
+// Get a customer's public cost dashboard
 // (GET /v1/public/cost-dashboard/{token})
 func (_ Unimplemented) GetPublicCostDashboard(w http.ResponseWriter, r *http.Request, token string) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11287,7 +12428,7 @@ func (_ Unimplemented) GetHostedInvoicePdf(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Data behind the payment-update page
+// Get what the payment-update page shows
 // (GET /v1/public/payment-updates/{token})
 func (_ Unimplemented) GetPublicPaymentUpdate(w http.ResponseWriter, r *http.Request, token string) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11305,25 +12446,25 @@ func (_ Unimplemented) ListRecipes(w http.ResponseWriter, r *http.Request, param
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List installed recipe instances
+// List installed recipes
 // (GET /v1/recipes/instances)
 func (_ Unimplemented) ListRecipeInstances(w http.ResponseWriter, r *http.Request, params ListRecipeInstancesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get recipe
+// Get a recipe
 // (GET /v1/recipes/{key})
 func (_ Unimplemented) GetRecipe(w http.ResponseWriter, r *http.Request, key string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Instantiate recipe (idempotent apply)
+// Install a recipe
 // (POST /v1/recipes/{key}/instantiate)
 func (_ Unimplemented) InstantiateRecipe(w http.ResponseWriter, r *http.Request, key string, params InstantiateRecipeParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Preview recipe
+// Preview a recipe
 // (POST /v1/recipes/{key}/preview)
 func (_ Unimplemented) PreviewRecipe(w http.ResponseWriter, r *http.Request, key string, params PreviewRecipeParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11383,19 +12524,19 @@ func (_ Unimplemented) ListSubscriptions(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Create subscription
+// Create a subscription
 // (POST /v1/subscriptions)
 func (_ Unimplemented) CreateSubscription(w http.ResponseWriter, r *http.Request, params CreateSubscriptionParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get subscription
+// Get a subscription
 // (GET /v1/subscriptions/{id})
 func (_ Unimplemented) GetSubscription(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Activate draft subscription
+// Activate a draft subscription
 // (POST /v1/subscriptions/{id}/activate)
 func (_ Unimplemented) ActivateSubscription(w http.ResponseWriter, r *http.Request, id string, params ActivateSubscriptionParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11413,37 +12554,37 @@ func (_ Unimplemented) SetSubscriptionBillingThresholds(w http.ResponseWriter, r
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Cancel subscription now
+// Cancel a subscription now
 // (POST /v1/subscriptions/{id}/cancel)
 func (_ Unimplemented) CancelSubscription(w http.ResponseWriter, r *http.Request, id string, params CancelSubscriptionParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// End trial now
+// End a trial now
 // (POST /v1/subscriptions/{id}/end-trial)
 func (_ Unimplemented) EndSubscriptionTrial(w http.ResponseWriter, r *http.Request, id string, params EndSubscriptionTrialParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Extend trial
+// Extend a trial
 // (POST /v1/subscriptions/{id}/extend-trial)
 func (_ Unimplemented) ExtendSubscriptionTrial(w http.ResponseWriter, r *http.Request, id string, params ExtendSubscriptionTrialParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Add subscription item
+// Add an item to a subscription
 // (POST /v1/subscriptions/{id}/items)
 func (_ Unimplemented) AddSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, params AddSubscriptionItemParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Remove subscription item
+// Remove a subscription item
 // (DELETE /v1/subscriptions/{id}/items/{itemID})
 func (_ Unimplemented) RemoveSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, itemID string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Change subscription item
+// Change a subscription item
 // (PATCH /v1/subscriptions/{id}/items/{itemID})
 func (_ Unimplemented) UpdateSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, itemID string, params UpdateSubscriptionItemParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11467,7 +12608,7 @@ func (_ Unimplemented) PauseSubscriptionCollection(w http.ResponseWriter, r *htt
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Retry billing on a subscription whose billing is failing
+// Retry a subscription's failed billing
 // (POST /v1/subscriptions/{id}/retry-billing)
 func (_ Unimplemented) RetrySubscriptionBilling(w http.ResponseWriter, r *http.Request, id string, params RetrySubscriptionBillingParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11485,13 +12626,13 @@ func (_ Unimplemented) ClearSubscriptionScheduledCancel(w http.ResponseWriter, r
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get subscription activity timeline
+// Get a subscription's activity timeline
 // (GET /v1/subscriptions/{id}/timeline)
 func (_ Unimplemented) GetSubscriptionTimeline(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List test clocks for the active tenant
+// List test clocks
 // (GET /v1/test-clocks)
 func (_ Unimplemented) ListTestClocks(w http.ResponseWriter, r *http.Request, params ListTestClocksParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11503,19 +12644,19 @@ func (_ Unimplemented) CreateTestClock(w http.ResponseWriter, r *http.Request, p
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Delete a test clock (cascades to pinned subscriptions)
+// Delete a test clock and its simulated data
 // (DELETE /v1/test-clocks/{id})
 func (_ Unimplemented) DeleteTestClock(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get a test clock by id
+// Get a test clock
 // (GET /v1/test-clocks/{id})
 func (_ Unimplemented) GetTestClock(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Advance the clock to a new frozen_time
+// Advance a test clock
 // (POST /v1/test-clocks/{id}/advance)
 func (_ Unimplemented) AdvanceTestClock(w http.ResponseWriter, r *http.Request, id string, params AdvanceTestClockParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11527,13 +12668,13 @@ func (_ Unimplemented) ListTestClockCustomers(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Retry catchup on a clock parked in internal_failure
+// Retry a failed test clock advance
 // (POST /v1/test-clocks/{id}/retry-advance)
 func (_ Unimplemented) RetryTestClockAdvance(w http.ResponseWriter, r *http.Request, id string, params RetryTestClockAdvanceParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List subscriptions pinned to this clock
+// List a test clock's subscriptions
 // (GET /v1/test-clocks/{id}/subscriptions)
 func (_ Unimplemented) ListTestClockSubscriptions(w http.ResponseWriter, r *http.Request, id string, params ListTestClockSubscriptionsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11545,13 +12686,13 @@ func (_ Unimplemented) ListUsageEvents(w http.ResponseWriter, r *http.Request, p
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Ingest usage event
+// Send a usage event
 // (POST /v1/usage-events)
 func (_ Unimplemented) CreateUsageEvent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Usage totals
+// Get usage totals
 // (GET /v1/usage-events/aggregate)
 func (_ Unimplemented) AggregateUsageEvents(w http.ResponseWriter, r *http.Request, params AggregateUsageEventsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -11563,7 +12704,7 @@ func (_ Unimplemented) BackfillUsageEvent(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Batch ingest usage events (max 1000, all-or-nothing)
+// Send a batch of usage events
 // (POST /v1/usage-events/batch)
 func (_ Unimplemented) CreateUsageEventBatch(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)

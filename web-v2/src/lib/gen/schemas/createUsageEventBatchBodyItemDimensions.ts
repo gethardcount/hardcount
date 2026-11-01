@@ -11,4 +11,7 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Scalar labels of the event, at most 16. A price takes an event whose labels include the price's `dimension_match`.
+ */
 export type CreateUsageEventBatchBodyItemDimensions = { [key: string]: unknown };

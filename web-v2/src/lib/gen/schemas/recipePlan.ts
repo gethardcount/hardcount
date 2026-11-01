@@ -14,13 +14,30 @@ import type { RecipePlanBaseBillTiming } from './recipePlanBaseBillTiming';
 import type { RecipePlanBillingInterval } from './recipePlanBillingInterval';
 import type { RecipePrice } from './recipePrice';
 
+/**
+ * A plan a recipe creates, with its usage prices. An install always
+ * creates a new plan.
+ */
 export interface RecipePlan {
+  /**
+     * The plan's code. When a plan with this code exists, the install
+     * gives the new plan the first free code with `_2`, `_3` and so
+     * on added.
+     */
   code: string;
+  /** The plan's name. */
   name: string;
+  /** The plan's currency, such as `USD`. */
   currency: string;
+  /** How often a subscription to the plan is billed. */
   billing_interval: RecipePlanBillingInterval;
+  /** The plan's recurring base fee, in the currency's minor unit (cents for USD). */
   base_amount_cents: number;
-  /** Optional when the base fee is 0; the plan is then in_arrears (ADR-031). */
+  /**
+     * When the base fee is billed; see Plan. Absent when the recipe
+     * leaves it out, which it may only with a base fee of 0. The plan is
+     * then `in_arrears`.
+     */
   base_bill_timing?: RecipePlanBaseBillTiming;
   /** The plan's usage prices. Each takes the plan's currency. */
   prices: RecipePrice[];

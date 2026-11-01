@@ -17,17 +17,38 @@
  * advanced.
  */
 export interface TestClockAdvanceSummary {
+  /**
+     * The clock's time before the advance. After a retried advance it
+     * equals `advanced_to`.
+     */
   advanced_from: string;
+  /** The clock's time after the advance. */
   advanced_to: string;
+  /** Period invoices the advance created. */
   invoices_generated: number;
+  /** Subscriptions whose trial ended in the span and that became `active`. */
   trials_activated: number;
+  /** Collection pauses whose `resumes_at` passed in the span and that were lifted. */
   pauses_resumed: number;
+  /** Billing-threshold invoices issued. */
   thresholds_fired: number;
+  /** Invoices waiting for tax whose tax calculation was tried again. */
   tax_retried: number;
+  /** Invoices waiting to be charged that the advance tried to collect. */
   charges_retried: number;
+  /**
+     * Credit notes for unused time that were waiting for their invoice
+     * to settle, issued now.
+     */
   clawbacks_issued: number;
+  /** Credit grants that expired in the span. */
   credits_expired: number;
+  /** Dunning runs that took a step. */
   dunning_advanced: number;
-  /** True when a step failed. The counts then cover only the work done before the failure. */
+  /**
+     * True when a step failed, which leaves the clock in
+     * `internal_failure`. The steps after a failed one still ran, so
+     * each count is what its step did.
+     */
   had_errors: boolean;
 }

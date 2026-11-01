@@ -15,11 +15,21 @@ import type { CreateSubscriptionBodyItemsItem } from './createSubscriptionBodyIt
 import type { CreateSubscriptionBodyStatus } from './createSubscriptionBodyStatus';
 
 export type CreateSubscriptionBody = {
+  /**
+     * Your code for the subscription: letters, digits, hyphens
+     * and underscores. Unique in your account and mode.
+     */
   code: string;
+  /** The subscription's name. Must not be blank. */
   display_name: string;
+  /**
+     * The customer to bill (`hc_cus_…`), in this account and
+     * mode.
+     */
   customer_id: string;
   /** Plan items — a subscription bills one or more plans. */
   items: CreateSubscriptionBodyItemsItem[];
+  /** How monthly periods line up. See the subscription's `billing_time`. */
   billing_time?: CreateSubscriptionBodyBillingTime;
   /**
      * Days of free trial; 0 means no trial. Above 0, the

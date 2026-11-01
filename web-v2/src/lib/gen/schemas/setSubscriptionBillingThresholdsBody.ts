@@ -14,9 +14,16 @@ import type { SetSubscriptionBillingThresholdsBodyItemThresholdsItem } from './s
 
 export type SetSubscriptionBillingThresholdsBody = {
   /**
-     * Invoice early when the period's usage so far reaches this amount, in cents of the subscription's currency. The base fee is not counted.
+     * Invoice early when the period's usage so far reaches
+     * this amount, in the subscription currency's minor unit
+     * (cents for USD). The base fee is not counted. 0 or
+     * absent sets no amount threshold.
      * @minimum 1
      */
   amount_gte?: number;
+  /**
+     * Per-item usage thresholds. Each item of this
+     * subscription can appear once. Absent or empty sets none.
+     */
   item_thresholds?: SetSubscriptionBillingThresholdsBodyItemThresholdsItem[];
 };

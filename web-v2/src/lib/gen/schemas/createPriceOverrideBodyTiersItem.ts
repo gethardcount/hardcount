@@ -12,7 +12,11 @@
  */
 
 export type CreatePriceOverrideBodyTiersItem = {
-  /** @nullable */
+  /**
+     * The tier's upper bound in whole units. `null` on the
+     * last tier, and only there.
+     * @nullable
+     */
   up_to?: number | null;
   /** Price per unit in cents in this tier, as a decimal string, with the limits of `unit_amount_cents`. A refusal names `tiers[i].unit_amount_cents` (i counts from 0). */
   unit_amount_cents?: string;

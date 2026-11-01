@@ -12,11 +12,12 @@
  */
 
 export type CreditGrantsRemainingByCurrencyItem = {
+  /** The currency, uppercase. */
   currency: string;
-  /** Remaining credit the customer paid for (`commit`). */
+  /** Remaining credit the customer paid for (`commit`), in the currency's minor unit. */
   commit_remaining_cents: number;
-  /** Remaining free credit (`promotional`). */
+  /** Remaining free credit (`promotional`), in the currency's minor unit. */
   promotional_remaining_cents: number;
-  /** Remaining credit with no kind, such as adjustments and credit-note credit. */
+  /** Remaining credit with no kind, such as adjustments and credit-note credit, in the currency's minor unit. */
   other_remaining_cents: number;
 };

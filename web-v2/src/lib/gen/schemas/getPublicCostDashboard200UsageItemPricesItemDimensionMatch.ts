@@ -12,6 +12,7 @@
  */
 
 /**
- * The labels the price takes. Absent for a price that takes every event.
+ * The labels the price takes. Absent for a
+ * price that takes every event.
  */
 export type GetPublicCostDashboard200UsageItemPricesItemDimensionMatch = {[key: string]: string};

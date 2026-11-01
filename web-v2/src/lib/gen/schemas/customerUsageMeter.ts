@@ -12,14 +12,33 @@
  */
 import type { CustomerUsageMeterPricesItem } from './customerUsageMeterPricesItem';
 
+/**
+ * One meter in a customer's usage report: its usage over the window
+ * and what that usage costs, split by the price that took it.
+ */
 export interface CustomerUsageMeter {
+  /** The meter's ID. */
   meter_id: string;
+  /** The `event_name` usage events send for this meter. */
   event_name: string;
+  /** The meter's display name. */
   meter_name: string;
+  /** The meter's unit, such as `tokens`. */
   unit: string;
+  /**
+     * The currency of the plan whose prices took the usage. Empty when
+     * no usage was priced.
+     */
   currency: string;
-  /** Decimal string. */
+  /**
+     * The usage the meter's prices took, as a decimal string, under
+     * the meter's aggregation. Usage no price took is left out.
+     */
   total_quantity: string;
+  /**
+     * What the usage costs, in the currency's minor unit (cents for
+     * USD). Usage no price took is left out.
+     */
   total_amount_cents: number;
   /**
      * One row per (plan, price) that took usage, and a `no_price` row

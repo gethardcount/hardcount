@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * How often a subscription to the plan is billed. Fixed after create.
+ */
 export type CreatePlanBodyBillingInterval = typeof CreatePlanBodyBillingInterval[keyof typeof CreatePlanBodyBillingInterval];
 
 

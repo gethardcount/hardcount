@@ -15,22 +15,47 @@ import type { SentEmailDeliveryState } from './sentEmailDeliveryState';
 import type { SentEmailEmailType } from './sentEmailEmailType';
 import type { SentEmailStatus } from './sentEmailStatus';
 
+/**
+ * One billing email Hardcount sent, or tried to send, to a customer
+ * about one of its invoices. `GET /v1/customers/{id}/sent-emails`
+ * lists them.
+ */
 export interface SentEmail {
+  /** The email's ID, `hc_emob_` and 20 characters. */
   id: string;
+  /**
+     * Which email it is: the invoice, a payment receipt, a failed
+     * payment notice, a request to add a payment method, a payment
+     * reminder (`dunning_warning`), a final notice
+     * (`dunning_escalation`), or a credit note.
+     */
   email_type: SentEmailEmailType;
+  /** The address the email was sent to. */
   recipient: string;
-  /** Hardcount's send state. `dispatched` means the mail server accepted it. */
+  /**
+     * Hardcount's send state. `pending`: queued. `dispatched`: the
+     * mail server accepted it. `failed`: it could not be sent.
+     * `skipped`: Hardcount did not send it, because the invoice was
+     * already paid, voided or uncollectible, or no longer exists.
+     */
   status: SentEmailStatus;
-  /** What the email provider reported back, if anything. */
+  /**
+     * What the email provider reported back about delivery.
+     * `unknown` until it reports.
+     */
   delivery_state: SentEmailDeliveryState;
+  /** The number of the invoice the email is about. */
   invoice_number?: string;
+  /** Why the last send attempt failed. Absent when no attempt failed. */
   last_error?: string;
+  /** When the email was queued. */
   created_at: string;
+  /** When the mail server accepted the email. Absent until then. */
   dispatched_at?: string;
   /**
-     * The email in the words of the activity line standard (ADR-128),
-     * the same as on the invoice's payment timeline: its name and
-     * what happened to it ("Receipt email delivered"), why it was not
+     * The email in the words of the activity line standard, the same
+     * as on the invoice's payment timeline: its name and what
+     * happened to it ("Receipt email delivered"), why it was not
      * sent, the invoice it was about, and who it went to. Dated at the
      * time on the customer's test clock that caused it, with the real
      * send time as `recorded_at`. Present for every email type this

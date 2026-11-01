@@ -14,6 +14,11 @@ import type { SubscriptionItem } from './subscriptionItem';
 import type { SubscriptionItemProration } from './subscriptionItemProration';
 import type { SubscriptionNewPeriodInvoice } from './subscriptionNewPeriodInvoice';
 
+/**
+ * What `PATCH /v1/subscriptions/{id}/items/{itemID}` did: the item
+ * after the change, when the change takes effect, and how the rest
+ * of the period was settled.
+ */
 export interface SubscriptionItemChangeResult {
   item: SubscriptionItem;
   /** When the change takes effect. For a scheduled plan change, the end of the current period. */

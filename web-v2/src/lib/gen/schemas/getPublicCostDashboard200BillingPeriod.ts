@@ -12,9 +12,31 @@
  */
 import type { GetPublicCostDashboard200BillingPeriodSource } from './getPublicCostDashboard200BillingPeriodSource';
 
+/**
+ * The period the usage covers.
+ */
 export type GetPublicCostDashboard200BillingPeriod = {
+  /**
+     * Start of the period. The zero time
+     * `0001-01-01T00:00:00Z` when `source` is
+     * `no_subscription`.
+     */
   start: string;
+  /**
+     * End of the period, exclusive. The zero time when
+     * `source` is `no_subscription`.
+     */
   end: string;
-  /** Branch on this before rendering the period. When it is `no_subscription` the customer has no active subscription, `subscriptions`, `usage` and `totals` are empty (`credits` is not), and `start`/`end` carry the zero time (`0001-01-01T00:00:00Z`) rather than a real range — display them and the page reads "January 1, year 1". */
+  /**
+     * Check this before you show the period.
+     * `subscription`: the period runs from the earliest
+     * start to the latest end of the current billing
+     * periods of the customer's active and trialing
+     * subscriptions. `no_subscription`: the customer has
+     * no active or trialing subscription; `subscriptions`,
+     * `usage` and `totals` are empty (`credits` is not),
+     * and `start` and `end` hold the zero time, not a real
+     * range.
+     */
   source: GetPublicCostDashboard200BillingPeriodSource;
 };

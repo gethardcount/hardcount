@@ -14,14 +14,28 @@ import type { InvoiceStatus } from './invoiceStatus';
 import type { PublicPaymentUpdateBranding } from './publicPaymentUpdateBranding';
 
 /**
- * What the payment-update page shows before the customer adds a card.
+ * What the payment-update page shows before the customer adds a
+ * card: `GET /v1/public/payment-updates/{token}`. The page opens from
+ * the link in a payment setup email, which Hardcount sends when an
+ * invoice has no payment method to charge.
  */
 export interface PublicPaymentUpdate {
+  /** The customer's display name. */
   customer_name: string;
+  /** The number of the invoice the link was sent for. */
   invoice_number: string;
   invoice_status: InvoiceStatus;
-  /** Not cleared when the invoice is voided. Check `invoice_status` before asking for payment. */
+  /**
+     * What is due on the invoice, in the currency's minor unit (cents
+     * for USD). Not cleared when the invoice is voided: check
+     * `invoice_status` before asking for payment.
+     */
   amount_due_cents: number;
+  /** The invoice's currency, such as `USD`. */
   currency: string;
+  /**
+     * The seller's branding from its account settings. A field the
+     * seller has not set is absent.
+     */
   branding: PublicPaymentUpdateBranding;
 }

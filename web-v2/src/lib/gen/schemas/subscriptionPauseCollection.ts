@@ -15,9 +15,15 @@ import type { SubscriptionPauseCollectionSetBy } from './subscriptionPauseCollec
 
 /**
  * Present on a subscription while collection is paused. New invoices
- * are still created, but stay drafts and are not charged.
+ * are still created, but stay drafts and are not charged. Absent when
+ * collection runs normally.
  */
 export interface SubscriptionPauseCollection {
+  /**
+     * What happens to the invoices built during the pause. Only
+     * `keep_as_draft`: they stay drafts, so they are not finalized,
+     * charged or dunned.
+     */
   behavior: SubscriptionPauseCollectionBehavior;
   /**
      * When collection resumes. Absent when the pause lasts until it is

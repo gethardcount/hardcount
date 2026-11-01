@@ -11,6 +11,12 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Which email it is: the invoice, a payment receipt, a failed
+ * payment notice, a request to add a payment method, a payment
+ * reminder (`dunning_warning`), a final notice
+ * (`dunning_escalation`), or a credit note.
+ */
 export type SentEmailEmailType = typeof SentEmailEmailType[keyof typeof SentEmailEmailType];
 
 

@@ -11,6 +11,18 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * - `grant`: credit added, by you with `POST /v1/credits/grant` or
+ *   by Hardcount (a prepaid-commit invoice when it is finalized, a
+ *   credit note, or a void or credit note that gave drawn credit
+ *   back).
+ * - `usage`: credit an invoice drew.
+ * - `expiry`: the unused rest of a grant, written off once its
+ *   `expires_at` passed.
+ * - `adjustment`: credit added or removed with
+ *   `POST /v1/credits/adjust`, or commit credit taken back when its
+ *   invoice was voided or refunded.
+ */
 export type CreditLedgerEntryEntryType = typeof CreditLedgerEntryEntryType[keyof typeof CreditLedgerEntryEntryType];
 
 

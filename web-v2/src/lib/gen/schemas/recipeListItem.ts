@@ -14,8 +14,10 @@ import type { Recipe } from './recipe';
 import type { RecipeCreates } from './recipeCreates';
 import type { RecipeInstance } from './recipeInstance';
 
+/**
+ * A recipe as `GET /v1/recipes` lists it: the recipe, how many objects it makes (`creates`), and, in `instantiated`, its install record when it is installed in this account and mode. `instantiated` is absent when it is not installed. Installing again changes nothing, and there is no uninstall.
+ */
 export type RecipeListItem = Recipe & {
   creates: RecipeCreates;
-  /** Present when this tenant (in the session's livemode) has installed the recipe; absent otherwise. Drives the "Installed" badge — re-apply is an idempotent no-op and there is no uninstall (ADR-085). */
   instantiated?: RecipeInstance;
 };

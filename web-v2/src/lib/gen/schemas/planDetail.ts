@@ -13,7 +13,9 @@
 import type { Plan } from './plan';
 
 /**
- * A plan as Get, Create and Update plan answer it.
+ * A plan as get, create and update plan answer it: the plan with its
+ * prices, whether a subscription has ever used it, and how many live
+ * subscriptions are on it.
  */
 export type PlanDetail = Plan & {
   /**
@@ -27,7 +29,7 @@ export type PlanDetail = Plan & {
   /**
      * Subscriptions on this plan that are not canceled. While it
      * is above 0, `base_amount_cents` cannot change (see Update
-     * plan).
+     * plan). Always 0 on the answer to a create.
      */
   live_subscription_count: number;
 };

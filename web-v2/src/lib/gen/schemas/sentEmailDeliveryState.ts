@@ -12,7 +12,8 @@
  */
 
 /**
- * What the email provider reported back, if anything.
+ * What the email provider reported back about delivery.
+ * `unknown` until it reports.
  */
 export type SentEmailDeliveryState = typeof SentEmailDeliveryState[keyof typeof SentEmailDeliveryState];
 

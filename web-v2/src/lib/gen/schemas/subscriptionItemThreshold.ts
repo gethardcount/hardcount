@@ -11,7 +11,12 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * A usage threshold on one item: when the item's usage in the period
+ * reaches `usage_gte`, Hardcount invoices the usage so far.
+ */
 export interface SubscriptionItemThreshold {
+  /** The item of this subscription the threshold watches. */
   subscription_item_id: string;
   /** Usage quantity threshold, as a decimal string. */
   usage_gte: string;

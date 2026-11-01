@@ -14,5 +14,6 @@
 export type SendCustomerPaymentSetupEmail202 = {
   /** The address the email was sent to. */
   to: string;
+  /** The email's subject. */
   subject: string;
 };

@@ -12,5 +12,9 @@
  */
 
 export type AdvanceTestClockBody = {
+  /**
+     * The clock's new time, RFC 3339. Must be after its
+     * current `frozen_time` and at most one year after it.
+     */
   frozen_time: string;
 };

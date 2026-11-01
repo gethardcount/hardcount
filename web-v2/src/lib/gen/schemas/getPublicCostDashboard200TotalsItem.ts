@@ -12,6 +12,11 @@
  */
 
 export type GetPublicCostDashboard200TotalsItem = {
+  /** The currency, such as `USD`. */
   currency: string;
+  /**
+     * The usage cost in this currency, in its minor unit
+     * (cents for USD).
+     */
   amount_cents: number;
 };

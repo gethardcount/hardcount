@@ -12,7 +12,7 @@
  */
 
 /**
- * As on PriceShape.
+ * How the override bills a quantity; see PriceShape.
  */
 export type CustomerPriceOverrideMode = typeof CustomerPriceOverrideMode[keyof typeof CustomerPriceOverrideMode];
 

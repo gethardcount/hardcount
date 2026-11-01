@@ -13,11 +13,13 @@
 
 export type GetCustomerMarginParams = {
 /**
- * Window start, inclusive. RFC 3339. Default is 30 days before the customer's current time.
+ * Window start, inclusive. RFC 3339. Default is 30 days before the
+ * customer's current time.
  */
 from?: string;
 /**
- * Window end, exclusive. RFC 3339. Default is the customer's current time (test clock time for a customer on a test clock).
+ * Window end, exclusive. RFC 3339. Default is the customer's current
+ * time (test clock time for a customer on a test clock).
  */
 to?: string;
 };

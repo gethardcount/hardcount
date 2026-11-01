@@ -13,9 +13,10 @@
 import type { CreditLiveCurrency } from './creditLiveCurrency';
 
 /**
- * A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency a live subscription will invoice usage in. Amounts in two currencies are never added together.
+ * A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency a live subscription will invoice usage in. Amounts in two currencies are never added together. Returned by `GET /v1/credits/balance/{customer_id}/live`; nothing is stored.
  */
 export interface CreditLiveBalance {
+  /** The customer (`hc_cus_…`). */
   customer_id: string;
   /** Ordered by currency. */
   balances: CreditLiveCurrency[];

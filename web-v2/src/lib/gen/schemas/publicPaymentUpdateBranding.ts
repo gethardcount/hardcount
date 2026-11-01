@@ -11,10 +11,19 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The seller's branding from its account settings. A field the
+ * seller has not set is absent.
+ */
 export type PublicPaymentUpdateBranding = {
+  /** The seller's company name. */
   company_name?: string;
+  /** The seller's contact email. */
   company_email?: string;
+  /** The address of the seller's logo. */
   logo_url?: string;
+  /** The seller's brand color, such as `#4F46E5`. */
   brand_color?: string;
+  /** Where the customer can get help. */
   support_url?: string;
 };

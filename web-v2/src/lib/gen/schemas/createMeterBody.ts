@@ -13,10 +13,22 @@
 import type { CreateMeterBodyAggregation } from './createMeterBodyAggregation';
 
 export type CreateMeterBody = {
-  /** The `event_name` usage events will send for this meter. Letters, digits, `-` and `_`; at most 100 characters. */
+  /**
+     * The `event_name` usage events will send for this meter.
+     * Letters, digits, `-` and `_`; at most 100 characters.
+     * Unique in the account and mode.
+     */
   event_name: string;
+  /** The display name, at most 255 characters. */
   name: string;
+  /**
+     * The unit of the quantity, such as `tokens` or `seconds`.
+     * Empty or left out is `unit`.
+     */
   unit?: string;
-  /** How the meter rolls its events into one quantity per billing period. Fixed once the meter has a usage event. */
+  /**
+     * How the meter rolls its events into one quantity per
+     * billing period. Fixed once the meter has a usage event.
+     */
   aggregation?: CreateMeterBodyAggregation;
 };

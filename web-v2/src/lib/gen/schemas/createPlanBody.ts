@@ -16,17 +16,35 @@ import type { CreatePlanBodyStatus } from './createPlanBodyStatus';
 import type { PriceInput } from './priceInput';
 
 export type CreatePlanBody = {
+  /**
+     * Your short name for the plan. Letters, digits, `-` and
+     * `_`; at most 100 characters; unique in the account and
+     * mode. Fixed after create.
+     */
   code: string;
+  /** The display name, at most 255 characters. */
   name: string;
+  /** Your description of the plan. */
   description?: string;
+  /**
+     * ISO 4217 code, such as `USD`, stored in upper case.
+     * Zero-decimal currencies such as JPY are refused. Fixed
+     * after create.
+     */
   currency: string;
+  /** How often a subscription to the plan is billed. Fixed after create. */
   billing_interval: CreatePlanBodyBillingInterval;
+  /**
+     * The recurring base fee per billing period, in the
+     * currency's minor unit (cents for USD). 0 or more; 0 when
+     * left out.
+     */
   base_amount_cents?: number;
   /**
      * Required when `base_amount_cents` is above 0. With a base
      * of 0 it may be left out, and the plan is in_arrears;
      * `in_advance` with a base of 0 is refused. See
-     * Plan.base_bill_timing (ADR-031).
+     * `base_bill_timing` on Plan.
      */
   base_bill_timing?: CreatePlanBodyBaseBillTiming;
   /**
@@ -38,7 +56,7 @@ export type CreatePlanBody = {
   status?: CreatePlanBodyStatus;
   /**
      * Stripe product tax code for the base fee, such as
-     * `txcd_10103001`. Empty or omitted means the tenant's
+     * `txcd_10103001`. Empty or omitted means the account's
      * `default_product_tax_code`.
      */
   tax_code?: string;

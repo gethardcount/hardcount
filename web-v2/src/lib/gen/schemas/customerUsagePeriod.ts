@@ -21,7 +21,9 @@ import type { CustomerUsagePeriodSource } from './customerUsagePeriodSource';
  * period, including usage a threshold invoice already billed.
  */
 export type CustomerUsagePeriod = {
+  /** Start of the window, inclusive. */
   from: string;
+  /** End of the window, exclusive. */
   to: string;
   /**
      * `current_billing_cycle`: no `from` and `to` were sent, and

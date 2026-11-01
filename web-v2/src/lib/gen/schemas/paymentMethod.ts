@@ -11,14 +11,35 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * A card saved for a customer in Stripe, which Hardcount can charge.
+ * The payment-method routes under
+ * `/v1/customers/{customer_id}/payment-methods` return it, and the
+ * `payment_method.*` webhook events carry it.
+ */
 export interface PaymentMethod {
+  /** The payment method's ID in Hardcount, `hc_pm_` and 24 hex characters. */
   id: string;
+  /** The customer the card belongs to. */
   customer_id: string;
+  /** The kind of payment method. Always `card` today. */
   type: string;
+  /**
+     * The card network as Stripe names it, such as `visa` or
+     * `mastercard`. Absent when Stripe sent none.
+     */
   card_brand?: string;
+  /** The last 4 digits of the card number. Absent when Stripe sent none. */
   card_last4?: string;
+  /** The card's expiry month, 1 to 12. Absent when Stripe sent none. */
   card_exp_month?: number;
+  /** The card's expiry year, such as `2029`. Absent when Stripe sent none. */
   card_exp_year?: number;
+  /**
+     * Whether this is the card Hardcount charges. A customer with saved
+     * cards has one default.
+     */
   is_default: boolean;
+  /** When the card was saved. */
   created_at: string;
 }

@@ -12,6 +12,6 @@
  */
 
 export type CreatePublicPaymentUpdateCheckout201 = {
-  /** Stripe Checkout URL. */
+  /** Stripe Checkout URL. Send the customer there. */
   url: string;
 };

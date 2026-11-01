@@ -12,6 +12,8 @@
  */
 
 export type RunBilling200 = {
+  /** Invoices the run created, on a partial run too. */
   invoices_generated: number;
+  /** One entry per failure, listed in the 206 response. Empty on a 200. */
   errors: string[];
 };

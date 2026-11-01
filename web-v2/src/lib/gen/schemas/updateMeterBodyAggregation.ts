@@ -11,6 +11,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The new aggregation. Refused once the meter has a usage event.
+ */
 export type UpdateMeterBodyAggregation = typeof UpdateMeterBodyAggregation[keyof typeof UpdateMeterBodyAggregation];
 
 

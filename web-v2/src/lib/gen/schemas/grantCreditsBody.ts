@@ -13,6 +13,7 @@
 import type { GrantCreditsBodyGrantKind } from './grantCreditsBodyGrantKind';
 
 export type GrantCreditsBody = {
+  /** The customer to grant credit to (`hc_cus_…`). */
   customer_id: string;
   /**
      * ISO 4217 code of the credit. Required. Case-insensitive;
@@ -20,7 +21,16 @@ export type GrantCreditsBody = {
      * are not supported yet.
      */
   currency: string;
+  /**
+     * The credit to add, in the currency's minor unit (cents
+     * for USD). From 1 to 100000000 (1,000,000.00).
+     */
   amount_cents: number;
+  /**
+     * What the credit is for, shown on the ledger entry.
+     * Required: a grant without one, or with a blank one, is
+     * refused with 422. At most 500 characters.
+     */
   description?: string;
   /**
      * Optional expiry; must be in the future. Omitted = never
@@ -31,11 +41,11 @@ export type GrantCreditsBody = {
      */
   expires_at?: string;
   /**
-     * Optional cost-basis class (ADR-078). `promotional` marks
-     * free/marketing credits, drained BEFORE all paid-class
-     * blocks. Omitted = unclassified (drains in the paid
-     * class). `commit` is reserved for the invoice-finalize
-     * funding path and rejected here.
+     * Optional cost-basis class. `promotional` marks free or
+     * marketing credit, which invoices draw before any other
+     * credit. Omitted means unclassified credit. `commit` is
+     * refused here: commit credit comes only from finalizing a
+     * commit invoice.
      */
   grant_kind?: GrantCreditsBodyGrantKind;
 };

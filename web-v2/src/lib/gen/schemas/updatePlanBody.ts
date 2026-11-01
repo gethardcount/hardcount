@@ -16,12 +16,27 @@ import type { UpdatePlanBodyStatus } from './updatePlanBodyStatus';
 export type UpdatePlanBody = {
   /** Whitespace is trimmed. Empty or omitted keeps the current name. */
   name?: string;
-  /** Whitespace is trimmed. Omit to keep the current description; an empty string clears it. */
+  /**
+     * Whitespace is trimmed. Omit to keep the current
+     * description; an empty string clears it.
+     */
   description?: string;
   /** 0 or more. Omit to keep the current base fee. */
   base_amount_cents?: number;
+  /**
+     * When the base fee is billed. Omit to keep the current
+     * timing. Refused once a subscription has used the plan.
+     */
   base_bill_timing?: UpdatePlanBodyBaseBillTiming;
+  /**
+     * `archived` stops new subscriptions and plan changes onto
+     * the plan. `active` brings it back.
+     */
   status?: UpdatePlanBodyStatus;
-  /** Stripe product tax code. Omit to keep the current code; an empty string clears it, and the base fee then uses the tenant's `default_product_tax_code`. */
+  /**
+     * Stripe product tax code. Omit to keep the current code; an
+     * empty string clears it, and the base fee then uses the
+     * account's `default_product_tax_code`.
+     */
   tax_code?: string;
 };

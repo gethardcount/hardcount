@@ -12,7 +12,7 @@
  */
 
 /**
- * As on PriceShape.
+ * How the price bills a quantity; see PriceShape.
  */
 export type PlanPriceMode = typeof PlanPriceMode[keyof typeof PlanPriceMode];
 

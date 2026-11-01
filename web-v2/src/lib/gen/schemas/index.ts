@@ -87,6 +87,7 @@ export * from './createSubscriptionBodyBillingTime';
 export * from './createSubscriptionBodyItemsItem';
 export * from './createSubscriptionBodyStatus';
 export * from './createTestClockBody';
+export * from './createUsageEventBatch422';
 export * from './createUsageEventBatchBodyItem';
 export * from './createUsageEventBatchBodyItemDimensions';
 export * from './createUsageEventBody';

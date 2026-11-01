@@ -11,6 +11,10 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * When the base fee is billed. Omit to keep the current
+ * timing. Refused once a subscription has used the plan.
+ */
 export type UpdatePlanBodyBaseBillTiming = typeof UpdatePlanBodyBaseBillTiming[keyof typeof UpdatePlanBodyBaseBillTiming];
 
 

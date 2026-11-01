@@ -14,6 +14,10 @@ import type { CreatePriceOverrideBodyMode } from './createPriceOverrideBodyMode'
 import type { CreatePriceOverrideBodyTiersItem } from './createPriceOverrideBodyTiersItem';
 
 export type CreatePriceOverrideBody = {
+  /**
+     * The customer who gets the rate. It must be a customer in
+     * this account and mode.
+     */
   customer_id: string;
   /** The plan price to override. */
   price_id: string;
@@ -27,5 +31,9 @@ export type CreatePriceOverrideBody = {
   package_size?: number;
   /** Price of one package in cents, as a decimal string, with the limits of `unit_amount_cents`. Used when `mode` is `package`. */
   package_amount_cents?: string;
+  /**
+     * Your note on why the customer has this rate, such as a
+     * contract reference. Spaces at the ends are trimmed.
+     */
   reason?: string;
 };

@@ -13,6 +13,10 @@
 import type { PauseSubscriptionCollectionBodyBehavior } from './pauseSubscriptionCollectionBodyBehavior';
 
 export type PauseSubscriptionCollectionBody = {
+  /**
+     * What happens to invoices built during the pause. Only
+     * `keep_as_draft`, which keeps them as drafts.
+     */
   behavior: PauseSubscriptionCollectionBodyBehavior;
   /** When collection resumes. Must be in the future. */
   resumes_at?: string;

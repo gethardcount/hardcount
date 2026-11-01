@@ -11,6 +11,15 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * How monthly periods line up. `calendar`: every period ends on
+ * the 1st of a month, in your account's billing time zone, so the
+ * first period runs from the start day to the next 1st.
+ * `anniversary`: each period starts on the day of the month the
+ * subscription started (the last day of a shorter month). A plan
+ * billed yearly always bills from its start date, whatever this
+ * says.
+ */
 export type SubscriptionBillingTime = typeof SubscriptionBillingTime[keyof typeof SubscriptionBillingTime];
 
 

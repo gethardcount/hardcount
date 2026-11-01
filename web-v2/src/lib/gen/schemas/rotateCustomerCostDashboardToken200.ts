@@ -12,6 +12,15 @@
  */
 
 export type RotateCustomerCostDashboardToken200 = {
+  /**
+     * The new token, `hc_pcd_` and 64 hex characters. Shown
+     * only in this answer.
+     */
   token: string;
+  /**
+     * `/v1/public/cost-dashboard/` and the token, after the
+     * server's `HARDCOUNT_API_BASE_URL` when that is set.
+     * Without it, the path alone.
+     */
   public_url: string;
 };

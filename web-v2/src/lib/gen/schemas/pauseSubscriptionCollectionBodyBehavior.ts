@@ -11,6 +11,10 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * What happens to invoices built during the pause. Only
+ * `keep_as_draft`, which keeps them as drafts.
+ */
 export type PauseSubscriptionCollectionBodyBehavior = typeof PauseSubscriptionCollectionBodyBehavior[keyof typeof PauseSubscriptionCollectionBodyBehavior];
 
 

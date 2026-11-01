@@ -11,9 +11,20 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * A meter a recipe creates, or reuses when one with the same
+ * `event_name` and aggregation exists.
+ */
 export interface RecipeMeter {
+  /** The `event_name` usage events send for the meter. */
   event_name: string;
+  /** The meter's display name. */
   name: string;
+  /** The unit of the quantity, such as `seconds`. */
   unit: string;
+  /**
+     * How the meter rolls its events into one quantity per period, one
+     * of `sum`, `count`, `max` or `last`.
+     */
   aggregation: string;
 }

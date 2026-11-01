@@ -12,11 +12,34 @@
  */
 
 export type CreateCustomerBody = {
+  /**
+     * Your own ID for the customer, such as the account ID in
+     * your app. At most 255 characters after spaces at the ends
+     * are trimmed. Unique in the account and mode.
+     */
   external_id: string;
+  /**
+     * The name shown on invoices, emails and the dashboard. At
+     * most 255 characters.
+     */
   display_name: string;
+  /**
+     * Where billing emails go. One bare address with a dot in
+     * its domain, such as `billing@acme.example`: no display
+     * name, quotes or angle brackets.
+     */
   email?: string;
-  /** @maxItems 10 */
+  /**
+     * Addresses to copy on billing emails, at most 10. Each is
+     * checked like `email`, lowercased and deduplicated. None
+     * may equal `email`.
+     * @maxItems 10
+     */
   additional_emails?: string[];
-  /** Test mode only. Attaches the customer to a test clock. */
+  /**
+     * Test mode only. Runs the customer on this test clock,
+     * which must exist in the account and mode. Fixed after
+     * create.
+     */
   test_clock_id?: string;
 };

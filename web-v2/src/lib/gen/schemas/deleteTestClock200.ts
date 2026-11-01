@@ -13,5 +13,6 @@
 import type { DeleteTestClock200Status } from './deleteTestClock200Status';
 
 export type DeleteTestClock200 = {
+  /** Always `deleted`. */
   status: DeleteTestClock200Status;
 };

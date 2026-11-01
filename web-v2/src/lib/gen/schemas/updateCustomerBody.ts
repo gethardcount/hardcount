@@ -13,11 +13,27 @@
 import type { UpdateCustomerBodyStatus } from './updateCustomerBodyStatus';
 
 export type UpdateCustomerBody = {
+  /**
+     * The new name. Spaces at the ends are trimmed. Empty or
+     * left out keeps the current name.
+     */
   display_name?: string;
+  /**
+     * The new primary email, checked as on create. Empty or left
+     * out keeps the current email.
+     */
   email?: string;
+  /**
+     * `archived` blocks new subscriptions for the customer.
+     * `active` lifts that.
+     */
   status?: UpdateCustomerBodyStatus;
-  /** Policy ID, or `""` to use the tenant default. */
+  /** Policy ID, or `""` to use the account's default policy. */
   dunning_policy_id?: string;
-  /** @maxItems 10 */
+  /**
+     * The new CC list, which replaces the whole list. `[]`
+     * clears it. Left out keeps the current list.
+     * @maxItems 10
+     */
   additional_emails?: string[];
 };

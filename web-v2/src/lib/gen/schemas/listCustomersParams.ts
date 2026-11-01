@@ -15,29 +15,39 @@ import type { ListCustomersDir } from './listCustomersDir';
 import type { OffsetParameter } from './offsetParameter';
 
 export type ListCustomersParams = {
+/**
+ * Only customers with this status, `active` or `archived`. Any other
+ * value matches no customer.
+ */
 status?: string;
 /**
- * Exact-match filter on the caller-assigned external ID.
+ * Only the customer with this `external_id` (exact match).
  */
 external_id?: string;
 /**
- * Comma-separated customer IDs to fetch exactly.
+ * Comma-separated customer IDs. Only those customers are returned;
+ * IDs not found are skipped.
  */
 ids?: string;
 /**
- * Case-insensitive substring match on display name, email,
- * external ID, or ID. Matching runs post-decryption (PII
- * columns are encrypted at rest), bounded to the first 5000
- * rows of the tenant's filtered set; the rows and `total` stop
- * there.
+ * Case-insensitive substring match on display name, email, external
+ * ID or ID. It looks at the first 5,000 customers, in the list's
+ * sort order, that match the other filters; the rows and `total`
+ * stop there.
  */
 search?: string;
 /**
- * One of display_name, email, external_id, status, created_at
- * (default). A sort by display_name or email looks at 5,000
- * customers at most; the rows and `total` stop there.
+ * One of `display_name`, `email`, `external_id`, `status` or
+ * `created_at` (the default). Any other value sorts by `created_at`.
+ * On a server that encrypts customer data, a sort by `display_name`
+ * or `email` looks at the 5,000 newest customers at most; the rows
+ * and `total` stop there.
  */
 sort?: string;
+/**
+ * Sort direction, `asc` or `desc`. Default `desc`; any value other
+ * than `asc` sorts descending.
+ */
 dir?: ListCustomersDir;
 /**
  * Rows per page, from 1 to 100. Default 50. Any other value, or one

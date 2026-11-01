@@ -15,7 +15,8 @@ import type { PriceWriteEffective } from './priceWriteEffective';
 import type { PriceWriteEndedOverridesItem } from './priceWriteEndedOverridesItem';
 
 /**
- * The answer to a price write: the price, and when the write applies.
+ * The answer to a price write (add, change or remove): the price, and
+ * when the write applies.
  * `now`: no subscription has used the plan, so it applies at once.
  * `next_period`: each subscriber pays the new content from their next
  * billing period; the current period keeps the prices it started with.
@@ -32,12 +33,15 @@ import type { PriceWriteEndedOverridesItem } from './priceWriteEndedOverridesIte
  * the earlier prices.
  */
 export type PriceWrite = PlanPrice & {
+  /** When the write applies, as explained above. */
   effective: PriceWriteEffective;
-  /** True on the answer to a removal. */
+  /** True on the answer to a removal. Absent otherwise. */
   removed?: boolean;
   /**
-     * On a removal, the customer overrides of the price it ended.
-     * Each ends when the removal takes effect for its customer.
+     * On a removal, the customer overrides of the price it ended
+     * (`[]` when there were none). Each ends when the removal
+     * takes effect for its customer. Absent on an add or a
+     * change.
      */
   ended_overrides?: PriceWriteEndedOverridesItem[];
 };

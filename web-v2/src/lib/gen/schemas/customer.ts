@@ -13,39 +13,93 @@
 import type { CustomerEmailStatus } from './customerEmailStatus';
 import type { CustomerStatus } from './customerStatus';
 
+/**
+ * A customer you bill: the person or company that subscriptions,
+ * invoices, credits and payment methods belong to. Create, list, get
+ * and update customers under `/v1/customers`. The
+ * `customer.email_bounced` and `customer.email_complained` webhook
+ * events carry this object too.
+ *
+ * Not every route fills every optional field. Get and update return
+ * the whole record. The list and create answers leave out
+ * `email_status`, the bounce fields, `dunning_policy_id` and
+ * `stripe_customer_id`, and the list also leaves out
+ * `additional_emails`.
+ */
 export interface Customer {
+  /** The customer's ID, `hc_cus_` and 20 characters. */
   id: string;
+  /**
+     * Your own ID for the customer, such as the account ID in your
+     * app. Unique in the account and mode, at most 255 characters,
+     * and fixed after create.
+     */
   external_id: string;
+  /** The name shown on invoices, emails and the dashboard. At most 255 characters. */
   display_name: string;
+  /**
+     * Where billing emails go: invoices, receipts, payment reminders
+     * and payment-method links. Absent when the customer has none.
+     */
   email?: string;
   /**
-     * CC'd on billing documents and billing-state emails (invoice,
-     * receipt, dunning, payment failed, credit note) — never on
-     * credential-bearing emails (setup links, resets, invites).
-     * Normalized to lowercase bare addresses, deduped, capped at 10,
-     * never equal to the primary email. Stored encrypted at rest.
+     * Addresses copied (CC) on billing documents and billing emails:
+     * invoice, receipt, payment reminder, failed payment and credit
+     * note. Never on emails that carry a link to act on the account,
+     * such as a payment-method link. Lowercase bare addresses, no
+     * duplicates, at most 10, never the primary `email`. Absent when
+     * the list is empty.
      * @maxItems 10
      */
   additional_emails?: string[];
+  /**
+     * `archived` blocks new subscriptions for the customer. Its
+     * unpaid invoices stay collectible.
+     */
   status: CustomerStatus;
+  /** When the customer was created. */
   created_at: string;
   /**
-     * Test clock this customer is pinned to (test mode only). When set,
-     * the customer — and any invoices/subscriptions created for it —
-     * run on the clock's simulated time. Empty for live customers. The
-     * dashboard reads it to show the "test clock" badge + simulated-time
-     * banner on the customer and its invoices.
+     * The test clock the customer was created on (test mode only).
+     * Its subscriptions and invoices then run on the clock's
+     * simulated time. Set at create and fixed after. Absent for a
+     * customer with no test clock.
      */
   test_clock_id?: string;
+  /** The account the customer belongs to. */
   tenant_id?: string;
-  /** Deliverability of `email`, learned from bounce and complaint reports. */
+  /**
+     * Whether `email` receives mail, learned from bounce and spam
+     * reports. `unknown` until a report arrives. `bounced` or
+     * `complained` after one, and Hardcount then stops emailing the
+     * address. Changing `email` sets it back to `unknown`. Hardcount
+     * does not set `ok` today.
+     */
   email_status?: CustomerEmailStatus;
+  /** When the last bounce or spam report was recorded. Absent until one is. */
   email_last_bounced_at?: string;
+  /**
+     * The reason the email provider gave with the last bounce or spam
+     * report. Absent until one is recorded.
+     */
   email_bounce_reason?: string;
-  /** Assigned dunning policy; absent means the tenant default. */
+  /**
+     * The dunning policy (the plan for retrying failed payments) this
+     * customer uses. Absent when the customer uses the account's
+     * default policy.
+     */
   dunning_policy_id?: string;
-  /** The Stripe customer. Absent until the first payment-method action. */
+  /**
+     * The Stripe customer linked to this customer. Absent until the
+     * first payment-method action, such as a payment-method link,
+     * creates it.
+     */
   stripe_customer_id?: string;
+  /**
+     * Whether the customer is in live mode. The customer routes and
+     * webhook events leave it out: use the mode of your API key.
+     */
   livemode?: boolean;
+  /** When the customer was last changed. */
   updated_at: string;
 }

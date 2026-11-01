@@ -13,10 +13,23 @@
 import type { UpsertProviderCostBodyCurrency } from './upsertProviderCostBodyCurrency';
 
 export type UpsertProviderCostBody = {
+  /**
+     * The provider, such as `anthropic`. Stored in lower case;
+     * it must equal the `provider` label of the usage events it
+     * costs.
+     */
   provider: string;
-  /** Model family token or raw snapshot id — raw ids match first at ingest. */
+  /**
+     * The model, such as `claude-sonnet-4.5`, or a raw model
+     * snapshot id. An event's `model_raw` label is matched
+     * first, then its `model` label.
+     */
   model: string;
-  /** ADR-044 role — input / output / cache_read. */
+  /**
+     * The kind of token, such as `input`, `output` or
+     * `cache_read`. Stored in lower case; it must equal the
+     * `token_type` label of the usage events it costs.
+     */
   token_type: string;
   /** US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens). 0 or more, under 10^10, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. */
   unit_cost_cents: string;

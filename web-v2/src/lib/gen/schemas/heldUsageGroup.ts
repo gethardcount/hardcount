@@ -22,10 +22,13 @@ export interface HeldUsageGroup {
   event_name: string;
   /** What was missing when the rows arrived. */
   reason: HeldUsageGroupReason;
+  /** Number of rows held in the group. */
   rows: number;
   /** Sum of the held quantities, as a decimal string. */
   total_quantity: string;
+  /** The earliest usage time among the rows. */
   first_event_at: string;
+  /** The latest usage time among the rows. */
   last_event_at: string;
   /** When Hardcount last received a row for this group. */
   last_received_at: string;

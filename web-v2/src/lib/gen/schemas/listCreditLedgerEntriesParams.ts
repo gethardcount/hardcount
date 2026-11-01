@@ -16,6 +16,9 @@ import type { ListCreditLedgerEntriesEntryType } from './listCreditLedgerEntries
 import type { OffsetParameter } from './offsetParameter';
 
 export type ListCreditLedgerEntriesParams = {
+/**
+ * Only entries of this type.
+ */
 entry_type?: ListCreditLedgerEntriesEntryType;
 /**
  * One of created_at (default), amount_cents, entry_type, expires_at.

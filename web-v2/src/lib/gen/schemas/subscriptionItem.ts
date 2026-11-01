@@ -14,20 +14,39 @@ import type { SubscriptionItemMetadata } from './subscriptionItemMetadata';
 
 /**
  * One priced line of a subscription. It pairs a plan with a quantity.
+ * Returned inside a subscription's `items`, and by the item routes.
  */
 export interface SubscriptionItem {
+  /** The item's ID (`hc_si_…`). */
   id: string;
+  /** The account the item belongs to. */
   tenant_id?: string;
+  /** The subscription the item is on. */
   subscription_id: string;
+  /**
+     * The plan the item bills now. A scheduled plan change shows in
+     * `pending_plan_id` until it takes effect.
+     */
   plan_id: string;
+  /**
+     * How many of the plan the item bills: the plan's base fee is
+     * charged this many times. At least 1.
+     */
   quantity: number;
   /** The item's stored metadata. Absent when empty. */
   metadata?: SubscriptionItemMetadata;
   /** Plan the item moves to at `pending_plan_effective_at`. Absent when no change is scheduled. */
   pending_plan_id?: string;
+  /**
+     * When the scheduled plan change takes effect: the end of the
+     * period in which it was scheduled. Absent when no change is
+     * scheduled.
+     */
   pending_plan_effective_at?: string;
   /** When the plan was last changed immediately. Absent until the first such change. */
   plan_changed_at?: string;
+  /** When the item was added. */
   created_at: string;
+  /** When the item last changed. */
   updated_at: string;
 }

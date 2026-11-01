@@ -12,6 +12,12 @@
  */
 import type { LitellmSpendResultErrorsItem } from './litellmSpendResultErrorsItem';
 
+/**
+ * What `POST /v1/integrations/litellm/spend` did with the records it
+ * received. Each record becomes up to five usage events, one per
+ * token type; the counts below count events, except `skipped` and
+ * `cache_hits`, which count records.
+ */
 export interface LitellmSpendResult {
   /** Usage events newly recorded. */
   accepted: number;
@@ -51,6 +57,10 @@ export interface LitellmSpendResult {
      * never counts here.
      */
   outside_subscription: number;
-  /** One entry per record that was not recorded. A record's events are recorded together or not at all. */
+  /**
+     * One entry per record that was not recorded. A record's events are
+     * recorded together or not at all. Absent when every record was
+     * recorded, held or skipped.
+     */
   errors?: LitellmSpendResultErrorsItem[];
 }
