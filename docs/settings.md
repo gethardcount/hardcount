@@ -100,7 +100,7 @@ How often background billing runs is not a setting: every hour, or every 5 minut
 
 | Setting | What it does | Default |
 |---|---|---|
-| `LOG_LEVEL` | `debug`, `info`, `warn` (or `warning`) or `error`. Logs are JSON on standard output. | `info`. An unknown value also means `info`, without a warning. |
+| `LOG_LEVEL` | `debug`, `info`, `warn` (or `warning`) or `error`. Logs are JSON on standard output. | `info`. Any other value stops start-up. |
 | `METRICS_TOKEN` | The bearer token a scraper must send to read `/metrics`. | Unset: `/metrics` is open, except in production, where it answers 401 and start-up logs a warning. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Your OpenTelemetry collector's OTLP/HTTP address, such as `http://otel-collector:4318`. Setting it turns tracing on. | Unset: no traces are sent. |
 | `OTEL_SERVICE_NAME` | The service name on every trace. | `hardcount` |
