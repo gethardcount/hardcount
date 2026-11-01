@@ -2249,9 +2249,6 @@ func lineIDsMatchTx(ctx context.Context, tx *sql.Tx, invoiceID string, want []st
 	return true, nil
 }
 
-// errLinesChanged: a line was added between reading an invoice and writing
-// its tax or finalizing it. Nothing was written; doing it again reads the
-// new line.
 // errLinesOnBillingDraft refuses a line added to a draft billing made for a
 // subscription (AddLineItemAtomicAudited).
 func errLinesOnBillingDraft() error {
@@ -2259,6 +2256,9 @@ func errLinesOnBillingDraft() error {
 		WithCode("invoice_not_manual")
 }
 
+// errLinesChanged: a line was added between reading an invoice and writing
+// its tax or finalizing it. Nothing was written; doing it again reads the
+// new line.
 func errLinesChanged() error {
 	return errs.InvalidState("a line was added to this invoice while its total was being calculated; try again").
 		WithCode("invoice_lines_changed")
