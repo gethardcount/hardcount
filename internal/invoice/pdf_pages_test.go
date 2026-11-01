@@ -273,7 +273,7 @@ func TestRenderPDF_PageBreaks_FullTotals(t *testing.T) {
 			pages := pdftest.Read(t, out)
 			checkPages(t, pages, items, "$43.21")
 			last := pages[len(pages)-1]
-			for _, s := range []string{"Discount", "Prepaid credits", "Amount Paid", "CN-0001 - Duplicate line", "POST-PAYMENT ADJUSTMENTS", "Tax-exempt: Nonprofit certificate 123", "Thank you for your business."} {
+			for _, s := range []string{"Discount", "Prepaid credits", "Amount Paid", "CN-0001 - Duplicate line", "REFUNDS AND CREDITS", "Tax-exempt: Nonprofit certificate 123", "Thank you for your business."} {
 				found := false
 				for _, p := range pages {
 					found = found || p.Has(s)

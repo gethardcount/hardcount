@@ -630,7 +630,7 @@ func TestParseBrandColor(t *testing.T) {
 
 // TestCNChannelDescription_RefundStateAnnotated guards the customer-visible
 // channel line against asserting cash movement the refund status disproves.
-// A mixed-allocation CN enters the POST-PAYMENT ADJUSTMENTS list via its
+// A mixed-allocation CN enters the REFUNDS AND CREDITS list via its
 // settled credit / out-of-band leg, so its card leg can be present in any
 // state; printing "to card" bare for a failed leg told the customer money
 // came back when no refund object even exists at Stripe (found live

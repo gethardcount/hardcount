@@ -65,3 +65,59 @@ func TestClassifyDunningRetryResult(t *testing.T) {
 		t.Fatalf("got %#v, want the RetryError with pi_lost asking for a new card", got)
 	}
 }
+
+// TestDefiniteRetryFailure_ReasonLineIsTheCardMessage: a dunning retry Stripe
+// definitely refused reaches dunning as a RetryError, and the customer's
+// warning email shows a reason only when Stripe sent a card message, the one
+// message Stripe says can be shown to the customer. Stripe's 400 to the
+// charge request itself (here the error_on_requires_action refusal, which has
+// no PaymentIntent and no card message) used to reach the customer as the
+// email's "Reason:". Mutation: drop NoReason, and the request refusal's case
+// fails.
+func TestDefiniteRetryFailure_ReasonLineIsTheCardMessage(t *testing.T) {
+	const devSentence = "The `error_on_requires_action` parameter can't be used with PaymentIntents which use payment methods managed through the Dashboard at https://dashboard.stripe.com/account/payments/settings."
+	tests := []struct {
+		name     string
+		pe       *payment.PaymentError
+		wantPI   string
+		wantAsk  domain.DeclineAsk
+		noReason bool
+	}{
+		{"card decline", &payment.PaymentError{Message: "Your card was declined.", DeclineCode: "generic_decline", PaymentIntentID: "pi_1", CardMessage: "Your card was declined."}, "pi_1", domain.DeclineAskNone, false},
+		{"card refused for good", &payment.PaymentError{Message: "Your card was declined.", DeclineCode: "lost_card", PaymentIntentID: "pi_2", CardMessage: "Your card was declined."}, "pi_2", domain.DeclineAskNewCard, false},
+		{"request refused, no PaymentIntent", &payment.PaymentError{Message: devSentence}, "", domain.DeclineAskNone, true},
+		{"non-card refusal naming a PaymentIntent", &payment.PaymentError{Message: "This PaymentIntent's payment_method could not be updated.", PaymentIntentID: "pi_3"}, "pi_3", domain.DeclineAskNone, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := fmt.Errorf("payment failed: %w", tc.pe)
+			re := definiteRetryFailure(err)
+			if re == nil {
+				t.Fatalf("definiteRetryFailure(%v) = nil, want a RetryError", err)
+			}
+			if re.PaymentIntentID != tc.wantPI || re.Ask != tc.wantAsk || re.NoReason != tc.noReason {
+				t.Errorf("got PI %q ask %q NoReason %v, want PI %q ask %q NoReason %v",
+					re.PaymentIntentID, re.Ask, re.NoReason, tc.wantPI, tc.wantAsk, tc.noReason)
+			}
+			if !errors.Is(re, err) {
+				t.Error("the RetryError does not wrap the charge's error")
+			}
+			// Still a counted attempt, as before.
+			if got := classifyDunningRetryResult(context.Background(), "inv_1", re); got != error(re) {
+				t.Errorf("classified as %v, want counted as it is", got)
+			}
+		})
+	}
+
+	for _, err := range []error{
+		nil,
+		fmt.Errorf("payment state unknown: %w", &payment.PaymentError{Unknown: true, Message: "timeout"}),
+		payment.ErrPaymentTransient,
+		&payment.BelowMinimumError{Message: "Amount must be at least $0.50 usd"},
+		errors.New("get invoice: conn closed"),
+	} {
+		if re := definiteRetryFailure(err); re != nil {
+			t.Errorf("definiteRetryFailure(%v) = %#v, want nil: not a definite refusal", err, re)
+		}
+	}
+}

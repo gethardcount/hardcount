@@ -470,6 +470,16 @@ replays Stripe's documented answer and checks the request carries the flag.
 The release checklist adds the live test-mode charge with `4000002500003155`
 that this ADR asked for.
 
+The flag needs `payment_method_types=[card]` on the same request (fixed
+2026-11-02, #PRNUM). Without it, a PaymentIntent takes the payment methods set in
+Stripe's Dashboard (the default since API version 2023-08-16), and Stripe
+refuses the flag with HTTP 400 `invalid_request_error`
+([changelog](https://docs.stripe.com/changelog/2023-08-16/automatic-payment-methods)).
+So every engine charge failed until then. The canned 402 in the test above
+could not show this; the v0.9.2 release check against a Stripe test account did.
+`TestCreatePaymentIntent_ErrorOnRequiresActionNamesCardPaymentMethodType`
+answers as Stripe does: 400 when the flag comes without the type.
+
 Sagar chose this on 2026-10-29 (#1289 panel): an off-session payment that needs
 the customer ends at once and the customer is asked to confirm, rather than
 waiting or being cancelled later. Nothing cancels a PaymentIntent: Stripe never
