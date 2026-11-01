@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -79,23 +80,12 @@ func main() {
 }
 
 func serve() {
-	// LOG_LEVEL controls the slog filter. Standard env name + values
-	// (debug / info / warn / error) — production tunes verbosity via
-	// the env var without a redeploy of a binary built for one level.
-	// Default 'info' matches the prior hardcoded behavior. Unrecognized
-	// values fall through to 'info' rather than failing boot — a typo
-	// in an ops setting should never take the API offline.
-	level := slog.LevelInfo
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("LOG_LEVEL"))) {
-	case "debug":
-		level = slog.LevelDebug
-	case "warn", "warning":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
+	logger, err := newLogger(os.Stdout)
+	if err != nil {
+		slog.Error("load config", "error", err)
+		os.Exit(1)
 	}
-	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})
-	slog.SetDefault(slog.New(telemetry.NewContextHandler(jsonHandler)))
+	slog.SetDefault(logger)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -473,6 +463,19 @@ func runMigrateRollback() {
 		os.Exit(1)
 	}
 	fmt.Printf("rolled back to version %d\n", v)
+}
+
+// newLogger is the server's JSON logger at LOG_LEVEL (config.ParseLogLevel),
+// so production tunes verbosity without a rebuild. An unknown level is an
+// error and the server does not start: it used to mean info without a word,
+// so LOG_LEVEL=verbose, meant as debug, hid every debug line it was set for.
+func newLogger(w io.Writer) (*slog.Logger, error) {
+	level, err := config.ParseLogLevel(os.Getenv("LOG_LEVEL"))
+	if err != nil {
+		return nil, err
+	}
+	jsonHandler := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: level})
+	return slog.New(telemetry.NewContextHandler(jsonHandler)), nil
 }
 
 func printUsage() {

@@ -215,6 +215,13 @@ func (c Config) validateFatal() error {
 		return fmt.Errorf("%w (docs/ops/email-setup.md)", err)
 	}
 
+	// LOG_LEVEL is read by the server before Load, to build its logger
+	// (cmd/hardcount newLogger), and refused there too. Checked here so every
+	// command that loads the config treats it alike.
+	if _, err := ParseLogLevel(os.Getenv("LOG_LEVEL")); err != nil {
+		return err
+	}
+
 	if encKey != "" {
 		if len(encKey) != 64 {
 			return fmt.Errorf("HARDCOUNT_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes), got %d", len(encKey))
@@ -521,6 +528,23 @@ func ParseSMTPTLS(raw string) (string, error) {
 		return mode, nil
 	}
 	return "", fmt.Errorf("SMTP_TLS=%q is not a transport: use starttls (the default, port 587), implicit (port 465) or none (plain text; refused in production)", strings.TrimSpace(raw))
+}
+
+// ParseLogLevel reads LOG_LEVEL: debug, info (the default when unset), warn
+// (or warning) or error, in any case. Anything else is an error naming them:
+// an unknown level used to mean info without a word.
+func ParseLogLevel(raw string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "info":
+		return slog.LevelInfo, nil
+	case "debug":
+		return slog.LevelDebug, nil
+	case "warn", "warning":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	}
+	return slog.LevelInfo, fmt.Errorf("LOG_LEVEL=%q is not a log level: use debug, info (the default), warn (or warning) or error", strings.TrimSpace(raw))
 }
 
 // boolEnv reads a true/false setting: unset → fallback. Any value other than
