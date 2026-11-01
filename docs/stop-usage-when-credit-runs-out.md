@@ -116,7 +116,8 @@ customer who is close to zero if that matters to you.
 
 Each read counts toward the API's general limit: 1,000 requests a minute
 for each API key. A poller that reads 1,000 customers a minute uses all of
-it.
+it. Every limit, its headers and the `429` answer:
+[Rate limits](api/rate-limits.md).
 
 - **Give the poller its own secret key.** Each key has its own limit, so the
   poller then never slows the rest of your app's API calls.

@@ -25,6 +25,11 @@ the [quick start](quick-start.md).
   [Test a billing change](guides/test-a-billing-change.md) ·
   [Set up email](ops/email-setup.md) · [Manage API keys](api-keys.md).
 - **API reference:** [The Hardcount API](api-surface.md) ·
+  [Authentication and keys](api/authentication.md) ·
+  [Errors](api/errors.md) · [Idempotency](api/idempotency.md) ·
+  [Rate limits](api/rate-limits.md) · [Pagination](api/pagination.md) ·
+  [Timing and limits](api/timing-and-limits.md) ·
+  [Two calls in four languages](api/two-calls.md) ·
   [Webhooks](webhooks.md) · [Versioning](versioning.md) ·
   [Every route: the OpenAPI file](../api/openapi.yaml).
 - **Self-host:** [Overview](self-host.md) ·

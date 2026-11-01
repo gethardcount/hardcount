@@ -68,7 +68,8 @@ back as `deduplicated`. A `422` names the bad events in `errors[]` and
 fails the same way again, so fix those events first.
 
 The usage routes ignore the `Idempotency-Key` header that other write
-routes take. The key in each event is their only one.
+routes take. The key in each event is their only one. Both keys, and a
+retry loop: [Idempotency](../api/idempotency.md).
 
 ## Which period an event counts in
 
