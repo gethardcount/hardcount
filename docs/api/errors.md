@@ -173,7 +173,7 @@ the credit ledger, and report it if the state looks wrong:
 
 | `code` | When | What to do |
 |---|---|---|
-| `batch_too_large` | A `POST /v1/usage-events/batch` body is over 1 MB | Send smaller batches |
+| `batch_too_large` | A `POST /v1/usage-events/batch` body is over 1 MB, or a `POST /v1/integrations/litellm/spend` body is over 32 MB. Nothing was saved. | Send smaller batches |
 | `payload_too_large` | A Stripe webhook body is over 64 KB | Nothing; Stripe's events are smaller |
 
 ### 422 Unprocessable Entity
@@ -293,9 +293,10 @@ A request body may hold only the fields its operation lists in the
 - The Stripe and Postmark webhooks and the LiteLLM callback are the
   exceptions: they take their sender's body as it comes.
 
-Bodies are limited to 1 MB, and Stripe webhook bodies to 64 KB. Only the
-usage batch and the Stripe webhook answer `413`. Most other routes answer a
-larger body with `400` `invalid_request`.
+Bodies are limited to 1 MB, LiteLLM callback bodies to 32 MB, and Stripe
+webhook bodies to 64 KB. Only the usage batch, the LiteLLM callback and the
+Stripe webhook answer `413`. Most other routes answer a larger body with `400`
+`invalid_request`.
 
 ## Answers in another shape
 
