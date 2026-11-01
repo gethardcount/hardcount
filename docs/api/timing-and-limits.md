@@ -39,7 +39,7 @@ first run after it.
 
 | What | Value |
 |---|---|
-| Request body | 1 MB (1,048,576 bytes) |
+| Request body | 1 MB (1,048,576 bytes). The LiteLLM callback, `POST /v1/integrations/litellm/spend`, takes 32 MB (33,554,432 bytes): a full LiteLLM batch is about 4 MB. |
 | Stripe webhook body | 64 KB (65,536 bytes) |
 | All request headers together | 8 KB. The server refuses them with `431` from about 12 KB, its 8 KB limit plus Go's 4 KB margin. |
 | Events in one `POST /v1/usage-events/batch` | 1,000 |
