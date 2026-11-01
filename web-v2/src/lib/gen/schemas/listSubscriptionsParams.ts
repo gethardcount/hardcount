@@ -6,7 +6,8 @@
  * Send an API key as `Authorization: Bearer <key>`. Bodies are JSON (a few
  * routes answer a PDF, CSV or event stream), and amounts are whole numbers
  * in the currency's minor unit (cents for USD). Routes tagged `Dashboard` or
- * `InboundWebhooks` are not for your code. More: docs/api-surface.md.
+ * `InboundWebhooks` are not for your code. More:
+ * [The Hardcount API](https://gethardcount.com/docs/api/overview/).
  *
  * OpenAPI spec version: 2026-04-07
  */
@@ -28,14 +29,16 @@ customer_id?: string;
  */
 plan_id?: string;
 /**
- * Exact status. Any other value is a 422. Paused collection is not
+ * Exact status. Any other value is a 422 with `param: status`.
+ * Paused collection is not
  * a status: use `collection=paused`.
  */
 status?: ListSubscriptionsStatus;
 /**
  * `failing` returns only subscriptions that carry a
  * `billing_failure`: those waiting for their next billing attempt
- * and those that are parked. Any other value is a 422.
+ * and those that are parked. Any other value is a 422 with
+ * `param: billing`.
  */
 billing?: ListSubscriptionsBilling;
 /**
@@ -43,7 +46,7 @@ billing?: ListSubscriptionsBilling;
  * `pause_collection` is in force, whether an operator or dunning set
  * it. A timed pause ends at `resumes_at` (on the subscription's test
  * clock, if it has one), even while the response still carries it.
- * Any other value is a 422.
+ * Any other value is a 422 with `param: collection`.
  */
 collection?: ListSubscriptionsCollection;
 /**

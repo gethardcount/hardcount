@@ -20550,14 +20550,16 @@ export interface operations {
                 /** @description Filter to subscriptions with a live item on this plan. */
                 plan_id?: string;
                 /**
-                 * @description Exact status. Any other value is a 400. Paused collection is not
+                 * @description Exact status. Any other value is a 422 with `param: status`.
+                 *     Paused collection is not
                  *     a status: use `collection=paused`.
                  */
                 status?: "draft" | "trialing" | "active" | "canceled";
                 /**
                  * @description `failing` returns only subscriptions that carry a
                  *     `billing_failure`: those waiting for their next billing attempt
-                 *     and those that are parked. Any other value is a 400.
+                 *     and those that are parked. Any other value is a 422 with
+                 *     `param: billing`.
                  */
                 billing?: "failing";
                 /**
@@ -20565,7 +20567,7 @@ export interface operations {
                  *     `pause_collection` is in force, whether an operator or dunning set
                  *     it. A timed pause ends at `resumes_at` (on the subscription's test
                  *     clock, if it has one), even while the response still carries it.
-                 *     Any other value is a 400.
+                 *     Any other value is a 422 with `param: collection`.
                  */
                 collection?: "paused";
                 /** @description Case-insensitive substring match on display name or code. */
@@ -20649,32 +20651,15 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `status`, `billing` or `collection` value the API does not know. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "error": {
-                     *         "type": "invalid_request_error",
-                     *         "code": "invalid_request",
-                     *         "message": "status must be one of draft, trialing, active, canceled; paused collection is not a status, use collection=paused",
-                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
-                     *       }
-                     *     }
-                     */
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             /**
-             * @description `limit` or `offset` is out of range or not a whole number, the
-             *     request sends the removed `after` cursor, `sort` or `dir` is not
-             *     one of its values. `param` names it, and for `sort` and `dir`
-             *     the message lists the allowed values.
+             * @description Code `validation_error`. A `status`, `billing` or `collection`
+             *     filter the API does not know, `limit` or `offset` out of range
+             *     or not a whole number, the removed `after` cursor, or a `sort` or
+             *     `dir` that is not one of its values. `param` names it, and for
+             *     the filters, `sort` and `dir` the message lists the allowed
+             *     values.
              */
             422: {
                 headers: {
@@ -20686,9 +20671,9 @@ export interface operations {
                      *       "error": {
                      *         "type": "invalid_request_error",
                      *         "code": "validation_error",
-                     *         "message": "sort \"nope\" is not one of created_at, next_billing_at, status, display_name, name, trial_end_at",
+                     *         "message": "status must be one of draft, trialing, active, canceled; paused collection is not a status, use collection=paused",
                      *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
-                     *         "param": "sort"
+                     *         "param": "status"
                      *       }
                      *     }
                      */
@@ -32674,7 +32659,7 @@ export interface operations {
             query?: {
                 /** @description Only the run for this invoice. */
                 invoice_id?: string;
-                /** @description Only runs in this state. Another value answers 400. */
+                /** @description Only runs in this state. Any other value is a 422 with `param: state`. */
                 state?: "active" | "escalated" | "resolved";
                 /**
                  * @description Rows per page, from 1 to 100. Default 50. Any other value, one that
@@ -32733,8 +32718,15 @@ export interface operations {
                     };
                 };
             };
-            /** @description `state` is not `active`, `escalated` or `resolved` (code `invalid_request`). */
-            400: {
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /**
+             * @description Code `validation_error`. `state` is not `active`, `escalated` or
+             *     `resolved`, `limit` or `offset` is out of range or not a whole
+             *     number, or the request sends the removed `after` cursor. `param`
+             *     names it.
+             */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -32743,18 +32735,16 @@ export interface operations {
                      * @example {
                      *       "error": {
                      *         "type": "invalid_request_error",
-                     *         "code": "invalid_request",
+                     *         "code": "validation_error",
                      *         "message": "state must be one of active, escalated, resolved",
-                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0"
+                     *         "request_id": "req_dbjg652q3gpgqfoq5cd0",
+                     *         "param": "state"
                      *       }
                      *     }
                      */
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["InvalidPage"];
             429: components["responses"]["RateLimited"];
         };
     };

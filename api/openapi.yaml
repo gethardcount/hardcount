@@ -15532,7 +15532,8 @@ paths:
         - name: status
           in: query
           description: |
-            Exact status. Any other value is a 400. Paused collection is not
+            Exact status. Any other value is a 422 with `param: status`.
+            Paused collection is not
             a status: use `collection=paused`.
           schema:
             type: string
@@ -15542,7 +15543,8 @@ paths:
           description: |
             `failing` returns only subscriptions that carry a
             `billing_failure`: those waiting for their next billing attempt
-            and those that are parked. Any other value is a 400.
+            and those that are parked. Any other value is a 422 with
+            `param: billing`.
           schema:
             type: string
             enum: [failing]
@@ -15553,7 +15555,7 @@ paths:
             `pause_collection` is in force, whether an operator or dunning set
             it. A timed pause ends at `resumes_at` (on the subscription's test
             clock, if it has one), even while the response still carries it.
-            Any other value is a 400.
+            Any other value is a 422 with `param: collection`.
           schema:
             type: string
             enum: [paused]
@@ -15626,28 +15628,18 @@ paths:
                     created_at: "2026-10-01T09:12:44Z"
                     updated_at: "2026-10-01T09:12:44Z"
                 total: 1
-        "400":
-          description: A `status`, `billing` or `collection` value the API does not know.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: invalid_request
-                  message: "status must be one of draft, trialing, active, canceled; paused collection is not a status, use collection=paused"
-                  request_id: req_dbjg652q3gpgqfoq5cd0
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "422":
           description: |
-            `limit` or `offset` is out of range or not a whole number, the
-            request sends the removed `after` cursor, `sort` or `dir` is not
-            one of its values. `param` names it, and for `sort` and `dir`
-            the message lists the allowed values.
+            Code `validation_error`. A `status`, `billing` or `collection`
+            filter the API does not know, `limit` or `offset` out of range
+            or not a whole number, the removed `after` cursor, or a `sort` or
+            `dir` that is not one of its values. `param` names it, and for
+            the filters, `sort` and `dir` the message lists the allowed
+            values.
           content:
             application/json:
               schema:
@@ -15656,9 +15648,9 @@ paths:
                 error:
                   type: invalid_request_error
                   code: validation_error
-                  message: 'sort "nope" is not one of created_at, next_billing_at, status, display_name, name, trial_end_at'
+                  message: "status must be one of draft, trialing, active, canceled; paused collection is not a status, use collection=paused"
                   request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: sort
+                  param: status
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -25930,7 +25922,7 @@ paths:
             type: string
         - name: state
           in: query
-          description: Only runs in this state. Another value answers 400.
+          description: "Only runs in this state. Any other value is a 422 with `param: state`."
           schema:
             type: string
             enum: [active, escalated, resolved]
@@ -25971,8 +25963,16 @@ paths:
                     invoice_currency: USD
                     max_retry_attempts: 3
                 total: 1
-        "400":
-          description: "`state` is not `active`, `escalated` or `resolved` (code `invalid_request`)."
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: |
+            Code `validation_error`. `state` is not `active`, `escalated` or
+            `resolved`, `limit` or `offset` is out of range or not a whole
+            number, or the request sends the removed `after` cursor. `param`
+            names it.
           content:
             application/json:
               schema:
@@ -25980,15 +25980,10 @@ paths:
               example:
                 error:
                   type: invalid_request_error
-                  code: invalid_request
+                  code: validation_error
                   message: state must be one of active, escalated, resolved
                   request_id: req_dbjg652q3gpgqfoq5cd0
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "422":
-          $ref: "#/components/responses/InvalidPage"
+                  param: state
         "429":
           $ref: "#/components/responses/RateLimited"
 

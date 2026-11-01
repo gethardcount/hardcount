@@ -6,7 +6,8 @@
  * Send an API key as `Authorization: Bearer <key>`. Bodies are JSON (a few
  * routes answer a PDF, CSV or event stream), and amounts are whole numbers
  * in the currency's minor unit (cents for USD). Routes tagged `Dashboard` or
- * `InboundWebhooks` are not for your code. More: docs/api-surface.md.
+ * `InboundWebhooks` are not for your code. More:
+ * [The Hardcount API](https://gethardcount.com/docs/api/overview/).
  *
  * OpenAPI spec version: 2026-04-07
  */
@@ -5998,7 +5999,7 @@ export const getListSubscriptionsQueryKey = (params?: ListSubscriptionsParams,) 
     }
 
 
-export const getListSubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListSubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -6017,10 +6018,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListSubscriptionsQueryResult = NonNullable<Awaited<ReturnType<typeof listSubscriptions>>>
-export type ListSubscriptionsQueryError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+export type ListSubscriptionsQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
+export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params: undefined |  ListSubscriptionsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listSubscriptions>>,
@@ -6030,7 +6031,7 @@ export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubsc
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
+export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listSubscriptions>>,
@@ -6040,7 +6041,7 @@ export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubsc
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
+export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -6048,7 +6049,7 @@ export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubsc
  * @summary List subscriptions
  */
 
-export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
+export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubscriptions>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -15366,7 +15367,7 @@ export const getListDunningRunsQueryKey = (params?: ListDunningRunsParams,) => {
     }
 
 
-export const getListDunningRunsQueryOptions = <TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListDunningRunsQueryOptions = <TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -15385,10 +15386,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListDunningRunsQueryResult = NonNullable<Awaited<ReturnType<typeof listDunningRuns>>>
-export type ListDunningRunsQueryError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
+export type ListDunningRunsQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params: undefined |  ListDunningRunsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listDunningRuns>>,
@@ -15398,7 +15399,7 @@ export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunning
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listDunningRuns>>,
@@ -15408,7 +15409,7 @@ export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunning
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -15416,7 +15417,7 @@ export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunning
  * @summary List dunning runs
  */
 
-export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = Error | UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListDunningRuns<TData = Awaited<ReturnType<typeof listDunningRuns>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListDunningRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningRuns>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {

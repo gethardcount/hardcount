@@ -6,7 +6,8 @@
  * Send an API key as `Authorization: Bearer <key>`. Bodies are JSON (a few
  * routes answer a PDF, CSV or event stream), and amounts are whole numbers
  * in the currency's minor unit (cents for USD). Routes tagged `Dashboard` or
- * `InboundWebhooks` are not for your code. More: docs/api-surface.md.
+ * `InboundWebhooks` are not for your code. More:
+ * [The Hardcount API](https://gethardcount.com/docs/api/overview/).
  *
  * OpenAPI spec version: 2026-04-07
  */
@@ -20,7 +21,7 @@ export type ListDunningRunsParams = {
  */
 invoice_id?: string;
 /**
- * Only runs in this state. Another value answers 400.
+ * Only runs in this state. Any other value is a 422 with `param: state`.
  */
 state?: ListDunningRunsState;
 /**
