@@ -63,7 +63,7 @@ dimension. A LiteLLM proxy does this for you: Hardcount turns a name such as
   a price for each. If you price Haiku 5.5 yourself, put `context_tier` in
   every price: a price without it prices both at one rate. A provider cost
   has no `context_tier`, so your margin on Haiku 5.5 is wrong for one of
-  the two prices ([more](#see-your-margin)).
+  the two prices ([see your margin](#see-your-margin)).
 - **The prices are Anthropic's list prices.** On Bedrock and Google Cloud,
   a regional endpoint costs you 10% more than global for Claude 4.5 and
   later models; the recipe charges the same for both. Fast mode, US-only
@@ -174,7 +174,7 @@ five places:
   `hardcount_usage_unbilled_total{reason="no_price"}`. It is what Hardcount found
   when the event arrived. An event with no `billing_status` is not
   promised to be billed
-  ([more](api-surface.md#what-hardcount-found-when-the-event-arrived));
+  ([what Hardcount found when the event arrived](api-surface.md#what-hardcount-found-when-the-event-arrived));
 - the "not billed" row of the customer's usage, on the customer page and
   in `GET /v1/customers/{id}/usage` (the current billing period, unless
   you pass `from` and `to`), marked `no_price`;

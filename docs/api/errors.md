@@ -102,7 +102,7 @@ decide.
 | `invalid_state` | The resource is in the wrong state for this action, such as advancing a test clock that is still advancing | Read it, wait or change it, then try again |
 | `already_bootstrapped` | `POST /v1/bootstrap` after the first account exists | Do not retry |
 
-**Idempotency** ([more](idempotency.md))
+**Idempotency** ([how idempotency keys work](idempotency.md))
 
 | `code` | When | What to do |
 |---|---|---|
