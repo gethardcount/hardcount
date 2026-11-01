@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // fixedSettings hands every tenant the same branding, so a test can put a
@@ -43,8 +44,10 @@ func TestWireFormat_EverySendPath(t *testing.T) {
 	s.SetSettingsGetter(fixedSettings{ts: domain.TenantSettings{
 		CompanyName: `Müller "Großhandel" \ Logistik GmbH & Co. KG — Kreditorenbuchhaltung Abteilung Süd`,
 	}})
+	// Stripe is connected, so the invoice and escalation emails offer to pay.
+	s.SetStripeReadiness(&stripeCheck{connected: true})
 	const outboxID = "hc_emob_00112233445566778899aabb"
-	ctx := WithCorrelation(context.Background(), outboxID)
+	ctx := WithCorrelation(postgres.WithLivemode(context.Background(), false), outboxID)
 
 	cust := "Müller Großhandel und Logistik GmbH & Co. KG — Kreditorenbuchhaltung Abteilung Süd, Werk 3"
 	// One unbroken operator note: before go-mail this became a single

@@ -2,11 +2,11 @@
 
 ## Status
 
-Accepted — 2026-06-23 (amended 2026-10-08 and 2026-10-30).
+Accepted — 2026-06-23 (amended 2026-10-08, 2026-10-30 and 2026-11-01).
 
 ## Summary
 
-An unpaid invoice whose customer has no usable card enters dunning (the retry-and-escalate process), like a declined charge. Without this, the subscription stayed active and kept billing with no path to a final decision. The retries count as failed attempts, so the run ends in the policy's final actions, and adding a card mid-run lets the collector charge the invoice. Amended 2026-10-08: the auto-charge collector starts the run itself when money is still owed and no card exists ([ADR-116](116-collection-intent-at-finalize-one-collector.md)), and the separate enrollment sweeps were deleted. Amended 2026-10-30: without Stripe for the invoice's mode no card can be added, so the customer is emailed the invoice itself once, not a card-setup link. The run's retries then charge nothing and remind the customer to pay the invoice, and the run still ends in the policy's final actions. Status: active, amended; tenants with dunning disabled are skipped.
+An unpaid invoice whose customer has no usable card enters dunning (the retry-and-escalate process), like a declined charge. Without this, the subscription stayed active and kept billing with no path to a final decision. The retries count as failed attempts, so the run ends in the policy's final actions, and adding a card mid-run lets the collector charge the invoice. Amended 2026-10-08: the auto-charge collector starts the run itself when money is still owed and no card exists ([ADR-116](116-collection-intent-at-finalize-one-collector.md)), and the separate enrollment sweeps were deleted. Amended 2026-10-30: without Stripe for the invoice's mode no card can be added, so the customer is emailed the invoice itself once, not a card-setup link. The run's retries then charge nothing and remind the customer to pay the invoice, and the run still ends in the policy's final actions. Amended 2026-11-01: without Stripe, the invoice email and the final notice ask the customer to pay as arranged, with a **View invoice** button, because the hosted page they link can't take a payment. Status: active, amended; tenants with dunning disabled are skipped.
 
 ## Context
 
@@ -188,3 +188,48 @@ not send it again, so the customer gets it once.
 
 **Not settled here.** The final notice (dunning escalation) keeps its **Pay
 invoice** button, which opens the hosted page that says to contact the seller.
+
+## Amendment (2026-11-01): without Stripe, no email offers to pay online
+
+**Problem.** Without Stripe for the invoice's mode, the hosted page shows the
+invoice with no Pay button and says to contact the seller. Two emails still
+offered to pay there:
+
+- the invoice email said "Tap the button below to view or pay your invoice",
+  with a **View & pay invoice** button and "View or pay online" in its text
+  part;
+- the final notice of an invoice still owed said to settle it using the link,
+  with a **Pay invoice** button (left open above).
+
+**Decision.** Both emails ask the hosted page's own question: is Stripe
+connected for the invoice's mode (`payment.StripeClients.HasFor`)? Without
+Stripe:
+
+- the invoice email says "Tap the button below to view your invoice. Please
+  pay as arranged with us, or contact us to arrange payment." Its button reads
+  **View invoice**, and its text part says "View online";
+- the final notice asks the customer to pay as arranged in the same words,
+  and its button reads **View invoice**.
+
+With Stripe both are unchanged. The email of a settled or written-off invoice
+is unchanged too, and reads no connection.
+
+**Read when the email is rendered.** The email sender reads the connection at
+send time, in the mode the outbox row carries. The hosted page reads it when
+the customer opens it, so the email reads it as close to that moment as it
+can. No outbox field is added, so a row queued by an older binary gets the
+right copy too.
+
+**A failed read is an error**, never "not connected" or "connected". The send
+fails and the outbox retries the row, as for any send error. A sender with no
+connection check wired fails the same way (`email.ErrNoStripeCheck`).
+
+**The other customer emails need no change.** The dunning warnings for a
+decline, a refused card, a confirmation or a missing card, and the
+payment-failed email, go out only after Stripe answered a charge, or with
+Stripe connected. Without Stripe the retry sends the pay-the-invoice reminder
+above instead.
+
+**Not settled here.** An invoice Stripe refused as below its minimum charge
+has no Pay button on the hosted page either. Its invoice email, sent by the
+operator's **Email invoice**, still offers **View & pay invoice**.

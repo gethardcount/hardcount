@@ -22,6 +22,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // ErrSMTPNotConfigured is returned by every send path when SMTP_HOST
@@ -77,7 +78,26 @@ type Sender struct {
 	// acceptable in tests and standalone contexts.
 	bounceReporter BounceReporter
 	suppression    RecipientSuppressionChecker
+
+	// stripeReady answers whether the customer can pay an invoice online,
+	// for the invoice and escalation emails' copy and button. Required:
+	// without it those sends fail with ErrNoStripeCheck.
+	stripeReady StripeReadiness
 }
+
+// StripeReadiness reports whether a tenant has Stripe connected for a mode:
+// the check the hosted invoice page makes before it offers Pay. Implemented
+// by *payment.StripeClients (HasFor), the same reader the auto-charge
+// collector and the dunning retrier use. A read error is an error, never
+// "not connected".
+type StripeReadiness interface {
+	HasFor(ctx context.Context, tenantID string, livemode bool) (bool, error)
+}
+
+// ErrNoStripeCheck is the send error when no StripeReadiness is wired. An
+// email that would offer to pay online does not guess whether the hosted
+// page can take the payment.
+var ErrNoStripeCheck = errors.New("email: no Stripe connection check wired")
 
 // SettingsGetter resolves a tenantID to the tenant's public-facing
 // settings. Satisfied by *tenant.SettingsStore at runtime; unit tests
@@ -201,6 +221,27 @@ func (s *Sender) SetBounceReporter(r BounceReporter) { s.bounceReporter = r }
 // it, the Sender skips the check and always attempts SMTP — same
 // behavior as before this gate existed (back-compat for tests).
 func (s *Sender) SetSuppressionChecker(c RecipientSuppressionChecker) { s.suppression = c }
+
+// SetStripeReadiness wires the check behind the invoice and escalation
+// emails' pay wording (canPayOnline). Required in the server.
+func (s *Sender) SetStripeReadiness(r StripeReadiness) { s.stripeReady = r }
+
+// canPayOnline reports whether the customer can pay tenantID's invoice on the
+// hosted page: Stripe is connected for the mode on ctx. The dispatcher pins
+// the outbox row's mode on ctx, which is the invoice's. It is read when the
+// email is rendered, the moment closest to the customer's click. A missing
+// check, a ctx with no mode, or a failed read is an error: the send fails and
+// the outbox retries the row.
+func (s *Sender) canPayOnline(ctx context.Context, tenantID string) (bool, error) {
+	if s.stripeReady == nil {
+		return false, ErrNoStripeCheck
+	}
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return false, err
+	}
+	return s.stripeReady.HasFor(ctx, tenantID, live)
+}
 
 // checkSuppression returns true if the send should be soft-skipped.
 // Logs the skip at INFO so operators can see it in `make dev` output.
@@ -423,15 +464,29 @@ func (s *Sender) hostedInvoiceURL(publicToken string) string {
 
 // SendInvoice sends an invoice email with PDF attachment. publicToken
 // is the hosted_invoice_url credential (T0-17) — empty means no pay CTA.
-// ctx must carry livemode for the branding lookup; the request handler
-// sets it via auth middleware, the outbox dispatcher derives it from
-// the email_outbox row.
+// ctx must carry livemode for the branding lookup and the Stripe check;
+// the request handler sets it via auth middleware, the outbox dispatcher
+// derives it from the email_outbox row.
+//
+// An owed invoice that is not written off and has a hosted page offers
+// "View & pay" only when that page will offer Pay (canPayOnline). The check
+// is read only then, so a failed read never holds up a settled or
+// written-off invoice's email.
 func (s *Sender) SendInvoice(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, totalCents int64, currency string, pdfBytes []byte, publicToken string, writtenOff bool) error {
 	brand := s.brandingFor(ctx, tenantID)
 	hostedURL := s.hostedInvoiceURL(publicToken)
 	amount := formatAmount(totalCents, currency)
+	zeroDue := totalCents == 0
 
-	subject, contentHTML, ctaURL, ctaLabel := renderInvoiceHTML(customerName, invoiceNumber, amount, hostedURL, totalCents == 0, writtenOff)
+	payOnline := false
+	if hostedURL != "" && !zeroDue && !writtenOff {
+		var err error
+		if payOnline, err = s.canPayOnline(ctx, tenantID); err != nil {
+			return fmt.Errorf("invoice email: read the Stripe connection: %w", err)
+		}
+	}
+
+	subject, contentHTML, ctaURL, ctaLabel := renderInvoiceHTML(customerName, invoiceNumber, amount, hostedURL, zeroDue, writtenOff, payOnline)
 	htmlBody, err := renderLayout(layoutInputs{
 		Subject: subject, CompanyName: brand.CompanyName, LogoURL: brand.LogoURL,
 		BrandColor: brand.BrandColor, SupportURL: brand.SupportURL,
@@ -441,7 +496,7 @@ func (s *Sender) SendInvoice(ctx context.Context, tenantID, to string, cc []stri
 	if err != nil {
 		return fmt.Errorf("render invoice html: %w", err)
 	}
-	textBody := invoiceTextBody(customerName, invoiceNumber, amount, currency, hostedURL, totalCents == 0, writtenOff)
+	textBody := invoiceTextBody(customerName, invoiceNumber, amount, currency, hostedURL, zeroDue, writtenOff, payOnline)
 
 	return s.sendRich(ctx, richMessage{
 		TenantID:       tenantID,
@@ -525,12 +580,24 @@ func (s *Sender) SendDunningWarning(ctx context.Context, tenantID, to string, cc
 	})
 }
 
-// SendDunningEscalation emails the "retries exhausted" escalation.
+// SendDunningEscalation emails the "retries exhausted" escalation. An invoice
+// that is not written off is still owed, and the email asks the customer to
+// pay it through the link only when the hosted page will offer Pay
+// (canPayOnline). A run with no Stripe connected still ends here (ADR-060
+// amendment 2026-10-30), so the check is read for every such invoice.
 func (s *Sender) SendDunningEscalation(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error {
 	brand := s.brandingFor(ctx, tenantID)
 	hostedURL := s.hostedInvoiceURL(publicToken)
 
-	subject, contentHTML, ctaURL, ctaLabel := renderDunningEscalationHTML(customerName, invoiceNumber, outcome, hostedURL)
+	payOnline := false
+	if !outcome.InvoiceWrittenOff {
+		var err error
+		if payOnline, err = s.canPayOnline(ctx, tenantID); err != nil {
+			return fmt.Errorf("dunning escalation email: read the Stripe connection: %w", err)
+		}
+	}
+
+	subject, contentHTML, ctaURL, ctaLabel := renderDunningEscalationHTML(customerName, invoiceNumber, outcome, hostedURL, payOnline)
 	htmlBody, err := renderLayout(layoutInputs{
 		Subject: subject, CompanyName: brand.CompanyName, LogoURL: brand.LogoURL,
 		BrandColor: brand.BrandColor, SupportURL: brand.SupportURL,
@@ -539,7 +606,7 @@ func (s *Sender) SendDunningEscalation(ctx context.Context, tenantID, to string,
 	if err != nil {
 		return fmt.Errorf("render dunning escalation html: %w", err)
 	}
-	textBody := dunningEscalationTextBody(customerName, invoiceNumber, outcome, hostedURL)
+	textBody := dunningEscalationTextBody(customerName, invoiceNumber, outcome, hostedURL, payOnline)
 
 	return s.sendRich(ctx, richMessage{
 		TenantID: tenantID, To: to, Cc: cc, Subject: subject,
@@ -724,7 +791,7 @@ If you weren't expecting this invitation, you can safely ignore this email.
 
 // ---- Plaintext fallback bodies (multipart/alternative text part) ----
 
-func invoiceTextBody(customerName, invoiceNumber, amount, currency, hostedURL string, zeroDue, writtenOff bool) string {
+func invoiceTextBody(customerName, invoiceNumber, amount, currency, hostedURL string, zeroDue, writtenOff, payOnline bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Hi %s,\n\n", customerName)
 	if zeroDue {
@@ -742,8 +809,13 @@ func invoiceTextBody(customerName, invoiceNumber, amount, currency, hostedURL st
 		}
 	} else {
 		fmt.Fprintf(&b, "Invoice %s is ready.\n\nAmount due: %s\nCurrency: %s\n\n", invoiceNumber, amount, strings.ToUpper(currency))
-		if hostedURL != "" {
+		switch {
+		case hostedURL != "" && payOnline:
 			fmt.Fprintf(&b, "View or pay online: %s\n\n", hostedURL)
+		case hostedURL != "":
+			// Same fact the HTML twin adapts on: no Pay button on the hosted
+			// page without Stripe for the invoice's mode.
+			fmt.Fprintf(&b, "%s\n\nView online: %s\n\n", payAsArranged, hostedURL)
 		}
 	}
 	b.WriteString("The invoice PDF is attached for your records.\n")
@@ -823,17 +895,17 @@ func confirmPaymentTextBody(customerName, invoiceNumber, hostedURL string) strin
 	return b.String()
 }
 
-func dunningEscalationTextBody(customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, hostedURL string) string {
+func dunningEscalationTextBody(customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, hostedURL string, payOnline bool) string {
 	// Same customer copy as the HTML alternative (dunningEscalationCopy).
 	// Pre-fix this text part still rendered the raw internal enum —
 	// "Action taken: mark_uncollectible", the exact P13 symptom, shown to
 	// every text-only client — and offered a "Resolve invoice" link even
 	// for invoices the hosted page refuses payment on.
-	sentence, stillPayable := dunningEscalationCopy(outcome)
+	sentence, offerPay := dunningEscalationCopy(outcome, payOnline)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Hi %s,\n\n%s\n\n%s\n\n", customerName, escalationLead(invoiceNumber), sentence)
 	if hostedURL != "" {
-		if stillPayable {
+		if offerPay {
 			fmt.Fprintf(&b, "Pay invoice: %s\n", hostedURL)
 		} else {
 			fmt.Fprintf(&b, "View invoice: %s\n", hostedURL)

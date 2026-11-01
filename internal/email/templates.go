@@ -132,7 +132,14 @@ func escape(s string) string { return html.EscapeString(s) }
 // writtenOff is the invoice's uncollectible status. Its hosted page has no
 // Pay button (ADR-110), so the email offers "View invoice" and asks the
 // customer to contact the seller, never "View & pay".
-func renderInvoiceHTML(customerName, invoiceNumber, amount string, hostedURL string, zeroDue, writtenOff bool) (subject, contentHTML, ctaURL, ctaLabel string) {
+//
+// payOnline is whether the hosted page will offer Pay: the seller has Stripe
+// connected for the invoice's mode (Sender.canPayOnline). Without it the page
+// shows the invoice and says to contact the seller, so the email asks the
+// customer to pay as arranged and offers "View invoice". It is read only for
+// an owed invoice that is not written off and has a hosted page; the other
+// branches ignore it.
+func renderInvoiceHTML(customerName, invoiceNumber, amount string, hostedURL string, zeroDue, writtenOff, payOnline bool) (subject, contentHTML, ctaURL, ctaLabel string) {
 	subject = "Invoice " + invoiceNumber + " — " + amount
 	if zeroDue {
 		subject = "Invoice " + invoiceNumber + " — no payment due"
@@ -167,10 +174,14 @@ func renderInvoiceHTML(customerName, invoiceNumber, amount string, hostedURL str
 			ctaURL = hostedURL
 			ctaLabel = "View invoice"
 		}
-	case hostedURL != "":
+	case hostedURL != "" && payOnline:
 		b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">Tap the button below to view or pay your invoice. The PDF is also attached for your records.</p>`)
 		ctaURL = hostedURL
 		ctaLabel = "View & pay invoice"
+	case hostedURL != "":
+		b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">Tap the button below to view your invoice. ` + escape(payAsArranged) + ` The PDF is also attached for your records.</p>`)
+		ctaURL = hostedURL
+		ctaLabel = "View invoice"
 	default:
 		b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">Please find the invoice PDF attached.</p>`)
 	}
@@ -362,7 +373,9 @@ func confirmPaymentAsk(hasLink bool) string {
 	return "Please contact us to pay the invoice."
 }
 
-func renderDunningEscalationHTML(customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
+// renderDunningEscalationHTML is the final notice of a dunning run. payOnline
+// is whether the hosted page will offer Pay (see dunningEscalationCopy).
+func renderDunningEscalationHTML(customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, hostedURL string, payOnline bool) (subject, contentHTML, ctaURL, ctaLabel string) {
 	subject = "Action required for invoice " + invoiceNumber
 	var b strings.Builder
 	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">We couldn't collect payment</h1>`)
@@ -373,12 +386,12 @@ func renderDunningEscalationHTML(customerName, invoiceNumber string, outcome dom
 	// "Action taken: mark_uncollectible". dunningEscalationCopy composes
 	// the customer sentence from the OUTCOME and is shared with the
 	// plaintext part.
-	sentence, stillPayable := dunningEscalationCopy(outcome)
+	sentence, offerPay := dunningEscalationCopy(outcome, payOnline)
 	b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">` + escape(sentence) + `</p>`)
 	if hostedURL != "" {
 		ctaURL = hostedURL
 		ctaLabel = "Pay invoice"
-		if !stillPayable {
+		if !offerPay {
 			ctaLabel = "View invoice"
 		}
 	}
@@ -398,6 +411,13 @@ func escalationLead(invoiceNumber string) string {
 // emails.
 const closedForOnlinePayment = "This invoice is closed for online payment. Please contact us to arrange payment."
 
+// payAsArranged asks the customer to pay an owed invoice that can't be paid
+// online: the seller has no Stripe connected for the invoice's mode, so the
+// hosted page shows the invoice with no Pay button and says to contact the
+// seller to arrange payment. Shared by the invoice and escalation emails, in
+// both parts.
+const payAsArranged = "Please pay as arranged with us, or contact us to arrange payment."
+
 // dunningEscalationCopy composes the customer-facing sentence used by BOTH
 // multipart/alternative parts of the escalation email. Single source on
 // purpose — the P13 raw-enum leak was fixed in the HTML part only, and the
@@ -409,12 +429,18 @@ const closedForOnlinePayment = "This invoice is closed for online payment. Pleas
 // to this invoice. A one-off invoice under a cancel policy cancels nothing,
 // so it must get the neutral sentence.
 //
-// stillPayable=false once the invoice is written off — a written-off
+// offerPay=false once the invoice is written off — a written-off
 // invoice has no Pay button on the hosted page (ADR-110), so callers offer
 // the link as "View invoice" and point at support rather than a dead end.
 // It is the invoice half that decides this; the subscription half never
 // changes whether THIS invoice can be paid online.
-func dunningEscalationCopy(o domain.DunningEscalationOutcome) (sentence string, stillPayable bool) {
+//
+// offerPay=false also when payOnline is false: the invoice is still owed,
+// but the seller has no Stripe connected for its mode, so the hosted page
+// has no Pay button either. The sentence asks the customer to pay as
+// arranged, never to settle it through the link. payOnline is ignored for a
+// written-off invoice.
+func dunningEscalationCopy(o domain.DunningEscalationOutcome, payOnline bool) (sentence string, offerPay bool) {
 	// Subscription clause. Pause is collection-only (keep_as_draft):
 	// service continues and new invoices stay drafts, so no "service is
 	// paused" / "resume service" claim is made. Nor "collection stopped": a
@@ -435,6 +461,13 @@ func dunningEscalationCopy(o domain.DunningEscalationOutcome) (sentence string, 
 			s = subClause + " " + s
 		}
 		return s, false
+	}
+
+	if !payOnline {
+		if subClause != "" {
+			return subClause + " The outstanding balance remains due. " + payAsArranged, false
+		}
+		return "The invoice remains due. " + payAsArranged, false
 	}
 
 	if subClause != "" {

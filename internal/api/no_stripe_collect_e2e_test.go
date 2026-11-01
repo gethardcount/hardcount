@@ -31,11 +31,16 @@ type noStripeRig struct {
 	lastFinalize map[string]any
 }
 
-func newNoStripeRig(t *testing.T, name string) *noStripeRig {
+// env is extra environment as name, value pairs, set before the server is
+// built (it reads its email settings once, at construction).
+func newNoStripeRig(t *testing.T, name string, env ...string) *noStripeRig {
 	t.Helper()
 	db := testutil.SetupTestDB(t)
 	t.Setenv("SMTP_HOST", "smtp.no-stripe.invalid")
 	t.Setenv("PAYMENT_UPDATE_URL", "https://billing.no-stripe.test/update-payment")
+	for i := 0; i+1 < len(env); i += 2 {
+		t.Setenv(env[i], env[i+1])
+	}
 	srv := NewServer(db, clock.Real(), nil)
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)

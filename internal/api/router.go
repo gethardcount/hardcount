@@ -640,6 +640,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// branding (logo, brand color, company name, support URL). Cold-start
 	// tenants without settings gracefully fall back to Hardcount defaults.
 	emailSender.SetSettingsGetter(settingsStore)
+	// The invoice and final-notice emails offer to pay online only when the
+	// hosted page will: the page's own Stripe check, read at send time.
+	emailSender.SetStripeReadiness(stripeClients)
 	// Loud startup log so operators don't run prod without SMTP and
 	// only discover it when a customer never receives their invoice.
 	// Sender returns ErrSMTPNotConfigured per send when unconfigured —
