@@ -341,7 +341,7 @@ Each event also carries these labels (dimensions):
   `prompt_over_100k`. Haiku 5.5 has a higher price when the prompt (input,
   cache reads and cache writes) is over 100,000 tokens. Provider costs have
   no `context_tier`, so one Haiku 5.5 cost covers both prices
-  ([more](../ai-pricing.md#see-your-margin)).
+  ([see your margin](../ai-pricing.md#see-your-margin)).
 - `provider`: the provider, from LiteLLM's `custom_llm_provider`.
 - `team_id`, when the call has one in `metadata`.
 - `request_tags`, when the call has them in `metadata`: the tags, sorted
@@ -501,7 +501,7 @@ trial's end before Hardcount ends the trial. A later change, such as a new
 subscription or an added price, can change the outcome either way. A
 delivery reads the customer's subscriptions once, so a subscription change
 saved during it can make a count wrong. The invoice is the final answer
-([more](../api-surface.md#what-hardcount-found-when-the-event-arrived)).
+([what Hardcount found when the event arrived](../api-surface.md#what-hardcount-found-when-the-event-arrived)).
 
 A refused row does not fail the batch. LiteLLM sees a 200 and treats the
 batch as delivered, and does not send it again. So a row in `errors` is

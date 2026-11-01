@@ -99,7 +99,7 @@ recorded cost.
 - **Claude Haiku 5.5's two prices.** A provider cost has no `context_tier`
   label, so one cost covers both of the model's prices. Your margin is
   wrong for one of them
-  ([more](../ai-pricing.md#see-your-margin)).
+  ([see your margin](../ai-pricing.md#see-your-margin)).
 
 More: every call, step by step:
 [See your margin](../ai-pricing.md#see-your-margin).

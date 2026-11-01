@@ -10,7 +10,7 @@ kilometre costs, and at the end you get a receipt and pay by card. Hardcount
 does the same for usage, such as AI tokens or API calls.
 
 ```mermaid
-flowchart LR
+flowchart TB
     A["Your app"] -->|"usage event"| B["Meter<br/>counts it"]
     B -->|"quantity"| C["Price<br/>turns it into money"]
     C -->|"period ends"| D["Invoice"]

@@ -49,7 +49,7 @@ sends it when it is finalized.
 Its `amount_due_cents` is the amount before credit, and
 `credits_applied_cents` is 0: Hardcount uses credit when it collects the
 invoice, just after this event
-([more](../webhooks.md#invoicefinalized-shows-the-amount-before-credit)).
+([invoice.finalized shows the amount before credit](../webhooks.md#invoicefinalized-shows-the-amount-before-credit)).
 Under Stripe Tax, `tax_transaction_id` can be recorded after this event;
 `GET /v1/invoices/{id}` shows it.
 

@@ -12,33 +12,37 @@ payments settle.
 ## The objects and the fields that link them
 
 ```mermaid
-flowchart LR
+flowchart BT
+    %% Each arrow points to the object a field names. Layout only:
+    %% "C ~~~ PR" keeps Customer below Price, and the longer arrows
+    %% from Payment method and Credit ledger entry keep their labels apart.
+    M["Meter"]
+    PR["Price"]
+    P["Plan"]
     TC["Test clock<br/>(test mode only)"]
     C["Customer"]
-    S["Subscription<br/>and its items"]
-    P["Plan"]
-    PR["Price"]
-    M["Meter"]
     U["Usage event"]
+    PM["Payment<br/>method"]
+    L["Credit ledger<br/>entry"]
+    S["Subscription<br/>and its items"]
     I["Invoice<br/>and its lines"]
-    CN["Credit note"]
-    L["Credit ledger entry"]
-    PM["Payment method"]
     D["Dunning run"]
+    CN["Credit note"]
 
+    PR -->|"meter_id"| M
+    PR -->|"plan_id"| P
+    C ~~~ PR
     C -->|"test_clock_id"| TC
+    U -->|"meter_id"| M
+    U -->|"customer_id"| C
+    PM --->|"customer_id"| C
+    L --->|"customer_id"| C
+    I -->|"customer_id"| C
     S -->|"customer_id"| C
     S -->|"items[].plan_id"| P
-    PR -->|"plan_id"| P
-    PR -->|"meter_id"| M
-    U -->|"customer_id"| C
-    U -->|"meter_id"| M
-    I -->|"customer_id"| C
     I -->|"subscription_id"| S
-    CN -->|"invoice_id"| I
-    L -->|"customer_id"| C
-    PM -->|"customer_id"| C
     D -->|"invoice_id"| I
+    CN -->|"invoice_id"| I
 ```
 
 Each arrow is a field on the object it starts from. For example, a usage
