@@ -4,12 +4,19 @@ import "time"
 
 // TestClockStatus tracks what a test clock is doing. Mirrors Stripe's API.
 //
-//   - ready: idle, safe to advance or delete.
-//   - advancing: a catchup run is in flight; further advances are rejected
-//     until it completes.
-//   - internal_failure: the last advance errored partway through; the clock
-//     is frozen at an intermediate state and the tenant must inspect
-//     (advances and subscription attachment stay blocked).
+//   - ready: idle; it can be advanced.
+//   - advancing: a catch-up run is in flight. Advance and RetryAdvance are
+//     refused (409) until it completes. frozen_time is already the new time.
+//   - internal_failure: the last catch-up failed partway, so the clock is at
+//     its new frozen_time with the catch-up unfinished. Advance is refused
+//     (409); POST /retry-advance resumes the catch-up (ADR-018), or the
+//     tenant deletes the clock.
+//
+// No status blocks attaching a customer. A customer created on the clock
+// joins it at its frozen_time in any status: ResolveSim (testclock store)
+// checks only that the clock exists. While the clock is advancing or failed,
+// frozen_time is already the new time, so the customer joins as one created
+// just after the advance would.
 type TestClockStatus string
 
 const (

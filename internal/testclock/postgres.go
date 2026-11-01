@@ -65,7 +65,9 @@ func (s *PostgresStore) Create(ctx context.Context, tenantID string, clk domain.
 // clock.Sim is designed to make unrepresentable.
 //
 // ErrNotFound → (zero, false, nil); other errors propagate. Soft-deleted clocks
-// count as not-existing.
+// count as not-existing. A clock in any status is attach-able: an advancing
+// or failed clock's frozen_time is already its new time, so the customer
+// joins at it (domain.TestClockStatus says why no status blocks this).
 func (s *PostgresStore) ResolveSim(ctx context.Context, tenantID, id string) (clock.Sim, bool, error) {
 	clk, err := s.Get(ctx, tenantID, id)
 	if err != nil {
