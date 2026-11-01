@@ -8044,8 +8044,10 @@ type SetDefaultDunningPolicy200JSONResponseBodyStatus string
 
 // ListDunningRunsParams defines parameters for ListDunningRuns.
 type ListDunningRunsParams struct {
-	InvoiceId string                     `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
-	State     ListDunningRunsParamsState `form:"state,omitempty" json:"state,omitempty"`
+	InvoiceId string `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
+
+	// State Exact run state. Any other value is a 422.
+	State ListDunningRunsParamsState `form:"state,omitempty" json:"state,omitempty"`
 
 	// Limit Rows per page, from 1 to 100. Default 50. Any other value, or one
 	// that is not a whole number, is a 422 with `param: limit`.
@@ -8874,20 +8876,20 @@ type GetV1SubscriptionsParams struct {
 	// PlanId Filter to subscriptions with a live item on this plan.
 	PlanId string `form:"plan_id,omitempty" json:"plan_id,omitempty"`
 
-	// Status Exact status. Any other value is a 400. Paused collection is not
+	// Status Exact status. Any other value is a 422. Paused collection is not
 	// a status: use `collection=paused`.
 	Status GetV1SubscriptionsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 
 	// Billing `failing` returns only subscriptions that carry a
 	// `billing_failure`: those waiting for their next billing attempt
-	// and those that are parked. Any other value is a 400.
+	// and those that are parked. Any other value is a 422.
 	Billing GetV1SubscriptionsParamsBilling `form:"billing,omitempty" json:"billing,omitempty"`
 
 	// Collection `paused` returns only active and trialing subscriptions whose
 	// `pause_collection` is in force, whether an operator or dunning set
 	// it. A timed pause ends at `resumes_at` (on the subscription's test
 	// clock, if it has one), even while the response still carries it.
-	// Any other value is a 400.
+	// Any other value is a 422.
 	Collection GetV1SubscriptionsParamsCollection `form:"collection,omitempty" json:"collection,omitempty"`
 
 	// Search Case-insensitive substring match on display name or code.
