@@ -143,8 +143,8 @@ takes no retry settings, so in every LiteLLM version it behaves like 1.83.9
 below: only a refused or dropped connection is tried once more. Use the
 form above.
 With either form, Hardcount accepts a single record, a list of records
-(`json_array`, the default), or `{"events": [...]}`. It refuses
-`log_format: ndjson` when a send holds more than one record.
+(`json_array`, the default), records one a line (`log_format: ndjson`, any
+number of them), or `{"events": [...]}`.
 
 ### Keep each send under the size limit
 
@@ -521,7 +521,7 @@ at all?
 
 | Status | Meaning | What to do |
 |---|---|---|
-| 400 | The body is empty or not valid JSON. The batch was not saved. | Fix the request. |
+| 400 | The body is empty or not valid JSON. The batch was not saved. The message names the first bad record and its line, such as `invalid JSON body at line 3 (record 3)`. | Fix that record. |
 | `413 batch_too_large` | The body is over 32 MB. The batch was not saved. | Have LiteLLM send fewer records at once ([how](#keep-each-send-under-the-size-limit)). A batch this size gets this answer every time. |
 | 413, from nginx | Behind the Compose stack's or the quick start's nginx, the body is over 1 MB. The batch did not reach Hardcount. | Have LiteLLM send fewer records at once ([how](#keep-each-send-under-the-size-limit)). |
 | 401 | The API key is missing, wrong, revoked or expired. The batch was not saved. | Fix the `Authorization` header. |

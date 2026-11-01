@@ -162,6 +162,11 @@ func TestDecodeBody_Shapes(t *testing.T) {
 		{"single record", `{"id":"a","model":"m"}`, "a"},
 		{"events wrapper", `{"events":[{"id":"a"},{"id":"b"}]}`, "a,b"},
 		{"empty events is a single record", `{"id":"a","events":[]}`, "a"},
+		{"NDJSON (LiteLLM's ndjson)", "{\"id\":\"a\"}\n{\"id\":\"b\"}\n{\"id\":\"c\"}", "a,b,c"},
+		{"NDJSON with CRLF, a blank line and a final newline", "{\"id\":\"a\"}\r\n\r\n{\"id\":\"b\"}\r\n", "a,b"},
+		{"objects back to back", `{"id":"a"}{"id":"b"}`, "a,b"},
+		{"a record over two lines", "{\"id\":\n\"a\"}\n{\"id\":\"b\"}", "a,b"},
+		{"an events wrapper, then a record", `{"events":[{"id":"a"},{"id":"b"}]} {"id":"c"}`, "a,b,c"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got, err := decode(c.body)
@@ -182,7 +187,9 @@ func TestDecodeBody_Shapes(t *testing.T) {
 		{"truncated array", `[{"id":"a"},{"id":`},
 		{"not an object in the array", `[{"id":"a"},1]`},
 		{"trailing data after the array", `[{"id":"a"}] [{"id":"b"}]`},
-		{"trailing data after the object", `{"id":"a"}{"id":"b"}`},
+		{"a stray } after the objects", `{"id":"a"} }`},
+		{"a stray ] after the objects", "{\"id\":\"a\"}\n]"},
+		{"an array after an object", `{"id":"a"} [{"id":"b"}]`},
 		{"not JSON", `id=a`},
 	} {
 		t.Run("refuses "+c.name, func(t *testing.T) {
