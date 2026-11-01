@@ -2141,7 +2141,10 @@ emailing that address. `reason` is the email provider's.
 
 Dunning is Hardcount retrying a failed payment on a schedule.
 `data.dunning_run` is the run as `GET /v1/dunning/runs/{id}` returns it
-under `run`: its invoice, state, attempts and how it was resolved.
+under `run`: its invoice, state, attempts and how it was resolved. Six
+fields the API adds when you read a run are left out: `invoice_number`,
+`invoice_amount_due_cents`, `invoice_currency`, `effective_now`,
+`test_clock_id` and `max_retry_attempts`.
 
 ### `dunning.started`
 

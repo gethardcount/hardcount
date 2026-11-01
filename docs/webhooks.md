@@ -39,7 +39,8 @@ retries.
 ## What a message looks like
 
 Every message is an HTTP `POST` to your URL with
-`Content-Type: application/json` and this body:
+`Content-Type: application/json` and a body like this one (Hardcount sends
+it on one line, and its key order may differ):
 
 ```json
 {
@@ -142,7 +143,8 @@ the endpoints of the caller's mode.
 
 - `events` takes event names from the [catalog](api/webhook-events.md).
   `"*"` means every event, and a prefix such as `"invoice.*"` means every
-  event that starts with it.
+  event that starts with it. Leaving `events` out when you register an
+  endpoint, or sending `[]` when you register or change one, means `"*"`.
 - An event name Hardcount never sends is refused with `422`, so a typo cannot
   leave you waiting for messages that never come.
 - **`active: false` pauses an endpoint.** It gets no new events. A retry
@@ -193,9 +195,11 @@ again, send what it missed:
 
 A resend carries the event's original `id` and `created_at`, so a receiver
 that skips handled ids handles it once. Each resend is a new delivery, with
-its own attempts and retries. A script that resends every failed delivery
-of an endpoint:
+its own attempts and retries. A script that reads every page of an
+endpoint's deliveries and resends each failed one:
 [Resend what your endpoint missed](guides/receive-webhooks.md#resend-what-your-endpoint-missed).
+Running it again resends them all again, which a receiver that skips
+handled ids ignores.
 
 ## Event catalog
 

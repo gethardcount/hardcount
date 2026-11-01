@@ -386,7 +386,7 @@ func validateEventNames(events []string) error {
 		}
 		if !domain.KnownWebhookEventTypes[e] {
 			return errs.Invalid("events", fmt.Sprintf(
-				"unknown event type %q — Hardcount never emits it, so this subscription would receive silence; see the event catalog in docs/webhooks.md", e))
+				"unknown event type %q — Hardcount never emits it, so this subscription would receive silence; see the event catalog in docs/api/webhook-events.md", e))
 		}
 	}
 	return nil

@@ -16,11 +16,12 @@ You run a small test receiver, register it with Hardcount, make something
 happen, and check the message.
 
 **Before you start:** Hardcount is running, and you have a test API key (see
-[API keys](../api-keys.md)). Open a terminal in the `hardcount` folder and set:
+[API keys](../api-keys.md)). Open a terminal in the `hardcount` folder and
+set these, with your own test key in place of `hc_secret_test_…`:
 
 ```bash
 export HARDCOUNT=http://localhost:8080
-export HARDCOUNT_KEY=hc_secret_test_…   # your test key
+export HARDCOUNT_KEY=hc_secret_test_…
 ```
 
 1. **Start the test receiver.** It answers every message with `200` and
@@ -43,8 +44,11 @@ export HARDCOUNT_KEY=hc_secret_test_…   # your test key
      `cloudflared tunnel --url http://localhost:9099`. Use the `https://`
      address it prints, plus `/ok`.
 
+   Save the address in `HOOK_URL`. This is the one for `make dev`; with a
+   tunnel, put its `https://` address followed by `/ok` in its place:
+
    ```bash
-   export HOOK_URL=http://localhost:9099/ok   # or https://<tunnel address>/ok
+   export HOOK_URL=http://localhost:9099/ok
    ```
 
    **You see:** nothing yet. The address is saved in `HOOK_URL`.
@@ -249,25 +253,37 @@ after the first try. Once your endpoint works again, send the missed events
 again. A resend carries the event's original `id`, so a receiver that skips
 handled ids handles each event once.
 
-- **One endpoint:** list its deliveries, and resend each failed one to that
-  endpoint only:
+- **One endpoint:** list all its deliveries, then resend each failed one to
+  that endpoint only. Put your endpoint's ID in place of `hc_whe_…`:
 
   ```bash
-  ENDPOINT_ID=hc_whe_…   # your endpoint
-  curl -s "$HARDCOUNT/v1/webhook-endpoints/endpoints/$ENDPOINT_ID/deliveries?limit=100" \
-    -H "Authorization: Bearer $HARDCOUNT_KEY" \
-    | jq -r '.data[] | select(.status == "failed") | .id' \
-    | while read -r DELIVERY_ID; do
-        curl -s -X POST \
-          "$HARDCOUNT/v1/webhook-endpoints/endpoints/$ENDPOINT_ID/deliveries/$DELIVERY_ID/replay" \
-          -H "Authorization: Bearer $HARDCOUNT_KEY"
-        echo
-      done
+  ENDPOINT_ID=hc_whe_…
+  FAILED=$(mktemp)
+  offset=0
+  while :; do
+    page=$(curl -s "$HARDCOUNT/v1/webhook-endpoints/endpoints/$ENDPOINT_ID/deliveries?limit=100&offset=$offset" \
+      -H "Authorization: Bearer $HARDCOUNT_KEY")
+    echo "$page" | jq -r '.data[] | select(.status == "failed") | .id' >> "$FAILED"
+    offset=$((offset + 100))
+    [ "$offset" -lt "$(echo "$page" | jq .total)" ] || break
+  done
+  while read -r DELIVERY_ID; do
+    curl -s -X POST \
+      "$HARDCOUNT/v1/webhook-endpoints/endpoints/$ENDPOINT_ID/deliveries/$DELIVERY_ID/replay" \
+      -H "Authorization: Bearer $HARDCOUNT_KEY"
+    echo
+  done < "$FAILED"
+  rm "$FAILED"
   ```
 
   **You see:** one line per resend, with the new `delivery_id` and the
   `event_id` of the resend. A paused endpoint (`active: false`) is refused
   with `409`: resume it first.
+
+  The script reads every page first, so the new deliveries it makes do not
+  shift the pages it reads. It resends every failed delivery, even one whose
+  event a later resend already delivered, and running it again resends them
+  all again. A receiver that skips handled ids ignores the repeats.
 
 - **Every endpoint that wants the event:**
   `POST /v1/webhook_events/{id}/replay`. It also reaches endpoints that
