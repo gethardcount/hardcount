@@ -35,7 +35,10 @@ const (
 // finalizes.
 //
 // A draft (tax pending, collection paused) is not collected: the claim
-// requires status=finalized, so the call is a no-op until it finalizes.
+// requires status=finalized, so the call is a no-op until it finalizes. Nor
+// is a finalized invoice whose subscription has collection paused, such as a
+// paused draft the operator finalized: the claim refuses it as the sweeps'
+// lists do, and it stays queued until collection resumes.
 //
 // Collection is not abortable by the caller's cancellation. Request-time
 // callers would otherwise abort the Stripe call at its most ambiguous moment

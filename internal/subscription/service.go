@@ -2764,8 +2764,9 @@ type PauseCollectionInput struct {
 // It does not stop collection on invoices finalized before the pause. A
 // dunning run already open on one keeps its retry schedule and charges the
 // customer's default card, as Stripe keeps retrying invoices created before a
-// pause unless they are voided. Only the charge sweeps (the queued auto-charge
-// and the charge when a card is added) skip a paused subscription. To stop an
+// pause unless they are voided. Only automatic collection (the collect after
+// a finalize, the queued auto-charge and the charge when a card is added)
+// skips a paused subscription. To stop an
 // open run, void the invoice or mark it uncollectible (ADR-036, amended
 // 2026-10-22).
 //
