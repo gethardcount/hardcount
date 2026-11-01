@@ -33,7 +33,7 @@ export type GrantCreditsBody = {
      * spaces are trimmed (fewer characters when it has
      * non-ASCII letters).
      */
-  description?: string;
+  description: string;
   /**
      * Optional expiry; must be in the future. Omitted = never
      * expires. The credit can be drawn up to and including this

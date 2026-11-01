@@ -2487,8 +2487,9 @@ export const getGetPublicPaymentUpdateUrl = (token: string,) => {
 
 /**
  * Public: no API key. The token from the link in a payment setup email
- * is the only credential. Hardcount sends that email when an invoice has
- * no payment method to charge, and again on each
+ * is the only credential. Hardcount queues that email when an invoice has
+ * no payment method to charge, the customer has an email address and
+ * `PAYMENT_UPDATE_URL` is set, and again on each
  * `POST /v1/invoices/{id}/resend-setup-link`. The link is the server's
  * `PAYMENT_UPDATE_URL` with `?token=` and the token. The token is valid
  * for 24 hours, and starting checkout uses it up. Share the page link
@@ -10828,11 +10829,12 @@ export const getFinalizeInvoiceUrl = (id: string,) => {
  *    customer when they have an email address. A declined charge sets
  *    `payment_status` to `failed`, sends `payment.failed`, and starts
  *    dunning when the customer's policy is enabled.
- * 3. With no card on file, the customer is emailed a link to add one
- *    when they have an email address, and `no_pm_notified_at` records
- *    it. This automatic email goes once;
- *    `POST /v1/invoices/{id}/resend-setup-link` sends it again.
- *    Dunning starts when the policy is enabled.
+ * 3. With no card on file, an email with a link to add one is queued
+ *    for the customer, once, when they have an email address and the
+ *    server's `PAYMENT_UPDATE_URL` is set; `no_pm_notified_at` records
+ *    it. It reaches the customer only when the server can send email
+ *    (SMTP is set up). `POST /v1/invoices/{id}/resend-setup-link` sends
+ *    it again. Dunning starts when the policy is enabled.
  * 4. When Stripe is not connected for the invoice's mode, the customer
  *    is emailed the invoice itself, card or not, when they have an
  *    email address and the server can send email. `invoice_emailed_at`

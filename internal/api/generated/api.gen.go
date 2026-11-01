@@ -6183,11 +6183,13 @@ type Invoice struct {
 	// NetPaymentTermDays Days from `issued_at` to `due_at`. 0 means due on receipt.
 	NetPaymentTermDays int `json:"net_payment_term_days"`
 
-	// NoPmNotifiedAt When Hardcount automatically emailed the customer a link to add a
-	// payment method for this invoice. The automatic email is sent
-	// once; `POST /v1/invoices/{id}/resend-setup-link` sends it again
-	// and does not change this time. Absent until the automatic email
-	// is sent.
+	// NoPmNotifiedAt When Hardcount automatically queued an email to the customer with
+	// a link to add a payment method for this invoice. It is queued
+	// once, when Stripe is connected, the customer has an email address
+	// and the server's `PAYMENT_UPDATE_URL` is set; it reaches the
+	// customer only when the server can send email.
+	// `POST /v1/invoices/{id}/resend-setup-link` sends it again and does
+	// not change this time. Absent until the automatic email is queued.
 	NoPmNotifiedAt time.Time `json:"no_pm_notified_at,omitempty"`
 
 	// PaidAt When the invoice was paid. Absent until it is paid.
@@ -7902,9 +7904,10 @@ type ProviderCostRateCurrency string
 
 // PublicPaymentUpdate What the payment-update page shows before the customer adds a
 // card: `GET /v1/public/payment-updates/{token}`. The page opens from
-// the link in a payment setup email. Hardcount sends one when an
-// invoice has no payment method to charge, and again on each
-// `POST /v1/invoices/{id}/resend-setup-link`.
+// the link in a payment setup email. Hardcount queues one when an
+// invoice has no payment method to charge, the customer has an email
+// address and the server's `PAYMENT_UPDATE_URL` is set, and again on
+// each `POST /v1/invoices/{id}/resend-setup-link`.
 type PublicPaymentUpdate struct {
 	// AmountDueCents What is due on the invoice, in the currency's minor unit (cents
 	// for USD). Not cleared when the invoice is voided: check
@@ -10543,7 +10546,7 @@ type GrantCreditsJSONBody struct {
 	// refused with 422. At most 500 bytes after surrounding
 	// spaces are trimmed (fewer characters when it has
 	// non-ASCII letters).
-	Description string `json:"description,omitempty"`
+	Description string `json:"description"`
 
 	// ExpiresAt Optional expiry; must be in the future. Omitted = never
 	// expires. The credit can be drawn up to and including this

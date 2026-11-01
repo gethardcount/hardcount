@@ -298,11 +298,13 @@ export interface Invoice {
      */
   auto_charge_pending?: boolean;
   /**
-     * When Hardcount automatically emailed the customer a link to add a
-     * payment method for this invoice. The automatic email is sent
-     * once; `POST /v1/invoices/{id}/resend-setup-link` sends it again
-     * and does not change this time. Absent until the automatic email
-     * is sent.
+     * When Hardcount automatically queued an email to the customer with
+     * a link to add a payment method for this invoice. It is queued
+     * once, when Stripe is connected, the customer has an email address
+     * and the server's `PAYMENT_UPDATE_URL` is set; it reaches the
+     * customer only when the server can send email.
+     * `POST /v1/invoices/{id}/resend-setup-link` sends it again and does
+     * not change this time. Absent until the automatic email is queued.
      */
   no_pm_notified_at?: string;
   /**

@@ -16,9 +16,10 @@ import type { PublicPaymentUpdateBranding } from './publicPaymentUpdateBranding'
 /**
  * What the payment-update page shows before the customer adds a
  * card: `GET /v1/public/payment-updates/{token}`. The page opens from
- * the link in a payment setup email. Hardcount sends one when an
- * invoice has no payment method to charge, and again on each
- * `POST /v1/invoices/{id}/resend-setup-link`.
+ * the link in a payment setup email. Hardcount queues one when an
+ * invoice has no payment method to charge, the customer has an email
+ * address and the server's `PAYMENT_UPDATE_URL` is set, and again on
+ * each `POST /v1/invoices/{id}/resend-setup-link`.
  */
 export interface PublicPaymentUpdate {
   /** The customer's display name. */

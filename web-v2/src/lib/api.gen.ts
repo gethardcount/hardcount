@@ -561,8 +561,9 @@ export interface paths {
         /**
          * Get what the payment-update page shows
          * @description Public: no API key. The token from the link in a payment setup email
-         *     is the only credential. Hardcount sends that email when an invoice has
-         *     no payment method to charge, and again on each
+         *     is the only credential. Hardcount queues that email when an invoice has
+         *     no payment method to charge, the customer has an email address and
+         *     `PAYMENT_UPDATE_URL` is set, and again on each
          *     `POST /v1/invoices/{id}/resend-setup-link`. The link is the server's
          *     `PAYMENT_UPDATE_URL` with `?token=` and the token. The token is valid
          *     for 24 hours, and starting checkout uses it up. Share the page link
@@ -2908,11 +2909,12 @@ export interface paths {
          *        customer when they have an email address. A declined charge sets
          *        `payment_status` to `failed`, sends `payment.failed`, and starts
          *        dunning when the customer's policy is enabled.
-         *     3. With no card on file, the customer is emailed a link to add one
-         *        when they have an email address, and `no_pm_notified_at` records
-         *        it. This automatic email goes once;
-         *        `POST /v1/invoices/{id}/resend-setup-link` sends it again.
-         *        Dunning starts when the policy is enabled.
+         *     3. With no card on file, an email with a link to add one is queued
+         *        for the customer, once, when they have an email address and the
+         *        server's `PAYMENT_UPDATE_URL` is set; `no_pm_notified_at` records
+         *        it. It reaches the customer only when the server can send email
+         *        (SMTP is set up). `POST /v1/invoices/{id}/resend-setup-link` sends
+         *        it again. Dunning starts when the policy is enabled.
          *     4. When Stripe is not connected for the invoice's mode, the customer
          *        is emailed the invoice itself, card or not, when they have an
          *        email address and the server can send email. `invoice_emailed_at`
@@ -6825,11 +6827,13 @@ export interface components {
             auto_charge_pending?: boolean;
             /**
              * Format: date-time
-             * @description When Hardcount automatically emailed the customer a link to add a
-             *     payment method for this invoice. The automatic email is sent
-             *     once; `POST /v1/invoices/{id}/resend-setup-link` sends it again
-             *     and does not change this time. Absent until the automatic email
-             *     is sent.
+             * @description When Hardcount automatically queued an email to the customer with
+             *     a link to add a payment method for this invoice. It is queued
+             *     once, when Stripe is connected, the customer has an email address
+             *     and the server's `PAYMENT_UPDATE_URL` is set; it reaches the
+             *     customer only when the server can send email.
+             *     `POST /v1/invoices/{id}/resend-setup-link` sends it again and does
+             *     not change this time. Absent until the automatic email is queued.
              */
             no_pm_notified_at?: string;
             /**
@@ -13294,9 +13298,10 @@ export interface components {
         /**
          * @description What the payment-update page shows before the customer adds a
          *     card: `GET /v1/public/payment-updates/{token}`. The page opens from
-         *     the link in a payment setup email. Hardcount sends one when an
-         *     invoice has no payment method to charge, and again on each
-         *     `POST /v1/invoices/{id}/resend-setup-link`.
+         *     the link in a payment setup email. Hardcount queues one when an
+         *     invoice has no payment method to charge, the customer has an email
+         *     address and the server's `PAYMENT_UPDATE_URL` is set, and again on
+         *     each `POST /v1/invoices/{id}/resend-setup-link`.
          * @example {
          *       "customer_name": "Acme Inc",
          *       "invoice_number": "HC-000001",
@@ -23441,7 +23446,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description `validation_error`: a malformed `dimensions` pair, a `from` or `to` that cannot be parsed, `to` before `from`, or a `limit` or `offset` out of range (param names the field). */
+            /** @description `validation_error`: a `from` or `to` that cannot be parsed, `to` before `from`, or a `limit` or `offset` out of range (`param` names the field); or a malformed `dimensions` pair (no `param`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -24363,7 +24368,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description `validation_error`: a malformed `dimensions` pair, an unknown `tz`, a `from` or `to` that cannot be parsed, or `to` before `from`. */
+            /** @description `validation_error`: a `from` or `to` that cannot be parsed, or `to` before `from` (`param` names the field); or a malformed `dimensions` pair or an unknown `tz` (no `param`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -28100,8 +28105,8 @@ export interface operations {
              *     route takes no body (`param` names the field). Or the invoice's
              *     prepaid commit line has an expiry that has already passed
              *     (`param` is `commit_expires_at`): the granted credit would expire
-             *     on arrival. Change the line's expiry, then finalize. Nothing
-             *     changed.
+             *     on arrival. A line cannot be edited: void the draft and create a
+             *     new invoice with a later `commit_expires_at`. Nothing changed.
              */
             422: {
                 headers: {
@@ -30077,7 +30082,7 @@ export interface operations {
                      *     spaces are trimmed (fewer characters when it has
                      *     non-ASCII letters).
                      */
-                    description?: string;
+                    description: string;
                     /**
                      * Format: date-time
                      * @description Optional expiry; must be in the future. Omitted = never
