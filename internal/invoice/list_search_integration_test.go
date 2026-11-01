@@ -5,6 +5,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
@@ -13,10 +14,14 @@ import (
 // TestList_SearchMatchesTheCustomer: the invoice list's search matches the
 // invoice number or the customer's name or email (C-15). It matched the
 // number only, so an operator looking for a customer's invoices found none.
-// Another tenant's customer with the same name never matches.
+// Another tenant's customer with the same name never matches. The customers
+// are matched by the customer store (Service.List with SetCustomerSearcher,
+// as the router wires it).
 func TestList_SearchMatchesTheCustomer(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	store := invoice.NewPostgresStore(db)
+	svc := invoice.NewService(store, nil, nil)
+	svc.SetCustomerSearcher(customer.NewPostgresStore(db))
 	ctx := postgres.WithLivemode(context.Background(), false)
 
 	const tenantID = "hc_ten_inv_search"
@@ -71,7 +76,7 @@ func TestList_SearchMatchesTheCustomer(t *testing.T) {
 		{"SRCH-", []string{"SRCH-0001", "SRCH-0002", "SRCH-0003"}},
 		{"initech", nil},
 	} {
-		list, total, err := store.List(ctx, invoice.ListFilter{TenantID: tenantID, Search: tc.search})
+		list, total, err := svc.List(ctx, invoice.ListFilter{TenantID: tenantID, Search: tc.search})
 		if err != nil {
 			t.Fatalf("search %q: %v", tc.search, err)
 		}
@@ -91,7 +96,7 @@ func TestList_SearchMatchesTheCustomer(t *testing.T) {
 	}
 
 	// The customer filter and the search narrow together.
-	list, _, err := store.List(ctx, invoice.ListFilter{TenantID: tenantID, CustomerID: "cus_srch_globex", Search: "acme"})
+	list, _, err := svc.List(ctx, invoice.ListFilter{TenantID: tenantID, CustomerID: "cus_srch_globex", Search: "acme"})
 	if err != nil {
 		t.Fatalf("customer + search: %v", err)
 	}

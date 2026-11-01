@@ -688,6 +688,47 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.C
 // path is a trigram-indexed search-token column, not a bigger cap.
 const searchScanCap = 5000
 
+// SearchIDsByNameOrEmail returns the ids of the customers whose name or email
+// contains q, case-insensitive, among the searchScanCap most recently created
+// customers of the caller's tenant and mode. It backs invoice search, which
+// cannot match these encrypted columns in SQL: the rows are decrypted here and
+// matched in Go, as listSearch does. A customer outside the scan window is not
+// found. An empty q finds none.
+func (s *PostgresStore) SearchIDsByNameOrEmail(ctx context.Context, tenantID, q string) ([]string, error) {
+	q = strings.ToLower(strings.TrimSpace(q))
+	if q == "" {
+		return nil, nil
+	}
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, display_name, COALESCE(email, '') FROM customers
+		ORDER BY created_at DESC, id DESC LIMIT $1`, searchScanCap)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []string
+	for rows.Next() {
+		var c domain.Customer
+		if err := rows.Scan(&c.ID, &c.DisplayName, &c.Email); err != nil {
+			return nil, err
+		}
+		if c, err = s.decryptCustomer(c); err != nil {
+			return nil, err
+		}
+		if strings.Contains(strings.ToLower(c.DisplayName), q) || strings.Contains(strings.ToLower(c.Email), q) {
+			ids = append(ids, c.ID)
+		}
+	}
+	return ids, rows.Err()
+}
+
 // listSearch is the Search != "" branch of List. It applies the
 // SQL-expressible filters (status, external_id, ids) and ORDER BY in
 // the database, streams up to searchScanCap rows, decrypts, and

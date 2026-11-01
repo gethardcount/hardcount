@@ -4621,14 +4621,19 @@ func buildInvWhere(f ListFilter) (string, []any) {
 		idx++
 	}
 	if f.Search != "" {
-		// The invoice number, or the customer's name or email: an operator
-		// looking for a customer's invoices types the customer, not a number
-		// (C-15). The customer row is read under the same tenant tx.
-		clauses = append(clauses, fmt.Sprintf(`(invoice_number ILIKE $%[1]d OR EXISTS (
-			SELECT 1 FROM customers c WHERE c.id = invoices.customer_id
-			  AND (c.display_name ILIKE $%[1]d OR c.email ILIKE $%[1]d)))`, idx))
-		args = append(args, "%"+postgres.EscapeLike(f.Search)+"%")
-		idx++
+		// The invoice number, or a customer whose name or email matched: an
+		// operator looking for a customer's invoices types the customer, not
+		// a number (C-15). The customers are matched before this query
+		// (Service.List, SearchCustomerIDs): their name and email are
+		// encrypted at rest, so an ILIKE here compared ciphertext. It found
+		// no name or email, and "enc:" matched every encrypted customer.
+		clauses = append(clauses, fmt.Sprintf(`(invoice_number ILIKE $%d OR customer_id = ANY($%d))`, idx, idx+1))
+		ids := f.SearchCustomerIDs
+		if ids == nil {
+			ids = []string{}
+		}
+		args = append(args, "%"+postgres.EscapeLike(f.Search)+"%", ids)
+		idx += 2
 	}
 	if !f.CreatedFrom.IsZero() {
 		clauses = append(clauses, fmt.Sprintf("created_at >= $%d", idx))

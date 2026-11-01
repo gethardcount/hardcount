@@ -277,10 +277,16 @@ type ListFilter struct {
 	SubscriptionID string
 	Status         string
 	PaymentStatus  string
-	// Search matches the invoice number or the customer's name or email,
-	// case-insensitive substring (ILIKE, metacharacters escaped). Empty =
-	// no filter. Backs the dashboard list search box and the command palette.
+	// Search matches the invoice number (case-insensitive substring, ILIKE,
+	// metacharacters escaped) or an invoice of a customer in
+	// SearchCustomerIDs. Empty = no filter. Backs the dashboard list search
+	// box and the command palette.
 	Search string
+	// SearchCustomerIDs are the customers whose name or email contains
+	// Search. Service.List fills it from the customer store, which matches
+	// after decrypting (both columns are encrypted at rest, so SQL cannot
+	// match them). Empty with a Search: the number alone matches.
+	SearchCustomerIDs []string
 	// CreatedFrom / CreatedTo bound created_at — inclusive on both
 	// ends, matching the shared api/timefilter contract (?from / ?to).
 	// Zero values = unbounded.

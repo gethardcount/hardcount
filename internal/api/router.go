@@ -993,6 +993,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// pause_collection lookup for the tax-retry auto-finalize gate: a paused
 	// subscription's draft stays a draft even once its tax resolves.
 	invoiceSvc.SetSubscriptionPauseReader(subStore)
+	// Invoice search by customer name or email: the customer store matches
+	// after decrypting, since both columns are encrypted at rest.
+	invoiceSvc.SetCustomerSearcher(customerStore)
 	// Prepaid-commit exposure for the attention classifier: credit already
 	// spendable against an invoice nobody paid (ADR-078 D3 fast-follow).
 	invoiceSvc.SetCommitGrantReader(creditStore)

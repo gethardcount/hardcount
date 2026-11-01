@@ -73,6 +73,9 @@ with `param` naming the parameter:
   than 10,000".
 - The customer list with `search`, or sorted by name or email, looks at
   5,000 customers at most. Its rows and its `total` stop there.
+- The invoice list's `search` matches a customer's name or email among the
+  5,000 customers created last. An invoice of an older customer is still
+  found by its invoice number.
 
 ## Lists that answer in one piece
 
