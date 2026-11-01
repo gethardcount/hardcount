@@ -33,8 +33,9 @@ const (
 	SubActionNone DunningSubscriptionAction = "none"
 	// SubActionPause calls subscription.PauseCollection
 	// (behavior=keep_as_draft): the cycle keeps drafting invoices, but
-	// nothing is charged and no dunning starts until an operator resumes.
-	// Matches Stripe's pause_collection — NOT the hard PauseAtomic, which
+    // nothing is charged and no dunning starts until an operator resumes
+   // collection or the invoice that caused the pause is paid.
+   // Matches Stripe's pause_collection — NOT the hard PauseAtomic, which
 	// silently skipped invoice generation and was replaced for parity.
 	SubActionPause DunningSubscriptionAction = "pause"
 	// SubActionCancel cancels the subscription outright.
