@@ -1460,7 +1460,7 @@ func (f *fakePlanReader) GetPlan(_ context.Context, _, planID string) (domain.Pl
 	if p, ok := f.plans[planID]; ok {
 		return p, nil
 	}
-	return domain.Plan{}, fmt.Errorf("no stub for plan %s", planID)
+	return domain.Plan{}, errs.ErrNotFound
 }
 
 // fakeSettings is a SettingsReader that returns a fixed timezone — used
