@@ -31,6 +31,42 @@ One month of AI usage for one customer, from the [demo](#quick-start) in test mo
 
 ---
 
+## Quick start
+
+Try Hardcount on your own computer. It runs in test mode, where no real money moves.
+
+You need git and Docker 24 or newer with the Compose plugin. On Windows, run it inside WSL.
+
+**1. Start Hardcount**
+
+```bash
+git clone --branch v0.9.2 https://github.com/gethardcount/hardcount.git
+cd hardcount/deploy/compose
+./quickstart.sh
+```
+
+**You see:** "Hardcount is running.", then your dashboard address, email, password and a test API key. The password is shown only once; the script also saves all four in `deploy/compose/quickstart-credentials.json`.
+
+Open `http://localhost:8080` and sign in. Hardcount opens in test mode, and it is empty.
+
+**2. Run the demo**
+
+```bash
+./quickstart.sh demo
+```
+
+The demo sets up AI token prices, creates a customer and sends token usage the way a LiteLLM proxy would. Then it moves the customer's test clock (a pretend clock for test customers) to the end of the month, and Hardcount makes the invoice, its PDF and the margin report shown above.
+
+**You see:** nine steps, each ending in a green ✓, then links to the invoice and the customer. Home still reads $0, because its totals leave out test-clock customers; use the links instead. [Each demo step, and where to click](docs/quick-start.md)
+
+**3. Stop or remove it**
+
+`./quickstart.sh stop` keeps your data. `./quickstart.sh destroy` deletes it, and cannot be undone. If port 8080 is taken, start with `HARDCOUNT_PORT=9000 ./quickstart.sh`.
+
+**Next:** [send your own usage and get a first invoice](docs/first-invoice.md) · [run it for real on one VM](docs/production-one-vm.md) · [change Hardcount itself](CONTRIBUTING.md#development-setup)
+
+---
+
 ## How it works
 
 ```mermaid
@@ -58,68 +94,32 @@ curl -X POST http://localhost:8080/v1/usage-events \
 
 ---
 
-## Quick start
-
-Try Hardcount on your own computer. It runs in test mode, where no real money moves.
-
-You need git and Docker 24 or newer with the Compose plugin. On Windows, run it inside WSL.
-
-**1. Start Hardcount**
-
-```bash
-git clone https://github.com/gethardcount/hardcount.git
-cd hardcount/deploy/compose
-./quickstart.sh
-```
-
-**You see:** "Hardcount is running.", then your dashboard address, email, password and a test API key. The password is shown only once; the script also saves all four in `deploy/compose/quickstart-credentials.json`.
-
-Open `http://localhost:8080` and sign in. Hardcount opens in test mode, where no real money moves, and it is empty.
-
-**2. Run the demo**
-
-```bash
-./quickstart.sh demo
-```
-
-The demo sets up AI token prices, creates a customer and sends token usage the way a LiteLLM proxy would. Then it moves the customer's test clock (a pretend clock for test customers) to the end of the month, and Hardcount makes the invoice, its PDF and the margin report shown above.
-
-**You see:** nine steps, each ending in a green ✓, then links to the invoice and the customer. Home still reads $0, because its totals leave out test-clock customers; use the links instead. [Each demo step, and where to click](docs/quick-start.md)
-
-**3. Stop or remove it**
-
-`./quickstart.sh stop` keeps your data. `./quickstart.sh destroy` deletes it, and cannot be undone. If port 8080 is taken, start with `HARDCOUNT_PORT=9000 ./quickstart.sh`.
-
-**Next:** [send your own usage and get a first invoice](docs/first-invoice.md) · [run it for real on one VM](docs/production-one-vm.md) · [change Hardcount itself](CONTRIBUTING.md#development-setup)
-
----
-
 ## Why Hardcount
 
 The gaps Hardcount is built for:
 
 | The gap | What Hardcount does |
 |---|---|
-| **Stripe Billing takes a cut:** 0.7% of billing volume on its pay-as-you-go plan, and its basic usage billing can't price each model and token type on one meter. | **No Stripe Billing fee.** Stripe only charges the card. One meter prices every model and token type. |
+| **Stripe Billing takes a cut:** 0.7% of billing volume on its pay-as-you-go plan, and its basic usage billing can't price each model and token type on one meter. | **No Stripe Billing fee.** Stripe still charges the card. One meter prices every model and token type. |
 | **Key parts sit behind a paid licence,** such as automatic failed-payment retries and invoice previews in Lago. | **One free edition.** MIT, with no paid edition. |
-| **Some are heavy to run,** with extra services such as Kafka and ClickHouse. | **Three parts:** the Hardcount server, Postgres and Redis. |
+| **Some are heavy to run:** Flexprice's default setup runs nine services, including Kafka and ClickHouse. | **One Go program, Postgres and Redis.** The ready-made Compose setup runs five small containers. |
 | **No way to fast-forward time** to test a billing change. | **Test clocks:** move a test customer forward a month and see the invoice before any real customer gets it. |
 | **A customer can cost you more than they pay,** because AI costs move with usage. | **Margin per customer and per model,** from the provider cost Hardcount records on each usage event as it arrives. OpenMeter and Flexprice report cost too. |
 
 Stripe still charges its normal card fee, and Stripe Tax's fee if you use it. Every claim above has a source in [Why Hardcount exists](docs/why-hardcount.md), and [How it compares](docs/comparison.md) lists where the other projects are ahead.
 
-**Pre-1.0.** Hardcount is young: one maintainer, Stripe and cards only, no SDKs yet, no production users yet. Until 1.0.0, a minor release can break the API, and a patch release can change something you rely on ([versioning before 1.0](docs/versioning.md)).
-
 ---
 
 ## Is Hardcount right for you?
+
+**Pre-1.0.** Hardcount is young: one maintainer, Stripe and cards only, no SDKs yet, no production users yet. Until 1.0.0, a minor release can break the API, and a patch release can change something you rely on ([versioning before 1.0](docs/versioning.md)).
 
 **A good fit if:**
 
 - **You charge by usage,** most of all an AI product that prices per token, by model and token type.
 - **You want billing on your own servers.** Usage and invoice records stay in your own Postgres. Stripe sees each charge, and the invoice lines too if you use Stripe Tax.
 - **You are a small or mid-size team.** One engineer can run it, on one server or several.
-- **Your volume is up to about a million usage events a day,** roughly 400,000 AI requests, however many tokens each one uses. In a 20-minute test on v0.8.0, a server listed at €6.49 a month before VAT (2 shared CPUs, 4 GB memory) took 12 events a second with no errors, about 1 million a day at that rate. Hardcount keeps every raw event, so plan 15 to 18 GB of database disk per month at that volume. [How we measured](docs/scale.md)
+- **Your volume is up to about a million usage events a day.** A €6.49-a-month server took that rate for 20 minutes with no errors (measured on v0.8.0). Plan 15 to 18 GB of database disk a month at that volume. [How we measured](docs/scale.md)
 
 **Not a fit if you need:**
 
@@ -134,11 +134,11 @@ Stripe still charges its normal card fee, and Stripe Tax's fee if you use it. Ev
 ## What's inside
 
 - **Pricing:** per-unit, graduated and package prices; rates per model and token type on one meter; a base fee plus usage on one invoice; prepaid credit that later usage draws down. [AI pricing](docs/ai-pricing.md)
-- **Billing you can trust:** Hardcount never bills the same period twice, because the database refuses a second invoice for it. Every usage line on an invoice links to the events behind it. [How Hardcount is engineered](docs/ENGINEERING.md)
-- **Getting paid:** cards through Stripe, with automatic retries and emails when a payment fails. Customers can also pay another way, such as a bank transfer, and you mark the invoice paid. [Card payment failure handling](docs/payments.md)
+- **Billing you can trust:** Hardcount never bills the same period twice, because the database refuses a second invoice for it. Every usage line on an invoice links to the events behind it. [How Hardcount keeps a bill right](docs/ENGINEERING.md)
+- **Getting paid:** cards through Stripe, with automatic retries and emails when a payment fails. Customers can also pay another way, such as a bank transfer, and you mark the invoice paid. [Payment failure handling](docs/payments.md)
 - **Running it:** one Go program with its background jobs inside, Postgres and Redis. No telemetry and no licence check. [Self-host](docs/self-host.md)
 
-Every feature: [What's in the box](docs/features.md).
+Every feature: [What Hardcount does](docs/features.md).
 
 ---
 

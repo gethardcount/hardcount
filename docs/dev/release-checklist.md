@@ -97,6 +97,7 @@ One pull request, merged before the tag, names the new release everywhere a read
 
 - `deploy/compose/quickstart.sh` (`HARDCOUNT_VERSION`) and `deploy/compose/.env.example` (both image lines);
 - `docs/quick-start.md` (step 1 and `--branch`) and `docs/first-invoice.md` (the version and its link);
+- `README.md` (the quick start's `--branch`);
 - `docs/production-one-vm.md`, `deploy/compose/README.md`, `docs/ops/high-availability.md` and `docs/versioning.md`;
 - `docs/upgrades.md`: the upgrade example moves to the new release, and the going-back example to the previous one.
 
