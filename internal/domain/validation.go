@@ -4,14 +4,16 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gethardcount/hardcount/internal/errs"
 )
 
-// MaxLen validates a field doesn't exceed max length. Returns an errs.Invalid
-// so callers can surface the message on the named field.
+// MaxLen validates a field doesn't exceed max length in Unicode characters
+// (runes), matching JSON Schema maxLength. Returns an errs.Invalid so callers
+// can surface the message on the named field.
 func MaxLen(field, value string, max int) error {
-	if len(value) > max {
+	if utf8.RuneCountInString(value) > max {
 		return errs.Invalid(field, "must be at most "+strconv.Itoa(max)+" characters")
 	}
 	return nil

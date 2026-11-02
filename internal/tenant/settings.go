@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -641,7 +642,7 @@ func validateSettings(ts *domain.TenantSettings) error {
 	if ts.NetPaymentTerms > 365 {
 		return errs.Invalid("net_payment_terms", "cannot exceed 365 days")
 	}
-	if len(ts.CompanyName) > 255 {
+	if utf8.RuneCountInString(ts.CompanyName) > 255 {
 		return errs.Invalid("company_name", "must be at most 255 characters")
 	}
 	// company_name flows into the From: display name of every outbound email.
@@ -652,30 +653,30 @@ func validateSettings(ts *domain.TenantSettings) error {
 	if strings.ContainsFunc(ts.CompanyName, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
 		return errs.Invalid("company_name", "must not contain control characters or line breaks")
 	}
-	if len(ts.CompanyAddressLine1) > 200 {
+	if utf8.RuneCountInString(ts.CompanyAddressLine1) > 200 {
 		return errs.Invalid("company_address_line1", "must be at most 200 characters")
 	}
-	if len(ts.CompanyAddressLine2) > 200 {
+	if utf8.RuneCountInString(ts.CompanyAddressLine2) > 200 {
 		return errs.Invalid("company_address_line2", "must be at most 200 characters")
 	}
-	if len(ts.CompanyCity) > 100 {
+	if utf8.RuneCountInString(ts.CompanyCity) > 100 {
 		return errs.Invalid("company_city", "must be at most 100 characters")
 	}
-	if len(ts.CompanyState) > 100 {
+	if utf8.RuneCountInString(ts.CompanyState) > 100 {
 		return errs.Invalid("company_state", "must be at most 100 characters")
 	}
-	if len(ts.CompanyPostalCode) > 20 {
+	if utf8.RuneCountInString(ts.CompanyPostalCode) > 20 {
 		return errs.Invalid("company_postal_code", "must be at most 20 characters")
 	}
 	ts.CompanyCountry = strings.ToUpper(strings.TrimSpace(ts.CompanyCountry))
 	if ts.CompanyCountry != "" && !iso3166Alpha2.MatchString(ts.CompanyCountry) {
 		return errs.Invalid("company_country", "must be an ISO-3166 alpha-2 country code (e.g. 'IN', 'US')")
 	}
-	if len(ts.TaxID) > 50 {
+	if utf8.RuneCountInString(ts.TaxID) > 50 {
 		return errs.Invalid("tax_id", "must be at most 50 characters")
 	}
 	if url := strings.TrimSpace(ts.SupportURL); url != "" {
-		if len(url) > 500 {
+		if utf8.RuneCountInString(url) > 500 {
 			return errs.Invalid("support_url", "must be at most 500 characters")
 		}
 		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
@@ -686,7 +687,7 @@ func validateSettings(ts *domain.TenantSettings) error {
 	if ts.BrandColor != "" && !brandColorPattern.MatchString(ts.BrandColor) {
 		return errs.Invalid("brand_color", "must be a 7-character hex like #1f6feb")
 	}
-	if len(ts.InvoiceFooter) > 1000 {
+	if utf8.RuneCountInString(ts.InvoiceFooter) > 1000 {
 		return errs.Invalid("invoice_footer", "must be at most 1000 characters")
 	}
 	if ts.TaxProvider == "" {
