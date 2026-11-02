@@ -19,6 +19,10 @@ original text.
 
 ## [Unreleased]
 
+### Changed
+
+- **The user docs read more clearly.** About 170 places across the concept pages, guides, API pages, self-host pages, runbooks and the API reference's descriptions: dense sentences split, terms defined where they are first used, and one name for each thing (the reconciler, the charge hold, a lost result, a spend threshold, a usage-only key, an account). Facts are unchanged. ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM))
+
 ## [0.9.2] - 2026-11-02
 
 Money and integrator fixes before the public launch. Finalizing a paused subscription's draft no longer charges the card, Stripe Tax prices every base fee by its plan's tax code, a line can no longer be added to a subscription's draft and go out untaxed, and LiteLLM usage is no longer lost to its batch size or log format. The API reference now describes every field with real examples, and new concept pages and guides cover what an integrator needs.

@@ -14,7 +14,7 @@
 
 export type GetCreditGrantsParams = {
 /**
- * `true` also lists the blocks with nothing left (used up,
+ * `true` also lists the grants with nothing left (used up,
  * expired, retired or deducted). Any other value leaves them out.
  */
 include_exhausted?: boolean;

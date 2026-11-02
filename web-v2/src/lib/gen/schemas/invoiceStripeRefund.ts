@@ -60,16 +60,17 @@ export interface InvoiceStripeRefund {
      * voided invoice), so no credit note. `needs_review`: a refund of
      * the invoice's own payment that Hardcount did not record
      * (`review_reason` says why); the invoice shows the
-     * `refunded_in_stripe` notice until the operator records it with a
-     * credit note or dismisses it. `not_refunded`: first seen already
-     * failed or canceled, so no money moved. `dismissed`: the operator
-     * handled it outside Hardcount.
+     * `refunded_in_stripe` notice until a dashboard user or an API key
+     * records it with a credit note or dismisses it. `not_refunded`:
+     * first seen already failed or canceled, so no money moved.
+     * `dismissed`: a dashboard user or an API key marked it as handled
+     * outside Hardcount.
      */
   outcome: InvoiceStripeRefundOutcome;
   /**
      * Why a refund of the invoice's own payment was flagged instead of
      * recorded. Set for `needs_review` and `dismissed`, and kept when
-     * the operator records one with a credit note.
+     * a dashboard user or an API key records one with a credit note.
      */
   review_reason?: InvoiceStripeRefundReviewReason;
   /** The credit note that records the refund, when `outcome` is `credit_note`. */

@@ -11,8 +11,9 @@ One of these:
 - An invoice shows the notice "Below Stripe's minimum charge".
 - The log line `Stripe refused to charge this invoice because the amount is
   below its minimum charge`.
-- A payment recovery run on the Dunning page ended with "Below Stripe's
-  minimum charge".
+- A dunning run on the Dunning page ended with "Below Stripe's minimum
+  charge". A dunning run is Hardcount's retries of a failed payment for one
+  invoice, with emails to the customer.
 - A customer says the hosted invoice page has no Pay button and reads "This
   amount is below the minimum for a card payment".
 
@@ -22,16 +23,17 @@ One of these:
   and creates no payment, so nothing is charged. The minimum depends on the
   currency, and for a charge that Stripe converts, on your Stripe account's
   settlement currency ([Stripe's list](https://docs.stripe.com/currencies#minimum-and-maximum-charge-amounts)).
-  A light usage month, a trial tail or a proration can come out below it.
+  A light usage month, a trial tail or a proration (a charge for only part
+  of a period) can come out below it.
 - **Hardcount does not treat it as a failed payment.** The invoice stays
   finalized with `payment_status` `pending`. Hardcount does not charge it again
-  automatically, starts no payment recovery, and does not email the
-  customer about it. A payment recovery already running on the invoice ends
+  automatically, starts no dunning run, and does not email the
+  customer about it. A dunning run already running on the invoice ends
   with resolution `amount_below_minimum`, at once or at its next scheduled
   step, so its policy's final action (a pause, a cancel or a write-off, if
   the policy has one) does not run.
-- **Hardcount learns the minimum from Stripe's answer**, so the invoice is first
-  charged once. For a customer with no card on file, Hardcount learns it when
+- **Hardcount learns the minimum from Stripe's answer**, so it always tries
+  to charge the invoice once first. For a customer with no card on file, Hardcount learns it when
   the customer clicks Pay on the hosted page, or when a card is saved and
   charged. Until then the invoice is handled like any card-less invoice
   (payment-method reminders, then the policy's final action).
@@ -54,7 +56,7 @@ curl -s "$API/v1/invoices/$INVOICE_ID" -H "Authorization: Bearer $KEY"
 sentence, which names the minimum, in `invoice.attention.provider_response`
 and `invoice.last_payment_error`.
 
-To list every such invoice of every tenant (in `psql`):
+To list every such invoice of every account (in `psql`):
 
 ```sql
 SET app.bypass_rls = 'on';
@@ -76,7 +78,8 @@ Choose one for each invoice:
 
 - **Record a payment** the customer made another way: **Record offline
   payment** in the invoice's ⋯ menu, or `POST /v1/invoices/{id}/record-payment`.
-- **Bill it with something else.** A cycle invoice is created finalized,
+- **Bill it with something else.** A cycle invoice is the one the billing
+  run builds when a period ends. It is created finalized,
   and only a draft takes new lines, so this amount cannot be added to the
   customer's next cycle invoice. When you next bill this customer by hand,
   put it on that manual invoice instead: create it with

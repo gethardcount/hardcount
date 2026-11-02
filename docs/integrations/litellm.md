@@ -146,8 +146,9 @@ number of them), or `{"events": [...]}`.
 A send over the size limit is refused, and LiteLLM never sends a refused
 send again, so every call in it is lost.
 
-The limit is 32 MB (33,554,432 bytes) on this route, also through the nginx
-of the Compose stack and the quick start. Over it, Hardcount answers
+The limit is 32 MB (33,554,432 bytes) on this route, also when the request
+passes through the nginx proxy of the Docker Compose setup and the quick
+start. Over it, Hardcount answers
 `413 batch_too_large` and saves nothing. That nginx stops bodies over
 33 MB itself, with its own 413 page, before Hardcount sees them. If you put your own proxy in front
 of Hardcount, give this route a limit above 32 MB (in nginx,
@@ -359,7 +360,7 @@ times for the 5-minute lifetime and 2 times for the 1-hour one. LiteLLM
 and Hardcount bills each lifetime as its own `token_type`. The
 `anthropic_style` recipe prices both. If you set your own prices, add a
 `cache_write_5m` and a `cache_write_1h` price for each model, or those
-tokens are billed at $0 and show as unmatched usage.
+tokens are billed at $0 and show as usage with no price.
 
 If a record has cache writes but no usable split, Hardcount bills them as
 `input`, below what the provider charges, and counts the call in
@@ -370,10 +371,11 @@ LiteLLM's own cost figures. A call with 1-hour writes takes its input and
 write costs from your [provider cost rates](../ai-pricing.md#see-your-margin) instead:
 LiteLLM 1.83.9's figures do not price the 1-hour writes correctly.
 
-A call sent again that Hardcount first saved before this split (as one `input`
-event with the writes inside) is saved the old way again, and a cache-write
-row of it that Hardcount was holding is not billed when released, so its writes
-are not billed twice.
+Hardcount builds from before this split saved a call's cache writes inside
+one `input` event. If LiteLLM sends again a call that such a build saved
+that way, Hardcount saves it the old way again. A cache-write row of that
+call that Hardcount was holding is then not billed when you release it. So
+its writes are not billed twice.
 
 A streamed Claude call (Claude Code streams) usually arrives without the
 split: LiteLLM 1.83.9 keeps only the usage of the last streamed event,
@@ -495,13 +497,20 @@ Hardcount customer yet, both of its events are held:
 | `outside_subscription` | Of `accepted`, events whose time no subscription of the customer bills. For example, there is none yet, or the call was before the day it started, in a free trial, or after it ended or its scheduled cancel. |
 | `errors` | Rows Hardcount refused and did not keep: a call with no `user` or no `id`, or a record that is not valid. |
 
-These four counts are what Hardcount found when each event arrived. An event
-in none of them is not promised to be billed. Hardcount does not check time
-after a period end whose invoice is not built yet, nor time after a
-trial's end before Hardcount ends the trial. A later change, such as a new
-subscription or an added price, can change the outcome either way. A
-delivery reads the customer's subscriptions once, so a subscription change
-saved during it can make a count wrong. The invoice is the final answer
+The four counts `after_close`, `no_price`, `not_on_plan` and
+`outside_subscription` say what Hardcount found when each event arrived.
+They are not a promise:
+
+- An event in none of them is not promised to be billed.
+- Hardcount does not check two stretches of time: after a period's end,
+  while its invoice is not built yet; and after a trial's end, before
+  Hardcount has ended the trial.
+- A later change, such as a new subscription or an added price, can change
+  the outcome either way.
+- One delivery reads the customer's subscriptions once. A subscription
+  change saved during that delivery can make a count wrong.
+
+The invoice is the final answer
 ([what Hardcount found when the event arrived](../api-surface.md#what-hardcount-found-when-the-event-arrived)).
 
 A refused row does not fail the batch. LiteLLM sees a 200 and treats the
@@ -564,8 +573,8 @@ exist, Hardcount holds the call's events instead of billing them:
   not billed.
 
 **What a release counts.** A released event counts toward the billing
-period its time falls in, the same rule as any late usage (see
-[ADR-120](../adr/120-invoice-grace-period-for-late-usage.md)). The release
+period its time falls in, the same rule as any late usage
+([the decision](../adr/120-invoice-grace-period-for-late-usage.md)). The release
 answer counts what Hardcount found for each event when it wrote it, the same
 way as the counts above:
 
@@ -625,9 +634,9 @@ of them.
 - **The `tokens` meter must exist.** Without it, each event is held, the
   same as for an unknown `user`, until you create the meter and release
   it.
-- **One Hardcount account for each API key.** Each key belongs to one tenant
-  (one separate billing account in Hardcount). A LiteLLM proxy that serves
-  several tenants must send each tenant's usage with that tenant's key. A
-  field in the call's metadata cannot choose the tenant.
+- **One Hardcount account for each API key.** Each key belongs to one
+  account, a separate set of customers, data and keys. A LiteLLM proxy that
+  serves several accounts must send each account's usage with that
+  account's key. A field in the call's metadata cannot choose the account.
 
 **Next:** [see your margin per customer](../ai-pricing.md#see-your-margin).

@@ -67,7 +67,7 @@ with `param` naming the parameter:
 }
 ```
 
-## Lists that stop counting
+## Lists that stop at a limit
 
 - The audit log's `total` stops at 10,001. A value above 10,000 means "more
   than 10,000".

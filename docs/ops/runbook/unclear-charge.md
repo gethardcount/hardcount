@@ -16,7 +16,8 @@ follow its Check, Fix and Verify. Back to the [runbook index](index.md).
 | `stale charge check: can't confirm an earlier charge with Stripe` in the logs, or `hardcount_stale_charge_hold_resolutions_total{result="cannot_ask"}` rising | [Interrupted: Hardcount cannot ask Stripe](#interrupted-hardcount-cannot-ask-stripe) |
 | `hardcount_creditnote_pending_issue_drafts` growing over days | [Clawback drafts waiting](#clawback-drafts-waiting) |
 
-Hardcount normally ends a park within a day: with no payment at Stripe 24 hours
+A parked invoice is one whose charge got an unclear answer that named no
+payment. It normally ends within a day: with no payment at Stripe 24 hours
 after the attempt, the invoice is charged again as usual.
 
 ## Unconfirmed, with a PaymentIntent
@@ -28,8 +29,9 @@ hours. Their `payment_status` is `unknown`, and they have a
 **Why:**
 
 - Stripe's webhook was delayed or lost.
-- The reconciler is not running. The reconciler re-checks payment status
-  with Stripe on each scheduler tick. See
+- The reconciler is not running. The reconciler is the check that asks
+  Stripe what happened to a charge whose result Hardcount did not save. It
+  re-checks payment status with Stripe on each scheduler tick. See
   [A background job is stuck](background-job-stuck.md).
 - The Stripe PaymentIntent (PI) is still not final at Stripe (for example
   `requires_action`). The reconciler settles only final outcomes, so it
@@ -69,9 +71,10 @@ no longer shows `payment_unconfirmed`.
 
 **Symptom:** an invoice's `payment_status` is `processing`, and after 6 hours
 its notice reads "Stripe still hasn't confirmed this payment after 6 hours,
-so check it in Stripe." When a dunning retry made the payment, its activity
-shows "Payment retry N is processing", and its dunning run stays under
-Active on the Dunning page with no new retry.
+so check it in Stripe." Dunning is Hardcount's retrying of a failed card
+payment, and a dunning run is the retries for one invoice. When a dunning
+retry made the payment, its activity shows "Payment retry N is processing",
+and its dunning run stays under Active on the Dunning page with no new retry.
 
 **Why:** Stripe has the payment and has not finished it. Card payments end
 within seconds; a payment method that settles later, such as a bank debit,
@@ -120,9 +123,12 @@ A parked invoice is one whose last charge got an unclear answer from Stripe
 that named no payment. So Hardcount cannot yet tell whether the customer paid.
 
 **Symptom:** `hardcount_parked_invoices{disposition="open"}` above 0. The gauge
-counts only parks Hardcount has not ended on schedule. Parks less than 26 hours
-past their hold are not counted: Hardcount normally ends them by about 25 hours.
-A park with no hold is always counted.
+counts only parked invoices that Hardcount has not finished on schedule. A
+parked invoice normally keeps its charge hold: the claim on the invoice that
+lets only one charge run at a time (`auto_charge_claimed_until`). The gauge
+leaves out a parked invoice until 26 hours past its charge hold, because
+Hardcount normally finishes one by about 25 hours. A parked invoice with no
+charge hold is always counted.
 
 **Why:**
 
@@ -137,21 +143,21 @@ A park with no hold is always counted.
   back to `pending` (`failed` after a dunning retry) and is charged again as
   usual. Stripe can still create a payment that long after a 5xx, while it
   recovers from an incident, so Hardcount waits that long before charging again.
-- So a counted park is one the check could not finish. Either Hardcount cannot
-  ask Stripe about it (see [Interrupted](#interrupted-hardcount-cannot-ask-stripe)),
-  or Stripe could not be read on any check for a day. Or the park has no
-  hold, so nothing checks it; Check step 3 gives it one.
+- So a counted parked invoice is one the reconciler could not finish. Either
+  Hardcount cannot ask Stripe about it (see [Interrupted](#interrupted-hardcount-cannot-ask-stripe)),
+  or Stripe could not be read on any run for a day. Or the invoice has no
+  charge hold, so nothing checks it; Check step 3 gives it one.
 
-**Check:**
+**Check:** steps 1 and 3 also fix what they find.
 
 1. Fix the Stripe connection if it is broken. The next tick finishes the
-   park on its own.
+   parked invoice on its own.
 2. Find the attempt in the Stripe dashboard by customer, amount and
    approximate time.
-3. Check that the invoice has a hold:
+3. Check that the invoice has a charge hold:
    `SELECT auto_charge_claimed_until FROM invoices WHERE id = '<invoice id>';`
    With none, give it one dated a day back, and the next tick finishes the
-   park:
+   parked invoice:
 
    ```sql
    BEGIN;
@@ -164,17 +170,18 @@ A park with no hold is always counted.
 
 **Fix:**
 
-1. If the charge succeeded and the park does not end (the customer is
+1. If the charge succeeded and the invoice stays parked (the customer is
    deleted in Stripe, so Hardcount cannot ask), send its
    `payment_intent.succeeded` event again from the Stripe dashboard to the
    Hardcount webhook endpoint. The webhook marks the invoice paid, a written-off
    one too.
-2. If nothing was charged and the park does not end, or the customer paid
+2. If nothing was charged and the invoice stays parked, or the customer paid
    another way, mark the invoice uncollectible. It is the one action the
-   invoice page allows on a parked invoice. In the park's first few minutes,
-   while the charge's claim is still live, it is refused ("being confirmed
-   with Stripe"); try again a few minutes later. It closes its dunning run. A
-   credit note draft held on the invoice still waits until the park ends.
+   invoice page allows on a parked invoice. In the first few minutes after
+   the invoice is parked, while the charge hold is still set, it is refused
+   ("being confirmed with Stripe"); try again a few minutes later. It closes
+   its dunning run. A credit note draft held on the invoice still waits until
+   the invoice is no longer parked.
 3. A write-off closes the invoice's dunning run without the policy's final
    action (cancel or pause the subscription). Check whether that action was
    due:
@@ -196,9 +203,10 @@ uncollectible before the 24 hours end, or Hardcount charges the card again.
 
 ## Interrupted: Hardcount cannot ask Stripe
 
-A charge is interrupted when Hardcount sent it to Stripe but did not save the
-answer (a crash, a shutdown, a closed **Collect payment**, or a 429 on a
-resend). Hardcount holds the invoice and asks Stripe before charging again
+A charge is interrupted, and its result is lost, when Hardcount sent it to
+Stripe but did not save the answer (a crash, a shutdown, a closed **Collect
+payment**, or a 429 on a resend). Hardcount keeps the invoice's charge hold
+and asks Stripe before charging again
 ([ADR-127](../../adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
 This section is for when it cannot ask.
 
@@ -212,22 +220,22 @@ This section is for when it cannot ask.
   Stripe." Dunning does not retry it, and its final action waits.
 
 A steady `hardcount_stale_charge_hold_resolutions_total{result="failed"}` is
-Stripe being unreachable; the check retries and needs nothing from you
-unless it lasts. When three checks in a row get no answer from Stripe, the
-check stops until the next hour and logs `stale charge check: Stripe could
+Stripe being unreachable; the reconciler retries and needs nothing from you
+unless it lasts. When three of its checks in a row get no answer from Stripe,
+the reconciler stops until the next hour and logs `stale charge check: Stripe could
 not be reached several times in a row`.
 
 **Why:** the reconciler lists the customer's payments in Stripe to learn
-what the interrupted charge did. It cannot when:
+what the charge with the lost result did. It cannot when:
 
-- the tenant disconnected Stripe for this mode (live or test);
-- Stripe rejects the tenant's key (revoked or rotated), or the key is a
+- the account disconnected Stripe for this mode (live or test);
+- Stripe rejects the account's key (revoked or rotated), or the key is a
   restricted key without permission to read PaymentIntents;
 - the Stripe customer is not in this Stripe account (deleted there, or
   created under other credentials).
 
-Until it can ask, Hardcount will not charge the invoice again: the interrupted
-charge may have taken the money.
+Until it can ask, Hardcount will not charge the invoice again: the charge
+with the lost result may have taken the money.
 
 **Check:**
 
@@ -248,22 +256,23 @@ look for a payment whose metadata `hardcount_invoice_id` is the invoice's id.
 **Fix:**
 
 1. **Stripe disconnected or key rejected:** reconnect Stripe or replace the
-   key under Settings → Payments. The next hourly check then finishes on
-   its own.
+   key under Settings → Payments. The reconciler's next hourly run then
+   finishes on its own.
 2. **The customer is gone from Stripe, or Stripe will not be reconnected:**
-   on an open invoice the check never clears, and offline payment is refused
-   while it waits. In this order:
+   on an open invoice the reconciler never clears the charge hold, and
+   offline payment is refused while it waits. In this order:
    1. **Mark uncollectible** (write-off). It moves no money and is allowed
-      while the check waits.
-   2. Wait for the next check. It clears the claim on the written-off
-      invoice, with one more ERROR. A parked invoice keeps its claim, with
-      an ERROR every check, until Stripe can be asked: see
-      [Parked](#parked-no-paymentintent).
+      while the reconciler waits.
+   2. Wait for the reconciler's next run. It clears the charge hold on the
+      written-off invoice, with one more ERROR. A parked invoice keeps its
+      charge hold, with an ERROR on every run, until Stripe can be asked:
+      see [Parked](#parked-no-paymentintent).
    3. If Stripe shows a payment for this invoice, record it with **Record
       payment**. That moves the invoice from uncollectible to paid.
 
-Do not clear `auto_charge_claimed_until` by hand: that is what lets the next
-charge go out, and the interrupted one may have succeeded.
+Do not clear `auto_charge_claimed_until` (the charge hold) by hand: clearing
+it lets the next charge go out, and the charge with the lost result may have
+succeeded.
 
 **Verify:**
 
@@ -281,9 +290,9 @@ a draft whose source payment is still unclear waits for it.
 
 **Check and fix:** is `hardcount_parked_invoices{disposition="open"}` above
 zero? If so, follow [Parked](#parked-no-paymentintent); each draft is
-released when its park ends. Otherwise the drafts are waiting on source
-payments still in flight, including parks inside their 24 hours, and need
-no action.
+released when its invoice is no longer parked. Otherwise the drafts are
+waiting on source payments still in flight, including parked invoices inside
+their 24 hours, and need no action.
 
 **Verify:** the drafts drain on the next reconciler pass.
 

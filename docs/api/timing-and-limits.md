@@ -24,16 +24,19 @@ invoice at once. So does an immediate cancel, or `retry-billing`.
 
 ## When billing or a payment fails
 
+A parked subscription is one Hardcount sets aside after eight failed billing
+attempts, until someone retries it. Dunning is Hardcount retrying a failed
+payment on a schedule, and emailing the customer.
+
 | What | Value |
 |---|---|
 | Waits after a failed billing attempt for a subscription | 15 minutes, 1 hour, 4 hours, 12 hours, then 24 hours |
-| Failed billing attempts before the subscription is set aside | 8. `POST /v1/subscriptions/{id}/retry-billing` brings it back. |
+| Failed billing attempts before the subscription is parked | 8. `POST /v1/subscriptions/{id}/retry-billing` brings it back. |
 | Payment retries of a new account's default dunning policy | On day 3, 7 and 14 after the failed payment. A policy takes 1 to 15 retries, each 1 to 30 days after the one before. |
 | A card charge whose answer from Stripe was unclear | Hardcount checks Stripe's list of the customer's payments on each billing run. If no payment shows up 24 hours after the attempt, the invoice is charged again. |
 
-Dunning is Hardcount retrying a failed payment on a schedule, and emailing
-the customer. Waits are counted in billing runs, so each one ends at the
-first run after it.
+Hardcount acts on these waits only during a billing run. So each wait ends
+at the first billing run after its time is up.
 
 ## Requests
 
@@ -45,7 +48,7 @@ first run after it.
 | Events in one `POST /v1/usage-events/batch` | 1,000 |
 | Rows in one list page | 100; 50 when `limit` is not sent ([pagination](pagination.md)) |
 | Time limit of a request | 30 seconds, then `504` `timeout` ([errors](errors.md#504-gateway-timeout)) |
-| Time the server keeps writing an answer | 35 seconds after the request arrives. A CSV export (`/v1/exports/…`) has a 5-minute time limit, and 5 minutes and 5 seconds to write. |
+| Time the server has to send an answer | Until 35 seconds after the request arrives. A CSV export (`/v1/exports/…`) has a 5-minute time limit, and 5 minutes and 5 seconds to write. |
 | Requests a minute or a second | See [Rate limits](rate-limits.md) |
 
 ## Keys and fields
@@ -70,7 +73,7 @@ first run after it.
 | Time your endpoint has to answer | 10 seconds. Only a `2xx` counts as delivered. |
 | Waits between delivery attempts | 1 minute, 5 minutes, 30 minutes, 2 hours, 24 hours, each plus up to 30 seconds |
 | Delivery attempts | 6, over about 26 hours 36 minutes. Then the delivery is marked failed. |
-| Tries to queue an event for delivery | 15, over about 52 hours |
+| Tries to turn a queued event into deliveries | 15, over about 52 hours |
 | Both secrets sign each message after a secret rotation | 72 hours |
 
 More: [Retries](../webhooks.md#retries).

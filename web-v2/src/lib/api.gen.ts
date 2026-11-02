@@ -708,7 +708,9 @@ export interface paths {
          *       true. Issuing applies it (see `POST /v1/credit-notes/{id}/issue`).
          *
          *     Commit relief, for paid invoices that bought prepaid credit only.
-         *     Send `commit_relief` and no `lines`. Hardcount retires that many
+         *     Commit relief takes back unused credit from a prepaid commit (credit
+         *     the customer paid for up front) and gives back its cash. Send
+         *     `commit_relief` and no `lines`. Hardcount retires that many
          *     credits from the commit and works out the cash to give back at the
          *     price the customer paid per credit, so a discounted commit is
          *     refunded at the discounted rate, never at face value. The note is
@@ -736,16 +738,18 @@ export interface paths {
         };
         /**
          * List a customer's credit grants
-         * @description The customer's credit blocks with drawdown state — granted /
-         *     drawn / remaining per grant, expiry, and remaining per currency
-         *     split by cost-basis class (commit = money-backed, promotional =
-         *     free, other = legacy/adjustments). include_exhausted=true adds
-         *     fully-drawn blocks for history. Each grant's `consumed_cents`
+         * @description The customer's credit grants. For each grant: how much was
+         *     granted, how much is drawn, how much is left, and when it expires.
+         *     The answer also gives what is left in each currency, split by kind:
+         *     `commit` (credit the customer paid for), `promotional` (free
+         *     credit) and `other` (older entries and adjustments). Send
+         *     `include_exhausted=true` to also list grants with nothing left, for
+         *     history. Each grant's `consumed_cents`
          *     also counts credit no invoice used: `expired_cents`, the part that
          *     expired unused; `retired_cents`, commit credit taken back when the
          *     invoice that funded it was voided or refunded by a credit note; and
-         *     `deducted_cents`, the part an operator deduction (a negative
-         *     adjustment) drew from this grant. The credit invoices actually used
+         *     `deducted_cents`, the part a deduction (a negative adjustment by a
+         *     dashboard user or an API key) drew from this grant. The credit invoices actually used
          *     is `consumed_cents - expired_cents - retired_cents - deducted_cents`.
          */
         get: operations["getCreditGrants"];
@@ -1111,9 +1115,9 @@ export interface paths {
          *     de-duplicate by `event_id`. A client that reads too slowly can miss
          *     frames: reconnect to get the newest 50 again.
          *
-         *     Live frames are not filtered by mode: check `livemode` on each
-         *     frame. The first batch holds only the caller's mode. Live frames
-         *     come from the server instance that handled the event, so with
+         *     Frames sent after the first batch are not filtered by mode: check
+         *     `livemode` on each frame. The first batch holds only the caller's
+         *     mode. The later frames come from the server instance that handled the event, so with
          *     several replicas a client sees only that replica's events.
          */
         get: operations["streamWebhookEvents"];
@@ -1271,8 +1275,8 @@ export interface paths {
          *     (`effective: now`). On a used plan it applies from each subscriber's
          *     next billing period (`effective: next_period`); until then the plan's
          *     other prices bill the meter's usage as before. A subscriber who first
-         *     joins the plan in a period after the add pays it from the join (see
-         *     `PriceWrite`).
+         *     joins the plan in a period after the add pays it from the moment they
+         *     join (see `effective` in the answer).
          *
          *     A price that names a removed price's meter and `dimension_match` adds
          *     that price back under its id. Its old customer overrides do not come
@@ -1298,9 +1302,10 @@ export interface paths {
         /**
          * Remove a price from a plan
          * @description On a plan no subscription has used, the price is gone at once. On a
-         *     used plan it takes no part from each subscriber's next billing period;
-         *     the current period keeps it. A subscriber who first joins the plan in
-         *     a period after the removal does not pay it (see `PriceWrite`). The
+         *     used plan, it stops billing from each subscriber's next billing
+         *     period; the current period keeps it. A subscriber who first joins the
+         *     plan in a period after the removal does not pay it (see `effective`
+         *     in the answer). The
          *     removal ends every customer override of the price, each when the
          *     removal takes effect for its customer, and the answer names them
          *     (`ended_overrides`). Adding the price back later keeps its id but not
@@ -1316,7 +1321,8 @@ export interface paths {
          *     plan no subscription has used, the change applies at once; on a used
          *     plan, from each subscriber's next billing period. The current period
          *     keeps the price it started with. A subscriber who first joins the plan
-         *     in a period after the change pays it from the join (see `PriceWrite`).
+         *     in a period after the change pays it from the moment they join (see
+         *     `effective` in the answer).
          *     Customer overrides of the price keep applying. The write is recorded
          *     in the audit log.
          */
@@ -1354,7 +1360,8 @@ export interface paths {
          *     not be archived.
          *
          *     An `active` subscription whose plans bill a non-zero base fee in
-         *     advance gets its first invoice in the same transaction; it is then
+         *     advance is saved together with its first invoice, in one database
+         *     transaction: both are saved, or neither is. The invoice is then
          *     collected like any other invoice. A `trialing` subscription gets
          *     that invoice when its trial ends. A customer on a test clock gives
          *     the subscription its clock, and the subscription starts at the
@@ -1383,7 +1390,8 @@ export interface paths {
          * @description Starts a `draft` subscription: it becomes `active` now, and its
          *     first period starts today in your account's billing time zone (the
          *     clock's day for a customer on a test clock). A non-zero base fee
-         *     billed in advance is invoiced in the same transaction. The plans'
+         *     billed in advance is invoiced in the same database transaction as
+         *     the activation: both are saved, or neither is. The plans'
          *     currency must still match the customer's billing profile and the
          *     customer's other `draft`, `trialing` and `active` subscriptions.
          *     Takes no body.
@@ -1411,7 +1419,8 @@ export interface paths {
          * @description Clears the subscription's `billing_failure` and bills it now, with
          *     the same attempt the billing run makes. Use it after fixing the
          *     cause of a failure, to skip the wait, or to restart a parked
-         *     subscription. An audit log entry records the retry. Takes no body.
+         *     subscription (one set aside after eight failed billing attempts,
+         *     until someone retries it). An audit log entry records the retry. Takes no body.
          *
          *     Once the failure is cleared, the outcome of the attempt is never
          *     an HTTP error. A 200 has three outcomes:
@@ -1431,7 +1440,7 @@ export interface paths {
          *       cleared.
          *
          *     The call bills inline. If it times out part-way through a long
-         *     catch-up, the response is an error, the invoices already created
+         *     catch-up (billing many overdue periods), the response is an error, the invoices already created
          *     stay, and the next billing run finishes the rest. The failure may
          *     already be cleared at that point, so a repeat call can answer 409.
          */
@@ -1676,8 +1685,8 @@ export interface paths {
         };
         get?: never;
         /**
-         * Set billing thresholds
-         * @description Sets the billing thresholds: limits that make Hardcount invoice before
+         * Set spend thresholds
+         * @description Sets the spend thresholds (`billing_thresholds`): limits that make Hardcount invoice before
          *     the period ends. A threshold bills sooner; it does not cap or
          *     block usage. Set `amount_gte`, `item_thresholds`, or both. The
          *     first threshold reached triggers the invoice.
@@ -1695,8 +1704,8 @@ export interface paths {
         put: operations["setSubscriptionBillingThresholds"];
         post?: never;
         /**
-         * Clear billing thresholds
-         * @description Removes all billing thresholds. Calling it on a subscription with
+         * Clear spend thresholds
+         * @description Removes all spend thresholds. Calling it on a subscription with
          *     no thresholds returns the subscription unchanged.
          */
         delete: operations["clearSubscriptionBillingThresholds"];
@@ -1726,7 +1735,7 @@ export interface paths {
          *
          *     On an active subscription, a plan whose base fee is billed in
          *     advance is charged for the rest of the current period, on an
-         *     invoice written in the same transaction as the add, when the
+         *     invoice saved in the same database transaction as the add, when the
          *     period's base-fee invoice exists. An item added on the first day
          *     of the period (in your account's billing time zone) pays for the
          *     whole period. A plan billed in arrears is billed at the end of the
@@ -1760,8 +1769,9 @@ export interface paths {
          *
          *     On an active subscription, the unused part of a base fee billed in
          *     advance is credited with credit notes on the invoices that charged
-         *     the item: written in the same transaction as drafts, and issued
-         *     right after it commits (a failed issue is retried). On a paid
+         *     the item. The notes are saved as drafts in the same database
+         *     transaction as the removal, and issued right after it is saved (a
+         *     failed issue is retried). On a paid
          *     invoice the credit goes to the customer's balance, on an unpaid
          *     one it reduces the amount due. A plan billed in arrears is billed
          *     at the end of the period for the days it was on the subscription.
@@ -1788,16 +1798,18 @@ export interface paths {
          *
          *     For a change that takes effect now on a plan billed in advance,
          *     Hardcount settles the rest of the period at once. An increase is
-         *     invoiced in the same transaction as the change. A decrease is
-         *     credited with credit notes on the invoices that charged the item,
-         *     written in the same transaction as drafts and issued right after
-         *     it commits (a failed issue is retried): on a paid invoice the
+         *     invoiced in the same database transaction as the change. A
+         *     decrease is credited with credit notes on the invoices that charged
+         *     the item. The notes are saved as drafts in the same database
+         *     transaction, and issued right after it is saved (a failed issue is
+         *     retried): on a paid invoice the
          *     credit goes to the customer's balance, on an unpaid one it reduces
          *     the amount due. `proration` in the response describes the result.
          *     A plan billed in arrears is settled at the end of the period.
          *
-         *     Changes to one subscription's items run one at a time, and each is
-         *     settled from the item as the change before it left it. A request
+         *     Changes to one subscription's items run one at a time. Hardcount
+         *     works out each change's charge or credit from the item as the
+         *     previous change left it. A request
          *     that repeats a change that already finished finds nothing to change
          *     and gets 422.
          *
@@ -1870,8 +1882,8 @@ export interface paths {
          * List usage events
          * @description Lists the usage events of this account and mode, newest first by
          *     `timestamp`. The filters combine; `total` counts every matching
-         *     event. The rows carry no `origin` and no `billing_status`. Needs
-         *     usage read permission.
+         *     event. The rows carry no `origin` and no `billing_status`. Needs a
+         *     secret key; a usage-only key cannot call it.
          */
         get: operations["listUsageEvents"];
         put?: never;
@@ -1892,8 +1904,7 @@ export interface paths {
          *     event arrived, such as a time that is already invoiced. The event
          *     is stored all the same.
          *
-         *     Needs the `usage:ingest` permission: an ingest key or a secret
-         *     key.
+         *     A usage-only key (`hc_ingest_…`) or a secret key can call it.
          */
         post: operations["createUsageEvent"];
         delete?: never;
@@ -1925,8 +1936,8 @@ export interface paths {
          *     and are not errors. A `deduplicated` count above zero on a batch
          *     you never sent before means some keys were already used, by an
          *     earlier event or by another event in the batch. Those events
-         *     were not stored. Needs the `usage:ingest` permission: an ingest
-         *     key or a secret key.
+         *     were not stored. A usage-only key (`hc_ingest_…`) or a secret key
+         *     can call it.
          */
         post: operations["createUsageEventBatch"];
         delete?: never;
@@ -1956,16 +1967,17 @@ export interface paths {
          *     only if that period's invoice has not been built yet. An event for
          *     an already-invoiced period is stored, but that invoice does not
          *     bill it; bill it with a one-off invoice if needed. Its 201 carries
-         *     the `billing_status` Hardcount found (see `UsageBillingStatus`):
-         *     `after_close` while the subscription that invoiced the period is
-         *     active or trialing, `outside_subscription` once it has ended. A
-         *     billing period of another subscription that is not invoiced yet and
-         *     holds the event's time decides the status instead.
+         *     the `billing_status` Hardcount found (see the `billing_status`
+         *     field): `after_close` while the subscription that invoiced the
+         *     period is active or trialing, and `outside_subscription` once it has
+         *     ended. If another subscription has a billing period that holds the
+         *     event's time and is not invoiced yet, that period decides the status
+         *     instead.
          *
-         *     Shares idempotency keys with live ingest: a repeated
-         *     `idempotency_key` returns 200 with the original event and an
-         *     `Idempotent-Replayed: true` header, and writes nothing.
-         *     Requires usage write permission, so an ingest key cannot backfill.
+         *     Uses the same idempotency keys as `POST /v1/usage-events` and the
+         *     batch route: a repeated `idempotency_key` returns 200 with the
+         *     original event and an `Idempotent-Replayed: true` header, and writes
+         *     nothing. Needs a secret key: a usage-only key cannot backfill.
          */
         post: operations["backfillUsageEvent"];
         delete?: never;
@@ -1989,7 +2001,8 @@ export interface paths {
          *     customer ID, event name and reason, most recent arrival first. Lists
          *     the 200 external customer IDs with the most recent arrivals, with
          *     every group for each; `total_customers` and `total_rows` count all
-         *     held rows, listed or not. Requires usage read permission.
+         *     held rows, listed or not. Needs a secret key; a usage-only key
+         *     cannot call it.
          */
         get: operations["listHeldUsage"];
         put?: never;
@@ -2024,7 +2037,7 @@ export interface paths {
          *     the billing period its time falls in only if that period's invoice
          *     has not been built yet; Hardcount does not move it onto a later
          *     invoice. A call that takes any rows writes an audit log entry.
-         *     Requires usage write permission.
+         *     Needs a secret key; a usage-only key cannot call it.
          */
         post: operations["releaseHeldUsage"];
         delete?: never;
@@ -2047,7 +2060,7 @@ export interface paths {
          * @description Marks the held rows for one external customer ID (and one event
          *     name, when given) as discarded. They are never billed. The rows stay
          *     stored as a record. A call that discards any rows writes an audit
-         *     log entry. Requires usage write permission.
+         *     log entry. Needs a secret key; a usage-only key cannot call it.
          */
         post: operations["discardHeldUsage"];
         delete?: never;
@@ -2112,14 +2125,14 @@ export interface paths {
          *
          *     A manual invoice uses the customer's currency. A `currency` that
          *     differs from the customer's billing-profile currency, or from the
-         *     plan currency of any of the customer's live (draft, trialing or
-         *     active) subscriptions, is refused with 409. A customer with neither
+         *     plan currency of any of the customer's draft, trialing or active
+         *     subscriptions, is refused with 409. A customer with neither
          *     may be invoiced in any supported currency.
          *
          *     Defaults when a field is left out:
          *     - `currency`: the customer's billing-profile currency, then the plan
-         *       currency of the customer's live subscriptions, then the account's
-         *       default currency.
+         *       currency of the customer's draft, trialing or active
+         *       subscriptions, then the account's default currency.
          *     - `net_payment_term_days`: the account's net payment terms. A
          *       negative value is stored as 0 (due on receipt).
          *     - `billing_period_start` / `billing_period_end`: now.
@@ -3335,7 +3348,7 @@ export interface paths {
         /**
          * Get the account and mode of the current credential
          * @description Tells you which account and mode the request's credential works
-         *     in. Any valid credential can call it, an ingest key included. With
+         *     in. Any valid credential can call it, a usage-only key included. With
          *     an API key the answer has `key_id` and `key_type`; with a dashboard
          *     session it has `user_id` and `email` instead. Every answer has
          *     `tenant_id`, `livemode`, `can_email_setup_links`,
@@ -3370,9 +3383,10 @@ export interface paths {
          *     periods gets one invoice per period.
          *
          *     Subscriptions on a test clock are not included; advance the clock
-         *     instead. A subscription whose billing is failing and is waiting for
-         *     its next attempt, or is parked, is skipped; to retry one, use
-         *     `POST /v1/subscriptions/{id}/retry-billing`. An audit log entry
+         *     instead. A subscription whose billing is failing is skipped, both
+         *     while it waits for its next attempt and while it is parked (set
+         *     aside after eight failed billing attempts, until someone retries
+         *     it). To retry one, use `POST /v1/subscriptions/{id}/retry-billing`. An audit log entry
          *     records the run. Takes no body.
          */
         post: operations["runBilling"];
@@ -3482,7 +3496,7 @@ export interface paths {
         put?: never;
         /**
          * Grant credit to a customer
-         * @description Adds a block of credit in `currency`. The credit pays only the
+         * @description Adds a credit grant in `currency`. The credit pays only the
          *     customer's invoices in that currency; it is never converted. A
          *     grant in a currency the customer is not billed in is accepted and
          *     shows as its own balance. Invoices draw the credit when they are
@@ -3660,7 +3674,8 @@ export interface paths {
          * Advance a test clock
          * @description Moves the clock forward to `frozen_time` and catches billing up for
          *     every customer and subscription attached to it. The call returns
-         *     200 as soon as the clock is `advancing`; the catch-up runs in the
+         *     200 as soon as the clock is `advancing`; the catch-up (the billing
+         *     of everything that fell due in the skipped time) runs in the
          *     background. Poll `GET /v1/test-clocks/{id}` until `status` leaves
          *     `advancing`. While it runs, another advance answers 409. One
          *     advance moves the clock at most one year; split a longer span into
@@ -3668,7 +3683,7 @@ export interface paths {
          *
          *     The catch-up runs these steps in order: trials that ended, period
          *     invoices (every period that came due), collection pauses that
-         *     ended, billing thresholds, tax retries, charges, credit notes that
+         *     ended, spend thresholds, tax retries, charges, credit notes that
          *     were waiting to be issued, dunning steps, and credit expiry.
          *     `last_advance_summary` counts what each step did. If a step fails,
          *     the later steps still run, and the clock ends in
@@ -3707,8 +3722,9 @@ export interface paths {
         put?: never;
         /**
          * Retry a failed test clock advance
-         * @description Resumes a clock parked in `internal_failure` after a failed
-         *     catch-up. The catch-up bills only what is still due at the clock's
+         * @description Resumes a clock left in `internal_failure` after a failed
+         *     catch-up (the billing Hardcount runs for the time a clock
+         *     skipped). The catch-up bills only what is still due at the clock's
          *     time, so resuming where the previous attempt stopped is safe;
          *     `frozen_time` keeps the value the failed advance set. Asynchronous
          *     like an advance: the 200 returns the clock back in `advancing`;
@@ -4462,8 +4478,7 @@ export interface paths {
          *     record with no `user` or no `id`, or an invalid event, is listed in
          *     `errors` and the rest of the batch still goes in, with status 200.
          *     If the usage store cannot be reached, the whole request fails with
-         *     503 so LiteLLM retries it. Needs the `usage:ingest` permission:
-         *     give the proxy an ingest key (`hc_ingest_…`), which can do nothing
+         *     503 so LiteLLM retries it. Give the proxy a usage-only key (`hc_ingest_…`), which can do nothing
          *     else. A secret key works too.
          */
         post: operations["ingestLitellmSpend"];
@@ -5282,8 +5297,8 @@ export interface components {
         };
         /**
          * @description A plan as get, create and update plan answer it: the plan with its
-         *     prices, whether a subscription has ever used it, and how many live
-         *     subscriptions are on it.
+         *     prices, whether a subscription has ever used it, and how many
+         *     subscriptions that are not canceled are on it.
          * @example {
          *       "id": "hc_pln_dajr5o2q3gpgqfoq5c1g",
          *       "tenant_id": "hc_ten_dajqj02q3gpgqfoq5c00",
@@ -5321,9 +5336,10 @@ export interface components {
             /**
              * @description Whether a subscription has ever used the plan (canceled ones
              *     and scheduled plan changes included). On a plan no one has
-             *     used, a price change applies at once; on a used plan, from
-             *     each subscriber's next billing period, and from the join for
-             *     a subscriber who first joins the plan in a period after it.
+             *     used, a price change applies at once. On a used plan, it
+             *     applies from each subscriber's next billing period. A
+             *     subscriber who first joins the plan in a period after the
+             *     change gets it from the moment they join.
              */
             used: boolean;
             /**
@@ -5872,8 +5888,8 @@ export interface components {
              * @description When the usage happened. It decides which billing period the
              *     event counts toward. An event sent without `timestamp` is
              *     stamped with the time Hardcount received it, or, for a customer
-             *     on a test clock, with the clock's time. A live event may be at
-             *     most 5 minutes ahead of that time. There is no limit on how far
+             *     on a test clock, with the clock's time. An event that is not a
+             *     backfill may be at most 5 minutes ahead of that time. There is no limit on how far
              *     back it goes, but an event in a period whose invoice is already
              *     built is stored and not billed (see `billing_status`).
              */
@@ -5927,9 +5943,10 @@ export interface components {
          *       its scheduled cancel.
          *     - `no_price`: the plan that bills the event's time prices this
          *       meter, but no price of that plan takes the event's `dimensions`.
-         *       A price takes an event whose dimensions include all of its
-         *       `dimension_match`, compared as strings: the number `1` is not the
-         *       string `"1"`.
+         *       A price takes an event whose dimensions include all of the
+         *       price's `dimension_match` labels. A price's labels are text, so a
+         *       number or a true/false value in the event never matches: the
+         *       number `1` does not match the string `"1"`.
          *
          *     No `billing_status` means Hardcount found no reason then. It is not a
          *     promise that the event will be billed. Hardcount checks only the
@@ -7044,8 +7061,9 @@ export interface components {
             created_at: string;
             /**
              * Format: int64
-             * @description Marks the line as a prepaid commit purchase: when the invoice is
-             *     finalized, the customer is granted a block of credit of this
+             * @description Marks the line as a prepaid commit purchase (credit the customer
+             *     pays for up front): when the invoice is finalized, the customer
+             *     gets a credit grant of this
              *     many cents (in the invoice's currency). It may differ from the
              *     line's price: a discounted commit sells $10,000 of credit for
              *     $9,000. Only on `add_on` lines of invoices you create, at most
@@ -7407,12 +7425,12 @@ export interface components {
             total_retired: number;
             /**
              * Format: int64
-             * @description Credit an operator deducted (a negative adjustment), in the currency's minor unit.
+             * @description Credit a dashboard user or an API key deducted (a negative adjustment), in the currency's minor unit.
              */
             total_deducted: number;
         };
         /**
-         * @description A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency a live subscription will invoice usage in. Amounts in two currencies are never added together. Returned by `GET /v1/credits/balance/{customer_id}/live`; nothing is stored.
+         * @description A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency an active or trialing subscription will invoice usage in. Amounts in two currencies are never added together. Returned by `GET /v1/credits/balance/{customer_id}/live`; nothing is stored.
          * @example {
          *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0g",
          *       "balances": [
@@ -9898,7 +9916,8 @@ export interface components {
              * @description Uppercase or lowercase ISO 4217 code; it is stored uppercase. It
              *     must be the customer's currency (see the 409). Defaults to the
              *     billing profile's currency, then the plan currency of the
-             *     customer's live subscriptions, then the account's default
+             *     customer's draft, trialing and active subscriptions, then the
+             *     account's default
              *     currency. Currencies with no minor unit (such as JPY) are
              *     refused.
              * @example USD
@@ -10637,17 +10656,18 @@ export interface components {
              *     voided invoice), so no credit note. `needs_review`: a refund of
              *     the invoice's own payment that Hardcount did not record
              *     (`review_reason` says why); the invoice shows the
-             *     `refunded_in_stripe` notice until the operator records it with a
-             *     credit note or dismisses it. `not_refunded`: first seen already
-             *     failed or canceled, so no money moved. `dismissed`: the operator
-             *     handled it outside Hardcount.
+             *     `refunded_in_stripe` notice until a dashboard user or an API key
+             *     records it with a credit note or dismisses it. `not_refunded`:
+             *     first seen already failed or canceled, so no money moved.
+             *     `dismissed`: a dashboard user or an API key marked it as handled
+             *     outside Hardcount.
              * @enum {string}
              */
             outcome: "awaiting" | "credit_note" | "other_payment" | "needs_review" | "not_refunded" | "dismissed";
             /**
              * @description Why a refund of the invoice's own payment was flagged instead of
              *     recorded. Set for `needs_review` and `dismissed`, and kept when
-             *     the operator records one with a credit note.
+             *     a dashboard user or an API key records one with a credit note.
              * @enum {string}
              */
             review_reason?: "invoice_not_paid" | "currency_mismatch" | "prepaid_commit" | "seen_late" | "credit_note_refund_failed" | "exceeds_card_refundable" | "exceeds_creditable";
@@ -11926,8 +11946,8 @@ export interface components {
         /**
          * @description What `POST /v1/usage-events/held/release` did. The counts are what
          *     Hardcount found when the release wrote the rows, as for
-         *     `billing_status` (see `UsageBillingStatus`). The invoice is the
-         *     final answer.
+         *     `billing_status` (see the `billing_status` field of a usage event).
+         *     The invoice is the final answer.
          * @example {
          *       "customer_id": "hc_cus_dakhnk2q3gpgqfoq5c0k",
          *       "released": 12,
@@ -12998,7 +13018,7 @@ export interface components {
              */
             customer_id: string;
             /**
-             * @description Delivery state. Live frames send `pending` (a new event or
+             * @description Delivery state. Frames sent after the first batch send `pending` (a new event or
              *     replay), `succeeded` (one delivery got a 2xx answer) or `failed`
              *     (one delivery failed for good). Frames in the first batch send
              *     the event's roll-up over all its deliveries: `pending`, `failed`,
@@ -13015,7 +13035,7 @@ export interface components {
              * @description When the event was created.
              */
             created_at: string;
-            /** @description The event's mode. Live frames are not filtered by mode, so check it. */
+            /** @description The event's mode. Frames sent after the first batch are not filtered by mode, so check it. */
             livemode: boolean;
             /** @description The original event, when this frame is about a replay. null otherwise. */
             replay_of_event_id: string | null;
@@ -13385,8 +13405,8 @@ export interface components {
             };
         };
         /**
-         * @description One block of credit on a customer's balance (a grant or a positive
-         *     adjustment) and how much of it is left. Amounts are in the
+         * @description One grant on a customer's credit balance (made by a grant or a
+         *     positive adjustment) and how much of it is left. Amounts are in the
          *     currency's minor unit (cents for USD).
          * @example {
          *       "id": "hc_ccl_dav2242q3gpgqfoq5c50",
@@ -13420,18 +13440,18 @@ export interface components {
             description: string;
             /**
              * Format: int64
-             * @description The credit the block started with, in the currency's minor unit.
+             * @description The credit the grant started with, in the currency's minor unit.
              */
             amount_cents: number;
             /**
              * Format: int64
-             * @description Everything drawn from the block, in the currency's minor unit:
+             * @description Everything drawn from the grant, in the currency's minor unit:
              *     used by invoices, expired, retired and deducted.
              */
             consumed_cents: number;
             /**
              * Format: int64
-             * @description Credit left in the block, `amount_cents` minus `consumed_cents`, in the currency's minor unit.
+             * @description Credit left in the grant, `amount_cents` minus `consumed_cents`, in the currency's minor unit.
              */
             remaining_cents: number;
             /**
@@ -13448,7 +13468,7 @@ export interface components {
             retired_cents: number;
             /**
              * Format: int64
-             * @description The part an operator removed with a negative adjustment, in the currency's minor unit.
+             * @description The part a dashboard user or an API key removed with a negative adjustment, in the currency's minor unit.
              */
             deducted_cents: number;
             /**
@@ -13459,16 +13479,16 @@ export interface components {
              *     Absent when the credit does not expire.
              */
             expires_at?: string;
-            /** @description For a `commit` block, the commit invoice whose finalizing made the grant. Absent for other blocks. */
+            /** @description For a `commit` grant, the commit invoice whose finalizing made the grant. Absent for other grants. */
             source_invoice_id?: string;
             /**
              * Format: date-time
-             * @description When the block was added.
+             * @description When the grant was added.
              */
             created_at: string;
         };
         /**
-         * @description A customer's credit blocks, newest first, with the remaining credit
+         * @description A customer's credit grants, newest first, with the remaining credit
          *     added up by currency and kind. Amounts are in the currency's minor
          *     unit (cents for USD).
          * @example {
@@ -13501,7 +13521,7 @@ export interface components {
          */
         CreditGrants: {
             /**
-             * @description The customer's credit blocks, newest first. A block with nothing
+             * @description The customer's credit grants, newest first. A grant with nothing
              *     left is listed only with `include_exhausted=true`.
              */
             grants: components["schemas"]["CreditGrantBlock"][];
@@ -17736,7 +17756,7 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description `true` also lists the blocks with nothing left (used up,
+                 * @description `true` also lists the grants with nothing left (used up,
                  *     expired, retired or deducted). Any other value leaves them out.
                  */
                 include_exhausted?: boolean;
@@ -17750,7 +17770,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Grants with remaining + kind subtotals */
+            /** @description The grants, what is left on each, and subtotals by kind. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -19015,7 +19035,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the `apikey:read` permission (an ingest key). */
+            /** @description The caller lacks the `apikey:read` permission (a usage-only key). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -19105,7 +19125,7 @@ export interface operations {
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /**
-             * @description The caller lacks the `apikey:read` permission (an ingest key), or
+             * @description The caller lacks the `apikey:read` permission (a usage-only key), or
              *     a browser page on another site sent the request
              *     (`cross-site request blocked`).
              */
@@ -19172,7 +19192,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the `apikey:read` permission (an ingest key). */
+            /** @description The caller lacks the `apikey:read` permission (a usage-only key). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -19993,8 +20013,8 @@ export interface operations {
                 };
             };
             /**
-             * @description `validation_error`: the base fee changed while live subscriptions
-             *     use the plan (param `plan`), `base_bill_timing` changed on a used
+             * @description `validation_error`: the base fee changed while subscriptions that
+             *     are not canceled use the plan (param `plan`), `base_bill_timing` changed on a used
              *     plan or is `in_advance` with a base of 0, a negative base fee, a
              *     `status` other than `active` or `archived`, an invalid `tax_code`,
              *     or an unknown field such as `meter_ids` (a plan's meters are its
@@ -20548,7 +20568,7 @@ export interface operations {
             query?: {
                 /** @description Only this customer's subscriptions (`hc_cus_…`). */
                 customer_id?: string;
-                /** @description Filter to subscriptions with a live item on this plan. */
+                /** @description Filter to subscriptions with an item on this plan that has not been removed. */
                 plan_id?: string;
                 /**
                  * @description Exact status. Any other value is a 422 with `param: status`.
@@ -20559,14 +20579,16 @@ export interface operations {
                 /**
                  * @description `failing` returns only subscriptions that carry a
                  *     `billing_failure`: those waiting for their next billing attempt
-                 *     and those that are parked. Any other value is a 422 with
+                 *     and those that are parked (set aside after eight failed billing
+                 *     attempts, until someone retries them). Any other value is a 422 with
                  *     `param: billing`.
                  */
                 billing?: "failing";
                 /**
                  * @description `paused` returns only active and trialing subscriptions whose
-                 *     `pause_collection` is in force, whether an operator or dunning set
-                 *     it. A timed pause ends at `resumes_at` (on the subscription's test
+                 *     `pause_collection` is in force, whether a dashboard user or an
+                 *     API key set it, or dunning (Hardcount's automatic payment
+                 *     retries) did. A timed pause ends at `resumes_at` (on the subscription's test
                  *     clock, if it has one), even while the response still carries it.
                  *     Any other value is a 422 with `param: collection`.
                  */
@@ -23566,7 +23588,7 @@ export interface operations {
             };
             /**
              * @description Event ingested. A `billing_status` is what Hardcount found when the
-             *     event arrived (see `UsageBillingStatus`); the event is stored
+             *     event arrived (see the `billing_status` field); the event is stored
              *     all the same.
              */
             201: {
@@ -23986,7 +24008,7 @@ export interface operations {
             };
             /**
              * @description Event recorded. A `billing_status` is what Hardcount found when the
-             *     event arrived (see `UsageBillingStatus`); the event is stored
+             *     event arrived (see the `billing_status` field); the event is stored
              *     all the same.
              */
             201: {
@@ -34173,7 +34195,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the `apikey:write` permission (an ingest key). */
+            /** @description The caller lacks the `apikey:write` permission (a usage-only key). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -34273,7 +34295,7 @@ export interface operations {
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /**
-             * @description The caller lacks the `apikey:write` permission (an ingest key), or
+             * @description The caller lacks the `apikey:write` permission (a usage-only key), or
              *     a browser page on another site sent the request
              *     (`cross-site request blocked`).
              */
@@ -34358,7 +34380,7 @@ export interface operations {
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /**
-             * @description The caller lacks the `apikey:write` permission (an ingest key), or
+             * @description The caller lacks the `apikey:write` permission (a usage-only key), or
              *     a browser page on another site sent the request
              *     (`cross-site request blocked`).
              */
@@ -34486,7 +34508,7 @@ export interface operations {
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /**
-             * @description The caller lacks the `apikey:write` permission (an ingest key), or
+             * @description The caller lacks the `apikey:write` permission (a usage-only key), or
              *     a browser page on another site sent the request
              *     (`cross-site request blocked`).
              */
@@ -34621,7 +34643,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the `apikey:write` permission (an ingest key). */
+            /** @description The caller lacks the `apikey:write` permission (a usage-only key). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -34725,7 +34747,7 @@ export interface operations {
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /**
-             * @description The caller lacks the `apikey:write` permission (an ingest key), or
+             * @description The caller lacks the `apikey:write` permission (a usage-only key), or
              *     a browser page on another site sent the request
              *     (`cross-site request blocked`).
              */
@@ -34895,8 +34917,8 @@ export interface operations {
             400: components["responses"]["InvalidBody"];
             401: components["responses"]["Unauthorized"];
             /**
-             * @description The caller is an API key, not a dashboard session (an ingest key
-             *     gets the `apikey:write` permission message instead), or a browser
+             * @description The caller is an API key, not a dashboard session (a usage-only
+             *     key gets the `apikey:write` permission message instead), or a browser
              *     page on another site sent the request
              *     (`cross-site request blocked`).
              */
@@ -35542,7 +35564,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the `apikey:read` permission (an ingest key). */
+            /** @description The caller lacks the `apikey:read` permission (a usage-only key). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -35633,7 +35655,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the `apikey:read` permission (an ingest key). */
+            /** @description The caller lacks the `apikey:read` permission (a usage-only key). */
             403: {
                 headers: {
                     [name: string]: unknown;

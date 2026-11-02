@@ -1,47 +1,11 @@
 # A background job is stuck
 
-Hardcount runs its billing, payment retries, webhooks and emails in background
-jobs. Back to the [runbook index](index.md).
-
-## How the jobs share work
-
-Five background jobs must run on exactly one replica at a time. Each is
-called a role:
-
-| Role | Runs every |
-|---|---|
-| `billing`, `dunning` (payment retries) | 1 hour (5 minutes when `APP_ENV=local`) |
-| `webhook_outbox` | 2 s |
-| `email_outbox` | 5 s |
-| `webhook_delivery` (the webhook retry worker) | 30 s |
-
-Each role is one row in the `leader_leases` table.
-
-- To run a tick, a replica takes that row for **10 seconds** (the lease),
-  renews it every **3 seconds** while its work runs, and releases it when
-  the tick ends.
-- The clock is the database's, so the replicas never need to agree on the
-  time.
-- Nothing is held for longer than one tick. Whichever replica polls first
-  after the role is due (one interval after the last tick **ended**) takes
-  the next one. There is no standing leader, so there is nothing to fail
-  over.
-
-Three things keep a tick from running twice:
-
-- **A dead holder cannot keep the row.** With no renew for 10 s, the lease
-  expires on the database clock, and any replica takes it on its next poll
-  (every 5 s at most). At worst a role is silent for **15 s** after a crash,
-  network partition, VM pause or `SIGSTOP`.
-- **A holder that cannot renew stops itself** after 6 s without an
-  acknowledged renew. That is inside the 10 s, so it is gone before another
-  replica can start.
-- **Every claim statement re-checks the tick's token.** The row carries a
-  number that goes up on every acquire (the fence token). A tick's claims
-  (due subscriptions, due dunning runs, outbox rows, pending deliveries)
-  check it with `leader_fence(role, token)`, so a tick that outlived its
-  lease claims nothing. Work already claimed is protected by a
-  compare-and-swap update when it is written.
+Hardcount runs its billing, payment retries (dunning), webhooks and emails in
+background jobs. Each job is a *role*: only one replica runs it at a time, one
+*tick* (run) after another, under a short *lease* (a booking in the database
+that expires unless it is renewed). Each role's interval, and how the roles
+share work, are in [How the jobs share work](#how-the-jobs-share-work). Back to
+the [runbook index](index.md).
 
 ## Symptom
 
@@ -63,7 +27,7 @@ in [Scheduler interval and batch size](#scheduler-interval-and-batch-size).
 
 ## Why
 
-- **A long transaction holds row locks**, for example a tenant with
+- **A long transaction holds row locks**, for example an account with
   millions of usage events on a single subscription.
 - **The database primary failed over**, and connections were lost
   mid-tick.
@@ -160,9 +124,13 @@ The next tick starts one interval after it ends.
    replica leads, so a restart does not fix it: find the input in the
    stack, and fix or remove it.
    - **A dunning run panics: pause that run until the fix ships.** A
-     panic is not counted as an attempt, so the run never runs out of
-     attempts. If the panic comes after a charge the card declined, the
-     stale-charge sweep clears the hold within the hour. The next tick
+     dunning run is the payment retries for one unpaid invoice. A panic is
+     not counted as an attempt, so the run never runs out of attempts. If
+     the panic comes after a charge the card declined, the reconciler
+     clears the invoice's charge hold within the hour. (The reconciler is
+     the check that asks Stripe what happened to a charge whose result
+     Hardcount did not save. The charge hold is the claim that lets only one
+     charge run on an invoice at a time.) The next tick
      then charges the card again: one real decline every hour or two,
      with no attempt counted and no email. Take `run_id` from the first
      `step panicked` line:
@@ -174,8 +142,8 @@ The next tick starts one interval after it ends.
 
      Set `paused = false` once the fix is out. Pause the whole role
      (`SELECT leader_pause('dunning', 'your-name', 'reason');`) only if
-     runs in several tenants keep panicking: it stops dunning for every
-     tenant.
+     runs in several accounts keep panicking: it stops dunning for every
+     account.
    - A panic while billing one subscription is also logged as
      `bill subscription panicked` with the subscription id. It repeats only
      when that subscription's wait ends (see
@@ -190,10 +158,10 @@ The next tick starts one interval after it ends.
    replica.
 3. **A long query.** Cancel it with `SELECT pg_cancel_backend(<pid>)` if
    appropriate.
-4. **One tenant's backlog.** A tick bills every due subscription before it
+4. **One account's backlog.** A tick bills every due subscription before it
    ends, so a large backlog makes a long tick, not a skipped one. To bill one
-   tenant now instead of waiting for the next tick, run
-   `POST /v1/billing/run` with that tenant's key; see
+   account now instead of waiting for the next tick, run
+   `POST /v1/billing/run` with that account's key; see
    [Scheduler interval and batch size](#scheduler-interval-and-batch-size).
 
 ## Verify
@@ -205,6 +173,46 @@ max(3× the role's interval, 5 minutes).
 After a database failover the roles carry on, because the row moved with
 the data. Expect at most one `lease_lost` per role from the ticks that were
 in flight.
+
+## How the jobs share work
+
+Five background jobs must run on exactly one replica at a time. Each is
+called a role:
+
+| Role | Runs every |
+|---|---|
+| `billing`, `dunning` (payment retries) | 1 hour (5 minutes when `APP_ENV=local`) |
+| `webhook_outbox` | 2 s |
+| `email_outbox` | 5 s |
+| `webhook_delivery` (the webhook retry worker) | 30 s |
+
+Each role is one row in the `leader_leases` table.
+
+- To run a tick, a replica takes that row for **10 seconds** (the lease),
+  renews it every **3 seconds** while its work runs, and releases it when
+  the tick ends.
+- The clock is the database's, so the replicas never need to agree on the
+  time.
+- Nothing is held for longer than one tick. Whichever replica polls first
+  after the role is due (one interval after the last tick **ended**) takes
+  the next one. There is no standing leader, so there is nothing to fail
+  over.
+
+Three things keep a tick from running twice:
+
+- **A dead holder cannot keep the row.** With no renew for 10 s, the lease
+  expires on the database clock, and any replica takes it on its next poll
+  (every 5 s at most). At worst a role is silent for **15 s** after a crash,
+  network partition, VM pause or `SIGSTOP`.
+- **A holder that cannot renew stops itself** after 6 s without an
+  acknowledged renew. That is inside the 10 s, so it is gone before another
+  replica can start.
+- **Every claim statement re-checks the tick's token.** The row carries a
+  number that goes up on every acquire (the fence token). A tick's claims
+  (due subscriptions, due dunning runs, outbox rows, pending deliveries)
+  check it with `leader_fence(role, token)`, so a tick that outlived its
+  lease claims nothing. Work already claimed is protected by a
+  compare-and-swap update when it is written.
 
 ## Pause a role on purpose
 
@@ -219,14 +227,15 @@ A pause survives restarts, because it is a row, not a process. So
 **unpause is part of the change**, and `hardcount_leader_paused` is the
 reminder.
 
-Do not edit `leader_leases` by hand beyond these two functions, and
-clearing `not_before` after a panic is fixed (see [Fix](#fix)).
+Change `leader_leases` by hand only with these two functions, or to clear
+`not_before` after a panic is fixed (see [Fix](#fix)). Two facts about the
+table:
 
-- Deleting a row is harmless. The next poll's acquire recreates it with a
+- Deleting a row does no harm. The next poll's acquire recreates it with a
   fresh token, seeded from the clock so it lands above any token ever
   issued.
-- The fence token and the pause state live in that row. A hand-set token
-  can make a running tick's claims return nothing, with no error.
+- The fence token and the pause state are stored in that row. A token set
+  by hand can make a running tick's claims return nothing, with no error.
 
 ## Metrics for the roles
 
@@ -267,7 +276,7 @@ unpaused.
   the page fires once per attempt, not once per tick.
 - That is at most eight times over 3 days 17 hours, spaced on the
   [wait ladder](billing-failing.md#why). Then the subscription parks
-  and the panic stops. On the hourly production tick the first three
+  (Hardcount stops retrying it) and the panic stops. On the hourly production tick the first three
   attempts land on three ticks in a row.
 - The subscription shows up in `hardcount_billing_failing_subscriptions`, and
   its id and stack are in the `bill subscription panicked` ERROR log. See
@@ -276,8 +285,8 @@ unpaused.
 ## A subscription is due but not billed
 
 `hardcount_billing_oldest_due_age_seconds{mode}` above 2× the billing interval
-means a subscription has been due for billing that long, and its billing is
-not saved as failing. "Due" starts when `INVOICE_GRACE_PERIOD` has passed
+means a subscription has been due for billing that long, and it is not
+counted in `hardcount_billing_failing_subscriptions`. "Due" starts when `INVOICE_GRACE_PERIOD` has passed
 after the period end, so a subscription inside its grace is not counted
 (see [Invoice timing](invoice-timing-late-usage.md)).
 
@@ -304,17 +313,18 @@ variables:
 - It reads due subscriptions **50 at a time** and keeps reading until none
   is left, so one tick bills every subscription that is due.
 
-Drain a tenant with a backlog on demand with `POST /v1/billing/run`, not by
-tuning these. It loops until that tenant has nothing left that it will
+Drain an account with a backlog on demand with `POST /v1/billing/run`, not by
+tuning these. It loops until that account has nothing left that it will
 attempt.
 
-- Like the tick, it closes a period only once `INVOICE_GRACE_PERIOD` has
-  passed after its end (see [Invoice timing](invoice-timing-late-usage.md)).
+- Like the tick, it closes a period (builds the invoice for a billing
+  period that has ended) only once `INVOICE_GRACE_PERIOD` has passed after
+  its end (see [Invoice timing](invoice-timing-late-usage.md)).
 - It skips subscriptions whose billing is failing while they wait for their
   next attempt or are parked (see [Billing failing](billing-failing.md)).
-- A drain running under the leader's tick may report 0 for a subscription
-  the leader is committing at that instant, because its due fetch skips
-  locked rows. The leader's commit bills it.
+- A drain that runs while the leader's tick is billing may report 0 for a
+  subscription the leader is committing at that instant. The drain skips
+  locked rows when it reads due subscriptions. The leader's commit bills it.
 
 Watch `hardcount_billing_cycle_duration_seconds` to check that each tick fits
 inside the interval. One replica holds the `billing` role per tick and

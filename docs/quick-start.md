@@ -24,9 +24,9 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
    ./quickstart.sh
    ```
 
-   The script starts the release's published images. The demo script and
-   these pages come from your download, so the tag keeps all three at the
-   same version.
+   The script runs the images published for that release. The clone also
+   holds the demo script and these docs. Cloning the release tag keeps all
+   three at the same version.
 
    The script makes a private `.env` file with new secrets. Then it starts
    five containers: the Hardcount server, its dashboard, Postgres, Redis and

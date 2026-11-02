@@ -268,8 +268,10 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
    ready
    ```
 
-   Testing a dunning policy that pauses or cancels? Move the clock in two
-   steps: see [catch-up](glossary.md#testing-with-simulated-time).
+   Testing a dunning policy that pauses or cancels? (Dunning is Hardcount's
+   automatic payment retries.) Move the clock in two steps: see
+   [catch-up](glossary.md#testing-with-simulated-time), the work Hardcount
+   does while a test clock moves.
 
 7. **Read the invoice.**
 
@@ -348,5 +350,6 @@ That is expected: open the customer from **Customers** instead.
 | `INVOICE_ID` is `null`, or the invoice has no token lines | The usage went to another customer, or was sent after the clock moved. Run steps 2 to 8 again with a new name in step 3. |
 | `after_close`, `no_price`, `not_on_plan` or `outside_subscription` is not 0 in step 5b | Hardcount stored the events but will not bill them. `no_price` means no price of the plan takes their `model` and `token_type`. In step 5a, the same reason is in the event's `billing_status`: run the command without the last `jq` part to see it. |
 
-**Next:** price your own models, sell prepaid credit and see your margin:
-[AI pricing](ai-pricing.md).
+**Next:** price each AI model and kind of token, and turn a provider's
+token counts into usage events:
+[Bill for AI tokens by model](guides/bill-for-ai-tokens.md).

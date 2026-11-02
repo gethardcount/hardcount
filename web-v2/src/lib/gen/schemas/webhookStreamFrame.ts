@@ -28,7 +28,7 @@ export interface WebhookStreamFrame {
      */
   customer_id: string;
   /**
-     * Delivery state. Live frames send `pending` (a new event or
+     * Delivery state. Frames sent after the first batch send `pending` (a new event or
      * replay), `succeeded` (one delivery got a 2xx answer) or `failed`
      * (one delivery failed for good). Frames in the first batch send
      * the event's roll-up over all its deliveries: `pending`, `failed`,
@@ -42,7 +42,7 @@ export interface WebhookStreamFrame {
   last_attempt_at: string | null;
   /** When the event was created. */
   created_at: string;
-  /** The event's mode. Live frames are not filtered by mode, so check it. */
+  /** The event's mode. Frames sent after the first batch are not filtered by mode, so check it. */
   livemode: boolean;
   /**
      * The original event, when this frame is about a replay. null otherwise.

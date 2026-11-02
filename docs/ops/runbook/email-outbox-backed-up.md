@@ -39,7 +39,8 @@ sends them through your SMTP relay. Back to the [runbook index](index.md).
   a `5.1.x` or `5.2.x` status. A refusal of the sender or of the message
   is retried, whatever its code.
 - **The sending job is stopped or behind.** Due emails wait, and the oldest
-  due age grows. One replica sends about 20 to 30 emails a minute, so a
+  due age grows. Hardcount sends about 20 to 30 emails a minute, from one
+  replica at a time, so a
   billing day that queues many invoice emails at once takes a while to
   drain. If the age grows and no emails are sent at all, see
   [A background job is stuck](background-job-stuck.md) for the
@@ -77,8 +78,8 @@ A `last_error` that begins `email outbox: unknown email_type` means
 different things by row status:
 
 - On a **pending** row: a replica older than the code that wrote the row
-  claimed it, during a rolling deploy. It retries on the backoff ramp, and
-  a replica that knows the type delivers it.
+  claimed it, during a rolling deploy. It is retried with growing waits (the
+  backoff ramp), and a replica that knows the type delivers it.
 - On a **failed** row: no replica knew the type for the whole ramp. The
   code that writes this email type shipped without its dispatcher case.
 
@@ -95,8 +96,8 @@ customer's email or CC list (or the member's email) and send again.
    `SMTP_USERNAME` and `SMTP_PASSWORD`, raise the relay's quota, or set
    `SMTP_HOST`. Hardcount reads the `SMTP_*` settings at start-up, so restart it
    after changing them.
-2. Once the relay accepts mail, run step 3. Otherwise each pending email
-   waits for its next try, up to 12 hours away, and
+2. Once the relay accepts mail, run step 3. If you skip it, each pending
+   email waits for its next try, up to 12 hours away, and
    `hardcount_email_outbox_failing_emails` keeps paging until then.
 3. Set `next_attempt_at` to now for every pending row:
 

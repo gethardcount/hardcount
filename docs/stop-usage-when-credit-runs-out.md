@@ -19,8 +19,10 @@ should not take your product down with it.
 
 ## Which customers to gate
 
-Gate only the customers you sell prepaid credit to (a prepaid commit or a
-credit grant). A pay-as-you-go customer, billed at the end of each period,
+To gate a customer is to check their credit before you serve them. Gate
+only the customers you sell prepaid credit to: a prepaid commit (credit
+they pay for up front) or a credit grant (credit you add to their
+balance). A pay-as-you-go customer, billed at the end of each period,
 has no credit, so their figure is always 0: gating on it would refuse them
 from their first request.
 
@@ -64,7 +66,8 @@ answers:
 ```
 
 `balances` has one entry per currency: each currency the customer holds
-credit in, and each currency a live subscription will invoice usage in.
+credit in, and each currency an active or trialing subscription will
+invoice usage in.
 No entry in the customer's currency means no credit in it.
 
 | Field | Meaning |
@@ -234,11 +237,12 @@ customer again straight after a top-up and update your cache.
 - Each subscription counted over its own billing period, when a customer has
   more than one.
 
-**A grant that has passed its expiry date is not counted**, even before the
-expiry run writes the expiry to the ledger. That run waits while a close or
-a period invoice that ends before the expiry can still draw on the grant.
-Until that close or invoice is settled, `balance_cents` here is lower than
-the balance `GET /v1/credits/balance/{customer_id}` returns.
+**A grant that has passed its expiry date is not counted**, even before
+Hardcount writes the expiry to the ledger. Hardcount waits to write it while
+an invoice can still draw on the grant. That is the invoice of a period that
+ended before the expiry date, while it is not made yet or not settled yet.
+Until then, `balance_cents` here is lower than the balance
+`GET /v1/credits/balance/{customer_id}` returns.
 
 ## What the figure leaves out
 
@@ -249,7 +253,7 @@ has left, because these are not subtracted:
   tax too, so with 10% tax, $30.00 of credit pays for about $27.27 of
   usage.
 - **A base fee billed at the end of the period.** It appears only when the
-  period closes and the invoice is issued.
+  period closes, that is, when Hardcount makes and issues its invoice.
 - **Unpaid invoices.** An invoice that is issued but not yet settled can
   still draw on the credit.
 - **Usage sent after a period has ended and before Hardcount has closed it.**
@@ -263,9 +267,10 @@ has left, because these are not subtracted:
 It can read lower than the truth in one case:
 
 - **A period has ended and its invoice is not built yet.** This lasts
-  through `INVOICE_GRACE_PERIOD`, or longer while a failed close waits for
-  its next attempt. The estimate subtracts that period's usage but no
-  longer counts credit that expired after the period ended. That period's
+  through `INVOICE_GRACE_PERIOD`. It lasts longer when Hardcount failed to
+  close the period and is waiting to try again. During this time, the
+  estimate already subtracts that period's usage. But it no longer counts
+  credit that expired after the period ended, although that period's
   invoice still draws on that credit
   ([why](adr/071-credit-expiry-retires-the-block.md)).
 
@@ -280,7 +285,9 @@ rather than at zero.
 
 Three cases are handled so that nothing is counted twice or wrongly:
 
-- **A billing threshold invoiced part of the period early.** That usage has
+- **A spend threshold invoiced part of the period early.** A spend
+  threshold is a limit that makes Hardcount invoice usage before the period
+  ends. That usage has
   been paid for from credit already, so only the usage since that invoice is
   counted.
 - **A subscription is in a trial.** Usage sent before the first paid period
@@ -300,7 +307,7 @@ Three cases are handled so that nothing is counted twice or wrongly:
 The `credit.balance_*` webhooks follow the settled balance, which moves when
 an invoice, grant, adjustment or expiry is written, not when usage arrives.
 So they can fire weeks after the credit ran out. Use them for top-up
-reminders, and the live read to decide whether to serve
+reminders, and the live balance read to decide whether to serve
 ([why](webhooks.md#the-credit-events-follow-the-settled-balance)).
 
 ## The same figure on the public cost page

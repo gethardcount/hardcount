@@ -86,9 +86,9 @@ release starts. This example moves to `v0.9.2`.
 
 With `RUN_MIGRATIONS_ON_BOOT=true`, several copies can start at once: they
 take turns through a Postgres lock, and each one applies only what is still
-missing. A waiting copy gives up after 30 minutes and is restarted. What
-that does not cover is old code running on a new database, so the release
-notes decide the order:
+missing. A waiting copy gives up after 30 minutes and is restarted. Taking
+turns does not protect old copies that are still running against the
+upgraded database. So the release notes decide the order:
 
 - **A release whose notes say it has migrations:** stop every old copy, run
   `hardcount migrate` once (or start one new copy with
@@ -98,7 +98,7 @@ notes decide the order:
 With `RUN_MIGRATIONS_ON_BOOT=false`, the default outside Compose, run
 `hardcount migrate` before you start a new release: Hardcount refuses to
 start while a migration is missing. The setup for several copies is in
-[Running two or more copies](ops/high-availability.md).
+[Run two or more copies](ops/high-availability.md).
 
 ## If the upgrade stops
 
@@ -116,7 +116,7 @@ docker compose stop hardcount-api
 Then follow [A database upgrade stopped](ops/runbook/migration-failed-midway.md).
 If the error says `waited 5s for a table lock`, something held a lock on a
 table the upgrade changes, often a long-running query: see
-[An upgrade waited for a table lock](ops/runbook/migration-failed-midway.md#it-waited-5s-for-a-table-lock).
+[It waited 5s for a table lock](ops/runbook/migration-failed-midway.md#it-waited-5s-for-a-table-lock).
 When the cause is fixed, start the API again:
 
 ```bash
@@ -175,7 +175,7 @@ On one VM:
    back to how it was at the backup.
 
 4. Empty the database and restore the backup into it. `dropdb` deletes the
-   live database, so check first that step 2 found the right file. Use your
+   database Hardcount runs on, so check first that step 2 found the right file. Use your
    backup's file name in the last line.
 
    ```bash
@@ -193,8 +193,9 @@ On one VM:
 
    **You see:** `All critical tables present.`, a "Restore Summary" block
    whose `Migration:` line is the old release's version, and
-   `Restore complete.` The limited database user keeps its access, also to
-   tables a later upgrade creates: the backup carries those rights.
+   `Restore complete.` The limited database user keeps its access. The backup
+   carries its access rights, including the rights to tables that a later
+   upgrade creates.
 
 5. Put back the old release's files and images, and start it. This example
    goes back to `v0.9.1`.

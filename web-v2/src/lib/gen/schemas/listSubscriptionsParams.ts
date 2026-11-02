@@ -25,7 +25,7 @@ export type ListSubscriptionsParams = {
  */
 customer_id?: string;
 /**
- * Filter to subscriptions with a live item on this plan.
+ * Filter to subscriptions with an item on this plan that has not been removed.
  */
 plan_id?: string;
 /**
@@ -37,14 +37,16 @@ status?: ListSubscriptionsStatus;
 /**
  * `failing` returns only subscriptions that carry a
  * `billing_failure`: those waiting for their next billing attempt
- * and those that are parked. Any other value is a 422 with
+ * and those that are parked (set aside after eight failed billing
+ * attempts, until someone retries them). Any other value is a 422 with
  * `param: billing`.
  */
 billing?: ListSubscriptionsBilling;
 /**
  * `paused` returns only active and trialing subscriptions whose
- * `pause_collection` is in force, whether an operator or dunning set
- * it. A timed pause ends at `resumes_at` (on the subscription's test
+ * `pause_collection` is in force, whether a dashboard user or an
+ * API key set it, or dunning (Hardcount's automatic payment
+ * retries) did. A timed pause ends at `resumes_at` (on the subscription's test
  * clock, if it has one), even while the response still carries it.
  * Any other value is a 422 with `param: collection`.
  */

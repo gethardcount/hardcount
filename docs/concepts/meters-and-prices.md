@@ -26,8 +26,11 @@ differently.
 
 You can change a meter's aggregation until it has its first usage event.
 After that, a change is refused with `409 meter_has_usage`, because its
-usage so far was counted the old way. Usage that Hardcount holds for an
-unknown customer does not count until it is released.
+usage so far was counted the old way. Held usage does not count until it
+is released. Held usage is usage from a LiteLLM proxy that Hardcount keeps
+without billing, because its customer does not exist yet. You release it
+once the customer
+exists ([held usage](../integrations/litellm.md#usage-for-a-customer-hardcount-does-not-know-yet)).
 
 ## Prices
 
@@ -58,7 +61,7 @@ Each event is billed by at most one price of the customer's plan.
    event of its meter.
 2. **When several prices can take an event, the one with the most labels
    wins.** So nothing is billed twice. A broad price and finer prices can
-   live side by side: the finer ones win where they apply.
+   exist side by side: the finer ones win where they apply.
 3. **Two prices that would tie are refused.** Two prices with the same
    number of labels that could both take one event, such as
    `{"model": "a"}` and `{"token_type": "input"}`, have no winner. The
@@ -76,10 +79,12 @@ More: [AI pricing reference](../ai-pricing.md#how-hardcount-picks-the-price-for-
 ## Prices belong to the plan
 
 Each plan has its own prices, so two plans can charge different rates for
-one meter. One customer cannot have two live subscriptions that price the
-same meter, so no usage is billed twice. The second subscription is refused
-with `409`. So is a new price that would add the meter to a plan such a
-customer is on (`409 meter_overlap`).
+one meter. One customer cannot have two subscriptions that are not canceled
+(draft, trialing or active) and price the same meter, so no usage is billed
+twice. Hardcount refuses the second subscription with `409`. It also
+refuses, with `409 meter_overlap`, a new price that would add the meter to
+a plan when a customer on that plan has another subscription that prices
+the meter.
 
 A price change takes effect at a period boundary, so a period is never
 billed at two rates:

@@ -2,7 +2,7 @@
 
 This folder runs Hardcount on one machine: Postgres, Redis, the Hardcount API, the dashboard, and nginx in front of them.
 
-- **Try it on your own computer:** run `./quickstart.sh` here. It uses the published images and local mode, so sign-in works at `http://localhost:8080` in every browser. Walkthrough: [quick start](../../docs/quick-start.md).
+- **Try it on your own computer:** run `./quickstart.sh` here. It uses the published images and local mode (`APP_ENV=local`), so sign-in works at `http://localhost:8080` in every browser. Walkthrough: [quick start](../../docs/quick-start.md).
 - **Install it on a server:** follow [Production on one VM](../../docs/production-one-vm.md). It installs a pinned release, then adds HTTPS, email, Stripe, nightly backups and a go-live checklist.
 
 ## Build from source instead
@@ -53,7 +53,7 @@ Read the [changelog](../../CHANGELOG.md) upgrade notes first, as for any upgrade
 
 With `APP_ENV=production`, the default in this stack, the sign-in cookie is always marked `Secure`. Browsers keep a `Secure` cookie on HTTPS. At `http://localhost`, Chrome and Firefox keep it too; Safari does not. At any other plain-HTTP address, such as `http://<server-ip>/`, no browser keeps it, and the sign-in page says so.
 
-Until you add HTTPS, sign in at `http://localhost/` on the server in Chrome or Firefox, or through an SSH tunnel from your laptop:
+Until you add HTTPS, sign in at `http://localhost/` on the server in Chrome or Firefox, or through an SSH tunnel from your laptop. With `NGINX_HTTP_PORT=127.0.0.1:8080`, as in Production on one VM, change `localhost:80` in the command to `localhost:8080`:
 
 ```bash
 ssh -L 8080:localhost:80 you@server   # localhost:8080 instead if NGINX_HTTP_PORT=127.0.0.1:8080

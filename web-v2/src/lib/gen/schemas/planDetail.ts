@@ -15,16 +15,17 @@ import type { Plan } from './plan';
 
 /**
  * A plan as get, create and update plan answer it: the plan with its
- * prices, whether a subscription has ever used it, and how many live
- * subscriptions are on it.
+ * prices, whether a subscription has ever used it, and how many
+ * subscriptions that are not canceled are on it.
  */
 export type PlanDetail = Plan & {
   /**
      * Whether a subscription has ever used the plan (canceled ones
      * and scheduled plan changes included). On a plan no one has
-     * used, a price change applies at once; on a used plan, from
-     * each subscriber's next billing period, and from the join for
-     * a subscriber who first joins the plan in a period after it.
+     * used, a price change applies at once. On a used plan, it
+     * applies from each subscriber's next billing period. A
+     * subscriber who first joins the plan in a period after the
+     * change gets it from the moment they join.
      */
   used: boolean;
   /**

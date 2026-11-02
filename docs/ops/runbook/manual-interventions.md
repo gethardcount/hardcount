@@ -32,7 +32,9 @@ below). Both make the matching change to the invoice and send
 
 3. **Resolve the run.** Set `app.livemode` to `'on'` for a live run or
    `'off'` for a test run. The event row takes its mode from this setting,
-   and the insert is refused without it.
+   and the insert is refused without it. The example uses `invoice_voided`:
+   replace it with the resolution from step 1 in both places, the UPDATE and
+   the INSERT.
 
    ```sql
    BEGIN;
@@ -94,7 +96,7 @@ way round yet.
 
 ## A customer has no usable payment method on file
 
-Saved cards live in the `payment_methods` table. Hardcount writes it when
+Saved cards are stored in the `payment_methods` table. Hardcount writes it when
 Stripe's `setup_intent.succeeded` webhook arrives, or `checkout.session.completed`
 for a card saved on a hosted page. (`payment_method.attached` is an event
 Hardcount sends to your endpoints, not one it receives from Stripe.) If a

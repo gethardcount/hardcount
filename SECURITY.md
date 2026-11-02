@@ -35,10 +35,10 @@ Hardcount is pre-1.0. Only the latest release gets security fixes.
 
 ## Out of scope
 
-- Vulnerabilities in the operator's deployment environment (Kubernetes cluster, managed Postgres, load balancer, secrets store, IAM)
+- Vulnerabilities in the deployment environment of the person who runs the server (Kubernetes cluster, managed Postgres, load balancer, secrets store, IAM)
 - Vulnerabilities in third-party services that Hardcount integrates with (Stripe, cloud providers, email providers, S3, KMS) — report those to the vendor
-- Configuration mistakes by the operator (e.g., running with `HARDCOUNT_ENCRYPTION_KEY` unset in a non-production env, or exposing the dashboard without TLS termination)
-- DoS via traffic flooding (a property of the operator's load balancer + WAF, not Hardcount)
+- Configuration mistakes by the person who runs the server (e.g., running with `HARDCOUNT_ENCRYPTION_KEY` unset in a non-production env, or exposing the dashboard without TLS termination)
+- DoS via traffic flooding (a property of the load balancer and WAF of the person who runs the server, not Hardcount)
 - Self-XSS, social engineering, physical attacks
 - Reports against forks or vendored copies of Hardcount — please reproduce on the canonical `main` branch first
 
@@ -55,14 +55,14 @@ In place:
   - about 30,000 common leaked passwords are refused when a password is set;
   - repeated wrong passwords slow down instead of locking the account;
   - the sign-in cookie travels only over HTTPS in production.
-- **Requests:** CSRF checks on the dashboard, security headers and HSTS, rate limiting. TLS itself is ended by the operator's proxy.
+- **Requests:** CSRF checks on the dashboard, security headers and HSTS, rate limiting. TLS itself is ended by a proxy run by the person who runs the server.
 - **Webhooks:** outbound events signed with HMAC-SHA256; inbound Stripe events verified.
 - **Audit log:** append-only; a database trigger refuses any update or delete.
 - **Supply chain:** CI runs `govulncheck` and scans the images with Trivy; release images carry an SBOM and are signed.
 
 Known gaps:
 
-- **No two-factor sign-in.** It is built when an operator asks for it or a customer's security review requires it ([ADR-095](docs/adr/095-login-security-roadmap-and-mfa.md)). Until then, a team can put the dashboard's sign-in behind its own SSO or VPN.
+- **No two-factor sign-in.** It is built when a team running Hardcount asks for it, or when a customer's security review requires it ([ADR-095](docs/adr/095-login-security-roadmap-and-mfa.md)). Until then, a team can put the dashboard's sign-in behind its own SSO or VPN.
 - **No built-in rotation** of `HARDCOUNT_ENCRYPTION_KEY` or `HARDCOUNT_EMAIL_BIDX_KEY`.
 - **No static analysis** (SAST, such as CodeQL or Semgrep) in CI.
 - **No threat model document.**

@@ -40,13 +40,15 @@ All the routes are under `/v1/subscriptions`. Each change sends a
 | `draft`, `trialing`, `active` | `POST /{id}/schedule-cancel` | `subscription.cancel_scheduled` | no change yet |
 | `trialing`, `active` | Hardcount, when the scheduled cancel is due | `subscription.canceled` | `canceled` |
 | `trialing`, `active` | `DELETE /{id}/scheduled-cancel` | `subscription.cancel_cleared` | no change |
-| `active` | Dunning's final action, when the policy says cancel | `subscription.canceled` | `canceled` |
+| `active` | Hardcount, when the payment retries for an unpaid invoice (dunning) run out and the dunning policy says cancel | `subscription.canceled` | `canceled` |
 
 A trial ends whether or not the customer has saved a card. The first
-invoice is then collected like any other. A customer with no card gets an
-email, once email is set up: a link to add a card when Stripe is connected
-and `PAYMENT_UPDATE_URL` is set, or the invoice itself when Stripe is not
-connected.
+invoice is then collected like any other. Once email is set up, a customer
+with no card gets an email:
+
+- with a link to add a card, when Stripe is connected and
+  `PAYMENT_UPDATE_URL` is set;
+- with the invoice itself, when Stripe is not connected.
 
 ## Billing periods
 
@@ -99,9 +101,10 @@ for the days it was on. How depends on when the base fee is billed:
   each part of the period at its own plan, for its own days.
 - **Billed in advance:** the period is already paid, so Hardcount settles
   the difference now. An upgrade makes an invoice now. A downgrade or a
-  smaller quantity makes a credit note: a paid share goes to the
-  customer's credit balance, and an unpaid share lowers what the open
-  invoice asks for.
+  smaller quantity makes a credit note (a document that lowers what the
+  customer owes) for the unused part of the period. The share the customer
+  already paid goes to their credit balance. The share not paid yet lowers
+  what the open invoice asks for.
 
 On a plan billed in advance, a change that charges more now (an upgrade, a
 larger quantity or an added item) is refused with
@@ -144,8 +147,9 @@ $50.00 of base fee.
 - **Now:** `POST /v1/subscriptions/{id}/cancel`. Hardcount makes a final
   invoice for the part of the period so far: usage, and a base fee billed
   in arrears for those days. For a base fee billed in advance, the days
-  left are given back: a paid share as credit to the customer's balance,
-  and an unpaid share by lowering what the open invoice asks for. A trial
+  left are given back. The share already paid goes to the customer's
+  credit balance. The share not paid yet lowers what the open invoice asks
+  for. A trial
   that never became active gets no final invoice.
 - **Later:** `POST /v1/subscriptions/{id}/schedule-cancel`, with
   `{"at_period_end": true}` or `{"cancel_at": "2026-09-30T00:00:00Z"}`.
@@ -172,8 +176,10 @@ time.
   yourself.
 - A pause does not stop the retries of an invoice issued before it. Void
   or write off that invoice to stop them.
-- Dunning can pause collection as its final action. That pause ends by
-  itself when the customer pays the invoice.
+- Dunning, Hardcount's payment retries for an unpaid invoice, can pause
+  collection as its final action
+  ([Payments](payments.md#retries-dunning)). That pause ends by itself
+  when the customer pays the invoice.
 
 `GET /v1/subscriptions?collection=paused` lists paused subscriptions.
 

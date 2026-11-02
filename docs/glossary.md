@@ -10,27 +10,28 @@ follows.
 
 ## Accounts and access
 
-- **tenant**: One business account in Hardcount, with its own customers, data,
-  dashboard users and API keys. One Hardcount install can hold many tenants, and each sees only its own data.
-  A dashboard user signs in to one tenant: the first one they joined. There
-  is no way yet to switch to another. [More](self-host.md)
+- **account (tenant)**: One business account in Hardcount, with its own
+  customers, data, dashboard users and API keys. One Hardcount install can
+  hold many accounts, and each sees only its own data. A dashboard user
+  signs in to one account: the first one they joined. There is no way yet
+  to switch to another. [More](self-host.md)
 - **operator**: Has two meanings. Usually the business that runs Hardcount to
   bill its customers, or its staff who sign in to the dashboard. In
   self-host and ops docs, the engineer who deploys and runs the install.
   [More](self-host.md)
-- **customer**: A person or company that a tenant bills. Each customer
-  belongs to one tenant and has an `external_id`: your own ID for it, such
+- **customer**: A person or company that an account bills. Each customer
+  belongs to one account and has an `external_id`: your own ID for it, such
   as the user ID in your database. Usage events use it to say whose usage it
   is. [More](concepts/data-model.md)
-- **test mode and live mode**: Two separate sets of data in one tenant, as
+- **test mode and live mode**: Two separate sets of data in one account, as
   in Stripe. Test mode is for trying things, and nothing in it charges real
   money. Live mode is real billing. An API key's mode (the `_test_` or
   `_live_` in its prefix) or the dashboard's mode switch picks which set you
-  see. Tenant settings are shared, but each mode has its own Stripe
+  see. Account settings are shared, but each mode has its own Stripe
   connection. [More](api-keys.md)
 - **API key types (secret, usage only)**: The two kinds of key you send as
   `Authorization: Bearer <key>`. A secret key (`hc_secret_`) has full
-  access to one tenant and stays on your server. A usage-only key
+  access to one account and stays on your server. A usage-only key
   (`hc_ingest_`, `ingest` in the API) can only send usage events, for
   LiteLLM or another gateway. [More](api-keys.md)
 
@@ -61,28 +62,32 @@ follows.
   takes the plan's currency. When an event fits more than one price of the
   plan, the price with the most labels takes it, so nothing counts twice. A
   billing period is priced as the plan's prices were when it started. A
-  subscriber who joins the plan inside a period (a new subscription, an
-  immediate plan change, an added item) is priced as the plan was when they
-  first joined it in that period; after a trial, when the trial ended.
+  subscriber can also join the plan inside a period: with a new
+  subscription, an immediate plan change or an added item. That period is
+  priced as the plan was when they first joined it in that period. After a
+  trial, it is priced as the plan was when the trial ended.
   [More](concepts/meters-and-prices.md#prices), and
   [the decision](adr/130-usage-prices-belong-to-the-plan.md)
 - **used plan**: A plan that a subscription has used, canceled ones
   included. A price change on a used plan applies from each subscriber's next
-  billing period, and from the join for a subscriber who first joins the plan
-  in a period after it; on a plan no one has used, at once.
+  billing period. A subscriber who first joins the plan in a period after
+  the change pays it from the join. On a plan no one has used, a price
+  change applies at once.
   [More](concepts/meters-and-prices.md#prices-belong-to-the-plan)
-- **no_price**: Usage of a meter that no price of the customer's plan
-  takes. Hardcount records it and bills nothing for it. When ingest finds
-  this, it answers `billing_status: "no_price"`.
+- **no_price**: Usage of a meter that the customer's plan prices, but that
+  no price of the plan takes, because no price matches the event's labels.
+  The usual cause is a model with no price. Hardcount records it and bills
+  nothing for it. The answer that stores such an event carries
+  `billing_status: "no_price"`.
   [More](ops/runbook/usage-with-no-price.md)
-- **billing_status (on an ingest answer)**: What Hardcount found when it
-  stored an event: `after_close` (its time is already invoiced),
+- **billing_status (in the answer to a usage event)**: What Hardcount found
+  when it stored an event: `after_close` (its time is already invoiced),
   `not_on_plan` (the plan of a period not invoiced yet has no price for its
   meter), `outside_subscription` (no subscription bills its time) or
-  `no_price`. A status that is present was true then. No status means Hardcount
-  found no reason then; it is not a promise that the event will be billed.
-  The invoice is the final answer. Only the answer that wrote the event
-  carries it.
+  `no_price`. A status in the answer was true when the event arrived. No
+  status means Hardcount found no problem then; it does not promise that the
+  event will be billed. The invoice is the final answer. Only the answer to
+  the request that stored the event carries a status.
   [More](concepts/usage-events.md#which-period-an-event-counts-in)
 - **invoice grace period**: How long Hardcount waits after a billing period
   ends before it makes the period's invoice, so usage that arrives a little
@@ -107,7 +112,7 @@ follows.
   it. [More](integrations/litellm.md#usage-for-a-customer-hardcount-does-not-know-yet),
   and [the decision](adr/122-hold-and-release-usage-for-unknown-customers.md)
 - **plan**: A price package you sell: a currency, a billing interval
-  (monthly or yearly), a fixed base fee, and its usage prices. Its meters
+  (monthly or yearly), an optional fixed base fee, and its usage prices. Its meters
   are the meters it has a price for. A subscription has one or more items, each a plan with a quantity.
   A plan's status is active or archived. [More](concepts/meters-and-prices.md)
 - **recipe**: A ready-made pricing setup that one API call applies. The
@@ -130,7 +135,7 @@ follows.
   [More](concepts/subscriptions.md)
 - **billing period**: The dates one subscription invoice covers. The start
   day is included and the end is not. Periods start and end at midnight in
-  the tenant's billing timezone. A monthly period starts either on the 1st
+  the account's billing timezone. A monthly period starts either on the 1st
   of the month (calendar billing, the default, after a first partial
   period) or on the day the subscription started (anniversary billing).
   With a trial, the first period starts on the day the trial ends. A start
@@ -138,8 +143,8 @@ follows.
   Yearly periods are always anniversary.
   [More](concepts/subscriptions.md#billing-periods), and
   [the decision](adr/012-day-grade-calendar-billing.md)
-- **billing timezone**: The one timezone for your whole account (a tenant
-  setting, UTC by default). Hardcount puts period starts and ends at midnight in
+- **billing timezone**: The one timezone for your whole account (an
+  account setting, UTC by default). Hardcount puts period starts and ends at midnight in
   it, and counts days for proration in it. Each invoice also keeps the zone
   it was issued under, so its dates never shift later.
   [More](concepts/subscriptions.md#billing-periods), and
@@ -160,7 +165,8 @@ follows.
   period charges the difference now, or credits it on a downgrade, and a
   short first period is prorated when billed. A change that charges more
   now is refused while the period's invoice is unpaid or written off. A
-  plan billed in arrears is prorated by days when the period closes.
+  plan billed in arrears is prorated by days when the period closes, that
+  is, when Hardcount makes the period's invoice.
   [More](concepts/subscriptions.md#plan-changes), and
   [the decision](adr/050-unpaid-source-proration-policy.md)
 - **spend threshold**: A limit on one subscription that issues an invoice
@@ -217,8 +223,9 @@ follows.
   [More](concepts/credits.md#the-order-credit-is-spent)
 - **credit note (CN)**: A document that lowers what a customer owes on an
   invoice. On an unpaid invoice it lowers the amount due; if nothing is left
-  due, the invoice is marked paid, and a part beyond what was due gives
-  back credit the invoice used. On a paid one,
+  due, the invoice is marked paid. If the credit note is for more than what
+  was due, the extra part gives back credit that the invoice used. On a
+  paid one,
   its total is split between a refund to the card, credit to the
   customer's balance, and money returned outside Hardcount (out of band). Its
   status is draft, issued or voided; only a draft can be voided.
@@ -226,9 +233,10 @@ follows.
   [the decision](adr/038-credit-note-three-channel-allocation.md)
 - **recorded from Stripe**: A credit note whose card refund is a refund made
   in Stripe outside Hardcount, for example in the Stripe dashboard
-  (`recorded_from_stripe`). Hardcount writes it from the refund's webhook when
-  the refund plainly fits the invoice, or the operator links the refund at
-  create; either way Hardcount calls nothing at Stripe for it.
+  (`recorded_from_stripe`). Hardcount writes it from the refund's Stripe
+  webhook when the refund clearly fits the invoice. Or the operator links
+  the refund when creating the credit note. Either way, Hardcount sends no
+  request to Stripe for it.
   [More](ops/runbook/refund-made-in-stripe.md), and
   [the decision](adr/134-refunds-made-in-stripe-are-recorded.md)
 - **clawback**: Has two meanings. In subscriptions: a period billed in
@@ -258,7 +266,8 @@ follows.
 - **unknown payment status**: A charge got an unclear answer (a timeout, a
   server error, a dropped connection), so Hardcount cannot tell if money moved.
   Nothing charges the invoice while the status is unknown. A Stripe webhook
-  or Hardcount's regular Stripe check settles it. If no PaymentIntent ID was
+  or the reconciler (below), Hardcount's regular check with Stripe, settles
+  it. If no PaymentIntent ID was
   recorded, the invoice is parked (below), which can end in a new
   charge.
   [More](concepts/payments.md#when-the-answer-is-unclear), and
@@ -272,12 +281,14 @@ follows.
 - **reconciler**: The check that asks Stripe what happened to payments
   Hardcount did not hear back about: `unknown` and `processing` payments,
   charge holds left after a lost answer, and parked invoices. It runs with
-  every scheduled billing run, hourly (every 5 minutes with `APP_ENV=local`).
+  every scheduled billing run, hourly (every 5 minutes when `APP_ENV` is
+  `local` or not set).
   [More](concepts/payments.md#when-the-answer-is-unclear)
 - **parked invoice**: An invoice whose charge result is unknown and that has
   no PaymentIntent ID recorded, so Hardcount cannot yet tell if the customer
   paid. Nothing charges it. On every scheduled billing run (every hour, or
-  every 5 minutes with `APP_ENV=local`, but not `POST /v1/billing/run`),
+  every 5 minutes when `APP_ENV` is `local` or not set, but not
+  `POST /v1/billing/run`),
   Hardcount lists the customer's payments in Stripe. A payment that appears is
   recorded, and if none has appeared
   24 hours after the charge, the invoice is charged again as usual. An
@@ -294,9 +305,10 @@ follows.
 - **dunning**: Hardcount's automatic process for collecting an unpaid invoice.
   A failed charge or a missing payment method starts it. It retries the
   charge on a schedule and sends reminders. When the retries run out, the
-  dunning policy can pause or cancel the subscription, write off the
-  invoice, both, or neither. A new account starts with one policy in each
-  mode, "Default retries", which retries three times and then does neither.
+  dunning policy makes two separate choices. For the subscription: pause
+  it, cancel it, or do nothing. For the invoice: write it off, or leave it
+  open. A new account starts with one policy in each mode, "Default
+  retries", which retries three times and then does nothing to either.
   [More](concepts/payments.md#retries-dunning)
 - **dunning run**: One dunning process for one unpaid invoice (at most one
   per invoice). It records the policy, the number of tries, when the next
@@ -310,9 +322,10 @@ follows.
   not reversed, but you can still record a payment made outside Stripe.
   Hardcount asks Stripe to close a Checkout page still open for it; if Stripe
   refuses, the page stays payable until it expires, at most an hour after
-  it opened. If it billed its
-  subscription's current period, it still counts as unpaid when that
-  subscription changes. An operator, or dunning's final action, writes an
+  it opened. If the invoice billed its subscription's current period, it
+  still counts as unpaid for a plan change: on a plan billed in advance, a
+  change that charges more now is refused
+  ([Plan changes](concepts/subscriptions.md#plan-changes)). An operator, or dunning's final action, writes an
   invoice off.
   [More](concepts/invoices.md#how-an-invoice-changes), and
   [the decision](adr/110-written-off-invoices-close-self-service-payment.md)
@@ -343,24 +356,23 @@ follows.
 
 - **test clock**: A pretend clock for test customers. Create a clock, add a
   new customer on it, then move the clock forward to see renewals, trial
-  ends, invoices and payment retries happen in minutes, not months. It
+  ends, invoices and payment retries happen in seconds, not months. It
   exists only in test mode. [More](concepts/test-clocks.md)
 - **catch-up (catchup)**: The work Hardcount does after a test clock moves
-  forward. It runs everything that fell due in the skipped time: trial
-  ends, billing periods, pauses that end, thresholds, tax retries, charges,
-  credit notes waiting for an invoice to settle, dunning steps and credit
-  expiries. It runs them by kind, not in time
-  order, in that order. Hardcount dates dunning's cancel or pause at the
-  escalation, the time of the last retry, never before the current
-  period's start. So one long move that bills the next period first dates
-  the pause or cancel at that next billing date. To test a policy that
-  pauses or cancels, move the
-  clock to the invoice's last retry first, then to the next billing date
-  ([#1276](https://github.com/gethardcount/hardcount/issues/1276)). The
-  clock then returns to `ready`, or to `internal_failure` if a step failed
-  or the move took more than 10 minutes.
-  [More](concepts/test-clocks.md#what-runs-while-the-clock-moves), and
-  [the decision](adr/015-test-clock-async-catchup.md)
+  forward. It runs everything that fell due in the skipped time, grouped by
+  kind, not in time order. The kinds run in this order: trial ends, billing
+  periods, pauses that end, thresholds, tax retries, charges, credit notes
+  waiting for an invoice to settle, dunning steps and credit expiries.
+  Hardcount dates a dunning pause or cancel at the escalation, the time of
+  the last retry, but never before the current period's start. So one long
+  move that bills the next period first dates the pause or cancel at that
+  next billing date. To test a policy that pauses or cancels, move the
+  clock to the invoice's last retry first, then to the next billing date.
+  The clock then returns to `ready`, or to `internal_failure` if a step
+  failed or the move took more than 10 minutes.
+  [More](concepts/test-clocks.md#what-runs-while-the-clock-moves),
+  [the decision](adr/015-test-clock-async-catchup.md), and
+  [the two-step move](https://github.com/gethardcount/hardcount/issues/1276)
 - **clock-pinned**: Describes a customer on a test clock, and everything it
   owns (subscriptions, invoices, credits). Its time comes from the clock,
   not the real clock, and the normal billing run skips it.

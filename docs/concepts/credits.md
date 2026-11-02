@@ -14,7 +14,7 @@ Each customer's credit is a ledger: a list of entries, one for each change.
 
 | Entry | What it is | Who writes it |
 |---|---|---|
-| `grant` | Credit added: a block that invoices can spend. | You, or Hardcount for a prepaid commit, a plan change or a credit note |
+| `grant` | Credit added: a block that invoices can spend. | You, or Hardcount for a prepaid commit, a plan change or a credit note (a document that lowers what a customer owes on an invoice) |
 | `usage` | Credit an invoice spent. | Hardcount |
 | `expiry` | The unspent part of a block that passed its expiry date. | Hardcount |
 | `adjustment` | A correction, up or down. | You |
@@ -26,7 +26,9 @@ never added together or converted.
 Read them with:
 
 - `GET /v1/credits/balance/{customer_id}`: the settled balance per
-  currency.
+  currency. It changes only when an invoice, grant, adjustment or expiry is
+  written; usage not invoiced yet does not lower it
+  ([the live balance](#your-apps-view-the-live-balance)).
 - `GET /v1/credits/ledger/{customer_id}`: every entry.
 - `GET /v1/credits/grants/{customer_id}`: each block, with what is used,
   what is left and when it expires.

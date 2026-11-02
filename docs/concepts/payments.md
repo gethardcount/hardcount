@@ -61,9 +61,10 @@ sets it up:
   the retry before it. Every new account starts with the policy "Default
   retries", `retry_days` `[3, 4, 7]`: retries on day 3, 7 and 14 after the
   failed charge.
-- **What to do when the retries run out:** pause collection, cancel the
-  subscription, write off the invoice, both, or neither. "Default retries"
-  does neither: the subscription keeps billing and the invoice stays open.
+- **What to do when the retries run out:** two separate choices. For the
+  subscription: pause collection, cancel it, or do nothing. For the
+  invoice: write it off, or leave it open. "Default retries" does nothing
+  to either: the subscription keeps billing and the invoice stays open.
 
 Each retry first uses any credit the customer got since the last try.
 
@@ -85,9 +86,10 @@ or a dropped connection. Then the payment status is `unknown`, and
 Hardcount never guesses.
 
 - **Nothing charges the invoice again** until Stripe's answer is known, so
-  the customer is never charged twice. A charge hold, a 5-minute claim on
-  the invoice, makes sure only one charge runs at a time. After an unclear
-  answer it stays in place.
+  the customer is never charged twice. A charge hold makes sure only one
+  charge runs at a time. It is a 5-minute claim on the invoice. After an
+  unclear answer, the hold stays until the reconciler (next item) has asked
+  Stripe what happened.
 - **The reconciler finds the answer.** It is a check that asks Stripe what
   happened to payments Hardcount did not hear back about. It runs with
   every billing run: hourly, or every 5 minutes when `APP_ENV` is `local`

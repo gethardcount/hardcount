@@ -25,14 +25,14 @@ have:
 
 1. Split the rate by the `outcome` label.
 2. For `row_lost`, search the error log for lines that start with
-   `audit: failed`. Their `tenant_id` field names the tenant. The metric has
-   no tenant label; the tenant is in the error log
+   `audit: failed`. Their `tenant_id` field names the account. The metric has
+   no account label; the account is in the error log
    ([why](../../adr/090-audit-in-tx-emission.md#note-2026-10-22-why-hardcount_audit_write_errors_total-carries-no-tenant_id-label)).
 
 **Fix:**
 
 - **`row_lost`:** treat it as a compliance incident.
-  1. Take the tenant from the error log.
+  1. Take the account (`tenant_id`) from the error log.
   2. The same `audit: failed …` line names each lost row's change: its
      `action`, `resource_type` and `resource_id`. List them; that is what
      the audit log is missing.
@@ -50,12 +50,15 @@ is declared in `internal/api/audit_routes.go` as `explicit` (it writes an
 audit row) or `exempt` (it does not need to). A non-zero counter means one
 of three things, most likely first:
 
-1. A route declared `explicit` has a code path that skips writing the row.
-2. A 2xx path that really changes nothing (a cache or idempotency replay, a
-   save with no changes) needs an `audit.MarkSkip` declaration.
-3. A new route shipped without a declaration. CI blocks this (the
-   route-walk test fails the build), unless someone edited the registry to
-   silence it.
+1. A route declared `explicit` (it writes an audit row) has a code path
+   that skips writing the row.
+2. A successful (2xx) request that really changes nothing, such as a cached
+   or idempotent repeat or a save with no changes, lacks its
+   `audit.MarkSkip` declaration. That declaration is how the code says no
+   audit row is needed.
+3. A new route shipped without a declaration. CI blocks this: the test that
+   walks every route fails the build, unless someone edited the route list
+   (`audit_routes.go`) to silence it.
 
 **Check:** find the route from the `route` label and the
 `UNCOVERED MUTATION` error log.

@@ -35,9 +35,12 @@ meter whose plan has prices for the older models only.
 
 - Hardcount builds and sends the invoice without that usage. It does not bill
   it later on its own.
-- The counter adds the quantity once per invoice built without it: period
-  close, cancel final invoice or spend-threshold invoice, once that
-  invoice's transaction commits.
+- The counter adds the quantity once per invoice built without it, once
+  that invoice's transaction commits. That invoice is one of three:
+  - the period close: the invoice built when a billing period ends;
+  - a cancel's final invoice;
+  - a spend-threshold invoice: one issued early, in the middle of a period,
+    when usage crosses a limit you set.
 - The counter resets when the process restarts.
 
 ## Check

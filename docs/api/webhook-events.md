@@ -18,17 +18,18 @@ an example message. How messages are delivered, signed and retried:
   when it is empty, such as `applied` on `dunning.escalated`.
 - **"Always sent"** marks an event saved together with the change that
   caused it, so a crash cannot drop it. Any other event can be lost in a
-  crash just after the change. See
+  crash just after the change. *Always sent* does not mean always
+  delivered. See
   [Three rules for your receiver](../webhooks.md#three-rules-for-your-receiver).
 - **The examples are the real shape of each message.** Hardcount sends the
-  body on one line, with its keys in this order; it is indented here. A test
-  renders every
-  event's `data` from the code that builds it and compares it with the files
-  in [internal/domain/testdata/webhook_payloads](../../internal/domain/testdata/webhook_payloads/);
-  another test checks each example here against the same code. The examples
-  share one fixed invoice, subscription, customer and so on, so a value such
-  as an invoice's `status` does not always fit the event: the
+  body on one line, with its keys in this order; it is indented here. Tests
+  check every example against the code that builds the message
+  ([test files](../../internal/domain/testdata/webhook_payloads/)). The
+  examples share one fixed invoice, subscription, customer and so on, so a
+  value such as an invoice's `status` does not always fit the event: the
   `invoice.finalized` example shows a paid invoice.
+- **`operator`** in `canceled_by` and `triggered_by` means a dashboard user
+  or an API key.
 
 Terms: [glossary](../glossary.md).
 
@@ -374,8 +375,8 @@ error (`last_payment_error`) and whether it was paid outside Hardcount
 `payment.received_on_voided_invoice`) carry the charge that raised the
 event: `incoming_payment_intent_id` is that charge, and `captured_cents` is
 what it took. Match the charge by `incoming_payment_intent_id`, not by the
-invoice's `stripe_payment_intent_id`; each event says what the invoice's
-one is.
+invoice's `stripe_payment_intent_id`. Each event below says which charge
+the invoice's `stripe_payment_intent_id` is.
 
 ### `payment.succeeded`
 
@@ -573,7 +574,7 @@ Hardcount (`paid_out_of_band` is true).
 
 A charge settled for a different amount than the invoice owed. The invoice
 was just paid by this charge, so its `stripe_payment_intent_id` is this
-charge, and `amount_paid_cents` is what Hardcount booked.
+charge, and `amount_paid_cents` is what Hardcount recorded.
 
 **Also in `data`:** `incoming_payment_intent_id`, `captured_cents`.
 
@@ -954,7 +955,8 @@ with `stripe_refund_id`, `stripe_payment_intent_id`, `amount_cents`,
   second charge, or money on a voided invoice). No credit note.
 - `needs_review`: a refund of the invoice's own payment that Hardcount did
   not record; `review_reason` says why. The invoice shows a notice until
-  the operator records it with a credit note or dismisses it.
+  someone records it with a credit note or dismisses it, in the dashboard or
+  with the API.
 - `not_refunded`: it failed or was canceled before it succeeded. No money
   moved.
 
@@ -1120,8 +1122,8 @@ A customer's payment method was set up or replaced through Stripe Checkout.
 `data.subscription` is the subscription with its items, as
 `GET /v1/subscriptions/{id}` returns it, without
 `current_billing_period_display` (a date range the API writes out when you
-read it). A cancel's time is the subscription's `canceled_at`, and a
-schedule's is its `cancel_at` and `cancel_effective_at`.
+read it). A cancel's time is the subscription's `canceled_at`. A scheduled
+cancel's time is its `cancel_at` and `cancel_effective_at`.
 
 ### `subscription.created`
 
@@ -1235,9 +1237,11 @@ A draft subscription was activated.
 
 ### `subscription.canceled`
 
-A subscription was canceled. `canceled_by` is `operator`, `customer`,
-`schedule`, `dunning` or `system`. A cancel by dunning says `dunning`, also
-when a test-clock advance ran it. A cancel at trial end carries
+A subscription was canceled. `canceled_by` says who canceled it:
+`operator` (a dashboard user or an API key), `customer`, `schedule` (a
+cancel set for later, such as at trial end), `dunning` (Hardcount's
+automatic payment retries ran out) or `system` (Hardcount itself). A cancel
+by dunning says `dunning`, also when a test-clock advance ran it. A cancel at trial end carries
 `reason: trial_end_cancel`; other cancels have no `reason`.
 
 **Always sent.** **Also in `data`:** `canceled_by`, `reason`.
@@ -1591,13 +1595,15 @@ nothing. `triggered_by` is `operator`, `schedule` (its resume date came) or
 
 - A payment lifts the pause when it is recorded. This event follows on the
   next scheduled billing run, once any period that ended under the pause
-  has closed.
+  has closed (Hardcount built its invoice and started the next period).
 - A `schedule` or `payment` resume carries `resumed_at`, and is saved with
   the change, so a crash cannot drop it. An `operator` resume has no
   `resumed_at`.
-- Each pause that ends sends one, with its own trigger, even when a new
-  pause or a resume call reaches it first. That resume call sends no
-  `operator` resume.
+- A pause can end before Hardcount clears it: its resume date comes, or
+  its invoice is paid. If a new pause or a resume call arrives in that gap,
+  Hardcount still sends one event for the ended pause, with that pause's
+  own trigger (`schedule` or `payment`). The resume call then sends no
+  event with `triggered_by: operator`.
 
 **Also in `data`:** `triggered_by`, `resumed_at`.
 
@@ -1937,7 +1943,8 @@ A scheduled plan change was canceled.
 
 A scheduled plan change was applied at the period end. The item's `plan_id`
 is the new plan, `old_plan_id` the one it left, and `applied_at` when. The
-subscription is as it was before the close that starts the next period.
+subscription is as it was just before the period closed. Closing a period
+means Hardcount builds its invoice and starts the next period.
 
 **Also in `data`:** `item_id`, `old_plan_id`, `applied_at`.
 
@@ -1995,13 +2002,15 @@ subscription is as it was before the close that starts the next period.
 
 ### `subscription.threshold_crossed`
 
-Usage crossed a billing threshold, so an invoice was made early.
+Usage crossed a spend threshold, so an invoice was made early. A spend
+threshold (the subscription's `billing_thresholds`) is a money amount for
+the period's usage so far, or a usage count on one item.
 
 - `invoice_id`: the invoice made early.
 - `running_subtotal`: the spend compared with the threshold, in cents.
-- `crossed_amount`: whether the amount threshold was crossed.
-- `crossed_item_id`: the item whose usage threshold was crossed, empty if
-  none.
+- `crossed_amount`: whether the money-amount threshold was crossed.
+- `crossed_item_id`: the item whose usage-count threshold was crossed,
+  empty if none.
 
 **Also in `data`:** `invoice_id`, `running_subtotal`, `crossed_amount`,
 `crossed_item_id`.
@@ -2371,7 +2380,8 @@ The settled credit balance in one currency went above zero again.
 
 ### `credit.commit_retired`
 
-A credit note took back prepaid credit.
+A credit note took back prepaid credit from a prepaid commit: credit the
+customer paid for up front.
 
 - `grant_id`: the prepaid credit grant.
 - `funding_invoice_id`: the invoice that bought it.

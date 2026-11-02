@@ -4192,7 +4192,7 @@ type CreditBalance struct {
 	// CustomerId The customer (`hc_cus_…`).
 	CustomerId string `json:"customer_id"`
 
-	// TotalDeducted Credit an operator deducted (a negative adjustment), in the currency's minor unit.
+	// TotalDeducted Credit a dashboard user or an API key deducted (a negative adjustment), in the currency's minor unit.
 	TotalDeducted int64 `json:"total_deducted"`
 
 	// TotalExpired Credit written off by expiry, in the currency's minor unit.
@@ -4208,24 +4208,24 @@ type CreditBalance struct {
 	TotalUsed int64 `json:"total_used"`
 }
 
-// CreditGrantBlock One block of credit on a customer's balance (a grant or a positive
-// adjustment) and how much of it is left. Amounts are in the
+// CreditGrantBlock One grant on a customer's credit balance (made by a grant or a
+// positive adjustment) and how much of it is left. Amounts are in the
 // currency's minor unit (cents for USD).
 type CreditGrantBlock struct {
-	// AmountCents The credit the block started with, in the currency's minor unit.
+	// AmountCents The credit the grant started with, in the currency's minor unit.
 	AmountCents int64 `json:"amount_cents"`
 
-	// ConsumedCents Everything drawn from the block, in the currency's minor unit:
+	// ConsumedCents Everything drawn from the grant, in the currency's minor unit:
 	// used by invoices, expired, retired and deducted.
 	ConsumedCents int64 `json:"consumed_cents"`
 
-	// CreatedAt When the block was added.
+	// CreatedAt When the grant was added.
 	CreatedAt time.Time `json:"created_at"`
 
 	// Currency The block's currency, uppercase.
 	Currency string `json:"currency"`
 
-	// DeductedCents The part an operator removed with a negative adjustment, in the currency's minor unit.
+	// DeductedCents The part a dashboard user or an API key removed with a negative adjustment, in the currency's minor unit.
 	DeductedCents int64 `json:"deducted_cents"`
 
 	// Description The description of the ledger entry that added the credit.
@@ -4249,7 +4249,7 @@ type CreditGrantBlock struct {
 	// Id The ledger entry that added the credit.
 	Id string `json:"id"`
 
-	// RemainingCents Credit left in the block, `amount_cents` minus `consumed_cents`, in the currency's minor unit.
+	// RemainingCents Credit left in the grant, `amount_cents` minus `consumed_cents`, in the currency's minor unit.
 	RemainingCents int64 `json:"remaining_cents"`
 
 	// RetiredCents Commit credit taken back when the invoice that funded it was
@@ -4257,18 +4257,18 @@ type CreditGrantBlock struct {
 	// unit.
 	RetiredCents int64 `json:"retired_cents"`
 
-	// SourceInvoiceId For a `commit` block, the commit invoice whose finalizing made the grant. Absent for other blocks.
+	// SourceInvoiceId For a `commit` grant, the commit invoice whose finalizing made the grant. Absent for other grants.
 	SourceInvoiceId string `json:"source_invoice_id,omitempty"`
 }
 
 // CreditGrantBlockGrantKind Absent for unclassified credit.
 type CreditGrantBlockGrantKind string
 
-// CreditGrants A customer's credit blocks, newest first, with the remaining credit
+// CreditGrants A customer's credit grants, newest first, with the remaining credit
 // added up by currency and kind. Amounts are in the currency's minor
 // unit (cents for USD).
 type CreditGrants struct {
-	// Grants The customer's credit blocks, newest first. A block with nothing
+	// Grants The customer's credit grants, newest first. A grant with nothing
 	// left is listed only with `include_exhausted=true`.
 	Grants []CreditGrantBlock `json:"grants"`
 
@@ -4427,7 +4427,7 @@ type CreditLedgerEntryEntryType string
 // credit. Absent for other credit.
 type CreditLedgerEntryGrantKind string
 
-// CreditLiveBalance A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency a live subscription will invoice usage in. Amounts in two currencies are never added together. Returned by `GET /v1/credits/balance/{customer_id}/live`; nothing is stored.
+// CreditLiveBalance A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency an active or trialing subscription will invoice usage in. Amounts in two currencies are never added together. Returned by `GET /v1/credits/balance/{customer_id}/live`; nothing is stored.
 type CreditLiveBalance struct {
 	// Balances Ordered by currency.
 	Balances []CreditLiveCurrency `json:"balances"`
@@ -5722,8 +5722,8 @@ type HeldUsageGroupReason string
 
 // HeldUsageReleaseResult What `POST /v1/usage-events/held/release` did. The counts are what
 // Hardcount found when the release wrote the rows, as for
-// `billing_status` (see `UsageBillingStatus`). The invoice is the
-// final answer.
+// `billing_status` (see the `billing_status` field of a usage event).
+// The invoice is the final answer.
 type HeldUsageReleaseResult struct {
 	// CustomerId The customer the rows were ingested for.
 	CustomerId string `json:"customer_id"`
@@ -6468,7 +6468,8 @@ type InvoiceCreateRequest struct {
 	// Currency Uppercase or lowercase ISO 4217 code; it is stored uppercase. It
 	// must be the customer's currency (see the 409). Defaults to the
 	// billing profile's currency, then the plan currency of the
-	// customer's live subscriptions, then the account's default
+	// customer's draft, trialing and active subscriptions, then the
+	// account's default
 	// currency. Currencies with no minor unit (such as JPY) are
 	// refused.
 	Currency string `json:"currency,omitempty"`
@@ -6585,8 +6586,9 @@ type InvoiceLineItem struct {
 	// expires (the default).
 	CommitExpiresAt time.Time `json:"commit_expires_at,omitempty"`
 
-	// CommitGrantedCents Marks the line as a prepaid commit purchase: when the invoice is
-	// finalized, the customer is granted a block of credit of this
+	// CommitGrantedCents Marks the line as a prepaid commit purchase (credit the customer
+	// pays for up front): when the invoice is finalized, the customer
+	// gets a credit grant of this
 	// many cents (in the invoice's currency). It may differ from the
 	// line's price: a discounted commit sells $10,000 of credit for
 	// $9,000. Only on `add_on` lines of invoices you create, at most
@@ -6901,10 +6903,11 @@ type InvoiceStripeRefund struct {
 	// voided invoice), so no credit note. `needs_review`: a refund of
 	// the invoice's own payment that Hardcount did not record
 	// (`review_reason` says why); the invoice shows the
-	// `refunded_in_stripe` notice until the operator records it with a
-	// credit note or dismisses it. `not_refunded`: first seen already
-	// failed or canceled, so no money moved. `dismissed`: the operator
-	// handled it outside Hardcount.
+	// `refunded_in_stripe` notice until a dashboard user or an API key
+	// records it with a credit note or dismisses it. `not_refunded`:
+	// first seen already failed or canceled, so no money moved.
+	// `dismissed`: a dashboard user or an API key marked it as handled
+	// outside Hardcount.
 	Outcome InvoiceStripeRefundOutcome `json:"outcome"`
 
 	// Reason Stripe's refund reason (`duplicate`, `fraudulent` or `requested_by_customer`). Absent when none was given.
@@ -6915,7 +6918,7 @@ type InvoiceStripeRefund struct {
 
 	// ReviewReason Why a refund of the invoice's own payment was flagged instead of
 	// recorded. Set for `needs_review` and `dismissed`, and kept when
-	// the operator records one with a credit note.
+	// a dashboard user or an API key records one with a credit note.
 	ReviewReason InvoiceStripeRefundReviewReason `json:"review_reason,omitempty"`
 
 	// Status Stripe's refund status, as Stripe sends it.
@@ -6945,15 +6948,16 @@ type InvoiceStripeRefund struct {
 // voided invoice), so no credit note. `needs_review`: a refund of
 // the invoice's own payment that Hardcount did not record
 // (`review_reason` says why); the invoice shows the
-// `refunded_in_stripe` notice until the operator records it with a
-// credit note or dismisses it. `not_refunded`: first seen already
-// failed or canceled, so no money moved. `dismissed`: the operator
-// handled it outside Hardcount.
+// `refunded_in_stripe` notice until a dashboard user or an API key
+// records it with a credit note or dismisses it. `not_refunded`:
+// first seen already failed or canceled, so no money moved.
+// `dismissed`: a dashboard user or an API key marked it as handled
+// outside Hardcount.
 type InvoiceStripeRefundOutcome string
 
 // InvoiceStripeRefundReviewReason Why a refund of the invoice's own payment was flagged instead of
 // recorded. Set for `needs_review` and `dismissed`, and kept when
-// the operator records one with a credit note.
+// a dashboard user or an API key records one with a credit note.
 type InvoiceStripeRefundReviewReason string
 
 // InvoiceStripeRefundStatus Stripe's refund status, as Stripe sends it.
@@ -7650,9 +7654,10 @@ type PlanDetail struct {
 
 	// Used Whether a subscription has ever used the plan (canceled ones
 	// and scheduled plan changes included). On a plan no one has
-	// used, a price change applies at once; on a used plan, from
-	// each subscriber's next billing period, and from the join for
-	// a subscriber who first joins the plan in a period after it.
+	// used, a price change applies at once. On a used plan, it
+	// applies from each subscriber's next billing period. A
+	// subscriber who first joins the plan in a period after the
+	// change gets it from the moment they join.
 	Used bool `json:"used"`
 }
 
@@ -9389,9 +9394,10 @@ type UsageAggregate struct {
 //     its scheduled cancel.
 //   - `no_price`: the plan that bills the event's time prices this
 //     meter, but no price of that plan takes the event's `dimensions`.
-//     A price takes an event whose dimensions include all of its
-//     `dimension_match`, compared as strings: the number `1` is not the
-//     string `"1"`.
+//     A price takes an event whose dimensions include all of the
+//     price's `dimension_match` labels. A price's labels are text, so a
+//     number or a true/false value in the event never matches: the
+//     number `1` does not match the string `"1"`.
 //
 // No `billing_status` means Hardcount found no reason then. It is not a
 // promise that the event will be billed. Hardcount checks only the
@@ -9432,9 +9438,10 @@ type UsageEvent struct {
 	//   its scheduled cancel.
 	// - `no_price`: the plan that bills the event's time prices this
 	//   meter, but no price of that plan takes the event's `dimensions`.
-	//   A price takes an event whose dimensions include all of its
-	//   `dimension_match`, compared as strings: the number `1` is not the
-	//   string `"1"`.
+	//   A price takes an event whose dimensions include all of the
+	//   price's `dimension_match` labels. A price's labels are text, so a
+	//   number or a true/false value in the event never matches: the
+	//   number `1` does not match the string `"1"`.
 	//
 	// No `billing_status` means Hardcount found no reason then. It is not a
 	// promise that the event will be billed. Hardcount checks only the
@@ -9504,8 +9511,8 @@ type UsageEvent struct {
 	// Timestamp When the usage happened. It decides which billing period the
 	// event counts toward. An event sent without `timestamp` is
 	// stamped with the time Hardcount received it, or, for a customer
-	// on a test clock, with the clock's time. A live event may be at
-	// most 5 minutes ahead of that time. There is no limit on how far
+	// on a test clock, with the clock's time. An event that is not a
+	// backfill may be at most 5 minutes ahead of that time. There is no limit on how far
 	// back it goes, but an event in a period whose invoice is already
 	// built is stored and not billed (see `billing_status`).
 	Timestamp time.Time `json:"timestamp"`
@@ -9546,9 +9553,10 @@ type UsageEventBatchEventResult struct {
 	//   its scheduled cancel.
 	// - `no_price`: the plan that bills the event's time prices this
 	//   meter, but no price of that plan takes the event's `dimensions`.
-	//   A price takes an event whose dimensions include all of its
-	//   `dimension_match`, compared as strings: the number `1` is not the
-	//   string `"1"`.
+	//   A price takes an event whose dimensions include all of the
+	//   price's `dimension_match` labels. A price's labels are text, so a
+	//   number or a true/false value in the event never matches: the
+	//   number `1` does not match the string `"1"`.
 	//
 	// No `billing_status` means Hardcount found no reason then. It is not a
 	// promise that the event will be billed. Hardcount checks only the
@@ -9913,13 +9921,13 @@ type WebhookStreamFrame struct {
 	// LastAttemptAt When the delivery result this frame reports happened. null in the first batch and in a new event's first frame.
 	LastAttemptAt time.Time `json:"last_attempt_at"`
 
-	// Livemode The event's mode. Live frames are not filtered by mode, so check it.
+	// Livemode The event's mode. Frames sent after the first batch are not filtered by mode, so check it.
 	Livemode bool `json:"livemode"`
 
 	// ReplayOfEventId The original event, when this frame is about a replay. null otherwise.
 	ReplayOfEventId string `json:"replay_of_event_id"`
 
-	// Status Delivery state. Live frames send `pending` (a new event or
+	// Status Delivery state. Frames sent after the first batch send `pending` (a new event or
 	// replay), `succeeded` (one delivery got a 2xx answer) or `failed`
 	// (one delivery failed for good). Frames in the first batch send
 	// the event's roll-up over all its deliveries: `pending`, `failed`,
@@ -10589,7 +10597,7 @@ type GrantCreditsJSONBodyGrantKind string
 
 // GetCreditGrantsParams defines parameters for GetCreditGrants.
 type GetCreditGrantsParams struct {
-	// IncludeExhausted `true` also lists the blocks with nothing left (used up,
+	// IncludeExhausted `true` also lists the grants with nothing left (used up,
 	// expired, retired or deducted). Any other value leaves them out.
 	IncludeExhausted bool `form:"include_exhausted,omitempty" json:"include_exhausted,omitempty"`
 }
@@ -12174,7 +12182,7 @@ type ListSubscriptionsParams struct {
 	// CustomerId Only this customer's subscriptions (`hc_cus_…`).
 	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
 
-	// PlanId Filter to subscriptions with a live item on this plan.
+	// PlanId Filter to subscriptions with an item on this plan that has not been removed.
 	PlanId string `form:"plan_id,omitempty" json:"plan_id,omitempty"`
 
 	// Status Exact status. Any other value is a 422 with `param: status`.
@@ -12184,13 +12192,15 @@ type ListSubscriptionsParams struct {
 
 	// Billing `failing` returns only subscriptions that carry a
 	// `billing_failure`: those waiting for their next billing attempt
-	// and those that are parked. Any other value is a 422 with
+	// and those that are parked (set aside after eight failed billing
+	// attempts, until someone retries them). Any other value is a 422 with
 	// `param: billing`.
 	Billing ListSubscriptionsParamsBilling `form:"billing,omitempty" json:"billing,omitempty"`
 
 	// Collection `paused` returns only active and trialing subscriptions whose
-	// `pause_collection` is in force, whether an operator or dunning set
-	// it. A timed pause ends at `resumes_at` (on the subscription's test
+	// `pause_collection` is in force, whether a dashboard user or an
+	// API key set it, or dunning (Hardcount's automatic payment
+	// retries) did. A timed pause ends at `resumes_at` (on the subscription's test
 	// clock, if it has one), even while the response still carries it.
 	// Any other value is a 422 with `param: collection`.
 	Collection ListSubscriptionsParamsCollection `form:"collection,omitempty" json:"collection,omitempty"`
@@ -13955,10 +13965,10 @@ type ServerInterface interface {
 	// Activate a draft subscription
 	// (POST /v1/subscriptions/{id}/activate)
 	ActivateSubscription(w http.ResponseWriter, r *http.Request, id string, params ActivateSubscriptionParams)
-	// Clear billing thresholds
+	// Clear spend thresholds
 	// (DELETE /v1/subscriptions/{id}/billing-thresholds)
 	ClearSubscriptionBillingThresholds(w http.ResponseWriter, r *http.Request, id string)
-	// Set billing thresholds
+	// Set spend thresholds
 	// (PUT /v1/subscriptions/{id}/billing-thresholds)
 	SetSubscriptionBillingThresholds(w http.ResponseWriter, r *http.Request, id string, params SetSubscriptionBillingThresholdsParams)
 	// Cancel a subscription now
@@ -14924,13 +14934,13 @@ func (_ Unimplemented) ActivateSubscription(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Clear billing thresholds
+// Clear spend thresholds
 // (DELETE /v1/subscriptions/{id}/billing-thresholds)
 func (_ Unimplemented) ClearSubscriptionBillingThresholds(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Set billing thresholds
+// Set spend thresholds
 // (PUT /v1/subscriptions/{id}/billing-thresholds)
 func (_ Unimplemented) SetSubscriptionBillingThresholds(w http.ResponseWriter, r *http.Request, id string, params SetSubscriptionBillingThresholdsParams) {
 	w.WriteHeader(http.StatusNotImplemented)

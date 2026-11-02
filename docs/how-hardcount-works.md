@@ -51,7 +51,8 @@ flowchart TB
 4. **The period ends, and Hardcount makes the invoice.** By default this
    happens 1 to 2 hours after the period ends. Hardcount waits an hour so that
    usage arriving a little late is still billed, and its billing run is
-   hourly (every 5 minutes when `APP_ENV` is `local`). The invoice has a
+   hourly (every 5 minutes when `APP_ENV` is `local` or not set). The
+   invoice has a
    line for each price that has usage, and one for the base fee; tax is
    added to the total. It is finalized at once: issued, and no longer a
    draft. It stays a draft only while tax cannot be worked out yet, or while
@@ -63,14 +64,16 @@ flowchart TB
 
 5. **Credit pays first, then Stripe charges the card.** Right after the
    invoice is finalized, Hardcount uses any credit the customer holds, such as
-   prepaid credit (a prepaid commit), to lower the amount due. So the
+   credit the customer paid for in advance (a prepaid commit), to lower the
+   amount due. So the
    `invoice.finalized` webhook shows the amount before credit. If credit
    covers it all, the invoice is marked paid with no charge. Otherwise, if
    the customer has a saved card and your Stripe account is connected,
    Hardcount asks Stripe to charge that card for what is left. With no saved
-   card, Hardcount starts dunning (step 6) and, once email is set up, emails
-   the customer: a link to add a card when your Stripe account is
-   connected, or else the invoice itself. Once they add a card, the next
+   card, Hardcount starts dunning, its automatic payment retries (step 6).
+   Once email is set up, it also emails the customer: a link to add a card
+   when your Stripe account is connected, or else the invoice itself. Once
+   they add a card, the next
    billing run charges it.
 
    **You see:** the invoice reads **Paid**, with a "Credits applied" line
@@ -80,8 +83,9 @@ flowchart TB
    dunning: it retries the charge on a schedule and, once email is set up,
    emails the customer. Each retry first uses any credit the customer got
    since the last try, so credit added later can pay an older invoice. If
-   every retry fails, it does what your dunning policy says: pause or
-   cancel the subscription, write off the invoice, both, or neither. A
+   every retry fails, it does what your dunning policy says. The policy
+   makes two separate choices. For the subscription: pause it, cancel it,
+   or do nothing. For the invoice: write it off, or leave it open. A
    pause from dunning lifts by itself once the customer pays that
    invoice, unless the subscription was canceled; a pause you set lasts
    until you resume it, or until its end date if you gave one.
