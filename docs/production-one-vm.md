@@ -4,7 +4,7 @@ This page takes a fresh Linux server to a Hardcount that bills real customers, w
 
 Hardcount is down while it restarts. If that is not acceptable, see [High availability](ops/high-availability.md).
 
-Load-tested on a €6.49/month Hetzner CX23 (ingest, billing and dashboard calls, without HTTPS, Stripe or email): see [How much traffic Hardcount handles](scale.md#what-one-small-server-handles).
+Load-tested on a €6.49/month Hetzner CX23, with the Velox v0.8.0 images (Velox was Hardcount's name before v0.9.0). The test covered ingest, billing and dashboard calls, without HTTPS, Stripe or email: see [How much traffic Hardcount handles](scale.md#what-one-small-server-handles).
 
 At the end you have:
 

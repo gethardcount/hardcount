@@ -9,7 +9,8 @@ Data leakage, a billing-correctness bug, or all customer charges failing.
 
 1. **Contain the damage.** Revoke API keys or stop the API container;
    Hardcount has no read-only mode. Pause webhook delivery by deactivating
-   endpoints (`PATCH` with `active=false`, which keeps the signing secret).
+   endpoints (`PATCH /v1/webhook-endpoints/endpoints/{id}` with the body
+   `{"active": false}`, which keeps the signing secret).
 2. **Snapshot the database** for forensic review.
 3. **Assemble responders:** get whoever runs the database and payments on
    the call.

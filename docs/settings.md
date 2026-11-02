@@ -93,7 +93,7 @@ Without `SMTP_HOST`, Hardcount sends no email: every send fails with "SMTP not c
 
 | Setting | What it does | Default |
 |---|---|---|
-| `CUSTOMER_PORTAL_URL` | The dashboard's address, with no path. Stripe returns a customer here after they save a card on a card-setup page you started: the setup-link email or a setup-session link. Hardcount adds `/payment-method-added`. | Unset: Stripe returns them to `http://localhost:5173/payment-method-added`, with a warning. The card is still saved. |
+| `CUSTOMER_PORTAL_URL` | The dashboard's address, with no path. Stripe returns a customer here after they save a card from a setup link you send or make on the customer's page (`send-setup-email`, `setup-session`). Hardcount adds `/payment-method-added`. | Unset: Stripe returns them to `http://localhost:5173/payment-method-added`, with a warning. The card is still saved. |
 | `PAYMENT_UPDATE_RETURN_URL` | Where a customer lands after adding a card from the "add a payment method" email. Hardcount adds `?status=success` or `?status=cancel`. | Unset: `http://localhost:5173/payment-method-added`, with a warning. The card is still saved. |
 
 ## Background jobs

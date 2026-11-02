@@ -30,8 +30,20 @@ predates the subscription
 3. **Each customer created in Hardcount, and on a plan.** The customer's
    external ID (your own ID for it) must be the `user` you pass to LiteLLM.
    The subscription puts the customer on a plan, so the usage lands on an
-   invoice. [The first invoice page](../first-invoice.md), steps 2 to 4,
-   shows both calls.
+   invoice. [The first invoice page](../first-invoice.md#steps), steps 3
+   and 4, shows both calls. Its step 4 uses the `PLAN_ID` that step 1
+   below saves.
+
+   Create the customer without a test clock: skip that page's step 2, and
+   run its step 3 without `test_clock_id`. A test clock's time stands
+   still, but the proxy stamps each call with the real time it ended. Once
+   that is more than 5 minutes past the clock's time, Hardcount refuses
+   every call as in the future (`must not be in the future`). LiteLLM
+   still gets a 200, so those calls are never billed
+   ([Response](#response)). A customer you already made on a test clock
+   there, such as `acme-1`, is not billed for the proxy's calls either:
+   make a new one, and pass its external ID as `user` in place of `acme-1`
+   below.
 4. **A LiteLLM proxy that can reach Hardcount.** This page was tested with
    LiteLLM 1.83.9, installed with `pip install 'litellm[proxy]==1.83.9'`.
    The proxy needs your provider's API key and a `model_list` entry for each
@@ -45,10 +57,11 @@ Apply a recipe: `anthropic_style` for Claude, `openai_style` for OpenAI
 ([what each creates and prices](../ai-pricing.md#ready-made-recipes)).
 
 ```bash
-curl -s -X POST "$HARDCOUNT/v1/recipes/anthropic_style/instantiate" \
+PLAN_ID=$(curl -s -X POST "$HARDCOUNT/v1/recipes/anthropic_style/instantiate" \
   -H "Authorization: Bearer $HARDCOUNT_KEY" \
   -H "Content-Type: application/json" \
-  -d '{}' | jq -r '.created_objects.plan_ids[0]'
+  -d '{}' | jq -r '.created_objects.plan_ids[0]')
+echo "$PLAN_ID"
 ```
 
 **You see:** the plan ID, such as `hc_pln_…`.
@@ -414,8 +427,8 @@ there means LiteLLM sent usage that Hardcount does not bill.
 
 A model you have no price for is not charged: its usage shows as usage
 with no price. Gemini models have no ready-made prices, so Gemini usage
-shows that way until you price it. But if your `tokens` meter has a default
-price, or a price that does not name a `model`, that price charges it.
+shows that way until you price it. But if the plan has a price on the
+`tokens` meter that does not name a `model`, that price charges it.
 
 Known limits:
 
@@ -614,7 +627,7 @@ of them.
     /v1/provider-costs`). Hardcount saves that cost on each event when it
     arrives.
   - LiteLLM's `response_cost` is one total for the whole call, which can
-    span three events. So Hardcount never saves it on an event.
+    span up to five events. So Hardcount never saves it on an event.
   - When the record has `cost_breakdown`, each event gets LiteLLM's cost
     for its own tokens instead of your provider cost: `output_cost` on
     `output`, `cache_read_cost` on `cache_read`, and `input_cost` minus

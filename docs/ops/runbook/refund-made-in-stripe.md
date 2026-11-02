@@ -42,7 +42,7 @@ One of these:
 - **Hardcount hears of refunds only if Stripe sends them.** The Stripe webhook
   endpoint needs `refund.created`, with the other refund events. The
   Hardcount settings page lists them under the webhook address. An endpoint
-  set up before this release lacks `refund.created`: in Stripe open
+  set up before v0.9.2 lacks `refund.created`: in Stripe open
   **Developers → Webhooks**, open the endpoint, and add it. Without it,
   Hardcount sees most card refunds only through their later `refund.updated`,
   more than a day after they were made, and flags them instead of recording

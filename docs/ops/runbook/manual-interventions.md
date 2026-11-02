@@ -1,7 +1,8 @@
 # Manual fixes
 
-Operator actions for incidents. Where a fix below writes to the database
-directly, record it in the audit log yourself. Back to the [runbook index](index.md).
+Operator actions for incidents. A fix below that writes to the database
+directly writes no audit log entry, and Hardcount has no way to add one by
+hand: keep your own record of what you ran, when and why. Back to the [runbook index](index.md).
 
 ## Force-resolve a stuck dunning run
 
@@ -54,7 +55,10 @@ below). Both make the matching change to the invoice and send
 4. **Change the invoice too.** This SQL resolves the run only; it does not
    touch the invoice. The endpoint makes the matching invoice change (void,
    mark uncollectible, or record a payment), and this SQL does not. If you
-   skip this step, the run and the invoice disagree.
+   skip this step, the run and the invoice disagree. No safe SQL makes this
+   change: make it from the dashboard or the API once one is back
+   (**Void invoice**, **Mark uncollectible** or **Record offline payment**
+   on the invoice).
 
 ## Mark an invoice paid (offline payment received)
 

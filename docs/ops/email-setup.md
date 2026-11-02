@@ -242,7 +242,7 @@ Send one invoice email and follow it.
 
 If the email stays `pending`, Hardcount is retrying it. The server log shows the provider's error; fix the cause it names. Hardcount retries for about 52 hours, then marks the email failed.
 
-If the email is `failed` at once with `email: recipient is not a single valid email address`, the customer's email or a CC entry is not one bare address, such as `Bob <bob@example.com>`. New addresses are checked when they are entered; an address stored earlier may still have this form. Hardcount does not retry this email. Change the address to the bare form (`bob@example.com`) and send again.
+If the email is `failed` at once with `email: recipient is not a single valid email address`, the customer's email or a CC entry is not one bare address, such as `Bob <bob@example.com>`. Hardcount checks every address when it is entered, so only an address written another way, such as by hand in SQL, can have this form. Hardcount does not retry this email. Change the address to the bare form (`bob@example.com`) and send again.
 
 ## Bounces and spam complaints
 

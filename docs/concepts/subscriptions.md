@@ -50,6 +50,10 @@ with no card gets an email:
   `PAYMENT_UPDATE_URL` is set;
 - with the invoice itself, when Stripe is not connected.
 
+With Stripe connected and `PAYMENT_UPDATE_URL` unset, the first email is
+the reminder of the first payment retry, which asks the customer to pay
+the invoice.
+
 ## Billing periods
 
 A billing period is the stretch of time one invoice covers. It includes its

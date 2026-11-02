@@ -233,7 +233,9 @@ In code, they come to four steps:
 
 **An endpoint belongs to one mode.** An endpoint registered with a test key
 gets only test events; one registered with a live key gets only live
-events. The message itself does not say which mode it came from.
+events. The message's outer fields do not say which mode it came from.
+Only a few objects inside `data` carry a `livemode` field, such as a
+dispute or a refund.
 
 To receive both, register two endpoints:
 

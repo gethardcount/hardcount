@@ -31,7 +31,7 @@ A migration is a versioned script that changes the database schema. Hardcount ap
 - **See the plan first.** `hardcount migrate status` shows the database's version, the migrations this release would apply, and whether a migration is running now. It changes nothing.
 - Set `RUN_MIGRATIONS_ON_BOOT=true` and Hardcount applies any new ones when it starts. The Compose stack sets it. The default is `false`: then run `hardcount migrate` before you start a new release, because Hardcount refuses to start while a migration is missing.
 - If several copies start at once, they take turns: one applies the migrations and the others wait, then find nothing left to do.
-- **A failed migration leaves nothing to repair.** Fix the cause the error names and run the upgrade again. See [A database upgrade stopped](ops/runbook/migration-failed-midway.md).
+- **A failed migration leaves nothing to repair by hand.** Fix the cause the error names and run the upgrade again. A failed index build can leave an INVALID index, which the next run drops and builds again. See [A database upgrade stopped](ops/runbook/migration-failed-midway.md).
 - **Never roll back in production.** `hardcount migrate rollback` runs only with `APP_ENV=local`. To go back after an upgrade, restore the backup you took before it; see [Going back](upgrades.md#going-back).
 - **Each migration waits at most 5 seconds for a table lock**, then stops and leaves nothing behind. `MIGRATION_LOCK_TIMEOUT` changes the limit. See [It waited 5s for a table lock](ops/runbook/migration-failed-midway.md#it-waited-5s-for-a-table-lock).
 

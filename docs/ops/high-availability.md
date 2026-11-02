@@ -26,7 +26,11 @@ Each copy answers API requests. Background jobs are different: billing runs, pay
 - **One copy runs each job at a time.** Before each run of a job, a copy takes a short lease: a row in Postgres that says "this copy runs this job now" (see [leader lease](../glossary.md)). The other copies stand by. If the copy holding a lease dies, another one takes over within about 15 seconds.
 - **Queued rows are claimed once.** Webhooks and emails wait in queue tables (outboxes) until a background worker sends them. A worker skips any row another worker already holds, instead of waiting for it (Postgres `SKIP LOCKED`).
 
-A few features still assume one copy: the dashboard's real-time webhook stream, test-clock advances (a test clock is a pretend clock for test customers), and one billing log note. None of them touch money.
+A few features still assume one copy. None of them touch money:
+
+- **The dashboard's real-time webhook stream** shows only the events and delivery tries of the copy that serves it. A page refresh reads the database and shows them all.
+- **A test-clock advance** (a test clock is a pretend clock for test customers) runs on the copy that took the request. If that copy stops during it, the clock stays `advancing` until a copy starts or restarts ([Test-clock advance hung](runbook/test-clock-advance-hung.md)).
+- **The note that a spending threshold was crossed but waits for the period's end** (a WARN line and an audit log row) is kept from repeating only inside one copy. Each copy that runs billing writes it once per subscription and period, and so does each restart.
 
 ## Set up the load balancer
 

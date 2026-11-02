@@ -160,7 +160,9 @@ take an API key. These routes ignore it, and run every time:
 3. On `429`, wait the seconds in `Retry-After`, then send it with the same
    key. See [Rate limits](rate-limits.md).
 4. On `409` `conflict_idempotency`, wait a few seconds and send it with the
-   same key.
+   same key. If the key is more than 24 hours old, it has expired, and the
+   same key gets this answer until the cleanup deletes it. Read the resource
+   instead, as in step 5.
 5. On a `5xx`, or `409` `conflict_idempotency_unresolved`, read the resource
    first. Send the request with a new key only if the change is not there.
 6. On another `4xx`, do not retry as it is. Fix the request, then send it

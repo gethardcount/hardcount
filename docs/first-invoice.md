@@ -197,8 +197,10 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
    **5b. Or send one call the way a LiteLLM proxy does.** A LiteLLM proxy
    reports each AI call to Hardcount, and Hardcount splits it into events by token
    type. This request sends the same record that the proxy sends.
-   LiteLLM's `user` is the customer's external ID. To connect a real
-   proxy, see [LiteLLM integration](integrations/litellm.md).
+   LiteLLM's `user` is the customer's external ID. This record has no
+   time, so the event gets the clock's time, as in 5a. A real proxy sends
+   each call's real time, so connect it for a customer without a test
+   clock: see [LiteLLM integration](integrations/litellm.md#before-you-start).
 
    <!-- docs-run: command name=5b -->
    ```bash

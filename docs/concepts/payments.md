@@ -30,7 +30,9 @@ invoice is Hardcount's. To connect Stripe, see
 
 With no card saved, step 3 cannot run. Dunning starts at once. Once email
 is set up, the customer gets an email at once: a link to add a card when
-Stripe is connected, or the invoice itself when it is not. Each dunning
+Stripe is connected and `PAYMENT_UPDATE_URL` is set, or the invoice itself
+when Stripe is not connected. With Stripe connected and
+`PAYMENT_UPDATE_URL` unset, no email goes out at once. Each dunning
 retry then sends a reminder. Once they add a card, the next billing run
 charges it; on a test clock, the next move of the clock does.
 
@@ -101,7 +103,8 @@ Hardcount never guesses.
 
 While a payment is `processing` or `unknown`, Hardcount refuses to void the
 invoice or to record a payment on it, so money cannot arrive on an invoice
-that no longer asks for it.
+that no longer asks for it. It also refuses to write the invoice off,
+except a parked one, whose write-off waits only a few minutes.
 
 More: [Card payment failure handling](../payments.md), every case in
 detail.

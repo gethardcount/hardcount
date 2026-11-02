@@ -5,9 +5,9 @@ page is for when `hardcount migrate`, or Hardcount starting with
 `RUN_MIGRATIONS_ON_BOOT=true`, stopped with an error, or Hardcount refuses to
 start because of the migration state. Back to the [runbook index](index.md).
 
-From v0.9.0, a failed migration leaves nothing to repair: fix the cause and
-run the upgrade again. The rest of this page says how to find the cause for
-each kind of error.
+From v0.9.0, a failed migration leaves nothing to repair by hand: fix the
+cause and run the upgrade again. The rest of this page says how to find the
+cause for each kind of error.
 
 ## Before anything else
 
@@ -138,7 +138,7 @@ upgrade path from Velox 0.8.x, so a production database never reaches this
 step: install fresh (see the v0.9.0 release notes).
 
 **Fix:** on a development database, find the rows (as the database owner,
-with `SET LOCAL app.bypass_rls = 'on'` in a transaction):
+with `SET app.bypass_rls = 'on'` first):
 
 ```sql
 SET app.bypass_rls = 'on';
