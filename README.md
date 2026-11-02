@@ -22,24 +22,11 @@ An open-source alternative to Stripe Billing and Lago: no Stripe Billing fee, no
 
 ## What it looks like
 
-One month of AI usage for one customer, from the [demo](#quick-start) in test mode.
-
-**▶ [Watch the 65-second walkthrough](https://gethardcount.com/#looks)**, narrated, with captions: the demo runs, then the dashboard shows what it made.
-
-<a href="https://gethardcount.com/#looks"><img alt="The quick start demo finishing in a terminal: every step checked, and links to the invoice and customer it made. Click to watch the narrated walkthrough on gethardcount.com." src="docs/assets/readme-walkthrough.png" width="100%"></a>
-
-**1. The demo invoice.** One line per model and token type, priced per million tokens.
+One month of AI usage for one customer, from the [demo](#quick-start) in test mode: one invoice line per model and token type, $5.73 due. Your margin on it is 51.9% (Sonnet 67.1%, Haiku 20.0%), shown only to you. **▶ [Watch the 65-second walkthrough](https://gethardcount.com/#looks)**, narrated, with captions.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-invoice-dark.png">
   <img alt="Invoice HC-000025 in the dashboard, from Example AI Ltd to ACME Corp: input, output and cache_read lines for claude-sonnet-4.5 and input and output lines for claude-haiku-4.5, priced per 1M tokens, $5.73 due." src="docs/assets/readme-invoice-light.png" width="100%">
-</picture>
-
-**2. Your margin, per model.** What you billed against what the AI provider charged you: Sonnet 67.1%, Haiku 20.0%. Only you see this.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-margin-dark.png">
-  <img alt="The customer's margin card for the last invoiced period: $5.73 usage billed, $2.76 provider cost, 51.9% margin, and one row per model: claude-sonnet-4.5 billed $3.88 at $1.28 cost, 67.1% margin; claude-haiku-4.5 billed $1.85 at $1.48 cost, 20.0% margin." src="docs/assets/readme-margin-light.png" width="100%">
 </picture>
 
 ---
