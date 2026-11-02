@@ -28,7 +28,7 @@ One month of AI usage for one customer, from the [demo](#quick-start) in test mo
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-invoice-dark.png">
-  <img alt="Invoice HC-000001 in the dashboard, from Example AI Ltd to ACME Corp: input, output and cache_read lines for claude-sonnet-4.5 and input and output lines for claude-haiku-4.5, priced per 1M tokens, $5.73 due." src="docs/assets/readme-invoice-light.png" width="100%">
+  <img alt="Invoice HC-000025 in the dashboard, from Example AI Ltd to ACME Corp: input, output and cache_read lines for claude-sonnet-4.5 and input and output lines for claude-haiku-4.5, priced per 1M tokens, $5.73 due." src="docs/assets/readme-invoice-light.png" width="100%">
 </picture>
 
 **2. Your margin, per model.** What you billed against what the AI provider charged you: Sonnet 67.1%, Haiku 20.0%. Only you see this.
