@@ -19,6 +19,26 @@ import (
 
 var slugPattern = regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
 
+// planReadError turns a PlanReader failure into the right client answer (#1560):
+// ErrNotFound → 422 "plan … not found" on field; anything else is wrapped so it
+// surfaces as a logged 500 instead of a fake "not found".
+func planReadError(err error, field, planID string) error {
+	if errors.Is(err, errs.ErrNotFound) {
+		return errs.Invalid(field, fmt.Sprintf("plan %q not found", planID))
+	}
+	return fmt.Errorf("read plan %q: %w", planID, err)
+}
+
+// itemPlanReadError is for the plan already bound to a subscription item. An
+// item's plan cannot be deleted (ON DELETE RESTRICT), so "not found" is a
+// server fault — same as firstPlanInterval — not a 422 on the request.
+func itemPlanReadError(err error, planID string) error {
+	if errors.Is(err, errs.ErrNotFound) {
+		return fmt.Errorf("plan %s of the subscription item could not be found", planID)
+	}
+	return fmt.Errorf("read plan %q: %w", planID, err)
+}
+
 // SettingsReader is the narrow surface this service uses to resolve
 // the tenant's timezone for period-boundary snapping. Optional —
 // nil-safe, falls back to UTC. Avoids importing internal/tenant
@@ -417,7 +437,7 @@ func (s *Service) rejectMixedItemIntervals(ctx context.Context, tenantID string,
 	}
 	first, err := s.plans.GetPlan(ctx, tenantID, items[0].PlanID)
 	if err != nil {
-		return errs.Invalid("items", fmt.Sprintf("plan %q not found", items[0].PlanID))
+		return planReadError(err, "items", items[0].PlanID)
 	}
 	firstInterval := first.BillingInterval
 	if firstInterval == "" {
@@ -430,7 +450,7 @@ func (s *Service) rejectMixedItemIntervals(ctx context.Context, tenantID string,
 	for _, it := range items[1:] {
 		plan, err := s.plans.GetPlan(ctx, tenantID, it.PlanID)
 		if err != nil {
-			return errs.Invalid("items", fmt.Sprintf("plan %q not found", it.PlanID))
+			return planReadError(err, "items", it.PlanID)
 		}
 		otherInterval := plan.BillingInterval
 		if otherInterval == "" {
@@ -463,7 +483,7 @@ func (s *Service) rejectArchivedPlans(ctx context.Context, tenantID string, plan
 	for _, pid := range planIDs {
 		plan, err := s.plans.GetPlan(ctx, tenantID, pid)
 		if err != nil {
-			return errs.Invalid("items", fmt.Sprintf("plan %q not found", pid))
+			return planReadError(err, "items", pid)
 		}
 		if plan.Status == domain.PlanArchived {
 			return errs.InvalidState(fmt.Sprintf("plan %q is archived — unarchive it or pick an active plan", pid))
@@ -518,7 +538,7 @@ func (s *Service) rejectCurrencyMismatch(ctx context.Context, tenantID, customer
 	for _, pid := range planIDs {
 		plan, err := s.plans.GetPlan(ctx, tenantID, pid)
 		if err != nil {
-			return errs.Invalid("items", fmt.Sprintf("plan %q not found", pid))
+			return planReadError(err, "items", pid)
 		}
 		cur := strings.ToUpper(strings.TrimSpace(plan.Currency))
 		if cur == "" {
@@ -594,7 +614,7 @@ func (s *Service) rejectMeterOverlap(ctx context.Context, tenantID, customerID, 
 	meters := make([]string, 0, len(planIDs))
 	for _, pid := range planIDs {
 		if _, err := s.plans.GetPlan(ctx, tenantID, pid); err != nil {
-			return errs.Invalid("items", fmt.Sprintf("plan %q not found", pid))
+			return planReadError(err, "items", pid)
 		}
 		planMeters, err := s.planMeters.PlanMeterIDs(ctx, tenantID, pid)
 		if err != nil {
@@ -1392,11 +1412,11 @@ func (s *Service) UpdateItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscr
 	if s.plans != nil {
 		currentPlan, perr := s.plans.GetPlan(ctx, tenantID, item.PlanID)
 		if perr != nil {
-			return ItemChangeResult{}, errs.Invalid("items", fmt.Sprintf("plan %q not found", item.PlanID))
+			return ItemChangeResult{}, itemPlanReadError(perr, item.PlanID)
 		}
 		newPlan, perr := s.plans.GetPlan(ctx, tenantID, input.NewPlanID)
 		if perr != nil {
-			return ItemChangeResult{}, errs.Invalid("new_plan_id", fmt.Sprintf("plan %q not found", input.NewPlanID))
+			return ItemChangeResult{}, planReadError(perr, "new_plan_id", input.NewPlanID)
 		}
 		// Swapping ONTO an archived plan is new business on a retired price
 		// (ADR-067) — same guard as subscription.Create. Existing items
@@ -1702,11 +1722,11 @@ func (s *Service) UpdateItem(ctx context.Context, tenantID, subscriptionID, item
 		// plans to match the engine's lenient defaults.
 		currentPlan, err := s.plans.GetPlan(ctx, tenantID, item.PlanID)
 		if err != nil {
-			return ItemChangeResult{}, errs.Invalid("items", fmt.Sprintf("plan %q not found", item.PlanID))
+			return ItemChangeResult{}, itemPlanReadError(err, item.PlanID)
 		}
 		newPlan, err := s.plans.GetPlan(ctx, tenantID, input.NewPlanID)
 		if err != nil {
-			return ItemChangeResult{}, errs.Invalid("new_plan_id", fmt.Sprintf("plan %q not found", input.NewPlanID))
+			return ItemChangeResult{}, planReadError(err, "new_plan_id", input.NewPlanID)
 		}
 		// Same archived-plan guard as the atomic path (UpdateItemTx) and
 		// subscription.Create — swapping onto a retired price is new business
