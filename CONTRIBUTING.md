@@ -301,9 +301,12 @@ time for real work, every pull request meets this bar:
 4. **Show that you ran it.** Say what you changed, why, and how you checked
    it. A pull request that was not run or understood is closed.
 5. **AI help is fine; say so.** If an AI tool wrote part of the change,
-   say which part in the description. You answer for every line: in review,
+   say which part in the description, and end each such commit with an
+   `Assisted-by:` line naming the tool, such as `Assisted-by: Claude Code`
+   (the Linux kernel's convention). You answer for every line: in review,
    you can explain what it does and why. A change you cannot explain is
-   closed.
+   closed. Commits before 2026-11-02 say `Co-Authored-By: Claude` for the
+   same thing.
 
 **Never accepted:** links that promote you or a product, batches of tiny
 edits made to collect contributions, and changes to the licence or the
