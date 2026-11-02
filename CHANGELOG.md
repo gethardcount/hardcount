@@ -21,7 +21,7 @@ original text.
 
 ### Changed
 
-- **The user docs read more clearly.** About 170 places across the concept pages, guides, API pages, self-host pages, runbooks and the API reference's descriptions: dense sentences split, terms defined where they are first used, and one name for each thing (the reconciler, the charge hold, a lost result, a spend threshold, a usage-only key, an account). Facts are unchanged. ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM))
+- **The user docs read more clearly.** About 170 places across the concept pages, guides, API pages, self-host pages, runbooks and the API reference's descriptions: dense sentences split, terms defined where they are first used, and one name for each thing (the reconciler, the charge hold, a lost result, a spend threshold, a usage-only key, an account). Facts are unchanged. ([#1585](https://github.com/gethardcount/hardcount/pull/1585))
 
 ## [0.9.2] - 2026-11-02
 
