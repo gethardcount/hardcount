@@ -80,7 +80,8 @@ Each item waits until someone using Hardcount needs it:
   ([ADR-127](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
 - Coupons, a customer portal, quotes, contracts and minimum spend.
 - Telemetry of any kind.
-- A separate docs site. The docs stay in this repo.
+- Docs kept outside this repo. The pages on gethardcount.com/docs are
+  built from this repo's `docs/`.
 
 ## Shipped recently
 
@@ -97,14 +98,14 @@ October 2026, v0.9.0 ([everything it changes](../CHANGELOG.md)):
 - **A usage event says when it will not be billed.** The 201 and each batch result carry a `billing_status`: no price takes it, the plan does not price its meter, no subscription covers its time, or its period was already invoiced.
 - **Prepaid credit carries its currency** and pays only invoices in that currency ([ADR-129](adr/129-credit-carries-its-own-currency.md)).
 - **3-D Secure is not a decline.** A card payment the bank wants the customer to confirm is no longer treated as a declined card.
-- **Migrations run with goose.** A failed migration leaves nothing to repair, and `hardcount migrate force` is gone.
+- **Migrations run with goose.** A failed migration leaves nothing to repair by hand, and `hardcount migrate force` is gone.
 - **One shape for the API.** Lists answer `{data, total}`, every error uses one envelope, request bodies with an unknown field are refused, and publishable API keys are removed.
 - **The first-invoice guide runs in CI** on every pull request, and each output is checked against the page.
 
 October 2026 (v0.5.0 to v0.8.2):
 
 - **Try it with one script.** `deploy/compose/quickstart.sh` starts Hardcount from the published images and prints a login, and `./quickstart.sh demo` runs AI token usage through to an invoice.
-- **Late usage is billed.** An invoice is built an hour after its period ends (`INVOICE_GRACE_PERIOD`), so usage that arrives a little late still counts.
+- **Usage that arrives a little late is billed.** An invoice is built an hour after its period ends (`INVOICE_GRACE_PERIOD`), so usage that arrives a little late still counts.
 - **New accounts retry failed payments.** Each new account starts with a "Default retries" policy.
 - **Live credit balance.** `GET /v1/credits/balance/{customer_id}/live` and the public cost page show how much prepaid credit a customer has left, including usage not yet invoiced.
 - **LiteLLM usage for a customer that does not exist yet is kept.** Hardcount holds it and shows it on the Usage page. Create the customer, then release it once.

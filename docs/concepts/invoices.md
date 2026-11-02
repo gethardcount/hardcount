@@ -67,7 +67,8 @@ Each route is under `/v1/invoices/{id}`.
 - While a card payment may still go through, a void, a write-off or a
   recorded payment is refused with a `409`, usually
   `payment_in_flight`. Wait for the payment to settle
-  ([Payments](payments.md#when-the-answer-is-unclear)).
+  ([Payments](payments.md#when-the-answer-is-unclear)). A parked invoice
+  can still be written off after a few minutes.
 - A void gives back any credit the invoice used, to the grants it came
   from.
 - A draft sends no webhook. A period's invoice that is made already
@@ -140,7 +141,9 @@ and `amount_due_cents` is 0. The total stays $28.84.
   - the invoice is `finalized`, so not paid, voided or written off;
   - money is due;
   - no payment is in flight;
-  - Stripe is connected in the invoice's mode.
+  - Stripe is connected in the invoice's mode;
+  - Stripe has not refused the amount as below its minimum charge
+    ([what to do](../ops/runbook/below-stripe-minimum.md)).
 
 ## Spend thresholds: an invoice made early
 

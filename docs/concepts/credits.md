@@ -17,7 +17,7 @@ Each customer's credit is a ledger: a list of entries, one for each change.
 | `grant` | Credit added: a block that invoices can spend. | You, or Hardcount for a prepaid commit, a plan change or a credit note |
 | `usage` | Credit an invoice spent. | Hardcount |
 | `expiry` | The unspent part of a block that passed its expiry date. | Hardcount |
-| `adjustment` | A correction, up or down. | You |
+| `adjustment` | A correction, up or down. | You, or Hardcount when it takes back prepaid-commit credit |
 
 The balance is kept per currency, and credit pays only invoices in its own
 currency. A customer with USD and EUR credit has two balances, which are

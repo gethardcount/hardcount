@@ -19,6 +19,10 @@ original text.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Docs: 37 statements that were wrong are corrected.** The LiteLLM guide no longer has you create the customer on a test clock: the clock's time stands still, so a real proxy's calls were refused as in the future, while LiteLLM read the answer as delivered. "Bill for AI tokens by model" and the LiteLLM guide now save the plan ID their later steps use. The checks after a restore set `app.bypass_rls`, so on managed Postgres they no longer read zero rows and pass. ([#1584](https://github.com/gethardcount/hardcount/pull/1584))
+
 ## [0.9.2] - 2026-11-02
 
 Money and integrator fixes before the public launch. Finalizing a paused subscription's draft no longer charges the card, Stripe Tax prices every base fee by its plan's tax code, a line can no longer be added to a subscription's draft and go out untaxed, and LiteLLM usage is no longer lost to its batch size or log format. The API reference now describes every field with real examples, and new concept pages and guides cover what an integrator needs.

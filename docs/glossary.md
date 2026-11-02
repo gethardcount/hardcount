@@ -172,15 +172,17 @@ follows.
   Usage is never blocked.
   [More](concepts/invoices.md#spend-thresholds-an-invoice-made-early)
 - **invoice states (draft, finalized, paid, void, uncollectible)**: Where
-  an invoice is in its life. Draft: you can still change it. Finalized:
-  issued and owed. Paid. Void: canceled, as if the debt never existed (the
-  API calls it `voided`). Uncollectible: written off as bad debt, but kept
-  for the records. [More](concepts/invoices.md#statuses)
+  an invoice is in its life. Draft: not issued yet. You can add lines to
+  a one-off draft; a subscription's draft keeps the lines billing gave it.
+  Finalized: issued and owed. Paid. Void: canceled, as if the debt never
+  existed (the API calls it `voided`). Uncollectible: written off as bad
+  debt, but kept for the records. [More](concepts/invoices.md#statuses)
 - **hosted invoice page**: A public web page for one issued invoice (not a
   draft). It opens from a secret link, so the customer needs no login. It
   shows the invoice and its PDF. While money is due, the invoice is not
-  written off and no payment is in flight, it has a Pay button that opens
-  Stripe Checkout.
+  written off, no payment is in flight and Stripe is connected in the
+  invoice's mode, it has a Pay button that opens Stripe Checkout. An
+  amount Stripe refused as below its minimum charge gets no Pay button.
   [More](concepts/invoices.md#pdf-and-the-hosted-invoice-page), and
   [the decision](adr/021-hosted-invoice-pay-flow-saves-pm.md)
 - **outbound webhook**: A message Hardcount sends to a URL in your app when
@@ -237,7 +239,8 @@ follows.
   included, and reverses that tax. The part already paid goes to the
   customer's credit balance; an unpaid part lowers what the open invoice
   asks for. In the
-  credit ledger: a negative entry that removes credit that was granted.
+  credit ledger: a negative `adjustment` entry that removes credit that
+  was granted.
   [More](concepts/subscriptions.md#plan-changes), and
   [the decision](adr/048-credit-clawback-tax-reversal.md)
 

@@ -102,7 +102,9 @@ start while a migration is missing. The setup for several copies is in
 
 ## If the upgrade stops
 
-A migration that fails is undone, so nothing needs repair. Hardcount does
+A migration that fails is undone, so nothing needs repair by hand. An index
+build is not undone: it runs without a transaction and can leave the index
+INVALID. Running the upgrade again drops it and builds it again. Hardcount does
 not start, and the error names the cause.
 
 On one VM, `docker compose logs --tail 20 hardcount-api` shows the error.

@@ -56,7 +56,8 @@ export KEY=hc_secret_live_...           # a secret API key for the tenant
 ```
 
 SQL steps run in `psql` as the database owner. Start the session with this
-line, which every SQL step on these pages also begins with:
+line, which every SQL step on these pages that reads or changes account
+data also begins with:
 
 ```sql
 SET app.bypass_rls = 'on';
@@ -69,7 +70,10 @@ Compose setup, whose database owner is a superuser, the queries work either
 way. On a managed database (Amazon RDS, Cloud SQL and the like) the admin
 user usually is not one. To check yours:
 `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user;`.
-A step that inserts a row also sets `app.livemode`, and says so.
+A step that inserts a row also sets `app.livemode`, and says so. Steps on
+tables without account data (`leader_leases`, `leader_status`,
+`login_throttle`) or on Postgres's own views (`pg_stat_activity`,
+`pg_class`) do not need the line.
 
 ## Words on these pages
 

@@ -85,7 +85,8 @@ The next tick starts one interval after it ends.
 
    ```sql
    SELECT role, held, holder_id, expires_in_s, last_tick_holder,
-          last_tick_age_s, paused_at, paused_by, pause_reason
+          last_tick_age_s, paused_at, paused_by, pause_reason,
+          not_before, not_before_in_s
      FROM leader_status ORDER BY role;
    ```
 
@@ -181,10 +182,11 @@ The next tick starts one interval after it ends.
      when that subscription's wait ends (see
      [Billing failing](billing-failing.md)).
    - Once the fix is out, the role still waits until `not_before`. To run
-     it at its next poll instead, clear it (`leader_unpause` does not):
+     it at its next poll instead, clear it (`leader_unpause` does not). Put
+     the role that panicked in place of `<role>`, for example `dunning`:
 
      ```sql
-     UPDATE leader_leases SET not_before = NULL WHERE role = 'billing';
+     UPDATE leader_leases SET not_before = NULL WHERE role = '<role>';
      ```
 2. **A wedged holder.** Find the holder in `holder_id` and restart that
    replica.

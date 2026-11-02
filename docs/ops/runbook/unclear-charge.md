@@ -149,7 +149,7 @@ A park with no hold is always counted.
 2. Find the attempt in the Stripe dashboard by customer, amount and
    approximate time.
 3. Check that the invoice has a hold:
-   `SELECT auto_charge_claimed_until FROM invoices WHERE id = '<invoice id>';`
+   `SET app.bypass_rls = 'on'; SELECT auto_charge_claimed_until FROM invoices WHERE id = '<invoice id>';`
    With none, give it one dated a day back, and the next tick finishes the
    park:
 

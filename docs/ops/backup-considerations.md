@@ -136,7 +136,7 @@ reports clean.
 
 ## Checks after a restore
 
-Run these before you let traffic back in.
+Run these before you let traffic back in. Run the SQL in `psql` as the database owner. The blocks that read or change account data begin with `SET app.bypass_rls = 'on';`. Without it, on a managed database whose admin user is not a superuser, they see no rows and change none, with no error, so a check looks passed ([why](runbook/index.md#before-you-start)).
 
 ### 1. The schema version matches
 
@@ -163,6 +163,7 @@ Row-Level Security (RLS) is the Postgres feature that keeps each account's rows 
 ### 3. The money tables look right
 
 ```sql
+SET app.bypass_rls = 'on';
 SELECT tenant_id, count(*) FROM invoices GROUP BY tenant_id;
 SELECT tenant_id, count(*) FROM credit_notes GROUP BY tenant_id;
 SELECT tenant_id, sum(total_amount_cents) FROM invoices
@@ -181,6 +182,7 @@ The safe default: leave the rows `pending` and accept a few duplicates. Webhook 
 If you are sure you want to skip them, mark them sent, and write down that you did:
 
 ```sql
+SET app.bypass_rls = 'on';
 UPDATE email_outbox SET status = 'dispatched', dispatched_at = now(),
   payload = payload - '{setup_url,update_url,password_reset_url,invite_url,public_token,pdf}'::text[]
   WHERE status = 'pending';
@@ -200,6 +202,8 @@ Hardcount's background jobs resume by themselves after a restart, on one copy or
 After the restart, these counts should fall to zero within a few minutes:
 
 ```sql
+SET app.bypass_rls = 'on';
+
 -- Subscriptions that should have billed
 SELECT count(*) FROM subscriptions
   WHERE status IN ('active', 'trialing') AND next_billing_at < now();
@@ -220,6 +224,7 @@ If they do not fall, the background jobs are not running. See the [runbook](runb
 If the backup is hours older than the failure, Stripe events sent in between are missing. Hardcount's background check asks Stripe about invoices whose payment status is `unknown`, but it does not replay every event. List the invoices to check by hand:
 
 ```sql
+SET app.bypass_rls = 'on';
 SELECT id, payment_status, updated_at FROM invoices
   WHERE updated_at < now() - interval '4 hours'
     AND payment_status IN ('processing', 'unknown', 'pending');
@@ -266,9 +271,9 @@ Some tables matter more than others when you decide what a restore must bring ba
 | `webhook_outbox` | Queued webhooks are not sent | Receivers should handle replays; send events again if needed |
 | `stripe_webhook_events` | Some history of Stripe's events is lost | Stripe holds the original events and its API returns them |
 
-### Old usage: can be dropped
+### Old usage: can be lost in an emergency
 
-`usage_events` rows from billing periods that are already invoiced. Their totals are on the invoices; the rows are for analysis only.
+`usage_events` rows from billing periods that are already invoiced. Their totals are on the invoices, so losing them loses no money. Hardcount still uses them. An event sent again is found to be a repeat only while its row exists: without it, the event is stored again. The usage and margin reports for those periods also read them. Do not delete them yourself ([how the data grows](postgres-requirements.md#how-the-data-grows)).
 
 ### Not in the database
 
