@@ -55,14 +55,14 @@ stores the IDs they point to.
 | Object | What it is | Who creates it | ID starts with |
 |---|---|---|---|
 | Customer | A person or company you bill. `external_id` is your own ID for it. | You | `hc_cus_` |
-| Meter | A counter for one kind of usage, such as tokens. Its `event_name` is the name usage events send. | You, or a recipe | `hc_mtr_` |
+| Meter | A counter for one kind of usage, such as tokens. Its `event_name` is the name usage events send. | You, or a recipe (a ready-made pricing setup that one API call applies) | `hc_mtr_` |
 | Plan | What you sell: a currency, a monthly or yearly period, an optional base fee, and prices. | You, or a recipe | `hc_pln_` |
 | Price | One usage rate of a plan: a meter, the labels an event must carry, and the rate. | You, or a recipe | `hc_prc_` |
 | Subscription | Puts a customer on one or more plans. Each plan is an item with a quantity. | You | `hc_sub_` |
 | Usage event | One "this customer used this much" record, sent by your app or a LiteLLM proxy. | You | `hc_evt_` |
 | Invoice | A bill for one customer. Its lines say what each part costs. | Hardcount, at each period end and for a plan change. You, for a one-off invoice. | `hc_inv_` |
 | Credit note | A document that lowers what a customer owes on an invoice, or refunds a paid one. | You. Hardcount, for credit after a downgrade or cancel, and for a refund made in Stripe. | `hc_cn_` |
-| Credit ledger entry | One change to a customer's prepaid credit: a grant, a use, an expiry or an adjustment. | You, for grants and adjustments. Hardcount, for uses, expiries and prepaid commits. | `hc_ccl_` |
+| Credit ledger entry | One change to a customer's prepaid credit: a grant (credit added), a use, an expiry or an adjustment. | You, for grants and adjustments. Hardcount, for uses, expiries and prepaid commits (credit the customer pays for up front). | `hc_ccl_` |
 | Payment method | A card the customer saved through Stripe. | The customer, on a Stripe page | `hc_pm_` |
 | Dunning run | Hardcount retrying one unpaid invoice and emailing the customer. | Hardcount, when a charge fails or no card is saved | `hc_drun_` |
 | Test clock | A pretend clock for test customers. | You | `hc_tclk_` |
@@ -92,9 +92,10 @@ Hardcount does the rest on its own:
 - When a charge fails, it starts a dunning run.
 - It writes the credit ledger entries for credit used and credit expired.
 - It sends a webhook for each step that changes an invoice, a payment, a
-  subscription or a dunning run. Credit used or expired sends none; the
-  `credit.balance_*` webhooks fire only when a balance crosses a line, such
-  as reaching 0.
+  subscription or a dunning run. Credit used or expired sends no webhook of
+  its own. The `credit.balance_*` webhooks are sent only when a balance
+  crosses a threshold: it falls below your low-balance setting, reaches 0,
+  or goes back above 0 ([Credits](credits.md#webhooks)).
 
 ## Test mode and live mode
 

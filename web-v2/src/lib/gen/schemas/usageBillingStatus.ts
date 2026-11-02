@@ -31,9 +31,10 @@
  *   its scheduled cancel.
  * - `no_price`: the plan that bills the event's time prices this
  *   meter, but no price of that plan takes the event's `dimensions`.
- *   A price takes an event whose dimensions include all of its
- *   `dimension_match`, compared as strings: the number `1` is not the
- *   string `"1"`.
+ *   A price takes an event whose dimensions include all of the
+ *   price's `dimension_match` labels. A price's labels are text, so a
+ *   number or a true/false value in the event never matches: the
+ *   number `1` does not match the string `"1"`.
  *
  * No `billing_status` means Hardcount found no reason then. It is not a
  * promise that the event will be billed. Hardcount checks only the

@@ -25,7 +25,8 @@ export interface InvoiceCreateRequest {
      * Uppercase or lowercase ISO 4217 code; it is stored uppercase. It
      * must be the customer's currency (see the 409). Defaults to the
      * billing profile's currency, then the plan currency of the
-     * customer's live subscriptions, then the account's default
+     * customer's draft, trialing and active subscriptions, then the
+     * account's default
      * currency. Currencies with no minor unit (such as JPY) are
      * refused.
      */

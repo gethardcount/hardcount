@@ -22,10 +22,14 @@ One of these:
   given back after it was paid. The invoice page, the customer's invoice page,
   the PDF, the refund limit and the Stripe Tax reversal all read credit notes.
 - **Hardcount writes the credit note itself when the refund is plain,** once
-  Stripe says it succeeded (a pending refund waits). A
-  refund of the payment that paid a paid invoice, in the invoice's currency,
-  that fits what the invoice has left, and that Hardcount hears of within a
-  day, becomes an issued credit note. Its card refund is that refund, so
+  Stripe says it succeeded (a pending refund waits). The refund becomes an
+  issued credit note when all of these are true:
+  - it refunds the payment that paid the invoice, and the invoice is paid;
+  - it is in the invoice's currency;
+  - it fits what the invoice has left;
+  - Hardcount hears of it within a day.
+
+  The note's card refund is that refund, so
   Hardcount calls nothing at Stripe for it, and it reverses its share of the
   tax. The note carries `recorded_from_stripe: true` and names the refund in
   `stripe_refund_id`; its row on the invoice's Activity list reads "Refunded
@@ -99,7 +103,7 @@ The same steps through the API follow. Act on a `needs_review` refund by its
 | `invoice_not_paid` | Check the invoice's payments in Stripe. Once the invoice is paid, record it (step 1); otherwise dismiss it. |
 | `exceeds_card_refundable` | The refund is more than the card payment had left after the credit notes on the invoice. Check the payment in Stripe, record the difference in your own books, and dismiss it. |
 | `exceeds_creditable` | An earlier credit note already gave part of the invoice back another way, for example as account credit. If that credit was not meant as well, take it back from the customer's balance. Then dismiss it. |
-| `prepaid_commit` | The invoice bought prepaid credit, which the customer can still spend. Retire it with commit relief recorded as money returned outside Hardcount, as in [Card disputes](card-disputes.md#fix) step 3, then dismiss it. |
+| `prepaid_commit` | The invoice bought prepaid credit, which the customer can still spend. Retire (remove) it with commit relief, the part of a credit note that retires prepaid credit, recorded as money returned outside Hardcount, as in [Card disputes](card-disputes.md#fix) step 3, then dismiss it. |
 | `currency_mismatch` | Record it in your own books and dismiss it. |
 
 1. **Record it with a credit note that names the refund.** Send the refund's

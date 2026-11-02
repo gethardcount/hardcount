@@ -14,8 +14,8 @@
 import type { CreditGrantBlockGrantKind } from './creditGrantBlockGrantKind';
 
 /**
- * One block of credit on a customer's balance (a grant or a positive
- * adjustment) and how much of it is left. Amounts are in the
+ * One grant on a customer's credit balance (made by a grant or a
+ * positive adjustment) and how much of it is left. Amounts are in the
  * currency's minor unit (cents for USD).
  */
 export interface CreditGrantBlock {
@@ -29,14 +29,14 @@ export interface CreditGrantBlock {
   grant_kind?: CreditGrantBlockGrantKind;
   /** The description of the ledger entry that added the credit. */
   description: string;
-  /** The credit the block started with, in the currency's minor unit. */
+  /** The credit the grant started with, in the currency's minor unit. */
   amount_cents: number;
   /**
-     * Everything drawn from the block, in the currency's minor unit:
+     * Everything drawn from the grant, in the currency's minor unit:
      * used by invoices, expired, retired and deducted.
      */
   consumed_cents: number;
-  /** Credit left in the block, `amount_cents` minus `consumed_cents`, in the currency's minor unit. */
+  /** Credit left in the grant, `amount_cents` minus `consumed_cents`, in the currency's minor unit. */
   remaining_cents: number;
   /** The part that expired unused, in the currency's minor unit. */
   expired_cents: number;
@@ -46,7 +46,7 @@ export interface CreditGrantBlock {
      * unit.
      */
   retired_cents: number;
-  /** The part an operator removed with a negative adjustment, in the currency's minor unit. */
+  /** The part a dashboard user or an API key removed with a negative adjustment, in the currency's minor unit. */
   deducted_cents: number;
   /**
      * The credit can be drawn up to and including this instant; a
@@ -55,8 +55,8 @@ export interface CreditGrantBlock {
      * Absent when the credit does not expire.
      */
   expires_at?: string;
-  /** For a `commit` block, the commit invoice whose finalizing made the grant. Absent for other blocks. */
+  /** For a `commit` grant, the commit invoice whose finalizing made the grant. Absent for other grants. */
   source_invoice_id?: string;
-  /** When the block was added. */
+  /** When the grant was added. */
   created_at: string;
 }

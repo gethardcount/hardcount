@@ -15,7 +15,7 @@
 /**
  * Why a refund of the invoice's own payment was flagged instead of
  * recorded. Set for `needs_review` and `dismissed`, and kept when
- * the operator records one with a credit note.
+ * a dashboard user or an API key records one with a credit note.
  */
 export type InvoiceStripeRefundReviewReason = typeof InvoiceStripeRefundReviewReason[keyof typeof InvoiceStripeRefundReviewReason];
 

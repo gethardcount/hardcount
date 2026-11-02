@@ -19,18 +19,20 @@ the subscription and now waits before each new attempt.
   12 hours, then 24 hours three times. On the hourly production tick, an
   attempt happens on the first tick at or after the wait ends.
 - **`state="parked"`**: eight attempts failed. Nothing retries the
-  subscription until someone calls retry-billing. The earliest a
+  subscription until someone calls retry-billing
+  (`POST /v1/subscriptions/{id}/retry-billing`, see [Fix](#fix)). The earliest a
   subscription can park is 3 days 17 hours after its first failure.
 
 A parked subscription skips no period. When it is retried, it is billed for
 every period it missed, one invoice per period. Waiting still has a cost:
 
-- Prepaid credit that was live when a missed period ended stays in the
-  customer's ledger balance after its expiry date, until the subscription
-  is billed. That period's invoice still draws on it. For a parked
+- Prepaid credit that had not yet expired when a missed period ended
+  stays in the customer's ledger balance after its expiry date, until the
+  subscription is billed. That period's invoice still draws on it. For a parked
   subscription, it stays until someone retries billing
   ([ADR-071 §2](../../adr/071-credit-expiry-retires-the-block.md)).
-- Usage thresholds do not fire for a period that has already ended.
+- Spend thresholds (limits that issue an invoice early, in the middle of a
+  period) do not fire for a period that has already ended.
 - The subscription cannot be cancelled or changed until it is billed. An
   immediate cancel, a scheduled cancel or its removal, a collection pause
   or resume, and any item or plan change answer 409 `unbilled_period`.
@@ -41,8 +43,9 @@ every period it missed, one invoice per period. Waiting still has a cost:
 Retry promptly once the cause is fixed.
 
 A cancel scheduled for the end of a trial still fires on a failing or
-parked trialing subscription. Any other change that leaves the same work
-due does not restart billing; retry after it.
+parked trialing subscription. Any other change restarts billing only if it
+changes what is due. If the subscription is still due for the same thing
+after the change, retry billing after it.
 
 ### Why the error rate falls
 
@@ -98,7 +101,7 @@ ladder.
    ```
 
 3. **After a shared cause is fixed, retry every failing subscription of the
-   tenant.** There is no bulk endpoint; loop over the list:
+   account.** There is no bulk endpoint; loop over the list:
 
    ```bash
    curl -sS "$API/v1/subscriptions?billing=failing&limit=100" -H "Authorization: Bearer $KEY" \
@@ -136,8 +139,8 @@ Read two fields of the retry response:
 | `billing_failure` present | The attempt failed again. `attempts` is back to 1 and the billing run retries on its own. This includes an attempt that ended without an error but left the subscription due ("Billing didn't finish, and the subscription is still due") |
 | no `billing_failure`, `still_due: true` | The attempt did not complete: a database connection was lost, or a deadlock. Nothing was saved and the subscription is unbilled. The next billing run attempts it, and the server log has the reason (`retry-billing: the attempt failed`). A second call answers 409, because the failure is already cleared |
 
-`invoices_generated` is not the success test. It counts period-close
-invoices only. It is 0 when the retry fired a scheduled cancel (the
+`invoices_generated` is not the success test. It counts only the invoices
+built when a period closes, at the end of a billing period. It is 0 when the retry fired a scheduled cancel (the
 subscription comes back `canceled`, with its final invoice), ended a trial,
 or closed a period with nothing to bill.
 
@@ -147,8 +150,8 @@ next billing run bills the subscription.
 
 `hardcount_billing_failing_subscriptions` falls on the next scrape.
 
-**Not covered here:** a subscription on a test clock never appears in this
-gauge or list. Its failure stops the clock; see
+**Not covered here:** a subscription on a test clock (a pretend clock for
+test customers) never appears in this gauge or list. Its failure stops the clock; see
 [Test-clock advance hung](test-clock-advance-hung.md).
 
 Related: [ADR-119](../../adr/119-billing-failure-record-keyed-to-the-due-instant.md).

@@ -24,20 +24,25 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
 - **Some actions build the invoice at once, with no grace:** an immediate
   cancel, `POST /v1/subscriptions/{id}/retry-billing` on a subscription
   whose billing is failing, any other change to a subscription whose period
-  has ended, and a test-clock advance.
-- **Dunning's final pause or cancel waits for the grace.** When retries run
-  out inside it, the dunning run stays active and is due again when the
-  grace ends. The invoice page shows that time as "Final step" and the
+  has ended, and a test-clock advance. (A test clock is a pretend clock for
+  test customers, and an advance moves it forward.)
+- **Dunning's final pause or cancel waits for the grace.** Dunning is
+  Hardcount's retrying of a failed payment, and a dunning run is the retries
+  for one invoice. When the retries run out inside the grace period, the
+  dunning run stays active and is due again when the grace ends. The invoice page shows that time as "Final step" and the
   Dunning page as "Final step in …": no charge is retried then, the pause or
   cancel runs.
-- **A cancel or plan change scheduled for a date** takes effect at that
-  close, up to the grace after its date. Until then the subscription is
+- **A cancel or plan change scheduled for a date** takes effect when
+  Hardcount closes that period (builds the period's invoice). That close
+  comes up to one grace period after the scheduled date. Until then the subscription is
   `active` on its old plan. `subscription.canceled` is sent at the close,
   with `canceled_at` at the scheduled date. A scheduled resume of paused
   collection that falls after a period end waits for that close too.
 - **Once the invoice is built it does not change.** Usage stamped inside
   its period that arrives later is stored, but billed on no invoice, now or
-  later. After a spend-threshold invoice, usage stamped before it that
+  later. A spend-threshold invoice is one Hardcount issues early, in the
+  middle of a period, when a subscription crosses a limit you set (a spend
+  threshold). After a spend-threshold invoice, usage stamped before it that
   arrives later is not on the period-end invoice either (sum and count
   meters). Hardcount says so when it writes such an event: the answer carries
   `billing_status: "after_close"` (an `after_close` count on a batch or a
@@ -52,16 +57,18 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
   invoice bills all the period's usage again, late events included. So such an
   event is flagged only after a paid spend-threshold invoice, which cannot
   be voided.
-- **Writing off or voiding a spend-threshold invoice.** A spend-threshold
-  invoice bills the usage up to when it fired, and no base fee: the base
-  fee is billed as it would be with no threshold. One issued by a
-  Hardcount build from before 2026-10-23 also carries the base fee of a plan billed in arrears; the
-  period-end invoice does not bill that base again, and what follows
-  applies to it as to the usage. A threshold invoice leaves out the
-  usage of a `max` or `last` meter: the period-end invoice bills that for
-  the whole period. What happens to the
-  charges on the threshold invoice depends on what you do with it, and
-  when:
+- **Writing off or voiding a spend-threshold invoice.**
+  - A spend-threshold invoice bills the usage up to when it fired, and no
+    base fee. The base fee is billed as it would be with no spend threshold.
+  - One issued by a Hardcount build from before 2026-10-23 also carries the
+    base fee of a plan billed in arrears. The period-end invoice does not
+    bill that base fee again, and what follows applies to it as to the
+    usage.
+  - A spend-threshold invoice leaves out the usage of a `max` or `last`
+    meter. The period-end invoice bills that usage for the whole period.
+
+  What happens to the charges on the spend-threshold invoice depends on what
+  you do with it, and when:
   - **Write it off** (mark uncollectible): they stay billed on it. The
     period-end invoice does not bill them again, and if the customer pays
     the written-off invoice later, it simply reads paid. Writing off means
@@ -76,9 +83,9 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
 
   Before 2026-10-23 a write-off behaved like a void here, and the
   period-end invoice billed the window again. If you relied on that, void
-  the threshold invoice instead, before the period-end invoice is built.
+  the spend-threshold invoice instead, before the period-end invoice is built.
 - **During the grace the subscription still shows the ended period.** Spend
-  thresholds and the live credit balance do not count the new period's
+  thresholds and the current credit balance do not count the new period's
   usage until the invoice is built.
 - **A credit grant that expires at or after a period ends** still pays that
   period's invoice. It is retired once the period's close has run and its
@@ -144,7 +151,7 @@ curl -sS "$API/v1/customers/$CUSTOMER/usage?from=$BILLING_PERIOD_START&to=$BILLI
 `INVOICE_GRACE_PERIOD` above its worst delay (at most `72h`) and restart.
 Every period-end invoice then comes that much later.
 
-**A walkthrough or script that needs a period closed right after it ends.**
+**A manual test or a script that needs a period closed right after it ends.**
 Run with `INVOICE_GRACE_PERIOD=0`. (`retry-billing` refuses a subscription
 whose billing is not failing, so it cannot close a healthy one early.)
 

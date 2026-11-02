@@ -211,9 +211,10 @@ Home leaves out customers on a test clock, so its totals do not change.
   `new_plan_id`, between steps 7 and 10. With `"immediate": true` it
   applies on January 15; without it, on February 1. How the base fee is
   prorated: [Subscriptions](../concepts/subscriptions.md#plan-changes).
-- **A dunning policy:** a customer with a card that declines, and moves to
-  each retry date. A policy that pauses or cancels needs a move in two
-  steps: [Test clocks](../concepts/test-clocks.md#testing-a-dunning-policy-that-pauses-or-cancels).
+- **A dunning policy** (what Hardcount's automatic payment retries do, and
+  what happens when they run out): save a card that declines on the
+  customer, then move the clock to each retry date. A policy that pauses or
+  cancels needs a move in two steps: [Test clocks](../concepts/test-clocks.md#testing-a-dunning-policy-that-pauses-or-cancels).
 - **Late usage:** an event with a January `timestamp`, sent after step 10,
   is answered with `billing_status: "after_close"` and is on no invoice
   ([Late usage](../concepts/usage-events.md#late-usage)).

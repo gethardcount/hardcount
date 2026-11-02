@@ -65,13 +65,13 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO hardcount_ap
 
 `ALTER DEFAULT PRIVILEGES` covers the tables the admin user creates later, so run the upgrades as that same admin user.
 
-In every `APP_ENV`, Hardcount also refuses to start when the limited user can't read and write a table it needs. The log line `refusing to start: the app database role is missing grants the app needs` lists the `GRANT` statements to run as the admin user. This happens when the database was created without the `ALTER DEFAULT PRIVILEGES` lines above (for example on managed Postgres): requests that wrote those tables used to fail with a 500 after the server started.
+In every `APP_ENV`, Hardcount also refuses to start when the limited user can't read and write a table it needs. The log line `refusing to start: the app database role is missing grants the app needs` lists the `GRANT` statements to run as the admin user. This happens when the database was created without the `ALTER DEFAULT PRIVILEGES` lines above, for example on managed Postgres. Without this check, requests that wrote those tables would fail with a 500 after the server started.
 
 **You see:** `CREATE ROLE`, `GRANT` and `ALTER DEFAULT PRIVILEGES` lines from psql. When Hardcount starts, it checks the user and starts listening.
 
 ### Settings Hardcount sets on each transaction
 
-Hardcount tells Postgres which account and mode (test or live) a transaction belongs to with three custom settings, `app.tenant_id`, `app.livemode` and `app.bypass_rls`. They need no setup on standard Postgres or on common managed Postgres. If your environment blocks custom settings, allow these three. Every account-scoped table uses `FORCE ROW LEVEL SECURITY`, so a hardened setup that requires it also works.
+Hardcount tells Postgres which account and mode (test or live) a transaction belongs to with three custom settings, `app.tenant_id`, `app.livemode` and `app.bypass_rls`. They need no setup on standard Postgres or on common managed Postgres. If your environment blocks custom settings, allow these three. Every account-scoped table uses `FORCE ROW LEVEL SECURITY`, which applies RLS to the table's owner too. So a hardened setup that requires `FORCE ROW LEVEL SECURITY` also works.
 
 ## Timeouts on the limited user
 
@@ -109,7 +109,7 @@ A connection pooler, such as PgBouncer, shares a few database connections among 
 |---|---|---|
 | Direct connection | Yes | Yes |
 | PgBouncer, session mode | Yes | Yes |
-| PgBouncer 1.21 or newer, transaction mode, `max_prepared_statements` above 0 | Yes. CI runs the whole test suite this way, with PgBouncer 1.24 and 200. | No |
+| PgBouncer 1.21 or newer, transaction mode, `max_prepared_statements` above 0 | Yes. CI runs the whole test suite this way, with PgBouncer 1.24 and `max_prepared_statements` set to 200. | No |
 | Older PgBouncer in transaction mode | Yes, if you add `default_query_exec_mode=cache_describe` to both database URLs | No |
 | RDS Proxy | Expected to work, not tested. It pins each client to one connection, so it pools little. | Use a direct connection |
 
@@ -128,13 +128,13 @@ With RDS Proxy, size it for the number of copies × `DB_MAX_OPEN_CONNS` connecti
 | `DB_CONN_MAX_LIFETIME_MIN` | 30 | Lower it to 5 to 10 behind a pooler with a short `server_lifetime` |
 | `DB_CONN_MAX_IDLE_TIME_SEC` | 120 | Lower it where connections are scarce |
 
-The default 20 connections carried 1,200 requests a second for one account in the benchmark ([sustained throughput](../benchmarks/sustained-throughput.md)). An earlier run with 60 was slower, but one locked row was the limit then, since fixed (#818), so it shows only that more connections did not help with that bottleneck. Raise it only if requests wait for a connection. Above about 100 connections per copy, put PgBouncer or RDS Proxy in front.
+The default 20 connections carried 1,200 requests a second for one account in the benchmark ([sustained throughput](../benchmarks/sustained-throughput.md)). An earlier run with 60 connections was slower. In that run, one locked row was the limit, and that problem is now fixed (#818). So that run shows only that more connections did not help with that one bottleneck. Raise it only if requests wait for a connection. Above about 100 connections per copy, put PgBouncer or RDS Proxy in front.
 
 ## How the data grows
 
 | Table | Grows with | Keep |
 |---|---|---|
-| `usage_events` | Every usage event. Can pass 10 million rows a month. | All. Hardcount deletes events only when you delete a test clock: the events of that clock's customers go with it. It cannot yet split the table by month. Do not delete or archive old rows yourself: an event's idempotency key is kept only in its row, so a resent old event would be stored again ([If you need more](../scale.md#if-you-need-more)). |
+| `usage_events` | Every usage event. Can pass 10 million rows a month. | All. Hardcount deletes events only when you delete a test clock: the events of that clock's customers go with it. It cannot yet split the table by month. Do not delete or archive old rows yourself. An event's idempotency key is the unique ID your app sends with it, so a resent event is stored once. That key is kept only in the event's row, so a resent old event would be stored again ([If you need more](../scale.md#if-you-need-more)). |
 | `audit_log` | Every change by a person or by Hardcount. Hundreds a day per account. | Often 7 years for audits such as SOC 2 |
 | `email_outbox` | One row per email sent | All. The invoice timeline, the customer's Sent emails and the Postmark webhook read them. |
 | `webhook_outbox` | One row per webhook queued | Rows with `status='dispatched'` can be deleted at any age; Hardcount does not delete them. Keep `failed` rows: [the runbook](runbook/webhook-outbox-backed-up.md#send-failed-rows-again) sends them again. |

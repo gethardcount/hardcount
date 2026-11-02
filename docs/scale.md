@@ -14,9 +14,11 @@ tokens on one model.
    10-minute runs.
 2. **12,000 events per second** on a larger one (`db.m7g.4xlarge`, 64 GB
    memory), with 10 events in each request. With stock Postgres settings it
-   passed four of five runs in one series and five of five in another. Sizing
-   the [WAL pool](failure-modes/rfm-001-wal-pool-exhaustion.md) took out the
-   latency spikes: the worst 10-second p99 fell from 177 ms to 52 ms.
+   passed four of five runs in one series and five of five in another. The
+   [WAL pool](failure-modes/rfm-001-wal-pool-exhaustion.md) is Postgres's
+   stock of ready-made log files. Sizing it took out the latency spikes: the
+   worst 10-second p99 fell from 177 ms to 52 ms. (p99 is the time within
+   which 99 of every 100 requests finished.)
 3. Apart from one Hardcount bottleneck, fixed in
    [#818](https://github.com/gethardcount/hardcount/issues/818), the database
    was the limit every time: its memory on the smaller machine, and how fast
@@ -79,7 +81,7 @@ sampled every 5 seconds.
 
 Conditions: AWS `ap-south-1`, one availability zone, a 100 GB `gp3` disk (AWS's
 general-purpose SSD) and stock database settings unless a row says otherwise.
-The load was one tenant, one meter and 200 customers. Requests were sent at a
+The load was one account, one meter and 200 customers. Requests were sent at a
 fixed rate whether or not the server kept up. Each row is a series of
 10-minute runs, and every event was counted in the database afterwards.
 
@@ -131,9 +133,10 @@ These steps come before Hardcount needs any new dependency:
    help, but it has not been measured.
 4. Split `usage_events` by month (partitioning). Not built. On a split table,
    Postgres requires every unique rule to include the column the table is
-   split on. So the idempotency key would move to its own small table,
-   written in the same commit as the event. Dedup would stay permanent, as
-   it is today.
+   split on. So the idempotency key (the unique ID your app sends with each
+   event, so a resent event is stored once) would move to its own small table,
+   written in the same commit as the event. Duplicate detection would stay
+   permanent, as it is today.
 5. Set a retention window on raw events. Not built. Deleting an event
    deletes its idempotency key with it, so this needs the key table from
    step 4 too.

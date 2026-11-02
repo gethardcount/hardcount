@@ -1,7 +1,8 @@
 # Test-clock advance hung
 
-Moving a [test clock](../../glossary.md#testing-with-simulated-time) forward
-(an advance) bills the skipped time. Back to the [runbook index](index.md).
+A [test clock](../../glossary.md#testing-with-simulated-time) is a pretend
+clock for test customers. Moving it forward (an advance) bills the skipped
+time. That billing is the catch-up. Back to the [runbook index](index.md).
 
 ## Symptom
 
@@ -17,9 +18,10 @@ Moving a [test clock](../../glossary.md#testing-with-simulated-time) forward
 - **A deploy abandoned the advance.** On shutdown, a replica waits 30
   seconds for an advance in progress, then exits. The clock stays
   `advancing` until **any replica starts or restarts**, because the
-  recovery runs once at boot, never on a schedule. In a rolling deploy the
-  new replica has usually booted already, so nothing picks it up. See Fix
-  step 3.
+  recovery runs once at boot, never on a schedule. In a rolling deploy, the
+  new replica usually started before the old one stopped. Its start-up
+  recovery ran too early to see the abandoned advance, so nothing picks it
+  up. See Fix step 3.
 
 ## Check
 

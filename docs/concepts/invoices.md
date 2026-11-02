@@ -38,9 +38,9 @@ More: [Usage events: late usage](usage-events.md#late-usage).
 
 | Status | What it means |
 |---|---|
-| `draft` | Not issued. Nothing is charged or emailed. You can add lines to a one-off draft; a subscription's draft keeps the lines and tax billing gave it. |
+| `draft` | Not issued. Nothing is charged or emailed. You can add lines to a one-off draft. A subscription's draft keeps the lines and the tax that the billing run gave it. |
 | `finalized` | Issued and owed. The dashboard shows it as **Open** while money is due. |
-| `paid` | Settled, by card, by credit, by a credit note, or by a payment you recorded. |
+| `paid` | Settled, by card, by credit, by a credit note (a document that lowers what the customer owes), or by a payment you recorded. |
 | `voided` | Canceled, as if it never existed. |
 | `uncollectible` | Written off: Hardcount stops collecting it, but keeps it in your records. |
 
@@ -69,8 +69,8 @@ Each route is under `/v1/invoices/{id}`.
   `payment_in_flight`. Wait for the payment to settle
   ([Payments](payments.md#when-the-answer-is-unclear)). A parked invoice
   can still be written off after a few minutes.
-- A void gives back any credit the invoice used, to the grants it came
-  from.
+- A void gives back any credit the invoice used, to the credit grants it
+  came from ([Credits](credits.md#credit-given-back)).
 - A draft sends no webhook. A period's invoice that is made already
   finalized sends `invoice.finalized` once, like a draft you finalize.
 
@@ -91,8 +91,8 @@ Hardcount works out an invoice in this order:
 
 With tax-inclusive pricing (**Settings → Tax**), your prices already hold
 the tax. Hardcount then takes the tax out of each line instead of adding
-it, so the subtotal is lower than the lines' prices and the total equals
-them.
+it on top. So the subtotal is lower than the sum of the line prices, and
+the total equals that sum.
 
 Then, right after the invoice is finalized, Hardcount collects it:
 
@@ -171,8 +171,10 @@ until you issue it with `POST /v1/credit-notes/{id}/issue`, or at once with
 `"auto_issue": true`. Only a draft credit note can be voided.
 
 - **On an unpaid invoice,** it lowers `amount_due_cents`. If nothing is
-  left due, the invoice is marked `paid`. A part beyond what is due gives
-  back credit the invoice used.
+  left due, the invoice is marked `paid`. If the credit note is for more
+  than what is still due, the extra part gives back credit that the invoice
+  used. That credit returns to the credit grants it came from
+  ([Credits](credits.md#credit-given-back)).
 - **On a paid invoice,** its total is split between a refund to the card,
   credit to the customer's balance, and money you returned outside
   Hardcount. With no split given, all of it goes to the credit balance.

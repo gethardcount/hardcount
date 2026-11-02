@@ -14,7 +14,7 @@ The item planned right after v0.9.0 has shipped ([Shipped recently](#shipped-rec
 **v0.10.0**, planned after v0.9.0:
 
 - **Spend alerts.** An alert level on each subscription, checked
-  against live usage, with an optional repeat. It is not the
+  against usage as it arrives, with an optional repeat. It is not the
   [spend threshold](glossary.md#subscriptions-and-invoices) that bills early. When usage crosses it, Hardcount
   sends a webhook and an email. Cutting a customer off stays in your app
   ([how](stop-usage-when-credit-runs-out.md)).
@@ -70,14 +70,15 @@ Each item waits until someone using Hardcount needs it:
   Hardcount ask for feature gating.
 - A plugin system.
 - Plan phases, plan versions, an XML catalog, several API versions side by
-  side, or GraphQL beside REST. Once prices are set per plan, keeping
+  side, or GraphQL beside REST. Because prices are set per plan, keeping
   customers on an old price means a separate plan.
 - A double-entry accounting ledger or revenue recognition.
-- Dedup that is optional or expires, money in floating-point numbers, and
-  retrying an unclear card charge under a new key while Stripe may still
-  finish the first. A new key is used only once Stripe has shown no payment
-  for that charge for 24 hours
-  ([ADR-127](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
+- Duplicate checks that are optional or that expire.
+- Money in floating-point numbers.
+- Charging a card again, with a new Stripe idempotency key, while Stripe may
+  still finish a first charge whose result was unclear. A new key is used
+  only once Stripe has shown no payment for that charge for 24 hours
+  ([why](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
 - Coupons, a customer portal, quotes, contracts and minimum spend.
 - Telemetry of any kind.
 - Docs kept outside this repo. The pages on gethardcount.com/docs are
@@ -114,7 +115,8 @@ October 2026 (v0.5.0 to v0.8.2):
 
 July to September 2026:
 
-- Prepaid commits, drawn down by later invoices.
+- Prepaid commits (credit the customer pays for up front), drawn down by
+  later invoices.
 - Provider cost tables and per-customer margin.
 - Team invites.
 - Safer handling of card charges whose outcome is unclear, and of unpaid invoices.

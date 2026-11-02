@@ -12,10 +12,11 @@ A production replica refuses to boot and logs one of these messages:
 
 ## Why
 
-The general and hosted-invoice rate limiters fail closed without Redis. A
-replica without Redis would boot green and answer 429 to its share of
-traffic, including hosted-invoice pay pages, while `/health/ready` stays
-ok. Refusing to start is the safer outcome.
+Without Redis, the general rate limiter and the hosted-invoice rate limiter
+refuse every request (they fail closed). A replica without Redis would start
+and look healthy, but answer 429 to its share of traffic, including
+hosted-invoice pay pages, while `/health/ready` stays ok. So refusing to
+start is the safer outcome.
 
 ## Check
 

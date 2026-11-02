@@ -71,13 +71,15 @@ freeze window are hurt.
 ## The fix
 
 Size the pool to hold at least one checkpoint cycle's worth of WAL, with
-slack. Verified under both provocation and full measured series:
+slack. Verified both in runs that caused the stall on purpose and in full
+measured series:
 
 ```
 min_wal_size = max_wal_size ≥ wal_keep_size + (1 + checkpoint_completion_target) × WAL rate × checkpoint_timeout
 ```
 
-(1.9 at RDS's default target of 0.9.)
+With RDS's default `checkpoint_completion_target` of 0.9, the factor
+`1 + checkpoint_completion_target` is 1.9.
 
 Worked example from the rig — a `db.m7g.4xlarge` ingesting through an HTTP
 API, every event reconciled against the database:

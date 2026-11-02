@@ -22,9 +22,11 @@ quantity times the matching cost. A cost you save or change later applies
 only to events that arrive after it. So save your costs before the usage
 arrives.
 
-- An event gets a cost only when it carries `provider`, `token_type` and a
-  `model` (or `model_raw`) label. Other events, such as usage of a meter
-  that is not for tokens, get none and are not counted.
+- An event gets a cost only when it carries `provider`, `token_type`, and
+  either `model` or `model_raw` (the model name exactly as LiteLLM sent
+  it). Other events, such as usage of a meter that is not for tokens, get
+  no cost, and `unresolved_events` does not count them. Their price still
+  counts in `revenue_cents` ([What margin leaves out](#what-margin-leaves-out)).
 - When a LiteLLM record has a cost breakdown, Hardcount can take LiteLLM's
   own cost for each kind of token instead of yours
   ([when](../integrations/litellm.md#things-to-know)).
@@ -96,9 +98,11 @@ recorded cost.
   change, or for a canceled subscription, it differs from the invoices.
 - **Events with no cost labels.** Their price still counts in
   `revenue_cents`, so `margin_bps` reads higher than your real margin.
-- **Claude Haiku 5.5's two prices.** A provider cost has no `context_tier`
-  label, so one cost covers both of the model's prices. Your margin is
-  wrong for one of them
+- **Claude Haiku 5.5's two prices.** Haiku 5.5 has a higher price when the
+  prompt is over 100,000 tokens, and its events carry a `context_tier`
+  label that picks the price. A provider cost has no `context_tier` label,
+  so one cost covers both of the model's prices. Your margin is wrong for
+  one of them
   ([see your margin](../ai-pricing.md#see-your-margin)).
 
 More: every call, step by step:

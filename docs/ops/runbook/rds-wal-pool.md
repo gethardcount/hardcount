@@ -25,7 +25,7 @@ evidence:
 
 How to see it if you suspect it:
 
-- `pg_stat_activity` (or the rig sampler) shows a client backend in
+- `pg_stat_activity` (or the per-second sampler in `scripts/bench-rig/`) shows a client backend in
   `IO:WALInitWrite`/`WALInitSync` with a pile-up on `LWLock:WALWrite`.
 - `TransactionLogsDiskUsage` grows under load right after it fell at a
   checkpoint.
@@ -57,17 +57,19 @@ near that size. Crash recovery can also take a little longer. Two cautions:
    - You do not notice it if traffic ramps up, or if an initial data load
      runs first (the load creates the files while nobody waits on
      commits).
-   - It is a rough 15 minutes or so if you start at peak on an empty pool.
+   - If you start at peak on an empty pool, expect about 15 minutes of
+     these pauses.
    - The alternative is the stock behavior: the same pauses after *every*
      quiet spell, forever.
    - `pg_switch_wal()` is not granted to `rds_superuser`, so there is no
      cheap way to grow the pool in advance on RDS. A bulk load or about
-     15 minutes of peak-rate traffic grows it. (Measured: applying 16 GB to
-     a shallow pool made the next 5 minutes *worse*, provocation arm D.)
+     15 minutes of peak-rate traffic grows it. (Measured in arm D of the
+     runs that caused the stall on purpose: applying 16 GB to a shallow pool
+     made the next 5 minutes *worse*.)
 2. **At higher write rates than measured, work the number out again.**
 
 ## Verify
 
 Check the Postgres log at peak. Checkpoints should read
-`checkpoint starting: time`, not `wal`. A WAL-driven checkpoint puts you
-back on the one-segment margin.
+`checkpoint starting: time`, not `wal`. A checkpoint started by WAL volume
+(`wal`) means the pool is back to a margin of one segment.

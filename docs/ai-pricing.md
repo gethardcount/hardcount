@@ -71,11 +71,13 @@ dimension. A LiteLLM proxy does this for you: Hardcount turns a name such as
 
 The two AI recipes share the `tokens` meter, so you can apply both. Each
 adds its own plan with its own prices, in the plan's currency. One customer
-cannot be on both plans at once: two live subscriptions of one customer
-cannot price the same meter, so usage is never billed twice. The second
-subscription is refused with 409, and a price that would add the meter to
-a plan such a customer is on with 409 `meter_overlap`. To sell both providers' models to one customer, apply one recipe,
-then add the other provider's model prices to its plan.
+cannot be on both plans at once. Two subscriptions of one customer that are
+not canceled (draft, trialing or active) cannot price the same meter, so
+usage is never billed twice. Hardcount refuses the second subscription
+with 409. It also refuses, with 409 `meter_overlap`, a price that would add
+the meter to a plan when a customer on that plan has another subscription
+that prices the meter. To sell both providers' models to one customer,
+apply one recipe, then add the other provider's model prices to its plan.
 
 To see the recipes, and to apply one with your own plan name:
 
@@ -202,12 +204,15 @@ plan in that period. So:
   (`effective: next_period`). The period already open keeps the prices it
   started with, also after a quantity change. A customer on a test clock
   follows the clock: the change applies from the clock's next period.
-- A subscriber who joins the plan after a change pays it at once: a new
-  subscription from its start (after a trial, from the trial's end), an
-  immediate plan change onto the plan from the change, an added item from
-  the add. So a subscription that starts later on the day of a change pays
-  the new rate, bills a price added earlier and does not bill a price
-  removed earlier, from its first period.
+- A subscriber who joins the plan after a change pays it at once:
+  - a new subscription, from its start (after a trial, from the trial's
+    end);
+  - an immediate plan change onto the plan, from the change;
+  - an added item, from the add.
+
+  So a subscription that starts later on the day of a change follows the
+  change from its first period. It pays the new rate, bills a price added
+  earlier, and does not bill a price removed earlier.
 - A customer's negotiated rate (a price override) keeps applying when the
   price's rate changes. Removing the price ends it, and the answer lists the
   overrides it ended.
@@ -216,15 +221,17 @@ plan in that period. So:
   an item removed and added back, and for a plan change and back. A change
   made in between applies from its next period.
 - An override follows the same rule. It applies from the subscriber's next
-  period, or from the join when the subscription first joins the plan in a
-  period after the override was created. So one created before a
-  subscription starts (after a trial, before the trial ends), even on the
-  same day, applies from its first period.
+  period. When the subscription first joins the plan in a period after the
+  override was created, the override applies from the join. So an override
+  created before a subscription starts, even on the same day, applies from
+  its first period. For a subscription with a trial, that is an override
+  created before the trial ends.
 - When an item leaves a plan and an item joins it again later in the
-  period, each part bills on its own, with its own peak and tiers. An item
-  added on the period's first day bills from the period start, so its part
-  starts where the part before it ended. On one plan those two parts bill
-  as one: a `max` meter bills one peak, and tiers run on.
+  period, each part bills on its own, with its own peak and its own tiers.
+  One case is different. An item added on the period's first day bills
+  from the period start, so its part starts where the part before it
+  ended. When those two touching parts are on one plan, they bill as one
+  part: a `max` meter bills one peak, and the tiers continue across both.
 - On a test clock, a change or an override takes effect just after the
   clock's current time. A subscription, an immediate plan change or an
   added item at that same clock time gets the earlier prices, so advance
@@ -241,8 +248,9 @@ count until it is released. Every price of the meter bills under it.
 
 ## Usage on a yearly plan
 
-A subscription has one billing period. On a yearly plan, usage is billed
-once a year, on the invoice at the end of the year.
+All items of a subscription bill on the same billing period. So on a
+yearly plan, usage is billed once a year, on the invoice at the end of the
+year.
 
 - **To bill some usage sooner,** set a spend threshold on the subscription
   (`amount_gte` on `PUT /v1/subscriptions/{id}/billing-thresholds`). The
@@ -385,9 +393,9 @@ the $10,000 of credit pays for about $9,091 of usage and $909 of tax.
   taxed", and the PDF says why there is no tax.
 - **Refunds:** refunding unused credit reverses no tax, because the
   purchase carried none
-  ([how a refund works](adr/080-paid-commit-cn-relief.md)). A commit whose
-  purchase was taxed, because it was invoiced before the purchase stopped
-  being taxed, still reverses that tax when refunded
+  ([how a refund works](adr/080-paid-commit-cn-relief.md)). One case is
+  different: a commit invoiced before Hardcount stopped taxing the purchase
+  was taxed. Refunding it still reverses that tax
   ([the change](https://github.com/gethardcount/hardcount/pull/1288)).
 - **Free (promotional) credit** pays usage invoices the same way, tax
   included.
@@ -463,7 +471,8 @@ it, never the customer.
    The **Provider costs** page lists them.
 
 2. **Read the margin for one invoiced period.** This reads the billing
-   period of the invoice in `INVOICE_ID`.
+   period of the invoice in `INVOICE_ID`, which step 7 of the
+   [first invoice page](first-invoice.md#steps) sets.
 
    ```bash
    PERIOD=$(curl -s "$HARDCOUNT/v1/invoices/$INVOICE_ID" \
@@ -488,19 +497,27 @@ it, never the customer.
    string), and a 65% margin (`margin_bps` is in hundredths of a percent).
 
 The margin covers usage only: base fees, credits and taxes are left out.
-Revenue Hardcount cannot match to a model is shown apart, in
-`unattributed_revenue_cents`. A token event that names its `provider`,
-`token_type` and `model` but matches no cost rate is counted in
-`unresolved_events`. So is an event whose cost, quantity ×
-`unit_cost_cents`, is too large to record (about $9.2 trillion or more);
-it is still billed. `margin_bps` is left out while any such event is in
-the window. It is also left out when no event in the window carries a
-cost, when revenue is 0, and when revenue and cost are in different
-currencies. Provider costs are in USD, so a plan priced in EUR or GBP shows
-no margin. An event sent through the usage API without one
-of those three labels, such as usage on a meter that is not for tokens,
-gets no cost and is not counted. Its price is still in `revenue_cents`, so
-`margin_bps` reads higher than your real margin.
+
+- **Revenue with no model.** Revenue Hardcount cannot match to a model is
+  shown apart, in `unattributed_revenue_cents`.
+- **Events with no cost.** A token event that names its `provider`,
+  `token_type` and `model` but matches no cost rate is counted in
+  `unresolved_events`. So is an event whose cost, quantity ×
+  `unit_cost_cents`, is too large to record (about $9.2 trillion or more);
+  it is still billed.
+- **Events with no cost labels.** An event sent through the usage API
+  without one of those three labels, such as usage on a meter that is not
+  for tokens, gets no cost, and `unresolved_events` does not count it. Its
+  price is still in `revenue_cents`, so `margin_bps` reads higher than your
+  real margin.
+
+`margin_bps` is left out:
+
+- while any event counted in `unresolved_events` is in the window;
+- when no event in the window carries a cost;
+- when revenue is 0;
+- when revenue and cost are in different currencies. Provider costs are in
+  USD, so a plan priced in EUR or GBP shows no margin.
 
 Left out, `to` is the customer's current time and `from` is 30 days
 before that time. On a test clock, that is the clock's time. A window can

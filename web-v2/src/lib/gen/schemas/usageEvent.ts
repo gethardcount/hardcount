@@ -54,8 +54,8 @@ export interface UsageEvent {
      * When the usage happened. It decides which billing period the
      * event counts toward. An event sent without `timestamp` is
      * stamped with the time Hardcount received it, or, for a customer
-     * on a test clock, with the clock's time. A live event may be at
-     * most 5 minutes ahead of that time. There is no limit on how far
+     * on a test clock, with the clock's time. An event that is not a
+     * backfill may be at most 5 minutes ahead of that time. There is no limit on how far
      * back it goes, but an event in a period whose invoice is already
      * built is stored and not billed (see `billing_status`).
      */

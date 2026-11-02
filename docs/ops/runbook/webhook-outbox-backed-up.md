@@ -2,7 +2,7 @@
 
 Hardcount queues every webhook event in the `webhook_outbox` table. A
 background job turns each row into an event and one delivery per matching endpoint,
-before anything is sent. An endpoint that keeps failing does not grow it: see
+before anything is sent. An endpoint that keeps failing does not make this table grow: see
 [A webhook endpoint keeps failing](webhook-endpoint-failing.md). Back to the
 [runbook index](index.md).
 
@@ -26,7 +26,7 @@ before anything is sent. An endpoint that keeps failing does not grow it: see
   [A background job is stuck](background-job-stuck.md).
 - **Writing the event and its deliveries fails.** The database refuses the
   write, for example on lost connections or a full disk. The error is in
-  `last_error`, and the row is retried on a backoff ramp.
+  `last_error`, and the row is retried with growing waits (a backoff ramp).
 
 ## Check
 

@@ -33,8 +33,10 @@ can send them for you: see [LiteLLM integration](../integrations/litellm.md).
 | `dimensions` | No | Labels, such as the AI model and the kind of token. Prices pick events by them. Up to 16 keys; each value is text, a number, true/false or null. |
 
 A customer or meter that does not exist is refused with `422`, and nothing
-is stored. A LiteLLM proxy's usage for an unknown customer is held instead,
-so you can release it later.
+is stored. Usage from a LiteLLM proxy for an unknown customer is held
+instead: Hardcount keeps it without billing it. Once you create the
+customer, you release it, and it becomes usage events
+([held usage](../integrations/litellm.md#usage-for-a-customer-hardcount-does-not-know-yet)).
 
 A `timestamp` may not be more than 5 minutes ahead of the customer's
 current time. For a customer on a [test clock](test-clocks.md), the current
@@ -68,8 +70,9 @@ back as `deduplicated`. A `422` names the bad events in `errors[]` and
 fails the same way again, so fix those events first.
 
 The usage routes ignore the `Idempotency-Key` header that other write
-routes take. The key in each event is their only one. Both keys, and a
-retry loop: [Idempotency](../api/idempotency.md).
+routes take. On these routes, the `idempotency_key` in each event is the
+only key. [Idempotency](../api/idempotency.md) explains both kinds of key,
+with a retry loop.
 
 ## Which period an event counts in
 
@@ -108,13 +111,15 @@ that arrives later is late usage: it is stored, answered with
 `billing_status: "after_close"`, and billed on no invoice, now or later.
 To charge for it, make a one-off invoice with the amount.
 
-A few actions close an ended period at once, without the grace period:
+A few actions close an ended period at once, without waiting for the grace
+period. To close a period is to make its invoice. These actions are:
 
 - an immediate cancel;
 - a plan, quantity or item change;
 - a pause or resume of collection;
 - a scheduled cancel, or its removal;
-- `retry-billing`;
+- a call to `POST /v1/subscriptions/{id}/retry-billing`, which retries a
+  subscription whose billing failed;
 - moving a test clock.
 
 More: [Invoice timing and late usage](../ops/runbook/invoice-timing-late-usage.md).

@@ -10,9 +10,9 @@ The code is the source: [`internal/config/config.go`](../internal/config/config.
 | Program | Reads |
 |---|---|
 | `hardcount migrate`, `migrate status`, `migrate rollback` | `DATABASE_URL` or the `DB_HOST` set, the pool settings and `MIGRATION_LOCK_TIMEOUT`, all in [Database](#database). `migrate rollback` also reads `APP_ENV` and runs only when it is `local`. |
-| `hardcount-bootstrap` (`make bootstrap`) | Every setting the server checks at start-up (`config.Load`), so the production checks apply to it too. It always applies migrations first. It also reads the three [first-account](#first-account) settings. |
+| `hardcount-bootstrap` (`make bootstrap`) | Every setting the server checks at start-up, so the production checks apply to it too. It always applies migrations first. It also reads the three [first-account](#first-account) settings. |
 | `hardcount-doctor` | `DATABASE_URL` only. Required: without it the doctor exits with status 2. It does not read the `DB_HOST` set. |
-| `hardcount-bench-seed` | Every setting the server checks at start-up (`config.Load`), plus the two `BENCH_*` settings in [Development and tests](#development-and-tests-only). |
+| `hardcount-bench-seed` | Every setting the server checks at start-up, plus the two `BENCH_*` settings in [Development and tests](#development-and-tests-only). |
 | `hardcount-docs-run` | No environment variables; only its command-line flags. |
 
 Stripe has no environment variable. Each account connects its own Stripe keys in the dashboard, under Settings → Payments, and Hardcount stores them in the database.
@@ -63,15 +63,15 @@ If Redis goes down after start-up in production, API and dashboard requests answ
 
 Without it, every request behind a load balancer appears to come from the load balancer. All users then share one rate limit, the audit log shows the load balancer's address, and 5 wrong passwords for an email, from anyone, make every new browser wait to sign in with it.
 
-To check it, sign in, switch the dashboard to test mode and open the audit log. The newest `login` entry shows the address Hardcount saw. It should be yours, not the load balancer's.
+To check it, sign in, switch the dashboard to test mode and open the audit log. Sign-in entries are kept in the test-mode audit log. The newest `login` entry shows the address Hardcount saw. It should be yours, not the load balancer's.
 
 ## Security and keys
 
 | Setting | What it does | Default |
 |---|---|---|
-| `HARDCOUNT_ENCRYPTION_KEY` | Encrypts stored personal data, webhook signing secrets, Stripe keys and hosted-invoice tokens (AES-256-GCM). It also keys the sign-in throttle. 64 hex characters: `openssl rand -hex 32`. Keep a copy: [Back up Hardcount](ops/backup-considerations.md). | Unset: that data is stored in plain text, with a warning. Production: required. A set value that is not 64 hex characters stops start-up in every environment. |
+| `HARDCOUNT_ENCRYPTION_KEY` | Encrypts stored personal data, webhook signing secrets, Stripe keys and hosted-invoice tokens (AES-256-GCM). The sign-in throttle also uses it, to hash the emails and addresses it counts. 64 hex characters: `openssl rand -hex 32`. Keep a copy: [Back up Hardcount](ops/backup-considerations.md). | Unset: that data is stored in plain text, with a warning. Production: required. A set value that is not 64 hex characters stops start-up in every environment. |
 | `HARDCOUNT_BOOTSTRAP_TOKEN` | Allows the `POST /v1/bootstrap` call that creates the first account. | Unset: that call is turned off. Outside local, a value shorter than 16 characters stops start-up. |
-| `HARDCOUNT_EMAIL_BIDX_KEY` | A separate key that lets Hardcount find a customer by email address, for bounce reports and for not sending to an address that bounced. 64 hex characters, not the encryption key: `openssl rand -hex 32`. | Unset: bounces are not recorded against customers, and bounced addresses are still sent to. Start-up logs a warning. A value that is not 64 hex characters logs an error and works as unset. |
+| `HARDCOUNT_EMAIL_BIDX_KEY` | A separate key for the email blind index, which lets Hardcount find a customer by email address, for bounce reports and for not sending to an address that bounced. 64 hex characters, not the encryption key: `openssl rand -hex 32`. | Unset: bounces are not recorded against customers, and bounced addresses are still sent to. Start-up logs a warning. A value that is not 64 hex characters logs an error and works as unset. |
 
 ## Email
 
@@ -93,7 +93,7 @@ Without `SMTP_HOST`, Hardcount sends no email: every send fails with "SMTP not c
 
 | Setting | What it does | Default |
 |---|---|---|
-| `CUSTOMER_PORTAL_URL` | The dashboard's address, with no path. Stripe returns a customer here after they save a card from a setup link you send or make on the customer's page (`send-setup-email`, `setup-session`). | Unset: Stripe returns them to `http://localhost:5173/payment-method-added`, with a warning. The card is still saved. |
+| `CUSTOMER_PORTAL_URL` | The dashboard's address, with no path. Stripe returns a customer here after they save a card from a setup link you send or make on the customer's page (`send-setup-email`, `setup-session`). Hardcount adds `/payment-method-added`. | Unset: Stripe returns them to `http://localhost:5173/payment-method-added`, with a warning. The card is still saved. |
 | `PAYMENT_UPDATE_RETURN_URL` | Where a customer lands after adding a card from the "add a payment method" email. Hardcount adds `?status=success` or `?status=cancel`. | Unset: `http://localhost:5173/payment-method-added`, with a warning. The card is still saved. |
 
 ## Background jobs

@@ -25,7 +25,7 @@ Every example uses `billing.example.com`. Replace it with your own address.
 
 ## 1. Install a pinned release
 
-A release is a tested version with a number, such as `v0.9.2`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/gethardcount/hardcount/releases). This page uses `v0.9.2`. A Velox install (v0.8.x) cannot be upgraded: see [Coming from Velox](upgrades.md#coming-from-velox).
+A release is a tested version with a number, such as `v0.9.2`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/gethardcount/hardcount/releases). This page uses `v0.9.2`. A Velox install (v0.8.x; Velox is Hardcount's name before v0.9.0) cannot be upgraded: see [Coming from Velox](upgrades.md#coming-from-velox).
 
 1. Get the files for that release.
 
@@ -65,9 +65,9 @@ A release is a tested version with a number, such as `v0.9.2`. Production runs a
    | `POSTGRES_PASSWORD` | The database admin password |
    | `HARDCOUNT_APP_DB_PASSWORD` | The password of the limited database user that API requests run as |
    | `HARDCOUNT_ENCRYPTION_KEY` | Encrypts stored personal data and Stripe keys |
-   | `HARDCOUNT_BOOTSTRAP_TOKEN` | Lets you create the first account in step 2 |
+   | `HARDCOUNT_BOOTSTRAP_TOKEN` | Lets you create the first account in [section 2](#2-create-your-account-and-first-login) |
    | `HARDCOUNT_IMAGE`, `HARDCOUNT_DASHBOARD_IMAGE` | Run the published release images instead of [building from source](../deploy/compose/README.md#build-from-source-instead) |
-   | `NGINX_HTTP_PORT=127.0.0.1:8080` | Hardcount listens only on the VM itself, on port 8080. The HTTPS server in step 3 sits in front of it. |
+   | `NGINX_HTTP_PORT=127.0.0.1:8080` | Hardcount listens only on the VM itself, on port 8080. The HTTPS server from [section 3](#3-add-https-with-caddy) sits in front of it. |
 
 3. Start Hardcount.
 
@@ -135,7 +135,7 @@ Caddy is a web server that gets a free HTTPS certificate from Let's Encrypt and 
 
 `.env` sets `APP_ENV=production`, so the sign-in cookie is `Secure`: sign in at your `https://` address ([before HTTPS](../deploy/compose/README.md#sign-in-before-https)).
 
-Hardcount reads each visitor's real address from the headers Caddy and nginx forward. Caddy's requests reach Hardcount through Docker's private network, which the Compose stack's default `TRUST_PROXY` already trusts, so leave that setting as it is.
+Hardcount reads each visitor's real address from the headers that Caddy and the stack's nginx forward. nginx is the web server container in front of the Hardcount API. Caddy's requests reach Hardcount through Docker's private network, which the Compose stack's default `TRUST_PROXY` already trusts, so leave that setting as it is.
 
 ## 4. Set the web addresses
 
@@ -191,7 +191,7 @@ sleep 10
 docker compose logs hardcount-api | grep "email blind index enabled"
 ```
 
-**You see:** a line with `email blind index enabled`. Do not change this key later: a new key does not match the customers indexed with the old one.
+**You see:** a line with `email blind index enabled`. The email blind index is what lets Hardcount find a customer by email address. Do not change this key later: a new key does not match the customers indexed with the old one.
 
 ## 5. Connect email
 
@@ -294,7 +294,7 @@ The repository ships `scripts/backup.sh`. It dumps the database, checks that the
 
 ### Test a restore
 
-This test restores the newest dump into a second, empty database on the same server. Your live data is not touched.
+This test restores the newest dump into a second, empty database on the same server. The database Hardcount runs on is not touched.
 
 1. Restore into a test database.
 
@@ -313,7 +313,7 @@ This test restores the newest dump into a second, empty database on the same ser
 
    **You see:** `All critical tables present.` and then `Restore complete.`
 
-2. Compare the restored data with the live data.
+2. Compare the restored data with the data Hardcount runs on.
 
    ```bash
    for db in hardcount hardcount_restore_test; do

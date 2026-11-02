@@ -84,12 +84,13 @@ migration 00206_dunning_retry_days.sql failed: ERROR: migration 00206 writes eac
   dunning policy hc_dpol_...: retry_schedule entry 1 (36h) is not a whole number of days from 1 to 30
 ```
 
-**Why:** migration 206 rewrites each dunning policy's schedule as
-`retry_days`, a list of whole days from 1 to 30. A wait one of the
-policy's retries uses, such as `"36h"`, or a wait over 30 days, has no
-exact value in days. The error also lists values Hardcount's own policy form
-never saved, such as a retry count over 15. Rounding would retry on a day
-nobody chose, so the migration changed nothing. A one-retry policy saved
+**Why:** a dunning policy says when Hardcount retries a failed payment.
+Migration 206 rewrites each dunning policy's schedule as `retry_days`, a
+list of whole days from 1 to 30. Some waits have no exact value in days: a
+wait such as `"36h"`, or a wait over 30 days. The error also lists values
+Hardcount's own policy form never saved, such as a retry count over 15.
+Rounding would retry on a day nobody chose, so the migration changed
+nothing. A one-retry policy saved
 without a schedule (stored as `null`) is not an error: it converts to its
 grace period.
 
@@ -211,8 +212,8 @@ uses.
 migration 00221_api_key_type_ingest.sql failed: ERROR: migration 00221 removes the platform API key type, and this database holds 1 platform key(s)
 ```
 
-**Why:** from this release an API key is a secret key or a usage-only
-(ingest) key, and the platform type is gone with the `/v1/tenants` routes
+**Why:** from this release an API key is a secret key or a usage-only key
+(`hc_ingest_…`), and the platform type is gone with the `/v1/tenants` routes
 ([ADR-133](../../adr/133-api-key-types-secret-and-ingest.md)). No Hardcount
 route ever issued a platform key, so these rows were written by hand. The
 migration does not delete a credential, and nothing was changed.

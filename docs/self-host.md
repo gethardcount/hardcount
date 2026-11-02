@@ -37,7 +37,7 @@ A migration is a versioned script that changes the database schema. Hardcount ap
 
 ## Upgrading
 
-[Upgrade Hardcount](upgrades.md): what to do before you upgrade, the upgrade on one VM or on several copies, and how to go back. A Velox install cannot be upgraded: see [Coming from Velox](upgrades.md#coming-from-velox).
+[Upgrade Hardcount](upgrades.md): what to do before you upgrade, the upgrade on one VM or on several copies, and how to go back. A Velox install (Hardcount's name before v0.9.0) cannot be upgraded: see [Coming from Velox](upgrades.md#coming-from-velox).
 
 ## Settings
 
@@ -55,7 +55,7 @@ Measured load, and what to do when you need more: [How much traffic Hardcount ha
 
 ## What to watch
 
-Hardcount serves Prometheus metrics at `/metrics` and writes structured logs to standard output. In `production`, set `METRICS_TOKEN` and have Prometheus send it as a bearer token; without it, `/metrics` answers 401.
+Hardcount serves Prometheus metrics at `/metrics` and writes structured logs to standard output. With `APP_ENV=production`, set `METRICS_TOKEN` and have Prometheus send it as a bearer token; without it, `/metrics` answers 401.
 
 Hardcount ships one Grafana dashboard, [`ops/grafana-dashboard.json`](ops/grafana-dashboard.json). Import it into Grafana and point it at the Prometheus that scrapes `/metrics`. It shows HTTP traffic, billing runs, payments, payment retries, the email and webhook queues, and tax.
 

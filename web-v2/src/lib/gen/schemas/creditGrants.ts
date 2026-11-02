@@ -15,13 +15,13 @@ import type { CreditGrantBlock } from './creditGrantBlock';
 import type { CreditGrantsRemainingByCurrencyItem } from './creditGrantsRemainingByCurrencyItem';
 
 /**
- * A customer's credit blocks, newest first, with the remaining credit
+ * A customer's credit grants, newest first, with the remaining credit
  * added up by currency and kind. Amounts are in the currency's minor
  * unit (cents for USD).
  */
 export interface CreditGrants {
   /**
-     * The customer's credit blocks, newest first. A block with nothing
+     * The customer's credit grants, newest first. A grant with nothing
      * left is listed only with `include_exhausted=true`.
      */
   grants: CreditGrantBlock[];

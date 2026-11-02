@@ -62,7 +62,8 @@ one. It runs it by kind, not in time order:
 5. tax calculations waiting for a retry;
 6. card charges of invoices waiting to be charged, such as new invoices
    or ones whose customer just added a card;
-7. credit notes that were waiting for an invoice to settle;
+7. credit notes (documents that lower what a customer owes) that were
+   waiting for an invoice to settle;
 8. dunning steps: payment retries, reminder emails and final actions;
 9. credit expiry, last.
 

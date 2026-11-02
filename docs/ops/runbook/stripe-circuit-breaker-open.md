@@ -17,12 +17,13 @@ retries skipped for another reason. Back to the [runbook index](index.md).
 ## Why
 
 - Stripe calls got no clear answer 5 times in a row (a 5xx, a timeout or a
-  dropped connection), and the breaker tripped to protect the retry budget.
+  dropped connection), and the breaker tripped, so payment retries are not
+  spent while Stripe is failing.
   Declines and other definite errors do not count, and neither does a
   rejected API key.
-- The breaker is one per Hardcount process, shared by every tenant. One
-  tenant's calls can open it for all of them on that replica.
-- Stripe is rate limiting, or a tenant's Stripe credentials could not be
+- The breaker is one per Hardcount process, shared by every account. One
+  account's calls can open it for all of them on that replica.
+- Stripe is rate limiting, or an account's Stripe credentials could not be
   read. These skip retries without tripping the breaker.
 - A database error during the retry, such as a dropped connection. The
   readiness probe shows those: `/health/ready` answers 503 while the
@@ -37,7 +38,7 @@ Stripe; a connection or `SQLSTATE` error points to the database.
 ## Fix
 
 1. Check Stripe's status page (`status.stripe.com`).
-2. If only one tenant's retries are skipped, check its Stripe credentials
+2. If only one account's retries are skipped, check its Stripe credentials
    in `Settings → Payments`, and rotate them if needed.
 3. For database errors, restore the database connection first.
 4. The breaker closes on its own: after a 30-second cool-off it lets one

@@ -20,8 +20,8 @@ Hardcount versions look like `0.MINOR.PATCH`, for example `0.8.2`.
   required, a default can change, and a route can answer with a new error.
 - **New values.** A field can get a new value, such as `unknown` for a
   credit note's `refund_status`. Webhooks can gain new event types.
-- **Settings.** A setting Hardcount used to ignore when it could not read it can
-  now stop start-up.
+- **Settings.** Hardcount used to ignore some settings it could not read.
+  Such a setting can now stop start-up.
 - **The upgrade path.** A release can drop the upgrade from older versions.
   v0.9.0, the first release named Hardcount (the project was called
   Velox), dropped it: it cannot take over a database Velox made, from

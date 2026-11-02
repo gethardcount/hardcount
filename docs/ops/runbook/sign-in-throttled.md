@@ -38,7 +38,8 @@ Two causes are common:
 ## Check
 
 1. Is the client address right? Sign in, switch the dashboard to test mode
-   and open the audit log. The newest `login` entry shows the address Hardcount
+   and open the audit log. Sign-in entries are kept in the test-mode audit
+   log. The newest `login` entry shows the address Hardcount
    saw. If it is your load balancer's or proxy's address, fix `TRUST_PROXY`
    ([Settings](../../settings.md#why-trust_proxy-matters)).
 2. Who is trying? Each wrong password logs `auth: failed login attempt` with

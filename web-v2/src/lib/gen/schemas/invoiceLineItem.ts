@@ -87,8 +87,9 @@ export interface InvoiceLineItem {
   /** When the line was written. */
   created_at: string;
   /**
-     * Marks the line as a prepaid commit purchase: when the invoice is
-     * finalized, the customer is granted a block of credit of this
+     * Marks the line as a prepaid commit purchase (credit the customer
+     * pays for up front): when the invoice is finalized, the customer
+     * gets a credit grant of this
      * many cents (in the invoice's currency). It may differ from the
      * line's price: a discounted commit sells $10,000 of credit for
      * $9,000. Only on `add_on` lines of invoices you create, at most

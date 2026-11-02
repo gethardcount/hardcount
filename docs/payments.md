@@ -9,51 +9,68 @@ Hardcount charges cards with Stripe PaymentIntents.
 ## Rules
 
 1. **An unclear answer is `unknown`, not failed.** A Stripe 5xx, any 409, a
-   network error or a timeout leaves the payment `unknown`, and nothing
-   charges that invoice again until a Stripe webhook or the reconciler gives
-   the answer. The two `unknown` rows under Cases say what happens next. A
-   409 counts as unclear because Stripe sends it when an idempotency key is
-   reused, so an earlier request may have charged the card. When Hardcount
-   itself stops waiting (a shutdown, or a closed **Collect payment**), it
-   saves nothing: that is a lost result, the last of those rows.
+   network error or a timeout leaves the payment `unknown`. Nothing charges
+   that invoice again until a Stripe webhook or the reconciler gives the
+   answer. The reconciler is the check that asks Stripe what happened to a
+   charge whose result Hardcount did not save.
+   - A 409 counts as unclear because Stripe sends it when an idempotency key
+     is reused, so an earlier request may have charged the card.
+   - What happens next is in two Cases rows: "Stripe 5xx that names a
+     PaymentIntent" and "An unclear answer with no PaymentIntent ID".
+   - When Hardcount itself stops waiting (a shutdown, or a closed **Collect
+     payment**), it saves nothing. That is a lost result: see the Cases row
+     "Crash after Stripe charged, before Hardcount saved".
 2. **One charge per invoice at a time, and none after a lost result.**
-   Auto-charge, dunning retries and **Collect payment** share one 5-minute
-   claim on the invoice, the charge hold. An open hosted Checkout page blocks
-   them, and a running or `unknown` charge blocks the page
-   ([ADR-068](adr/068-checkout-session-dedup.md)). A charge with a definite
-   answer frees its claim at once. So does one that sent nothing, or that
-   Stripe refused before charging. Those are: the circuit breaker open; the
-   Stripe credentials unreadable; the Stripe key refused or missing; the
-   invoice changed at the re-check before sending; or the amount below
-   Stripe's minimum. A claim whose charge result was lost (a crash, a shutdown,
-   a closed **Collect payment**, a 429) stays set after its 5 minutes, and so
-   does a parked invoice's. Every charge, the hosted page, void,
-   offline payment and dunning's final action wait for it. The reconciler asks
-   Stripe about it on the first scheduled run at least 10 minutes after the
-   claim ended. It records a payment it finds, or clears the claim if Stripe
-   has nothing. With the hourly run, that is usually within about an hour
-   ([ADR-127](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
+   - Automatic charges, dunning retries and **Collect payment** share one
+     claim on the invoice: the charge hold, which lasts 5 minutes. (Dunning
+     is Hardcount's retrying of a failed card payment, with emails to the
+     customer.)
+   - An open hosted Checkout page blocks these charges, and a running or
+     `unknown` charge blocks the page
+     ([ADR-068](adr/068-checkout-session-dedup.md)).
+   - A charge with a definite answer frees its charge hold at once. So does
+     a charge that sent nothing, or that Stripe refused before charging.
+     Those are: the circuit breaker open; the Stripe credentials unreadable;
+     the Stripe key refused or missing; the invoice changed at the re-check
+     before sending; or the amount below Stripe's minimum.
+   - A lost result is a charge whose answer Hardcount never saved: a crash,
+     a shutdown, a closed **Collect payment**, or a 429. Its charge hold
+     stays set after the 5 minutes. So does the charge hold of a parked
+     invoice: one whose unclear answer named no PaymentIntent (see Cases).
+   - While the charge hold stays set, every charge waits for it, and so do
+     the hosted page, void, offline payment and dunning's final action.
+   - The reconciler asks Stripe about it on the first scheduled run at least
+     10 minutes after the charge hold ended. It records a payment it finds,
+     or clears the charge hold if Stripe has nothing. With the hourly run,
+     that is usually within about an hour
+     ([ADR-127](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
 3. **Idempotency key per attempt.** Re-sending the same attempt sends the
    same key, so Stripe returns the first PaymentIntent. The same attempt means
    the same attempt counter, the same card, and the same kind of charge: a
    dunning retry, or any other charge (auto-charge and **Collect payment**
    send the same key). A dunning retry after a decline is a new attempt with a
-   new key, and so is the next charge after the reconciler finds nothing at
-   Stripe for a lost or parked one. Stripe may drop a key once it is 24 hours old.
+   new key. So is the next charge after the reconciler finds nothing at
+   Stripe for a lost result or a parked invoice. Stripe may drop a key once it
+   is 24 hours old.
 4. **Webhooks: deduplicated, first result wins.** A processed event ID is
    skipped. A failure arriving after the invoice is paid, or from an older
    attempt, is ignored. A transient processing error gets a 5xx, so Stripe
    redelivers; an event that names no Hardcount invoice is acknowledged.
 5. **Charges do not wait on webhooks.** The reconciler asks Stripe on every
    scheduled run: hourly, or every 5 minutes when `APP_ENV` is `local` or
-   unset. On each run it reads `unknown` payments that carry a PaymentIntent
-   ID and are at least 1 minute old, `processing` ones at least 30 minutes
-   old, and hosted Checkout sessions at least 5 minutes old. Lost or parked
-   charges it reads through Stripe's list of the customer's payments once
-   their claim ended 10 minutes ago, so at least 15 minutes after the
-   charge. These are minimum ages: each waits for the next scheduled run. Results go through the same settlement code as webhooks. Still
-   webhook-only: refund status after a pending refund. A decline Stripe shows
-   for a parked charge counts as no payment, so the charge 24 hours later
+   unset. On each run it reads:
+   - `unknown` payments that carry a PaymentIntent ID, once they are at
+     least 1 minute old;
+   - `processing` payments, once they are at least 30 minutes old;
+   - hosted Checkout sessions, once they are at least 5 minutes old;
+   - lost results and parked invoices, through Stripe's list of the
+     customer's payments, once their charge hold ended 10 minutes ago. That
+     is at least 15 minutes after the charge.
+
+   These are minimum ages: each waits for the next scheduled run. Results go
+   through the same settlement code as webhooks. A pending refund's later
+   status still comes only from webhooks. A decline that Stripe shows for a
+   parked charge counts as no payment, so the new charge 24 hours later
    records the decline again.
 
 ## Cases
@@ -65,22 +82,22 @@ Hardcount charges cards with Stripe PaymentIntents.
 | Card refused for good: lost, stolen, pick up card, revoked authorization and the rest of Stripe's hard decline codes | As above, but retries no longer charge that card for this invoice. They keep their schedule and count, and charge only once another card is the customer's default. A card saved after the refusal becomes the default, as above (paying on the hosted page also saves one). The customer is asked for a different card; the reason is not named. The invoice says "needs a different card". | Ask for a new card (**Update payment method**), or let the customer pay on the hosted page. **Collect payment** refuses that card with a 409 (`card_refused`) and charges nothing. A card saved before the refusal needs **Set as default** on the customer's page ([ADR-126](adr/126-a-card-refused-for-good-is-not-retried.md)). |
 | The bank wants the customer to confirm the payment (3-D Secure, Stripe's `authentication_required`) | Payment `failed` and dunning starts, as for a decline. Retries count but don't charge that card while it is the default, as in Stripe Billing; a card saved through a setup or update link becomes the default and the next retry charges it. The customer's email and each reminder ask them to confirm on the hosted invoice page, with nothing about a decline. The invoice says "Customer must confirm payment". | **Email payment link**: the customer pays and confirms on the hosted invoice page ([runbook](ops/runbook/customer-must-confirm-payment.md)). |
 | Stripe 5xx that names a PaymentIntent | `unknown` ("Confirming payment"); the reconciler reads the PaymentIntent on the first scheduled run once it is a minute old, or a webhook settles it. | Nothing. If it lasts hours: [runbook](ops/runbook/unclear-charge.md#unconfirmed-with-a-paymentintent). |
-| An unclear answer with no PaymentIntent ID: a 5xx, any 409, a network error, or a request past the caller's time limit (15 s for dunning, 30 s for auto-charge and **Collect payment**) | Invoice *parked* ("Payment status unknown"); nothing charges it. Every run from 10 minutes after the claim ended, the reconciler lists the customer's payments in Stripe: a succeeded payment marks the invoice paid, a processing one is followed. If none has appeared 24 hours after the attempt, the invoice goes back to `pending` (`failed` after a dunning retry) and is charged again as usual, under a new idempotency key ([ADR-127](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)). | Nothing. If the customer paid another way, **Mark uncollectible** within the 24 hours. In the park's first few minutes it is refused while the charge's claim is still live; try again shortly. [Runbook](ops/runbook/unclear-charge.md#parked-no-paymentintent). |
+| An unclear answer with no PaymentIntent ID: a 5xx, any 409, a network error, or a request past the caller's time limit (15 s for dunning, 30 s for auto-charge and **Collect payment**) | Invoice *parked* ("Payment status unknown"); nothing charges it. Every run from 10 minutes after the charge hold ended, the reconciler lists the customer's payments in Stripe: a succeeded payment marks the invoice paid, a processing one is followed. If none has appeared 24 hours after the attempt, the invoice goes back to `pending` (`failed` after a dunning retry) and is charged again as usual, under a new idempotency key ([ADR-127](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)). | Nothing. If the customer paid another way, **Mark uncollectible** within the 24 hours. In the first few minutes after the invoice is parked, this is refused while the charge hold is still set; try again shortly. [Runbook](ops/runbook/unclear-charge.md#parked-no-paymentintent). |
 | Crash after finalize, before the charge | Finalize and the charge queue are one write; the next run charges it. | Nothing. |
-| Crash after Stripe charged, before Hardcount saved; or Hardcount stopped waiting for its own reasons (a shutdown, a closed **Collect payment**) | The charge's claim stays set, so nothing charges again: not another charge kind, a changed card, the hosted page, or the same attempt after Stripe dropped its key. Void and offline payment are refused; write-off is allowed. A webhook marks it paid. Without one, the reconciler lists the customer's payments in Stripe once the claim ended 10 minutes ago. A payment found is recorded (a second one is flagged); a payment still processing is put on the invoice, which follows it from then on; nothing found clears the claim (rule 2). | Nothing. If Stripe is disconnected or the customer is gone from it, the claim cannot clear: [runbook](ops/runbook/unclear-charge.md#interrupted-hardcount-cannot-ask-stripe). |
-| Concurrent charges (auto, dunning, manual, second replica) | One wins the claim; a refused **Collect payment** says a charge is being confirmed with Stripe. | Nothing. |
+| Crash after Stripe charged, before Hardcount saved; or Hardcount stopped waiting for its own reasons (a shutdown, a closed **Collect payment**) | A lost result. The charge hold stays set, so nothing charges again: not another charge kind, a changed card, the hosted page, or the same attempt after Stripe dropped its key. Void and offline payment are refused; write-off is allowed. A webhook marks it paid. Without one, the reconciler lists the customer's payments in Stripe once the charge hold ended 10 minutes ago. A payment found is recorded (a second one is flagged); a payment still processing is put on the invoice, which follows it from then on; nothing found clears the charge hold (rule 2). | Nothing. If Stripe is disconnected or the customer is gone from it, the charge hold cannot clear: [runbook](ops/runbook/unclear-charge.md#interrupted-hardcount-cannot-ask-stripe). |
+| Concurrent charges (auto, dunning, manual, second replica) | One wins the charge hold; a refused **Collect payment** says a charge is being confirmed with Stripe. | Nothing. |
 | Customer pays on the hosted page during a Hardcount charge | Mutually exclusive (see Rules). Sessions expire after 1 hour. | Nothing. |
 | Second payment, amount or currency mismatch, money on a voided invoice | "Payment needs review"; `payment.duplicate_charge`, `payment.amount_mismatch`, `payment.currency_mismatch` or `payment.received_on_voided_invoice` sent. | Refund the extra, or reconcile the difference, in Stripe. |
 | Customer disputes a card payment (a chargeback: the customer asks their bank to reverse it) | Recorded against the invoice, which stays paid. `payment.dispute_opened` sent, then `payment.dispute_closed` when Stripe closes it. A lost dispute shows a critical notice on the invoice. Needs the three `charge.dispute.*` events on the Stripe webhook endpoint. | Respond in Stripe before the deadline. If lost: a credit note with the money returned outside Hardcount (never a card refund), a new invoice, or a write-off in your own books ([runbook](ops/runbook/card-disputes.md)). |
-| Void, write-off or offline payment while a charge is running | Refused until the charge settles. A parked invoice can still be written off once its charge's claim has ended, a few minutes after the charge; if that charge later turns out to have succeeded, the invoice is marked paid. After a lost result, void and offline payment wait for the reconciler (rule 2); write-off is allowed. | Retry after it settles. |
-| Cancel or plan swap that voids an unused prebill during a charge | Refused and rolled back while the charge's claim is set, including after a lost result until the reconciler has asked Stripe (rule 2). A dunning cancel refused this way is tried again 24 hours later. | Retry the cancel or swap later. |
-| Credit note that leaves nothing due on an unpaid invoice (an operator waives it) | The invoice is marked paid with the note: `invoice.paid` is sent, its invoice with `amount_paid_cents` 0, and its dunning run closes as `payment_recovered`, escalated runs included. The Dunning page's "Recovered" card and the recovery rate leave it out: no money arrived. It can no longer be voided. Revenue does not count the waived amount. A later item removal, quantity cut or downgrade in the same period gives no further credit: the waiver already credited the whole invoice. | Nothing. |
+| Void, write-off or offline payment while a charge is running | Refused until the charge settles. A parked invoice can still be written off once its charge hold has ended, a few minutes after the charge; if that charge later turns out to have succeeded, the invoice is marked paid. After a lost result, void and offline payment wait for the reconciler (rule 2); write-off is allowed. | Retry after it settles. |
+| Cancel or plan swap that voids an unused prebill during a charge | Refused and rolled back while the charge hold is set, including after a lost result until the reconciler has asked Stripe (rule 2). A dunning cancel refused this way is tried again 24 hours later. | Retry the cancel or swap later. |
+| Credit note that leaves nothing due on an unpaid invoice (an operator waives it) | The invoice is marked paid with the note. `invoice.paid` is sent, and the invoice in that event has `amount_paid_cents` 0. The invoice's dunning run closes as `payment_recovered`, escalated runs included. The Dunning page's "Recovered" card and the recovery rate leave it out: no money arrived. It can no longer be voided. Revenue does not count the waived amount. A later item removal, quantity cut or downgrade in the same period gives no further credit: the waiver already credited the whole invoice. | Nothing. |
 | Credit note while a charge is running, or after a lost result | Refused while the payment is `processing` or `unknown`; allowed while the charge call is in flight and while a lost result waits for the reconciler. A note that leaves nothing due then leaves the invoice open at $0; if that charge fails, the next dunning retry marks it paid. If that charge did succeed, the payment is flagged when it is found (`payment.duplicate_charge` or `payment.amount_mismatch`). | Wait for the charge result before issuing one. |
-| A dunning retry whose payment Stripe is still processing (a payment method that settles later, such as a bank debit) | The retry counts and dunning keeps running: no `dunning.resolved`, no reminder, and the next retry keeps its date. While the payment is processing, nothing retries the invoice or runs the final action. If it succeeds, dunning closes as recovered then. If it fails, the customer gets that retry's reminder, and the next retry moves to the failure plus the policy's next wait when that is later. After the last retry, the final action runs on a later dunning pass once the retry's charge claim has cleared: usually the first pass after the failure, or the next **Advance** on a test clock. The escalation is dated at the failure. The activity shows "Payment retry N is processing" ([#1289](https://github.com/gethardcount/hardcount/issues/1289)). | Nothing. If it stays processing for days: [runbook](ops/runbook/unclear-charge.md#processing-for-days). |
-| Retries used up, and a payment may still go through when dunning's final action is due (`processing`, `unknown`, a charge running, or a lost result) | No cancel, pause or write-off while that payment may still go through; dunning checks again later. The final action holds the charge claim itself, so no charge starts while it cancels. A payment that succeeds closes dunning; one that fails gets the final action. A parked invoice waits for the reconciler: with no payment 24 hours after the attempt, it goes back to `failed` or `pending` and dunning goes on. | Nothing. If you write off a parked invoice whose dunning used every retry, apply the policy's cancel or pause by hand ([runbook](ops/runbook/unclear-charge.md#parked-no-paymentintent)). |
-| Stripe failing | Circuit breaker, one for the whole process: after 5 unclear failures in a row within a minute (the count resets every 60 s), no charges for 30 s, and no reconciler reads by PaymentIntent. Those reads count toward the 5 too. The interrupted-charge check skips the breaker on purpose, so its failures never stop charges. A skipped dunning retry is not counted. | Usually nothing: [runbook](ops/runbook/stripe-circuit-breaker-open.md). |
-| Database error during a dunning retry | The retry is skipped and does not use up an attempt; a `WARN` line names the invoice and the error. The next pass usually retries it within the hour. If the charge claim was saved but its answer lost, the retry waits until the reconciler clears the claim: up to about 2 hours. If credits covered the invoice and only marking it paid failed, the next pass marks it paid. | Nothing. |
-| A refund made in the Stripe dashboard (or Stripe's API) on a Hardcount payment | Once it succeeded, a refund of the payment that paid a paid invoice, that fits what is left to refund and credit and that Hardcount hears of within a day, becomes an issued credit note whose card refund is that refund: no Stripe call, the tax reversed, the invoice still paid. Anything else is recorded on the invoice, never as a document: a refund of another payment or one that failed shows on its Activity list, and a refund of its own payment that did not fit shows a notice. `payment.refunded_in_stripe` is sent once. Needs `refund.created` on the Stripe webhook endpoint ([ADR-134](adr/134-refunds-made-in-stripe-are-recorded.md)). | For a notice: record it with a credit note that names the refund, attach it to a note whose refund failed, or dismiss it; never record it by hand. **Retry refund** is refused while one is unsettled ([runbook](ops/runbook/refund-made-in-stripe.md)). |
+| A dunning retry whose payment Stripe is still processing (a payment method that settles later, such as a bank debit) | The retry counts and dunning keeps running: no `dunning.resolved`, no reminder, and the next retry keeps its date. While the payment is processing, nothing retries the invoice or runs the final action. If it succeeds, dunning closes as recovered then. If it fails, the customer gets that retry's reminder, and the next retry moves to the failure plus the policy's next wait when that is later. After the last retry, the final action runs on a later dunning pass once the retry's charge hold has cleared: usually the first pass after the failure, or the next **Advance** on a test clock. The escalation is dated at the failure. The activity shows "Payment retry N is processing" ([#1289](https://github.com/gethardcount/hardcount/issues/1289)). | Nothing. If it stays processing for days: [runbook](ops/runbook/unclear-charge.md#processing-for-days). |
+| Retries used up, and a payment may still go through when dunning's final action is due (`processing`, `unknown`, a charge running, or a lost result) | No cancel, pause or write-off while that payment may still go through; dunning checks again later. The final action takes the charge hold itself, so no charge starts while it cancels. A payment that succeeds closes dunning; one that fails gets the final action. A parked invoice waits for the reconciler: with no payment 24 hours after the attempt, it goes back to `failed` or `pending` and dunning goes on. | Nothing. If you write off a parked invoice whose dunning used every retry, apply the policy's cancel or pause by hand ([runbook](ops/runbook/unclear-charge.md#parked-no-paymentintent)). |
+| Stripe failing | Circuit breaker, one for the whole process: after 5 unclear failures in a row within a minute (the count resets every 60 s), no charges for 30 s, and no reconciler reads by PaymentIntent. Those reads count toward the 5 too. The reconciler's check of lost results skips the breaker on purpose, so its failures never stop charges. A skipped dunning retry is not counted. | Usually nothing: [runbook](ops/runbook/stripe-circuit-breaker-open.md). |
+| Database error during a dunning retry | The retry is skipped and does not use up an attempt; a `WARN` line names the invoice and the error. The next pass usually retries it within the hour. If the charge hold was saved but the result was lost, the retry waits until the reconciler clears the charge hold: up to about 2 hours. If credits covered the invoice and only marking it paid failed, the next pass marks it paid. | Nothing. |
+| A refund made in the Stripe dashboard (or Stripe's API) on a Hardcount payment | Hardcount records the refund as an issued credit note when all of these are true: the refund succeeded; it refunds the payment that paid the invoice; the invoice is paid; it is in the invoice's currency; it fits what is left to refund and credit; and Hardcount hears of it within a day. That credit note's card refund is the Stripe refund, so Hardcount makes no Stripe call. The tax is reversed, and the invoice stays paid. Hardcount records any other refund on the invoice, never as a document. A refund of another payment, or one that failed, shows on the invoice's Activity list. A refund of the invoice's own payment that did not fit shows a notice. `payment.refunded_in_stripe` is sent once. Needs `refund.created` on the Stripe webhook endpoint ([ADR-134](adr/134-refunds-made-in-stripe-are-recorded.md)). | For a notice: record it with a credit note that names the refund, attach it to a note whose refund failed, or dismiss it; never record it by hand. **Retry refund** is refused while one is unsettled ([runbook](ops/runbook/refund-made-in-stripe.md)). |
 | Refund pending or failed at the bank | Status follows Stripe's refund webhooks; failed never moves back to succeeded. Failed, or pending over 72 hours, shows on the home page. | **Retry refund** on the credit note. It looks the refund up in Stripe first and reuses it. |
 | Refund timeout, Stripe 5xx, 409 or 429 (no clear answer) | Refund `unknown`: the customer may already be refunded. It shows on the home page at once. Webhooks do not change it. | Don't refund in the Stripe dashboard. Retry the refund: Hardcount looks for the refund in Stripe, then resends the same request with the same idempotency key. While Stripe keeps the key (at least 24 hours), it returns the first result instead of making a second refund. |
 

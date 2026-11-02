@@ -78,7 +78,7 @@ see [Versioning](versioning.md#the-api-version).
 
 Every list route takes `limit` (1 to 100, default 50) and `offset`, and
 answers `{"data": [...], "total": n}`. There is no cursor. The few lists that
-stop counting or answer in one piece: [Pagination](api/pagination.md).
+stop at a row limit, or answer in one piece: [Pagination](api/pagination.md).
 
 ## Rate limits
 
@@ -122,8 +122,8 @@ curl -s -X POST "$HARDCOUNT/v1/usage-events" \
   [the retry rules](#sending-usage-safely).
 - `dimensions` are labels; the plan's prices pick events by them.
 - `timestamp` is optional: an RFC 3339 time, such as
-  `2026-10-31T12:00:00Z`. Without it, the event gets the customer's current
-  time.
+  `2026-10-31T12:00:00Z`. Without it, the event gets the current time, or
+  the clock's time for a customer on a test clock.
 
 **You see:** status `201` and the stored event, with an `id` such as
 `hc_evt_…`. The meter and the customer must exist first, or the event is
@@ -142,10 +142,12 @@ refused with `422`.
 
 **A price belongs to a plan.** Two plans can price one meter differently.
 When an event fits more than one price of the plan, the price with the most
-labels takes it. On a plan no subscription has used, a price change applies
-at once; on a used plan, from each subscriber's next billing period, and
-from the join for a subscriber who first joins the plan in a period after
-it.
+labels takes it. A price change applies:
+
+- at once, on a plan no subscription has used;
+- from each subscriber's next billing period, on a plan that has been used;
+- from the moment they join, for a subscriber who first joins the plan in a
+  period after the change.
 
 **A price has one `mode`:**
 
@@ -162,9 +164,10 @@ A price takes only its mode's fields. A field the mode does not use must be
 **Units.** A field named `*_cents` is in the currency's smallest unit, such
 as cents for USD. A price you send is a decimal string with at most 12
 decimal places: `"0.0003"` is $3.00 per million units. An invoice line
-rounds to whole cents once. Provider costs follow the same rule:
-`unit_cost_cents` is US cents per token, and usage events and the margin
-report give cost as `provider_cost_cents` and `cost_cents`.
+rounds to whole cents once. Provider costs, what an AI provider charges you
+per token, follow the same rule: `unit_cost_cents` is US cents per token.
+Usage events and the margin report give cost as `provider_cost_cents` and
+`cost_cents`.
 
 ### Customers and subscriptions
 
@@ -188,9 +191,9 @@ A subscription puts a customer on a plan.
 | `POST` | `/v1/subscriptions/{id}/schedule-cancel` | Cancel later: send `{"at_period_end": true}`, or a `cancel_at` time |
 | `DELETE` | `/v1/subscriptions/{id}/scheduled-cancel` | Remove a scheduled cancel |
 | `POST` | `/v1/subscriptions/{id}/cancel` | Cancel now |
-| `POST` | `/v1/subscriptions/{id}/retry-billing` | Clear a billing failure and bill now |
+| `POST` | `/v1/subscriptions/{id}/retry-billing` | Clear a billing failure (an ended period that could not be invoiced) and bill now |
 | `GET` | `/v1/subscriptions?billing=failing` | List subscriptions whose billing is failing |
-| `GET` | `/v1/subscriptions?collection=paused` | List active and trialing subscriptions whose collection is paused, by you or by dunning |
+| `GET` | `/v1/subscriptions?collection=paused` | List active and trialing subscriptions whose collection is paused, by you or by dunning (Hardcount's automatic retries of a failed payment) |
 
 Changing, pausing or canceling a subscription first bills any period that
 has already ended, then applies the change. If that period cannot be billed,
@@ -206,11 +209,13 @@ the call returns `409` with code `unbilled_period`.
 | `POST` | `/v1/billing/run` | Bill this account's subscriptions that are due now |
 | `POST` | `/v1/invoices/create_preview` | Preview the next invoice without creating it |
 
-`/v1/billing/run` bills what the hourly run would: periods whose
-`INVOICE_GRACE_PERIOD` has passed. It skips subscriptions on a test clock
-(advancing the clock bills those), ones waiting after a failed attempt, and
-ones set aside after too many failed attempts (`retry-billing` brings them
-back). It answers 206 when some subscriptions could not be billed.
+`/v1/billing/run` bills what the hourly run would: periods whose grace
+period has passed. The grace period (`INVOICE_GRACE_PERIOD`, 1 hour by
+default) is the wait after a period ends. The run skips subscriptions on a
+test clock (advancing the clock bills those) and ones waiting after a failed
+billing attempt. It also skips parked ones: a parked subscription is set
+aside after eight failed billing attempts, until someone retries it with
+`retry-billing`. It answers 206 when some subscriptions could not be billed.
 
 ### Credits and refunds
 
@@ -299,18 +304,20 @@ so a retry is never counted twice. An event without a key is refused with
 and what a repeated key answers:
 [Idempotency](api/idempotency.md#usage-events-the-idempotency_key-field).
 
-**Send `quantity` on every event.** It is a JSON number (`5`) or a string
-holding one (`"5.5"`, for exact decimals), with at most 12 decimal places,
-a size under 10^26, and at most 100 characters. A negative value is a
-correction. An event without one, or with any other
-value, is refused with `422` and `param: quantity`. The event's
-`dimensions` pick its price; `properties`, the old name, is refused when
-it has a key (`null` or `{}` is ignored).
+**Send `quantity` on every event.** It is a JSON number (`5`), or a string
+that holds one (`"5.5"`, for exact decimals). It has at most 12 decimal
+places, is under 10^26, and is at most 100 characters long. A negative value
+is a correction. An event with no `quantity`, or with a value that breaks
+these rules, is refused with `422` and `param: quantity`.
+
+The event's `dimensions` pick its price. `properties` is the old name for
+`dimensions`: an event whose `properties` has a key is refused, and `null`
+or `{}` is ignored.
 
 ### What Hardcount found when the event arrived
 
-Hardcount stores every valid event. The answer that wrote it can carry a
-`billing_status`: what Hardcount found when the event arrived. Hardcount checked
+Hardcount stores every valid event. The answer to the request that stored it
+can carry a `billing_status`: what Hardcount found when the event arrived. Hardcount checked
 the event against the customer's subscriptions, the plans and prices in
 force, and the invoices already built at that moment. A status that is
 present was true at that moment:
@@ -320,7 +327,7 @@ present was true at that moment:
 | `after_close` | The event's time is already invoiced (see Late usage below). | Bill it with a one-off invoice if it should be charged. A price added to a plan does not bill it. |
 | `not_on_plan` | A billing period not invoiced yet holds the event's time, but its plan has no price for the meter. | To bill later usage, add a price for the meter to the plan, or move the customer to a plan that has one. Check the invoice before you bill this event by hand. |
 | `outside_subscription` | No active or trialing subscription of the customer bills the event's time. For example, there is none, or the time is before one starts, in a free trial, or after one ends or its scheduled cancel. | Check the event's customer and timestamp. |
-| `no_price` | The plan that bills the event's time prices the meter, but no price of it takes the event's `dimensions`. A price takes an event whose dimensions include all of its `dimension_match`, compared as strings: the number `1` is not `"1"`. | Add a price for those dimensions to bill later usage. Check the invoice before you bill this event by hand. |
+| `no_price` | The plan that bills the event's time prices the meter, but no price of it takes the event's `dimensions`. A price takes an event whose dimensions include all of the price's `dimension_match` labels. A price's labels are text, so a number or a true/false value in the event never matches: the number `1` does not match `"1"`. Send dimension values as strings. | Add a price for those dimensions to bill later usage. Check the invoice before you bill this event by hand. |
 
 No `billing_status` means Hardcount found no reason then. It is not a promise
 that the event will be billed.
@@ -333,11 +340,14 @@ that the event will be billed.
   undone, or a price added.
 - The invoice is the final answer.
 
-A present status can be wrong in two cases: a price change whose save
-began before a billing period started and finished after the request read
-the prices, and a subscription change saved while the request is in
-flight. A LiteLLM delivery reads the subscriptions once, so the second
-case covers the whole delivery.
+A present status can be wrong in two cases:
+
+- A price change began saving before a billing period started, and
+  finished after this request read the prices.
+- A subscription change was saved while this request was running.
+
+A LiteLLM delivery reads the subscriptions once, so the second case covers
+the whole delivery.
 
 Where it is sent:
 
@@ -346,7 +356,8 @@ Where it is sent:
   (`ingested` or `deduplicated`) and `billing_status`, plus a count of
   each status.
 - The LiteLLM answer counts each status, and the held-usage release counts
-  `no_price` and `not_on_plan`. Their counts follow the same rule.
+  `no_price` and `not_on_plan`. These counts follow the same rules as
+  `billing_status`.
 - A replay and a read never carry `billing_status`.
 
 ### Late usage
@@ -368,17 +379,20 @@ An event counts toward the billing period its `timestamp` falls in.
   `POST /v1/invoices/{id}/line-items`, then
   `POST /v1/invoices/{id}/finalize`.
 - The same applies after a spend-threshold invoice (an invoice made early
-  because spend crossed a limit). Usage of a sum or count meter stamped
-  before it that arrives later is not on the period-end invoice either.
-  If the spend-threshold invoice is voided before the period-end invoice
-  is built, the period-end invoice bills all the period's usage, late
-  events included. Writing it off does not do that: a written-off
-  spend-threshold invoice keeps its usage billed. So the answer flags such
-  an event only when the spend-threshold invoice is already paid: a paid
-  invoice cannot be voided. Bill a flagged event the same way.
-- These build the ended period's invoice at once, with no grace period,
-  whether they come through the API or the dashboard. Setting or clearing
-  spend thresholds does not.
+  because spend crossed a limit):
+  - Usage of a sum or count meter (one that adds up quantities or counts
+    events) whose `timestamp` is before that invoice, but that arrives
+    after it, is not on the period-end invoice either.
+  - If the spend-threshold invoice is voided before the period-end invoice
+    is built, the period-end invoice bills all the period's usage, late
+    events included.
+  - Writing the spend-threshold invoice off does not do that: it keeps its
+    usage billed.
+  - A paid invoice cannot be voided. So the answer flags such an event only
+    when the spend-threshold invoice is already paid. Bill a flagged event
+    the same way.
+- These actions build the invoice of an ended period at once, with no grace
+  period, whether they come through the API or the dashboard:
   - an immediate cancel;
   - an item added, changed or removed, or a pending item change canceled;
   - a pause or resume of collection;
@@ -386,8 +400,11 @@ An event counts toward the billing period its `timestamp` falls in.
   - `retry-billing`;
   - a spend-threshold invoice;
   - a test-clock advance.
-- Dunning's final pause or cancel waits for the grace. When retries run out
-  inside it, the run waits until the grace ends, then pauses or cancels.
+
+  Setting or clearing spend thresholds does not.
+- Dunning's final pause or cancel waits for the grace period. When retries
+  run out inside the grace period, the run waits until it ends, then pauses
+  or cancels.
 
 The metric `hardcount_usage_unbilled_total{reason, origin}` counts the events
 answered with each `billing_status` (`reason="after_close"` for late usage).

@@ -35,10 +35,12 @@ export HARDCOUNT_KEY=hc_secret_test_…
 
 2. **Pick the address Hardcount will call.** It depends on how you run Hardcount.
 
-   - **From source** (`make dev`): use `http://localhost:9099/ok`.
+   - **From source** (`make dev`): use `http://localhost:9099/ok`. Outside
+     production, Hardcount accepts a `localhost` address.
    - **In Docker** (the [quick start](../quick-start.md) or a server): inside
-     its container, `localhost` is the container itself, and Hardcount refuses
-     private network addresses, so it cannot reach the receiver directly.
+     its container, `localhost` is the container itself. Hardcount refuses
+     other private network addresses, so it cannot reach the receiver
+     directly.
      In a second terminal, start a tunnel, which gives your computer a
      public `https://` address. For example:
      `cloudflared tunnel --url http://localhost:9099`. Use the `https://`
@@ -215,7 +217,7 @@ signed with a secret you have not deployed yet arrives again later.
 Hardcount sends each event at least once, so your receiver must be safe to
 run twice. Follow the
 [three rules for your receiver](../webhooks.md#three-rules-for-your-receiver).
-In code that means:
+In code, they come to four steps:
 
 1. **Answer fast.** Hardcount waits 10 seconds for a `2xx`. Save the message
    and answer, then do slow work, such as sending an email, afterwards.

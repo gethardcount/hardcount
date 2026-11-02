@@ -15,8 +15,8 @@
 /**
  * What `POST /v1/usage-events/held/release` did. The counts are what
  * Hardcount found when the release wrote the rows, as for
- * `billing_status` (see `UsageBillingStatus`). The invoice is the
- * final answer.
+ * `billing_status` (see the `billing_status` field of a usage event).
+ * The invoice is the final answer.
  */
 export interface HeldUsageReleaseResult {
   /** The customer the rows were ingested for. */

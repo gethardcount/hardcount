@@ -126,24 +126,24 @@ decide.
 | `unpaid_invoice_blocks_change` | A change that charges more (an upgrade, an added item, more seats) while the current period's invoice is unpaid. A written-off invoice counts as unpaid. | Collect or void that invoice first; writing it off does not lift this |
 | `funding_invoice_tax_pending` | A change that credits unused time (a cancel, a downgrade, a removed item), while the invoice that billed that time is a draft whose tax is not worked out yet | Try again later |
 | `item_changed` | The subscription's items changed while the request ran | Read it again, then retry |
-| `subscription_period_moved` | The subscription moved to a new billing period while the request ran, or a spend-threshold invoice already billed past now | Read it again, then retry, or schedule the change for the next period |
+| `subscription_period_moved` | The subscription moved to a new billing period while the request ran, or a spend-threshold invoice has already billed this subscription past the current time | Read it again, then retry, or schedule the change for the next period |
 | `billing_not_failing` | `retry-billing` on a subscription whose billing is not failing | Nothing to do |
 
 **Invoices and payments**
 
 | `code` | When | What to do |
 |---|---|---|
-| `payment_in_flight` | A card charge for the invoice may be in progress, so a void, write-off, offline payment, credit note, collect or email would race it | Wait a few minutes, then retry |
+| `payment_in_flight` | A card charge for the invoice may be in progress. A void, write-off, offline payment, credit note, collection or email would run at the same time as that charge. | Wait a few minutes, then retry |
 | `payment_unidentifiable` | Stripe's answer for a charge was unclear. Hardcount checks with Stripe within a day. Only a write-off is allowed until then. | Wait, or mark the invoice uncollectible |
 | `payment_in_progress` | A payment for this invoice is already in progress on the hosted page | Wait |
 | `not_payable` | The invoice cannot be paid now, for example it is paid or voided | Do not retry |
 | `amount_below_minimum` | The amount is below Stripe's smallest card charge | Void it, record an offline payment, or bill it later |
 | `card_refused` | The bank refused the saved card for good | Ask the customer for a new card |
-| `invoice_not_collectible` | Resend a payment link on an invoice that is not unpaid or written off | Do not retry |
-| `invoice_not_sendable` | Email a draft or voided invoice | Finalize it first, or do not send it |
-| `no_email_on_file` | Resend a payment link to a customer with no email | Add an email to the customer |
+| `invoice_not_collectible` | You asked to resend a payment link for an invoice that is not unpaid or written off | Do not retry |
+| `invoice_not_sendable` | You asked to email a draft or voided invoice | Finalize it first, or do not send it |
+| `no_email_on_file` | You asked to resend a payment link to a customer with no email | Add an email to the customer |
 | `invoice_changed`, `invoice_lines_changed` | The invoice changed while the request ran | Read it again, then retry |
-| `invoice_not_manual` | Add a line to a draft billing made for a subscription. It keeps billing's lines and tax. | Bill the charge on its own one-off invoice |
+| `invoice_not_manual` | You tried to add a line to a draft invoice that billing made for a subscription. That invoice keeps the lines and tax that billing gave it. | Bill the charge on its own one-off invoice |
 | `credit_note_exceeds_invoice`, `invoice_not_open_receivable` | A credit note no longer fits the invoice, which changed while the request ran | Read the invoice, then retry with the right amount |
 | `customer_currency_conflict` | A one-off invoice's currency is not the customer's billing currency | Use the customer's currency |
 | `tax_calculation_expired` | Stripe Tax's calculation for the invoice is too old to finalize | Retry the tax, then finalize |
@@ -154,7 +154,7 @@ decide.
 
 | `code` | When | What to do |
 |---|---|---|
-| `email_not_configured` | An action that sends email, on a server with no email set up (`SMTP_HOST`). Nothing was sent. | The operator sets up email: [Email setup](../ops/email-setup.md) |
+| `email_not_configured` | An action that sends email, on a server with no email set up (`SMTP_HOST`). Nothing was sent. | The person who runs your server sets up email: [Email setup](../ops/email-setup.md) |
 | `stripe_not_connected` | An action that needs Stripe, in a mode with no Stripe keys | Connect Stripe under **Settings** |
 | `online_payment_unavailable` | The hosted invoice or payment-update page cannot take a card: the seller has not connected Stripe for this mode | The customer pays another way; do not retry |
 
@@ -187,9 +187,9 @@ the credit ledger, and report it if the state looks wrong:
 | `idempotency_error` | An `Idempotency-Key` was used before with a different method, path or body | Use a new key for a new request |
 | `customer_has_no_subscription` | An invoice preview or a usage summary for a customer with no active subscription | Send `subscription_id`, or a period with `from` and `to` |
 | `subscription_has_no_cycle` | An invoice preview for a subscription with no current billing period | Send a period |
-| `missing_email` | Email a payment-method link to a customer with no email | Add an email |
+| `missing_email` | You asked to email a payment-method link to a customer with no email | Add an email |
 | `note_too_long` | That email's note is over 2,000 bytes | Shorten it |
-| `invalid_state` | Rotate the public link of a draft invoice | Finalize the invoice first |
+| `invalid_state` | You asked to rotate the public link of a draft invoice | Finalize the invoice first |
 | `invalid_or_expired` | The dashboard's check of a password-reset link (`GET /v1/auth/password-reset/check`) found it unknown, expired or used. Setting the password, or accepting an invite, with a bad token answers `validation_error` with `param: token` instead. | Ask for a new link |
 
 ### 429 Too Many Requests
@@ -227,7 +227,7 @@ Each sends a `Retry-After` header with the seconds to wait.
 | `idempotency_unavailable` | Hardcount could not record the `Idempotency-Key`, so it ran nothing | Retry with the same key after `Retry-After` (1 second) |
 | `ingest_unavailable` | The usage store did not answer. Nothing was recorded. | Send the same events again |
 | `currency_unavailable` | `POST /v1/invoices` could not read the customer's currency. No invoice was made. | Retry, with a new `Idempotency-Key` if you sent one |
-| `catchup_queue_full` | A test-clock advance or retry-advance found too many catch-ups waiting. Its catch-up did not start, and the clock is set to `internal_failure`. | Once the running catch-ups finish, send `POST /v1/test-clocks/{id}/retry-advance`. The same advance again answers `409`. |
+| `catchup_queue_full` | A test-clock advance or retry-advance found too many catch-ups waiting. A catch-up is the billing Hardcount runs for the time a test clock skipped. This clock's catch-up did not start, and the clock is set to `internal_failure`. | Once the running catch-ups finish, send `POST /v1/test-clocks/{id}/retry-advance`. The same advance again answers `409`. |
 
 ### 504 Gateway Timeout
 

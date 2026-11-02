@@ -9,7 +9,7 @@ On the one-VM Docker Compose install, follow [Production on one VM, step 7](../p
 `HARDCOUNT_ENCRYPTION_KEY` encrypts personal data (email, names, phone numbers, tax IDs), webhook signing secrets and each account's Stripe keys before Hardcount saves them. This is on top of any disk encryption your Postgres has.
 
 - Store the key in a secrets manager (such as AWS Secrets Manager, GCP Secret Manager or HashiCorp Vault), apart from the database backups.
-- Without the key, every encrypted column in a backup is unreadable. The rest of the backup cannot replace it.
+- Without the key, every encrypted column in a backup is unreadable. Nothing else in the backup can take the place of the key.
 - Keep the same key. Hardcount has no tool to re-encrypt data with a new key, so changing it makes the old data unreadable.
 
 ## 2. Pick how to back up the database
@@ -24,7 +24,7 @@ Avoid these:
 - **Dumping table by table.** Hardcount adds tables often, and a list of tables goes out of date.
 - **Disk snapshots without the write-ahead log (WAL).** You lose everything since the last snapshot. Hourly snapshots still lose about 30 minutes on average.
 
-On managed Postgres, the provider's snapshots and PITR are your main backup. Still run the [restore drill](#5-run-the-restore-drill) every few months: only the drill proves that Hardcount's money tables come back whole, and a dump shows your billing data is not tied to one cloud.
+On managed Postgres, the provider's snapshots and PITR are your main backup. Still run the [restore drill](#5-run-the-restore-drill) every few months. Only the drill proves that Hardcount's money tables come back whole. A dump is also a copy you can restore anywhere, so your billing data is not tied to one cloud.
 
 ## 3. Take a backup
 
@@ -71,9 +71,12 @@ The dump travels through standard output, so the container needs no mounted fold
 
 `scripts/restore.sh` replaces the objects in the backup, in the target database, in one transaction: either all of it is restored, or nothing changes. Each restored table gets the access rights it has in the backup, even when the target database gives new tables more, as a new Compose install does. It needs `pg_restore` and `psql` on the machine that runs it. `psql` runs the SQL that `pg_restore` writes, so it must be at least as recent as `pg_restore`: an older `psql` stops at `invalid command \restrict`, and nothing changes.
 
-**Restore into an empty database when you can.** The script replaces what the backup holds, the migration record included, and leaves alone what it does not hold, such as a table a newer migration created. When such a table refers to a table in the backup, the restore cannot replace that table, so it stops and changes nothing. When it refers to none, the restore keeps it and takes the migration record back to the backup's version: the next upgrade runs that migration again, which can stop on `already exists`.
+**Restore into an empty database when you can.** The script replaces everything the backup holds, including the migration record. It leaves alone anything the backup does not hold, such as a table that a newer migration created. Such a table causes one of two problems:
 
-1. On a new Postgres server, create the limited user first. Users and their settings belong to the server, not to the database, so a dump cannot carry them. Without the user the restore fails, and the script stops before it starts. The second line sets the timeout that [Postgres requirements](postgres-requirements.md#timeouts-on-the-limited-user) calls required.
+- It refers to a table in the backup (a foreign key). Then the restore cannot replace that table, so it stops and changes nothing.
+- It refers to no table in the backup. Then the restore keeps it, but takes the migration record back to the backup's version. The next upgrade runs that migration again, which can stop on `already exists`.
+
+1. On a new Postgres server, create the limited user first. Users and their settings belong to the server, not to the database, so a dump cannot carry them. Without the user the restore would fail, so the script stops before the restore starts. The second line sets the timeout that [Postgres requirements](postgres-requirements.md#timeouts-on-the-limited-user) calls required.
 
    ```sql
    CREATE ROLE hardcount_app LOGIN PASSWORD '<your-password>';
@@ -130,9 +133,9 @@ Each run adds one line to `~/.hardcount/drill.log`, so you can see how long back
 
 Exit codes: `0` passed, `1` a setting is wrong, `2` the backup failed, `3` the restore failed, `4` row counts differ, `5` the container did not start.
 
-After a drill passes, you can also start Hardcount against a restored copy, check that `/health/ready` answers 200, and run the money checks against it. They are `go run ./cmd/hardcount-doctor`, from a source checkout of the same release with `DATABASE_URL` set to the restored copy; the release image does not include them. They should report no problems.
-Run it as the database owner. The app role (`hardcount_app`) sees no rows and
-reports clean.
+After a drill passes, you can also start Hardcount against a restored copy, check that `/health/ready` answers 200, and run the money checks against it. The money checks are one program, `hardcount-doctor`, and the release image does not include it. Run `go run ./cmd/hardcount-doctor` from a source checkout of the same release, with `DATABASE_URL` set to the restored copy. It should report no problems.
+Run it as the database owner. Run as the limited user (`hardcount_app`), it
+sees no rows and reports no problems, even when there are some.
 
 ## Checks after a restore
 
@@ -142,7 +145,7 @@ Run these before you let traffic back in. Run the SQL in `psql` as the database 
 
 Run the `hardcount migrate status` of the release you will start, against the restored database.
 
-**You see:** `state:        up to date, nothing to apply`. `behind` lists what `hardcount migrate` will do. `no migration record` means the backup was restored without its migration table: restore it again, with the table, into an empty database. A backup from Velox 0.8.x gives the same state, and one from a later Velox build gives `made by Velox`. Neither can be upgraded: install fresh.
+**You see:** `state:        up to date, nothing to apply`. `behind` lists what `hardcount migrate` will do. `no migration record` means the backup was restored without its migration table: restore it again, with the table, into an empty database. A backup from Velox 0.8.x (Velox is Hardcount's name before v0.9.0) gives the same state, and one from a later Velox build gives `made by Velox`. Neither can be upgraded: install fresh.
 
 The record itself, if you want to look:
 
@@ -195,7 +198,7 @@ The `payload - '{…}'` part removes the links and the PDF from the email rows, 
 
 Hardcount's background jobs resume by themselves after a restart, on one copy or on several:
 
-- A subscription that was due but not billed is billed on the next billing run (hourly in production, every 5 minutes in local development).
+- A subscription that was due but not billed is billed on the next billing run (hourly, or every 5 minutes with `APP_ENV=local`).
 - Invoices waiting for an automatic charge are charged.
 - Payment retries (dunning) that are due run.
 
@@ -221,7 +224,7 @@ If they do not fall, the background jobs are not running. See the [runbook](runb
 
 ### 6. Payments made during the gap
 
-If the backup is hours older than the failure, Stripe events sent in between are missing. Hardcount's background check asks Stripe about invoices whose payment status is `unknown`, but it does not replay every event. List the invoices to check by hand:
+If the backup is hours older than the failure, Stripe events sent in between are missing. The reconciler (the check that asks Stripe what happened to a charge whose result Hardcount did not save) asks Stripe about invoices whose payment status is `unknown`. It does not replay every event. List the invoices to check by hand:
 
 ```sql
 SET app.bypass_rls = 'on';

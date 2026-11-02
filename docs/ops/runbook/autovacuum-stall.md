@@ -17,7 +17,7 @@ while the average I/O size drops from about 100 KB to about 6 KB.
 Measured on the benchmark rig (2026-08-19, `db.m7g.4xlarge`, 100 GB gp3,
 25,000 events/s, stock RDS parameters, vacuum log on).
 
-- PG13 and later run an insert-triggered autovacuum pass over
+- Postgres 13 and later run an insert-triggered autovacuum pass over
   `usage_events` after about 20 % growth.
 - The end of that pass rewrites nearly every page added since the previous
   pass. This is hint bits and opportunistic freezing, which
@@ -35,8 +35,9 @@ on `usage_events`, together with the Enhanced Monitoring sign above.
 
 ## Fix
 
-Set **`autovacuum_vacuum_insert_scale_factor = 0.02`** (dynamic; or as a
-per-table setting on the events table). It limits each burst to the 2 %
+Set **`autovacuum_vacuum_insert_scale_factor = 0.02`**. It is a dynamic
+setting, so no restart is needed. You can also set it for one table, on
+`usage_events`. It limits each burst to the 2 %
 growth slice instead of 20 % of an ever-growing table, so the burst no
 longer grows with the table.
 

@@ -49,7 +49,7 @@ Replay the window's calls to `POST /v1/integrations/litellm/spend`.
   - `id`: the row's `request_id`. It is LiteLLM's call ID, so a call
     Hardcount already holds gets the same keys and is deduplicated.
   - `call_type`, `model`, `custom_llm_provider`, and the customer's ID in
-    `end_user`, as the live record carries them.
+    `end_user`, as the record LiteLLM sends carries them.
   - `usage`: `prompt_tokens`, `completion_tokens`, and the cache counts
     (`cache_read_input_tokens`, `cache_creation_input_tokens`, or
     `prompt_tokens_details`), as LiteLLM reported them for the call.
@@ -58,14 +58,16 @@ Replay the window's calls to `POST /v1/integrations/litellm/spend`.
   [Send usage from LiteLLM](../../integrations/litellm.md).
 - Every billed row carries an idempotency key
   (`<call id>:input|cache_read|cache_write_5m|cache_write_1h|output`), and a
-  call's rows are saved together. Nothing else goes into the key, so the
+  call's rows are saved together. Nothing else goes into the key. So the
   spend log's millisecond times don't matter, and replaying a window that
-  was partly recorded only fills the gap. For a call type Hardcount billed
-  before 2026-10-22 (completion, chat, embedding, text completion) the key
-  uses the call ID as it is. For the others, an ID that would make a key
-  longer than 255 characters goes in as its SHA-256, which Hardcount works
-  out the same way on the replay. A call first saved before cache writes
-  were split (2026-10-22) is saved the old way again, not billed twice.
+  was partly recorded only fills the gap.
+  - Call types Hardcount billed before 2026-10-22 (completion, chat,
+    embedding, text completion) use the call ID in the key as it is.
+  - For the other call types, an ID that would make a key longer than 255
+    characters goes in as its SHA-256. Hardcount works it out the same way
+    on the replay.
+  - A call first saved before cache writes were split (2026-10-22) is saved
+    the old way again, so it is not billed twice.
 - **Deadline:** the replay must reach Hardcount before the period's invoice is
   built. That is `INVOICE_GRACE_PERIOD` (default 1 hour) after the period
   ends, plus up to one billing tick. A replay after that is stored but not
@@ -75,8 +77,10 @@ Replay the window's calls to `POST /v1/integrations/litellm/spend`.
   answer's `after_close` and in
   `hardcount_usage_unbilled_total{reason="after_close"}`, with a WARN line
   naming it. Rows on a canceled subscription count as
-  `outside_subscription` instead, and rows before a spend-threshold
-  invoice that is not paid yet are not counted (see
+  `outside_subscription` instead. A spend-threshold invoice is one issued
+  early, in the middle of a period, when usage crosses a limit you set.
+  Rows before a spend-threshold invoice that is not paid yet are not
+  counted (see
   [Invoice timing and late usage](invoice-timing-late-usage.md)). These
   counts are what Hardcount found when each row arrived; the invoice is the
   final answer. `hardcount_usage_late_event_total` counts only events more than

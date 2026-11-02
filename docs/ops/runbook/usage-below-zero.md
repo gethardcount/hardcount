@@ -22,7 +22,10 @@ period and builds the rest of the invoice: base fees and every other meter.
 It does not carry the negative amount into a later period.
 
 - One row is written per invoice built this way: the period close, the
-  final invoice of an immediate cancel, or a spend-threshold invoice. It is
+  final invoice of an immediate cancel, or a spend-threshold invoice. The
+  period close is the invoice built when a billing period ends. A
+  spend-threshold invoice is one issued early, in the middle of a period,
+  when usage crosses a limit you set. It is
   written in the same transaction as the invoice, so a retried close writes
   it once. A close with nothing else to bill makes no invoice and still
   writes the row.

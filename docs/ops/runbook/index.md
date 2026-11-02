@@ -21,7 +21,7 @@ Stripe troubleshooting is out of scope.
 | Invoices stuck with an unconfirmed payment for hours | [A charge's result is unclear](unclear-charge.md#unconfirmed-with-a-paymentintent) |
 | A payment `processing` for days, or a dunning retry that "is processing" | [A charge's result is unclear: processing](unclear-charge.md#processing-for-days) |
 | A test clock stuck on the Advancing badge | [Test-clock advance hung](test-clock-advance-hung.md) |
-| A tenant sees another tenant's data | [Data leak between tenants suspected](rls-leak-suspected.md) |
+| An account sees another account's data | [Data leak between accounts suspected](rls-leak-suspected.md) |
 | LiteLLM spend 503s, or Hardcount spend short of LiteLLM's | [LiteLLM spend gap after an outage](litellm-spend-gap.md) |
 | A replica will not boot and names Redis | [A replica will not start](replica-will-not-start.md) |
 | Someone cannot sign in: "Too many sign-in attempts", or `hardcount_auth_login_total{outcome="throttled"}` rising | [Sign-in says "Too many sign-in attempts"](sign-in-throttled.md) |
@@ -32,7 +32,7 @@ Stripe troubleshooting is out of scope.
 | `hardcount_parked_invoices{disposition="open"}` above zero | [A charge's result is unclear: parked](unclear-charge.md#parked-no-paymentintent) |
 | An invoice notice reads "Customer must confirm payment", or a payment retry was not attempted because the bank wants the customer to confirm | [The customer's bank wants them to confirm a payment](customer-must-confirm-payment.md) |
 | An invoice notice reads "Below Stripe's minimum charge", or a customer's hosted page has no Pay button for a small amount | [An invoice is below Stripe's minimum charge](below-stripe-minimum.md) |
-| "stale charge check: can't confirm an earlier charge with Stripe" in the logs, or `hardcount_stale_charge_hold_resolutions_total{result="cannot_ask"}` rising | [A charge's result is unclear: interrupted](unclear-charge.md#interrupted-hardcount-cannot-ask-stripe) |
+| "stale charge check: can't confirm an earlier charge with Stripe" in the logs, or `hardcount_stale_charge_hold_resolutions_total{result="cannot_ask"}` rising | [A charge's result is unclear: lost, and Hardcount cannot ask Stripe](unclear-charge.md#interrupted-hardcount-cannot-ask-stripe) |
 | An invoice says "after a lost dispute", a `payment.dispute_opened` or `payment.dispute_closed` webhook, or Stripe emails about a dispute | [Card disputes](card-disputes.md) |
 | An invoice says "A refund of … was made in Stripe and not recorded here", a `payment.refunded_in_stripe` webhook, or a refund made in the Stripe dashboard | [A refund made in Stripe](refund-made-in-stripe.md) |
 | `hardcount_creditnote_pending_issue_drafts` growing over days | [A charge's result is unclear: clawback drafts](unclear-charge.md#clawback-drafts-waiting) |
@@ -77,8 +77,12 @@ tables without account data (`leader_leases`, `leader_status`,
 
 ## Words on these pages
 
-- **Tenant**: one account's data. Many tenants share one database.
+- **Account**: one business, with its own data, dashboard users and API
+  keys. Many accounts share one database. The API, the database and some
+  log lines call an account a *tenant* (`tenant_id`).
 - **Replica**: one running copy of the Hardcount server.
+- **Role**: one background job that only one replica runs at a time, such as
+  `billing` or `email_outbox`.
 - **Tick**: one run of a background job, such as one billing pass.
 - **Lease**: a short booking, in the database, that lets one replica run
   one tick of a job. Like a meeting-room booking, it expires unless it is
@@ -87,6 +91,17 @@ tables without account data (`leader_leases`, `leader_status`,
   takes it. Work checks the number, so a replica whose lease ran out
   cannot claim anything.
 - **Outbox**: a table of emails or webhooks waiting to be sent.
+- **Dead-lettered**: set aside as `failed` and never tried again on its own.
+- **Dunning**: retrying a failed card payment and emailing the customer. A
+  **dunning run** is the retries for one unpaid invoice.
+- **Charge hold**: a 5-minute claim on an invoice while Hardcount charges
+  it, so only one charge runs at a time.
+- **Lost result**: a charge Hardcount sent to Stripe whose answer it never
+  saved, for example after a crash or a shutdown.
+- **Reconciler**: the check that asks Stripe what happened to a charge whose
+  result Hardcount did not save. It runs with every scheduled billing run.
+- **Clawback**: a credit note Hardcount issues when a paid, in-advance
+  period is cut short, for example by a downgrade.
 - **Parked**: set aside until something changes
   ([invoices](unclear-charge.md#parked-no-paymentintent),
   [subscriptions](billing-failing.md)).

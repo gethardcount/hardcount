@@ -79,8 +79,10 @@ The status tells you where the dispute is:
 
    **If the invoice bought prepaid credit**, the customer can still spend
    that credit, and Hardcount refuses an ordinary credit note on the invoice.
-   Retire the credit with commit relief instead. The relief amount goes
-   inside `commit_relief`, as `out_of_band_amount_cents`:
+   Retire (remove) the unspent credit with commit relief instead. Commit
+   relief is the part of a credit note that retires prepaid credit the
+   customer bought up front. The relief amount goes inside `commit_relief`,
+   as `out_of_band_amount_cents`:
 
    ```http
    POST /v1/credit-notes

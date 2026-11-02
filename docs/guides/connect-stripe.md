@@ -161,7 +161,8 @@ customer holds, then charges the card for the rest.
 
 To see a failure, save `4000 0000 0000 0341` on another customer. Stripe
 saves it, then declines every charge. The invoice's payment goes to
-`failed`, `payment.failed` is sent, and dunning starts retrying it.
+`failed`, `payment.failed` is sent, and dunning starts: Hardcount's
+automatic payment retries for an unpaid invoice.
 
 ## 5. Disputes
 

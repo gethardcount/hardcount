@@ -19,6 +19,10 @@ original text.
 
 ## [Unreleased]
 
+### Changed
+
+- **The user docs read more clearly.** About 170 places across the concept pages, guides, API pages, self-host pages, runbooks and the API reference's descriptions: dense sentences split, terms defined where they are first used, and one name for each thing (the reconciler, the charge hold, a lost result, a spend threshold, a usage-only key, an account). Facts are unchanged. ([#1585](https://github.com/gethardcount/hardcount/pull/1585))
+
 ### Fixed
 
 - **Docs: 37 statements that were wrong are corrected.** The LiteLLM guide no longer has you create the customer on a test clock: the clock's time stands still, so a real proxy's calls were refused as in the future, while LiteLLM read the answer as delivered. "Bill for AI tokens by model" and the LiteLLM guide now save the plan ID their later steps use. The checks after a restore set `app.bypass_rls`, so on managed Postgres they no longer read zero rows and pass. ([#1584](https://github.com/gethardcount/hardcount/pull/1584))

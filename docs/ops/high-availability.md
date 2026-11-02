@@ -28,8 +28,8 @@ Each copy answers API requests. Background jobs are different: billing runs, pay
 
 A few features still assume one copy. None of them touch money:
 
-- **The dashboard's live webhook stream** shows only the events and delivery tries of the copy that serves it. A page refresh reads the database and shows them all.
-- **A test-clock advance** runs on the copy that took the request. If that copy stops during it, the clock stays `advancing` until a copy starts or restarts ([Test-clock advance hung](runbook/test-clock-advance-hung.md)).
+- **The dashboard's real-time webhook stream** shows only the events and delivery tries of the copy that serves it. A page refresh reads the database and shows them all.
+- **A test-clock advance** (a test clock is a pretend clock for test customers) runs on the copy that took the request. If that copy stops during it, the clock stays `advancing` until a copy starts or restarts ([Test-clock advance hung](runbook/test-clock-advance-hung.md)).
 - **The note that a spending threshold was crossed but waits for the period's end** (a WARN line and an audit log row) is kept from repeating only inside one copy. Each copy that runs billing writes it once per subscription and period, and so does each restart.
 
 ## Set up the load balancer
@@ -54,7 +54,7 @@ A few features still assume one copy. None of them touch money:
 
 4. Set the shutdown grace period (Kubernetes `terminationGracePeriodSeconds`) above `SHUTDOWN_DRAIN_DELAY` plus 90 seconds: 120s with the 5s default, 180s with `SHUTDOWN_DRAIN_DELAY=60s`. The Compose stack sets `stop_grace_period: 120s`.
 
-5. Set the load balancer's timeouts. Its read or idle timeout must be above 35 seconds, the server's write timeout. Then a slow request gets the server's own 504, not a dropped connection. The Compose stack's nginx uses 40s. The dashboard's live webhook log (`/v1/webhook_events/stream`) is a long-lived stream: turn response buffering off for that path and allow it at least an hour, or the log stops updating.
+5. Set the load balancer's timeouts. Its read or idle timeout must be above 35 seconds, the server's write timeout. Then a slow request gets the server's own 504, not a dropped connection. The Compose stack's nginx uses 40s. The dashboard's real-time webhook log (`/v1/webhook_events/stream`) is a long-lived stream: turn response buffering off for that path and allow it at least an hour, or the log stops updating.
 
 6. Set the load balancer's request body limit. Allow bodies above 32 MB on `POST /v1/integrations/litellm/spend`, where LiteLLM sends its batches; 1 MB is enough on every other route. The Compose stack's nginx uses `client_max_body_size 33m` for that route. A lower limit turns full batches away with `413`, and LiteLLM does not send them again, so that usage is never billed ([LiteLLM size limit](../integrations/litellm.md#keep-each-send-under-the-size-limit)).
 
@@ -76,13 +76,13 @@ On a stop signal (SIGTERM), a copy first tells the load balancer it is leaving: 
 | Step | What happens | Time limit |
 |---|---|---|
 | Readiness drain | `/health/ready` answers `503 {"status":"draining"}`; `/health` stays 200. The copy keeps listening, so the load balancer has time to stop sending it requests. | `SHUTDOWN_DRAIN_DELAY` (default 5s outside `local`) |
-| 1. Requests in progress | The dashboard's live webhook stream is closed first, so it cannot hold this stage open. | Up to 30s |
+| 1. Requests in progress | The dashboard's real-time webhook stream is closed first, so it cannot hold this stage open. | Up to 30s |
 | 2. A test-clock advance in progress | Stopped at the limit. The clock stays `advancing` until a copy restarts. See [Test-clock advance hung](runbook/test-clock-advance-hung.md). | Up to 30s |
 | 3. Background jobs | | Up to 30s |
 
 The worst case is `SHUTDOWN_DRAIN_DELAY` plus 90 seconds. Usually the three stages take under 2 seconds after the drain delay.
 
-A grace period shorter than that can kill a copy (SIGKILL) halfway through. Hardcount is built to survive that: queued webhooks and emails a copy had claimed are picked up again when its lease runs out, and the next copy to start recovers a killed test-clock advance. The cost is that a few webhooks or emails can be sent twice.
+A grace period shorter than that can kill a copy (SIGKILL) halfway through. Hardcount is built to survive that. Queued webhooks and emails that a copy had claimed are picked up again when its claim on them runs out. The next copy to start recovers a killed test-clock advance. The cost is that a few webhooks or emails can be sent twice.
 
 ## Upgrades
 

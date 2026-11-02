@@ -22,18 +22,21 @@ retries.
 2. **Events can arrive out of order.** Do not work out the current state
    from the order they arrive. Read the event's data, or fetch the
    invoice or subscription from the API.
-3. **Events marked *always sent* survive a crash; others may not.** Those
-   events in the [catalog](api/webhook-events.md) are saved together with
-   the change that caused them, so a crash cannot drop them. Other events,
-   including `invoice.finalized`, are queued just after the change is
-   saved, and a crash or a database error at that moment can drop one.
-   Any event can still go undelivered:
+3. **Some events survive a crash; others may not.** The
+   [catalog](api/webhook-events.md) marks the first kind *Always sent*:
+   they are saved together with the change that caused them, so a crash
+   cannot drop them. Other events, including `invoice.finalized`, are
+   queued just after the change is saved, and a crash or a database error
+   at that moment can drop one. *Always sent* does not mean always
+   delivered. Any event can still go undelivered:
    - To an endpoint that keeps failing, a delivery is marked failed after 6
      attempts over about 26 hours 36 minutes ([Retries](#retries)). Send it
      again from the dashboard or the API ([Send a delivery again](#send-a-delivery-again)).
-   - The queue gives up on an event it could not write after 15 tries over
-     about 52 hours. That event was never written, so nothing can resend
-     it; the person who runs your server can queue it again:
+   - Before anything is sent, a background job turns each queued event into
+     an event record and its deliveries. If that step fails 15 times, over
+     about 52 hours, Hardcount gives up. The event record was never made, so
+     nothing can resend it. The person who runs your server can queue it
+     again:
      [Webhook outbox backed up](ops/runbook/webhook-outbox-backed-up.md#send-failed-rows-again).
 
 ## What a message looks like
@@ -67,8 +70,8 @@ it on one line, and its key order may differ):
 - The message has no field that says whether it is a test or a live event.
   Each endpoint belongs to one mode; see
   [Test mode and live mode](#test-mode-and-live-mode).
-- This shape is new in v0.9.0. v0.9.0 installs fresh, so no event in it
-  has an older shape ([old key → new key](../CHANGELOG.md#090---2026-10-28)).
+- This shape is new in v0.9.0. v0.9.0 installs fresh, so no v0.9.0 install
+  has events in an older shape ([old key → new key](../CHANGELOG.md#090---2026-10-28)).
 
 Headers:
 
@@ -238,9 +241,9 @@ list, with examples:
 `credit.balance_recovered` follow the settled balance: the credit a customer
 holds after every invoice issued so far. They fire when an invoice, a grant,
 an adjustment or an expiry moves that balance. They do not follow usage.
-Credit a void or credit note hands back moves the balance once: if part of
-it expires at once, because its grant was past its expiry, the events
-follow the net change.
+A void or a credit note can give credit back. That moves the balance once.
+If part of the returned credit expires at once, because its grant is
+already past its expiry date, the events follow the net change.
 
 Each currency has its own balance, and each event is about one of them: a
 customer whose EUR credit runs out gets `credit.balance_depleted` with

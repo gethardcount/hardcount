@@ -24,7 +24,8 @@ One of these:
   page, Stripe asks the customer's bank to confirm the payment and shows
   the customer the bank's check. A charge made without them can't pass it.
 - **The invoice is a failed payment.** `payment_status` is `failed`, and
-  payment recovery starts as for any failed payment.
+  dunning (Hardcount's retries of a failed payment, with reminder emails)
+  starts as for any failed payment.
 - **Retries don't charge that card.** Stripe Billing does not retry
   `authentication_required`
   ([Stripe](https://docs.stripe.com/billing/revenue-recovery/smart-retries#non-retryable-decline-codes)),
@@ -60,7 +61,7 @@ curl -s "$API/v1/invoices/$INVOICE_ID" -H "Authorization: Bearer $KEY"
 `payment.authentication_required`, and Stripe's message in
 `invoice.attention.provider_response`.
 
-To list every such invoice of every tenant (in `psql`), by the rule
+To list every such invoice of every account (in `psql`), by the rule
 retries use: on the customer's default card, a hard decline first, else
 the newest answer:
 
