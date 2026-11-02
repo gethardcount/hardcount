@@ -21,7 +21,7 @@ original text.
 
 ### Fixed
 
-- **Docs: 37 statements that were wrong are corrected.** The LiteLLM guide no longer has you create the customer on a test clock: the clock's time stands still, so a real proxy's calls were refused as in the future, while LiteLLM read the answer as delivered. "Bill for AI tokens by model" and the LiteLLM guide now save the plan ID their later steps use. The checks after a restore set `app.bypass_rls`, so on managed Postgres they no longer read zero rows and pass. ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM))
+- **Docs: 37 statements that were wrong are corrected.** The LiteLLM guide no longer has you create the customer on a test clock: the clock's time stands still, so a real proxy's calls were refused as in the future, while LiteLLM read the answer as delivered. "Bill for AI tokens by model" and the LiteLLM guide now save the plan ID their later steps use. The checks after a restore set `app.bypass_rls`, so on managed Postgres they no longer read zero rows and pass. ([#1584](https://github.com/gethardcount/hardcount/pull/1584))
 
 ## [0.9.2] - 2026-11-02
 
