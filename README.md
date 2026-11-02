@@ -24,6 +24,10 @@ An open-source alternative to Stripe Billing and Lago: no Stripe Billing fee, no
 
 One month of AI usage for one customer, from the [demo](#quick-start) in test mode.
 
+**▶ [Watch the 65-second walkthrough](https://gethardcount.com/#looks)**, narrated, with captions: the demo runs, then the dashboard shows what it made.
+
+<a href="https://gethardcount.com/#looks"><img alt="The quick start demo finishing in a terminal: every step checked, and links to the invoice and customer it made. Click to watch the narrated walkthrough on gethardcount.com." src="docs/assets/readme-walkthrough.png" width="100%"></a>
+
 **1. The demo invoice.** One line per model and token type, priced per million tokens.
 
 <picture>
