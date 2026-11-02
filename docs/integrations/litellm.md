@@ -148,7 +148,8 @@ send again, so every call in it is lost.
 
 The limit is 32 MB (33,554,432 bytes) on this route, also through the nginx
 of the Compose stack and the quick start. Over it, Hardcount answers
-`413 batch_too_large` and saves nothing. If you put your own proxy in front
+`413 batch_too_large` and saves nothing. That nginx stops bodies over
+33 MB itself, with its own 413 page, before Hardcount sees them. If you put your own proxy in front
 of Hardcount, give this route a limit above 32 MB (in nginx,
 `client_max_body_size 33m`, as `deploy/compose/nginx.conf` does). Most
 proxies default to far less.
