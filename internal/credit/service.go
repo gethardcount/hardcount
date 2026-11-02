@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -170,7 +171,7 @@ func (s *Service) Grant(ctx context.Context, tenantID string, input GrantInput) 
 	if desc == "" {
 		return domain.CreditLedgerEntry{}, errs.Required("description")
 	}
-	if len(desc) > 500 {
+	if utf8.RuneCountInString(desc) > 500 {
 		return domain.CreditLedgerEntry{}, errs.Invalid("description", "must be at most 500 characters")
 	}
 	// Reject past expires_at — a grant that's already expired at
@@ -369,7 +370,7 @@ func (s *Service) GrantTx(ctx context.Context, tx *sql.Tx, tenantID string, inpu
 	if desc == "" {
 		return domain.CreditLedgerEntry{}, errs.Required("description")
 	}
-	if len(desc) > 500 {
+	if utf8.RuneCountInString(desc) > 500 {
 		return domain.CreditLedgerEntry{}, errs.Invalid("description", "must be at most 500 characters")
 	}
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(clock.Now(ctx)) {
@@ -484,7 +485,7 @@ func (s *Service) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID
 	if desc == "" {
 		return domain.CreditReturn{}, errs.Required("description")
 	}
-	if len(desc) > 500 {
+	if utf8.RuneCountInString(desc) > 500 {
 		return domain.CreditReturn{}, errs.Invalid("description", "must be at most 500 characters")
 	}
 	if input.InvoicePaid && input.InvoiceTotalCents <= 0 {

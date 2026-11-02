@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
@@ -282,7 +283,7 @@ type CreateInput struct {
 
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.TestClock, error) {
 	name := strings.TrimSpace(input.Name)
-	if len(name) > 200 {
+	if utf8.RuneCountInString(name) > 200 {
 		return domain.TestClock{}, errs.Invalid("name", "must be at most 200 characters")
 	}
 	if input.FrozenTime.IsZero() {

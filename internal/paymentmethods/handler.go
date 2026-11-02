@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -306,7 +307,7 @@ func (h *Handler) operatorSendSetupEmail(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	note := strings.TrimSpace(req.Note)
-	if len(note) > 2000 {
+	if utf8.RuneCountInString(note) > 2000 {
 		respond.Error(w, r, http.StatusUnprocessableEntity, "invalid_request_error",
 			"note_too_long", "note must be 2000 characters or fewer")
 		return
