@@ -18,11 +18,12 @@ Using a LiteLLM proxy? It sends the events for you: follow
 
 ## Before you start
 
-You need Hardcount running and a test secret key in `HARDCOUNT` and
-`HARDCOUNT_KEY`, as in [Send usage and get your first
-invoice](../first-invoice.md#before-you-start). That page also creates a
-customer on a test clock. This guide uses its `CUSTOMER_REF` (the
-customer's external ID) and `CUSTOMER_ID`.
+You need Hardcount running, with its address in `HARDCOUNT` and a test
+secret key in `HARDCOUNT_KEY`, as in [Send usage and get your first
+invoice](../first-invoice.md#before-you-start). That page's steps 2 to 4
+also create a customer on a test clock (see the end of step 1 below). This
+guide uses the `CUSTOMER_REF` (the customer's external ID) and
+`CUSTOMER_ID` they set.
 
 ## 1. Load ready-made prices
 
@@ -31,10 +32,11 @@ model; `openai_style` prices the GPT, o-series and embedding models;
 `replicate_style` prices GPU seconds.
 
 ```bash
-curl -s -X POST "$HARDCOUNT/v1/recipes/anthropic_style/instantiate" \
+PLAN_ID=$(curl -s -X POST "$HARDCOUNT/v1/recipes/anthropic_style/instantiate" \
   -H "Authorization: Bearer $HARDCOUNT_KEY" \
   -H "Content-Type: application/json" \
-  -d '{}' | jq -r '.created_objects.plan_ids[0]'
+  -d '{}' | jq -r '.created_objects.plan_ids[0]')
+echo "$PLAN_ID"
 ```
 
 **You see:** the plan ID, such as `hc_pln_…`.
@@ -47,7 +49,9 @@ same setup. The models, and how to set the plan's name and currency:
 
 A customer must be on the plan before their usage is billed. The [first
 invoice page](../first-invoice.md#steps), steps 2 to 4, creates the
-customer and the subscription.
+customer on a test clock and the subscription. Its step 4 uses the
+`PLAN_ID` saved above. Those steps set `CUSTOMER_REF` and `CUSTOMER_ID`,
+which the steps below use.
 
 ## 2. Turn a provider's token counts into events
 

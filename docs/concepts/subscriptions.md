@@ -46,7 +46,9 @@ A trial ends whether or not the customer has saved a card. The first
 invoice is then collected like any other. A customer with no card gets an
 email, once email is set up: a link to add a card when Stripe is connected
 and `PAYMENT_UPDATE_URL` is set, or the invoice itself when Stripe is not
-connected.
+connected. With Stripe connected and `PAYMENT_UPDATE_URL` unset, the first
+email is the reminder of the first payment retry, which asks the customer
+to pay the invoice.
 
 ## Billing periods
 

@@ -71,8 +71,9 @@ with `param` naming the parameter:
 
 - The audit log's `total` stops at 10,001. A value above 10,000 means "more
   than 10,000".
-- The customer list with `search`, or sorted by name or email, looks at
-  5,000 customers at most. Its rows and its `total` stop there.
+- The customer list with `search` looks at 5,000 customers at most. Its
+  rows and its `total` stop there. A sort by name or email does the same,
+  on a server that encrypts customer data (`HARDCOUNT_ENCRYPTION_KEY`).
 - The invoice list's `search` matches a customer's name or email among the
   5,000 customers created last. An invoice of an older customer is still
   found by its invoice number.

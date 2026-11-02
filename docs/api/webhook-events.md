@@ -1121,7 +1121,10 @@ A customer's payment method was set up or replaced through Stripe Checkout.
 `GET /v1/subscriptions/{id}` returns it, without
 `current_billing_period_display` (a date range the API writes out when you
 read it). A cancel's time is the subscription's `canceled_at`, and a
-schedule's is its `cancel_at` and `cancel_effective_at`.
+schedule's is its `cancel_at` and `cancel_effective_at`. These fields,
+`trial_end_at` and `pause_collection` are left out when they are not set.
+The example subscription has no cancel, trial or pause, so its examples do
+not show them.
 
 ### `subscription.created`
 

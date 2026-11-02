@@ -109,8 +109,12 @@ ladder.
        done
    ```
 
-   Each page holds at most 100; take the next page with `offset` until you
-   have retried every subscription once. A subscription whose retry fails
+   Each page holds at most 100. A subscription whose retry works leaves the
+   list, so the rows after it move up, and an `offset` of 100 skips them.
+   For the next page, add `&offset=<n>` to the list's address, where `n` is
+   the number of rows printed so far with `still_failing: true`: those are
+   the only retried rows still on the list. Stop when a page is empty: by
+   then every subscription has been retried once. A subscription whose retry fails
    again stays on the list, so the list empties only once each cause is
    fixed. An empty list does not prove that everything billed either: a row
    printed with `still_due: true` left the list without being billed. The

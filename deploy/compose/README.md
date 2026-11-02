@@ -109,7 +109,7 @@ If the user does not exist at all, create it with the SQL in [Postgres requireme
 `APP_DATABASE_URL` points at the admin user, usually because `DATABASE_URL` was copied into it. Point it at `hardcount_app`.
 
 **The API exits with `migration … failed`, or names `goose_db_version`.**
-A database upgrade stopped. A failed migration leaves nothing to repair. Compose keeps starting the API again, and each start tries the upgrade again, so stop it first with `docker compose stop hardcount-api`. Fix the cause the error names, then start it with `docker compose up -d hardcount-api`. The cases are in [A database upgrade stopped](../../docs/ops/runbook/migration-failed-midway.md).
+A database upgrade stopped. A failed migration leaves nothing to repair by hand: a failed index build can leave an INVALID index, which the next run drops and builds again. Compose keeps starting the API again, and each start tries the upgrade again, so stop it first with `docker compose stop hardcount-api`. Fix the cause the error names, then start it with `docker compose up -d hardcount-api`. The cases are in [A database upgrade stopped](../../docs/ops/runbook/migration-failed-midway.md).
 
 **The API exits with `LOG_LEVEL=… is not a log level`.**
 Set `LOG_LEVEL` in `.env` to `debug`, `info`, `warn` or `error`, or delete the line for `info`. Then run `docker compose up -d` again.

@@ -43,7 +43,7 @@ In the instance's parameter group, set:
 
 | Peak rate | WAL rate | Set |
 |---|---|---|
-| 12–15k events/s | 14–20 MB/s | 2 + 8–11 GB, so **16 GB** |
+| 12–15k events/s | 14–20 MB/s | 2 GB (RDS's default `wal_keep_size`) + 8–11 GB, so **16 GB** |
 | 25,000 events/s | 29.6 MB/s | **24–32 GB**, or shorten `checkpoint_timeout`. The pool at 16 GB still hit zero twice in 35 minutes |
 
 Both settings are dynamic (no reboot). The cost is disk: `pg_wal` stays
