@@ -216,12 +216,9 @@ internal/{domain}/
 
 ## Code style
 
-- `go fmt` and `go vet` must pass.
-- No exported types without doc comments.
-- Errors use `errs.DomainError` for domain-specific errors or `fmt.Errorf`
-  for validation.
-- JSON field names are `snake_case`.
-- ID format: `hc_{type}_{random_hex}` (for example `hc_cus_abc123`).
+New and changed code follows the [code standard](docs/dev/code-standard.md).
+Comments and docs follow the [writing style](docs/dev/writing-style.md).
+`make lint` checks the rules a linter can.
 
 ## Frontend (web-v2)
 

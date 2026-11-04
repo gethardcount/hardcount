@@ -189,7 +189,9 @@ Ordered by leverage. A "no" blocks the PR.
      (ADR-040), or a self-clearing marker column + scheduler sweep.
 4. **The UPDATE itself is idempotent?** Keep a no-op re-read branch for when
    the transition already ran (guard the `amount_paid=amount_due` re-zeroing
-   class). The CAS is `WHERE state<>target` and `RowsAffected`-gated.
+   class). The CAS lists the states the row may come from
+   (`WHERE state = ANY($allowed)`, which leaves out the target) and is
+   `RowsAffected`-gated.
 5. **Webhook: the dedup-row write (`IngestEvent`) is the last write, after the
    effect commits?** Only errors that can never be processed (`ErrNotFound`)
    ack. To ack is to acknowledge the event, which ends redelivery. Everything

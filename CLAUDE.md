@@ -10,6 +10,7 @@ Each rule is explained in the section named after it.
 - **Testing:** every change ships with a test at the right layer. UI changes are checked with Playwright and by looking at the screen.
 - **Concurrent sessions:** work in your own git worktree, and check every branch before you claim a migration or ADR number.
 - **Documentation discipline:** every user-visible ship updates its docs in the same PR. The doc must not lie.
+- **Code standard:** new and changed code follows [docs/dev/code-standard.md](docs/dev/code-standard.md).
 
 ## Architecture
 - Per-domain packages in `internal/`. Each domain owns its store, service and handler, with store interfaces per domain (not a god Repository).
@@ -115,3 +116,6 @@ Every user-visible ship updates the docs that describe it, in the same PR:
 How to write them: **[docs/dev/writing-style.md](docs/dev/writing-style.md)** (point first, one idea per sentence, define terms, clarity and truth in separate PRs).
 
 The bar isn't "perfect docs." The bar is "the doc doesn't lie." A doc that says "logs link to stdout" when the code returns an error is worse than no doc.
+
+## Code standard
+New and changed code follows **[docs/dev/code-standard.md](docs/dev/code-standard.md)**. Test-writing rules are in [docs/testing.md](docs/testing.md#writing-tests). Old code is brought in line by small cleanup PRs, not by rewrites.

@@ -18,10 +18,12 @@ Hardcount: the user and operator docs start at [docs/README.md](../README.md).
 5. [OpenAPI workflow](openapi-workflow.md): changing the API contract.
 6. [Writing a database migration](migrations.md): changing the
    database schema.
-7. [Writing style](writing-style.md): how to write docs here.
-8. [Contributor glossary](glossary.md): words from the code, the database
+7. [Code standard](code-standard.md): how we write code, tooling and the
+   dashboard.
+8. [Writing style](writing-style.md): how to write docs and comments here.
+9. [Contributor glossary](glossary.md): words from the code, the database
    and the operations docs.
-9. AI coding agents start at [CLAUDE.md](../../CLAUDE.md).
+10. AI coding agents start at [CLAUDE.md](../../CLAUDE.md).
 
 ## Background
 

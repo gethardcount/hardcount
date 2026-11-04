@@ -47,6 +47,72 @@ instant. A row dated at the advance instead then reads two days late. The
 activity scenarios are in
 `internal/api/activity_parity_dates_integration_test.go`.
 
+## Writing tests
+
+The rest of the code rules are in the [code standard](dev/code-standard.md).
+
+**Go tests**
+
+- **A test must be able to fail when the behavior it names breaks.** Assert a
+  value, a row or an effect; "no error" alone proves little. Watch it fail
+  without your fix. ([Kent Beck: canon TDD](https://newsletter.kentbeck.com/p/canon-tdd))
+- **Wait on a condition, never a sleep.** Use a channel, a WaitGroup,
+  `testutil.WaitForLockWaiter`, a fake clock or `testing/synctest`. A sleep is
+  slow, and too short on a slow runner.
+  ([Go blog: synctest](https://go.dev/blog/synctest))
+- **Test SQL behavior against real Postgres** through
+  `testutil.SetupTestDB`. It connects as the app's own non-owner role, so
+  row-level security applies. A fake can't run a `WHERE` clause or a lock.
+  ([SWE at Google, ch. 13](https://abseil.io/resources/swe-book/html/ch13.html))
+- **Test a shared helper once, in its own package.** Callers test only their
+  own inputs. Copies of the same cases add work, not coverage.
+  ([Fowler: test pyramid](https://martinfowler.com/articles/practical-test-pyramid.html))
+- **Use the helpers in `internal/testutil` instead of copying them.** Copies
+  drift. ([SWE at Google, ch. 12](https://abseil.io/resources/swe-book/html/ch12.html))
+- **Build test data through production code** (constructors, services, the
+  API). Use raw SQL only for a state production can't reach, and say why.
+  ([Google: test helpers](https://google.github.io/styleguide/go/best-practices#creating-test-helper-packages))
+- **Fakes are hand-written and implement the consumer's small interface.**
+  Assert the resulting state. Count calls only when the call is the effect,
+  such as a Stripe request or an email.
+  ([SWE at Google, ch. 13](https://abseil.io/resources/swe-book/html/ch13.html))
+- **Plain Go assertions; no testify or mock generators.** Use `cmp.Diff` for
+  nested structs. ([Go wiki](https://go.dev/wiki/TestComments#assert-libraries))
+- **Check errors with `errors.Is`, or by error code,** not by message text.
+  Wording changes; behavior doesn't.
+  ([Go wiki: error semantics](https://go.dev/wiki/TestComments#test-error-semantics))
+- **Skip a test only when something it needs is missing,** like Postgres under
+  `-short`. `SetupTestDB` already skips, so don't add a second check. A
+  skipped test reports ok, so CI stays green while nothing ran. A test that
+  fails at some hours reads the wall clock: give it a fake clock instead of
+  skipping it.
+  ([Fowler: non-determinism in tests](https://martinfowler.com/articles/nonDeterminism.html))
+- **Change environment variables only with `t.Setenv`,** and don't use
+  `t.Parallel` in tests that use `SetupTestDB`, because it clears the tables.
+  ([testing: T.Setenv](https://pkg.go.dev/testing#T.Setenv))
+- **Run a concurrency test under `-race`.** The race detector only sees code
+  that runs, and CI's `-race` run covers only the `-short` unit tests, so run
+  `go test -race -short=false` yourself on a Postgres-backed concurrency test.
+  ([Go race detector](https://go.dev/doc/articles/race_detector))
+- **Go test style:** helpers call `t.Helper()` first; table tests name each
+  row; failure messages read `Total(x) = 3, want 4`; use `t.Context()`, and
+  `b.Loop()` in benchmarks. **lint:** thelper, usetesting.
+  ([Google: test failures](https://google.github.io/styleguide/go/decisions#useful-test-failures))
+
+**Dashboard tests**
+
+- **Logic is tested in Vitest,** as pure functions in `src/lib` (see the
+  [code standard](dev/code-standard.md#frontend-web-v2)).
+- **Playwright tests find elements by role, label or text,** never by CSS
+  class, and await every action.
+  ([Playwright best practices](https://playwright.dev/docs/best-practices))
+
+**What we don't adopt:** `t.Parallel` everywhere, `-shuffle`, build tags for
+integration tests, a coverage percentage gate, contract tests for every fake,
+component tests with jsdom, Firefox and WebKit runs, and pixel snapshots. None
+of them fixes a problem we have measured, and real Postgres and Playwright
+already cover what they would.
+
 ## Run each layer locally
 
 Start Postgres once: `docker compose up -d postgres`.
