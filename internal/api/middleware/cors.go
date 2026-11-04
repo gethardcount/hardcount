@@ -1,5 +1,5 @@
 // Package middleware provides HTTP middleware for the Hardcount API server.
-// Includes rate limiting, idempotency keys, Prometheus metrics, CORS, and
+// It includes rate limiting, idempotency keys, Prometheus metrics, CORS and
 // cursor-based pagination helpers.
 package middleware
 
@@ -26,10 +26,10 @@ import (
 //     which gets the same list. A listed origin may send the sign-in cookie,
 //     so a dashboard served from another address can sign in.
 //
-// The match is ours, not rs/cors's AllowedOrigins, because that option reads
-// an empty list as every origin and an entry with a * inside it as a
-// prefix-and-suffix pattern ("h*" would allow every https origin). The boot
-// check refuses such entries; here they simply match nothing.
+// Hardcount matches origins itself instead of using rs/cors's AllowedOrigins.
+// That option reads an empty list as every origin, and an entry with a *
+// inside it as a prefix-and-suffix pattern: "h*" would allow every https
+// origin. The boot check refuses such entries, and here they match nothing.
 //
 // An OPTIONS request without Access-Control-Request-Method is not a preflight
 // and goes on to the router.
