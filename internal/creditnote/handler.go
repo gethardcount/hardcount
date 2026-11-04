@@ -63,14 +63,13 @@ type Handler struct {
 	emailConfigured bool
 }
 
-func NewHandler(svc *Service, deps ...HandlerDeps) *Handler {
-	h := &Handler{svc: svc}
-	if len(deps) > 0 {
-		h.customers = deps[0].Customers
-		h.settings = deps[0].Settings
-		h.invoices = deps[0].Invoices
+func NewHandler(svc *Service, deps HandlerDeps) *Handler {
+	return &Handler{
+		svc:       svc,
+		customers: deps.Customers,
+		settings:  deps.Settings,
+		invoices:  deps.Invoices,
 	}
-	return h
 }
 
 // SetAuditLogger configures audit logging for financial operations.

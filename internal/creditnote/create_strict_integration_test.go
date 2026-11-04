@@ -34,7 +34,7 @@ func TestCreateCreditNote_UnknownFieldRefused(t *testing.T) {
 
 	svc := creditnote.NewService(creditnote.NewPostgresStore(db), invoice.NewPostgresStore(db), nil)
 	svc.SetNumberGenerator(tenant.NewSettingsStore(db))
-	srv := middleware.Idempotency(db, nil)(creditnote.NewHandler(svc).Routes())
+	srv := middleware.Idempotency(db, nil)(creditnote.NewHandler(svc, creditnote.HandlerDeps{}).Routes())
 
 	post := func(body, key string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
