@@ -69,7 +69,7 @@ func TestManualFinalize_CollectsThroughTheEngine_E2E(t *testing.T) {
 	engine.SetInvoiceEmailer(&testInvoiceEmailer{})
 	engine.SetDunningResolver(&testDunningResolver{})
 
-	h := invoice.NewHandler(svc, customers, settings)
+	h := invoice.NewHandler(svc, customers, settings, invoice.HandlerDeps{})
 	h.SetCollector(engine)
 	routes := h.Routes()
 

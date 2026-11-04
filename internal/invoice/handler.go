@@ -306,19 +306,20 @@ type HandlerDeps struct {
 	RefundIssuer      RefundIssuer
 }
 
-func NewHandler(svc *Service, customers CustomerGetter, settings SettingsGetter, deps ...HandlerDeps) *Handler {
-	h := &Handler{svc: svc, customers: customers, settings: settings}
-	if len(deps) > 0 {
-		h.creditNotes = deps[0].CreditNotes
-		h.pdfCreditNotes = deps[0].IssuedCreditNotes
-		h.charger = deps[0].Charger
-		h.paymentSetups = deps[0].PaymentSetups
-		h.dunning = deps[0].Dunning
-		h.emailEvents = deps[0].EmailEvents
-		h.dunningTimeline = deps[0].DunningTimeline
-		h.refundIssuer = deps[0].RefundIssuer
+func NewHandler(svc *Service, customers CustomerGetter, settings SettingsGetter, deps HandlerDeps) *Handler {
+	return &Handler{
+		svc:             svc,
+		customers:       customers,
+		settings:        settings,
+		creditNotes:     deps.CreditNotes,
+		pdfCreditNotes:  deps.IssuedCreditNotes,
+		charger:         deps.Charger,
+		paymentSetups:   deps.PaymentSetups,
+		dunning:         deps.Dunning,
+		emailEvents:     deps.EmailEvents,
+		dunningTimeline: deps.DunningTimeline,
+		refundIssuer:    deps.RefundIssuer,
 	}
-	return h
 }
 
 // SetEmailSender configures email sending for invoice notifications.
