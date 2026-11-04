@@ -23,45 +23,44 @@ import (
 	"github.com/gethardcount/hardcount/internal/usage"
 )
 
-// Sprint 2 — data export. Streaming CSV endpoints so a tenant can
-// take their data out, clearing the "I take my data" review during
-// procurement. RLS-scoped via the standard Bearer-key auth chain.
+// Data export: streaming CSV endpoints, so a tenant can take its data out.
+// Procurement reviews ask for this ("can I take my data?"). Each export is
+// scoped by RLS through the standard Bearer-key auth chain.
 //
-// Each endpoint issues its OWN query (StreamForExport on its store), NOT the
-// store's List method. Borrowing List is what this code used to do, and it is
-// how two columns the CSVs promised — customers.email_status and
-// usage_events.origin — came to be blank in every export ever taken: List's
-// SELECT does not carry them. An export's columns are its own contract.
+// Each endpoint runs its own query (StreamForExport on its store), not the
+// store's List method. List's SELECT does not carry two columns the CSVs
+// promise, customers.email_status and usage_events.origin. So an export built
+// on List would leave them blank. An export's columns are its own contract.
 //
-// Streaming: ONE snapshot transaction per export, one query, rows handed to the
-// csv.Writer as they are scanned and flushed every exportPageSize rows — so the
-// HTTP buffer never holds the full result set and operators can export millions
-// of rows without OOM.
+// Streaming: one snapshot transaction per export, and one query. Rows go to
+// the csv.Writer as they are scanned, with a flush every exportPageSize rows.
+// So the HTTP buffer never holds the full result, and operators can export
+// millions of rows without running out of memory.
 //
-// The snapshot is the correctness property, not an optimization. These exports
-// used to page each store with LIMIT/OFFSET, every page in its OWN transaction,
-// over a newest-first ordering. A row inserted while the export ran entered at
-// the HEAD and shifted every later row down by one — so the row on each page
-// boundary was written to the CSV TWICE, and a delete symmetrically SKIPPED one.
-// The usage export is given a five-minute timeout precisely BECAUSE it streams a
-// lot of rows, which is exactly the window in which concurrent ingest is
-// guaranteed; a duplicated usage row in a finance CSV reads as usage that did
-// not happen. Under a single MVCC snapshot the question cannot arise. (#475)
+// The single snapshot is what makes an export correct, not an optimization.
+// LIMIT/OFFSET pages over a newest-first order, each in its own transaction,
+// would duplicate and skip rows. A row inserted during the export enters at
+// the head and shifts every later row down by one, so each page-boundary row
+// is written twice, and a delete skips one. The usage export has a
+// five-minute timeout because it streams many rows, and concurrent ingest is
+// certain in that window. A duplicated usage row in a finance CSV reads as
+// usage that did not happen. Under one MVCC snapshot, this cannot arise
+// (#475).
 //
-// Date filters: the four DATA exports accept ?from=<RFC3339>&to=<RFC3339>, and
-// usage_events REQUIRES both (the table is unbounded — without a range, an
-// export would walk the entire history).
+// Date filters: the four data exports accept ?from=<RFC3339>&to=<RFC3339>.
+// usage_events requires both, because the table has no bound: without a
+// range, an export would walk the entire history.
 //
-// The audit-log export is the exception: it takes ?date_from / ?date_to, because
-// its params mirror the audit-log READ route so the dashboard's on-screen filters
-// and its Export produce the same set. Passing ?from/?to there is silently
-// ignored and you get the whole log — a footgun worth knowing about rather than
-// papering over, since the two routes sit side by side in the same handler.
+// The audit-log export is the exception. It takes ?date_from and ?date_to,
+// the params of the audit-log read route, so the dashboard's on-screen
+// filters and its Export select the same rows. Passing ?from and ?to there
+// is silently ignored, and you get the whole log. This trap is written down
+// on purpose, since the two routes sit side by side in the same handler.
 //
-// AUDIT (ADR-090 §7): every export here emits an action=export audit row
-// BEFORE the first byte streams, and fails closed if it cannot. This is the
-// only READ path in Hardcount that writes to audit_log — see auditExport for why
-// the ordering is load-bearing.
+// Audit (ADR-090 §7): every export here emits an action=export audit row
+// before the first byte streams, and fails closed if it cannot. This is the
+// only read path in Hardcount that writes to audit_log. See auditExport for
+// why the order matters.
 
 const (
 	// exportTimeout is how long an export may run: the /v1/exports routes'
@@ -70,16 +69,17 @@ const (
 	exportTimeout = 5 * time.Minute
 
 	// exportWriteGrace is how far an export's write deadline reaches past
-	// exportTimeout, so the EXPORT_INCOMPLETE marker an export that ran out
-	// of time writes still reaches the socket. It is the margin the server's
-	// WriteTimeout keeps over the 30 s request timeout (cmd/hardcount/main.go).
+	// exportTimeout. An export that runs out of time writes the
+	// EXPORT_INCOMPLETE marker, and the grace lets that marker still reach
+	// the socket. It is the margin the server's WriteTimeout keeps over the
+	// 30 s request timeout (cmd/hardcount/main.go).
 	exportWriteGrace = 5 * time.Second
 
-	// exportPageSize is the FLUSH INTERVAL — rows written to the csv.Writer
-	// between flushes to the wire. It is no longer a page size: nothing
-	// paginates any more. Every export (including audit-log.csv) walks one
-	// snapshot cursor, so this number now only trades HTTP buffer size against
-	// syscalls, and no correctness depends on it.
+	// exportPageSize is the flush interval: the rows written to the
+	// csv.Writer between flushes to the wire. Despite its name, it is not a
+	// page size, because nothing pages. Every export (audit-log.csv too)
+	// walks one snapshot cursor. So this number only trades HTTP buffer size
+	// against syscalls, and no correctness depends on it.
 	exportPageSize = 100
 
 	// usageExportMaxSpanDays caps the date range for usage_events
@@ -88,10 +88,10 @@ const (
 	usageExportMaxSpanDays = 366
 )
 
-// exportAuditor writes the export's own audit row. Own-tx by necessity: an
-// export is a READ — there is no business transaction for ADR-090's LogInTx to
-// ride. *audit.Logger satisfies it (its Log detaches from the caller's
-// cancellation, which is exactly the property this path needs).
+// exportAuditor writes the export's own audit row, on its own transaction.
+// An export is a read, so there is no business transaction for ADR-090's
+// LogInTx to join. *audit.Logger satisfies it. Its Log detaches from the
+// caller's cancellation, which is the property this path needs.
 type exportAuditor interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
@@ -135,32 +135,34 @@ func (h *exportsHandler) Routes(customerRead, invoiceRead, subscriptionRead, usa
 	r.With(invoiceRead).Get("/invoices.csv", h.exportInvoices)
 	r.With(subscriptionRead).Get("/subscriptions.csv", h.exportSubscriptions)
 	r.With(usageRead).Get("/usage-events.csv", h.exportUsageEvents)
-	// The audit log exports itself. Same permission as the audit-log READ route
-	// (auth.PermAPIKeyRead — see the /v1/audit-log mount in router.go): the file
-	// is the same data, so gating it differently would either lock out operators
-	// who can already read it on screen or hand it to ones who can't.
+	// The audit log can be exported too. It needs the same permission as the
+	// audit-log read route: auth.PermAPIKeyRead (see the /v1/audit-log mount
+	// in router.go). The file is the same data. A different gate would either
+	// lock out operators who can already read it on screen, or give it to
+	// operators who cannot.
 	r.With(auditRead).Get("/audit-log.csv", h.exportAuditLog)
 	return r
 }
 
-// parseDateRange reads ?from / ?to off the request. Thin wrapper around
-// timefilter.ParseRange so exports share the same date-filter contract as
-// audit-log queries + usage queries — RFC3339 OR YYYY-MM-DD, both accepted
-// everywhere. Returns zero time.Time when missing.
+// parseDateRange reads ?from and ?to from the request. It wraps
+// timefilter.ParseRange, so exports share the date-filter contract of the
+// audit-log and usage queries: RFC3339 or YYYY-MM-DD, both accepted
+// everywhere. A missing value is a zero time.Time.
 //
-// The range is applied in SQL, by each store's StreamForExport. It used to be
-// applied in Go AFTER the page was fetched, which meant a filtered export still
-// walked every row in the tenant; nothing filters post-load any more.
+// Each store's StreamForExport applies the range in SQL. Nothing filters rows
+// after loading them, so a filtered export does not walk every row in the
+// tenant.
 func parseDateRange(r *http.Request) (from, to time.Time, err error) {
 	return timefilter.ParseRange(r, "from", "to")
 }
 
-// exportFilename is the download name, timestamped so re-exports don't clobber.
-// Built BEFORE the audit row so the row records the exact filename the operator
-// received — that string is how a file found later gets traced back to the
-// export that produced it.
+// exportFilename returns the download name, with a timestamp so a re-export
+// does not overwrite an earlier file. It is built before the audit row, so
+// the row records the exact filename the operator received. That string is
+// how a file found later is traced back to the export that produced it.
 func exportFilename(stem string) string {
-	// UTC stamp — must be stable/unambiguous, not vary by operator TZ.
+	// The stamp must be in UTC, so it is unambiguous and does not vary with
+	// the operator's time zone.
 	return fmt.Sprintf("%s-%s.csv", stem, time.Now().UTC().Format("20060102-150405")) //tz:ok
 }
 
@@ -177,12 +179,12 @@ func writeCSVHeaders(w http.ResponseWriter, r *http.Request, filename string) *c
 
 // extendExportWriteDeadline moves this response's write deadline to
 // exportTimeout + exportWriteGrace from now. The server's WriteTimeout (35 s,
-// cmd/hardcount/main.go) bounds every response's writes, so without this an
-// export was cut at 35 s, mid-file, although its route allows five minutes;
-// the SSE stream lifts the same deadline (webhook sse.go). It reaches the
-// connection through the middleware's writers, which all Unwrap. A writer
-// that cannot take a deadline is logged: such an export still works, but is
-// cut at the server's WriteTimeout.
+// cmd/hardcount/main.go) bounds every response's writes. Without this call,
+// an export would be cut at 35 s, mid-file, although its route allows five
+// minutes. The SSE stream lifts the same deadline (webhook sse.go). The call
+// reaches the connection through the middleware's writers, which all
+// Unwrap. A writer that cannot take a deadline is logged. Such an export
+// still works, but is cut at the server's WriteTimeout.
 func extendExportWriteDeadline(w http.ResponseWriter, r *http.Request) {
 	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(exportTimeout + exportWriteGrace)); err != nil {
 		slog.WarnContext(r.Context(), "csv export: could not extend the write deadline — an export longer than the server's WriteTimeout will be cut off",
@@ -190,35 +192,36 @@ func extendExportWriteDeadline(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// auditExport records a bulk data egress — and is the gate the export must pass
-// before it may stream a single byte.
+// auditExport records a bulk data egress. It is the gate an export must pass
+// before it streams a single byte.
 //
-// ORDER IS THE WHOLE POINT (and it is why this is not a defer):
+// The order is the point, and it is why this is not a defer:
 //
-//   - Emit-then-stream can only ever OVER-record: an export that is audited and
-//     then fails mid-file leaves a row for a file the operator never fully got.
-//     A reader can reconcile that against the EXPORT_INCOMPLETE marker.
-//   - Stream-then-emit UNDER-records, and that is unrecoverable. Killing the
-//     connection mid-stream (or a 5-minute timeout firing, or the process being
-//     restarted) means pages of customer PII have already left the building and
-//     the completion row is never written. audit_log would say nothing happened.
-//     In an append-only compliance log there is no second chance to write it.
+//   - Emit, then stream: this can only over-record. An export that is audited
+//     and then fails mid-file leaves a row for a file the operator never fully
+//     got. A reader can reconcile that against the EXPORT_INCOMPLETE marker.
+//   - Stream, then emit: this under-records, and that cannot be undone. If
+//     the connection dies mid-stream, a 5-minute timeout fires or the
+//     process restarts, pages of customer PII have already left Hardcount
+//     and the completion row is never written. audit_log would say nothing
+//     happened, and an append-only log gives no second chance to write it.
 //
-// So the row records the ATTEMPT — an operator asked this system to hand them
-// the tenant's customers/invoices/subscriptions/usage/audit log — which is the
-// fact a chain of custody actually needs. FAIL CLOSED: if the row cannot be
-// written, the handler returns 5xx and streams NOTHING. An export we cannot
-// record is an export we do not perform.
+// So the row records the attempt: an operator asked Hardcount for the
+// tenant's customers, invoices, subscriptions, usage or audit log. That is
+// the fact a chain of custody needs. It fails closed: if the row cannot be
+// written, the handler returns 5xx and streams nothing. An export Hardcount
+// cannot record is an export it does not perform.
 //
-// Own-tx: an export is a read, so there is no business transaction to join
-// (ADR-090's shared-fate LogInTx needs one). audit.Logger.Log detaches from the
-// caller's cancellation (context.WithoutCancel), so a client that hangs up the
-// instant the export starts still leaves the row behind.
+// The row is written on its own transaction. An export is a read, so there
+// is no business transaction to join (ADR-090's shared-fate LogInTx needs
+// one). audit.Logger.Log detaches from the caller's cancellation
+// (context.WithoutCancel). So a client that hangs up the moment the export
+// starts still leaves the row behind.
 //
-// The row deliberately does NOT carry a row count: the count is unknowable
-// before the first page is fetched, and a number we cannot honour is a lie in a
-// permanent record. resource_id is empty for the same reason — a bulk export has
-// no single subject.
+// The row has no row count, on purpose. The count is unknown before the first
+// page is fetched, and a number Hardcount cannot stand behind is a lie in a
+// permanent record. resource_id is empty for the same reason: a bulk export
+// has no single subject.
 func (h *exportsHandler) auditExport(r *http.Request, tenantID, resourceType, filename string, filters map[string]any) error {
 	return h.audit.Log(r.Context(), tenantID, domain.AuditActionExport, resourceType, "", "",
 		map[string]any{
@@ -228,10 +231,10 @@ func (h *exportsHandler) auditExport(r *http.Request, tenantID, resourceType, fi
 		})
 }
 
-// exportScope describes WHAT the export selected, for the audit row's metadata.
-// An empty date filter is recorded explicitly as "all" — "the operator took the
-// entire table" is precisely the fact worth having, and an absent key would read
-// as a missing detail rather than an unfiltered dump.
+// exportScope describes what the export selected, for the audit row's
+// metadata. An empty date filter is recorded as "all". "The operator took the
+// entire table" is the fact worth having, and a missing key would read as a
+// missing detail, not as an unfiltered dump.
 func exportScope(from, to time.Time) map[string]any {
 	if from.IsZero() && to.IsZero() {
 		return map[string]any{"date_range": "all"}
@@ -246,18 +249,17 @@ func exportScope(from, to time.Time) map[string]any {
 	return m
 }
 
-// csvSafe neutralizes spreadsheet (CSV) formula injection. A cell whose first
-// character is one of = + - @ TAB CR is interpreted as a formula by Excel,
-// Google Sheets, and LibreOffice — so a customer-controlled value like
-// "=HYPERLINK(...)" or "@SUM(...)" executes when the operator opens the export.
-// Prefixing such values with a single quote forces them to render as text.
-// Empty strings pass through. Applied to free-text, externally-controlled
-// columns (display names, external IDs, emails, codes, idempotency keys).
+// csvSafe neutralizes spreadsheet (CSV) formula injection. Excel, Google
+// Sheets and LibreOffice read a cell as a formula when its first character is
+// one of = + - @ TAB CR. So a customer-controlled value like "=HYPERLINK(...)"
+// or "@SUM(...)" runs when the operator opens the export. A single quote in
+// front of such a value makes it show as text. Empty strings pass through.
+// It is applied to free-text columns that outsiders control (display names,
+// external IDs, emails, codes, idempotency keys).
 //
-// The property being protected: the CSV is the artifact an operator hands an
-// AUDITOR. A file that executes code when opened is not evidence — and the
-// audit-log export makes this sharper still, because customer display names ride
-// into it through resource_label.
+// The CSV is what an operator hands an auditor, and a file that runs code
+// when opened is not evidence. The audit-log export makes this matter more,
+// because customer display names reach it through resource_label.
 func csvSafe(s string) string {
 	if s == "" {
 		return s
@@ -283,21 +285,22 @@ func flushAndContinue(cw *csv.Writer, w http.ResponseWriter) error {
 	return nil
 }
 
-// exportAbort makes a mid-stream failure visible IN the file. The HTTP
-// status is already 200 by the time a store error or ctx timeout hits
-// (headers went out with the first row), so the stream used to just
-// END — a silently truncated CSV indistinguishable from a complete
-// export, feeding partial books into whatever the operator reconciles
-// against. The trailing EXPORT_INCOMPLETE record is the honest,
-// machine-checkable signal (documented contract: a row whose first
-// cell is EXPORT_INCOMPLETE means discard the file and retry), plus a
-// server-side error log. Best-effort by construction: if the client
-// connection itself died, the marker write fails silently — that
-// client isn't reading anyway.
+// exportAbort makes a mid-stream failure visible in the file. By the time a
+// store error or a ctx timeout hits, the HTTP status is already 200, because
+// the headers went out with the first row. Without a marker, the stream would
+// just end. The cut-off CSV would look like a complete export, and feed
+// partial books into whatever the operator reconciles against.
 //
-// The audit row is already written by this point (auditExport runs before the
-// stream), so an aborted export still leaves evidence that data was requested
-// and partially handed over — which is the honest record of what happened.
+// So exportAbort writes a trailing EXPORT_INCOMPLETE record, a signal a
+// machine can check, and logs an error on the server. The documented
+// contract: a row whose first cell is EXPORT_INCOMPLETE means discard the
+// file and retry. The marker is best-effort by design: if the client
+// connection itself died, the write fails silently, and that client is not
+// reading anyway.
+//
+// auditExport runs before the stream, so the audit row is already written.
+// An aborted export still leaves the true record: data was requested and
+// partly handed over.
 func exportAbort(ctx context.Context, cw *csv.Writer, resource string, err error) {
 	slog.ErrorContext(ctx, "csv export aborted mid-stream — emitted EXPORT_INCOMPLETE marker",
 		"resource", resource, "error", err)
@@ -305,10 +308,10 @@ func exportAbort(ctx context.Context, cw *csv.Writer, resource string, err error
 	cw.Flush()
 }
 
-// exportAuditFailed answers a request whose audit row could not be written. No
-// CSV headers have been set and no bytes written, so this is a clean 500 — the
-// export simply does not happen. audit.Logger.Log has already logged the cause
-// and incremented hardcount_audit_write_errors_total.
+// exportAuditFailed answers a request whose audit row could not be written.
+// No CSV headers are set and no bytes are written yet, so this is a clean
+// 500, and the export does not happen. audit.Logger.Log has already logged
+// the cause and incremented hardcount_audit_write_errors_total.
 func exportAuditFailed(w http.ResponseWriter, r *http.Request, resourceType string, err error) {
 	slog.ErrorContext(r.Context(), "export REFUSED — its audit row could not be written (fail-closed)",
 		"resource", resourceType, "error", err)
@@ -375,11 +378,11 @@ func (h *exportsHandler) exportCustomers(w http.ResponseWriter, r *http.Request)
 		exportAbort(r.Context(), cw, "customers", err)
 		return
 	}
-	// Flush the final partial batch to the SOCKET. The periodic flush above only
-	// fires on an exportPageSize boundary, so without this an export smaller than
-	// one batch would never reach http.Flusher — and the deferred cw.Flush() only
-	// pushes the csv.Writer into the ResponseWriter, not the ResponseWriter onto
-	// the wire.
+	// Flush the last partial batch to the socket. The periodic flush above
+	// runs only on an exportPageSize boundary. Without this call, an export
+	// smaller than one batch would never reach http.Flusher. The deferred
+	// cw.Flush() only pushes the csv.Writer into the ResponseWriter, not the
+	// ResponseWriter onto the wire.
 	_ = flushAndContinue(cw, w)
 }
 
@@ -413,20 +416,22 @@ func (h *exportsHandler) exportInvoices(w http.ResponseWriter, r *http.Request) 
 		"total_amount_cents", "amount_due_cents", "amount_paid_cents",
 		"credits_applied_cents",
 		"billing_period_start", "billing_period_end",
-		// uncollectible_at sits beside its siblings: a written-off invoice that
-		// is later RECOVERED reaches status='paid', and without this column the
-		// row is byte-identical to one that was never written off. Bad-debt
-		// recovery is a distinct accounting event; the export was the only
-		// durable place an accountant could locate one, and it could not.
-		// tax_provider + tax_transaction_id are the RELIEF HATCH (ADR-111).
-		// Hardcount no longer reverses tax on write-off, so claiming bad-debt
-		// relief is the tenant's own conditioned claim (UK: 6 months + written
-		// off to a separate bad-debt account; CA/NY/TX: charged off for
-		// federal income tax purposes). Every other input those tests need is
-		// already here — status, tax_amount_cents, uncollectible_at, due_at,
-		// paid_at, amount_paid_cents. What was missing is whether Hardcount had
-		// ALREADY reversed at the provider, which is the one fact deciding
-		// whether the tenant's own claim would be a double claim.
+		// uncollectible_at sits beside its sibling dates. A written-off
+		// invoice that is later recovered reaches status='paid'. Without
+		// this column, its row is byte-identical to one never written off.
+		// Recovering bad debt is a distinct accounting event, and the export
+		// is the only lasting place an accountant can find one.
+		//
+		// tax_provider and tax_transaction_id are what the tenant needs to
+		// claim bad-debt tax relief itself (ADR-111). Hardcount does not
+		// reverse tax on a write-off, so the claim is the tenant's own, and
+		// has conditions (UK: 6 months, and written off to a separate
+		// bad-debt account; CA/NY/TX: charged off for federal income tax
+		// purposes). Every other input those tests need is already here:
+		// status, tax_amount_cents, uncollectible_at, due_at, paid_at and
+		// amount_paid_cents. These columns add whether Hardcount already
+		// reversed the tax at the provider. That one fact decides whether
+		// the tenant's own claim would be a double claim.
 		"tax_provider", "tax_transaction_id", "tax_reversed_at",
 		"issued_at", "due_at", "paid_at", "voided_at", "uncollectible_at",
 		"created_at",
@@ -470,11 +475,11 @@ func (h *exportsHandler) exportInvoices(w http.ResponseWriter, r *http.Request) 
 		exportAbort(r.Context(), cw, "invoices", err)
 		return
 	}
-	// Flush the final partial batch to the SOCKET. The periodic flush above only
-	// fires on an exportPageSize boundary, so without this an export smaller than
-	// one batch would never reach http.Flusher — and the deferred cw.Flush() only
-	// pushes the csv.Writer into the ResponseWriter, not the ResponseWriter onto
-	// the wire.
+	// Flush the last partial batch to the socket. The periodic flush above
+	// runs only on an exportPageSize boundary. Without this call, an export
+	// smaller than one batch would never reach http.Flusher. The deferred
+	// cw.Flush() only pushes the csv.Writer into the ResponseWriter, not the
+	// ResponseWriter onto the wire.
 	_ = flushAndContinue(cw, w)
 }
 
@@ -514,9 +519,9 @@ func (h *exportsHandler) exportSubscriptions(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// planIDs arrives pipe-joined from the query's aggregate — the store no
-	// longer hydrates every subscription's items just so the export can join
-	// their plan ids into one string.
+	// planIDs arrives pipe-joined from the query's aggregate. So the store
+	// does not load every subscription's items just to join their plan ids
+	// into one string.
 	n := 0
 	err = h.subscriptions.StreamForExport(r.Context(), tenantID, from, to, func(sub domain.Subscription, planIDs string) error {
 		if err := cw.Write([]string{
@@ -543,11 +548,11 @@ func (h *exportsHandler) exportSubscriptions(w http.ResponseWriter, r *http.Requ
 		exportAbort(r.Context(), cw, "subscriptions", err)
 		return
 	}
-	// Flush the final partial batch to the SOCKET. The periodic flush above only
-	// fires on an exportPageSize boundary, so without this an export smaller than
-	// one batch would never reach http.Flusher — and the deferred cw.Flush() only
-	// pushes the csv.Writer into the ResponseWriter, not the ResponseWriter onto
-	// the wire.
+	// Flush the last partial batch to the socket. The periodic flush above
+	// runs only on an exportPageSize boundary. Without this call, an export
+	// smaller than one batch would never reach http.Flusher. The deferred
+	// cw.Flush() only pushes the csv.Writer into the ResponseWriter, not the
+	// ResponseWriter onto the wire.
 	_ = flushAndContinue(cw, w)
 }
 
@@ -564,7 +569,7 @@ func (h *exportsHandler) exportUsageEvents(w http.ResponseWriter, r *http.Reques
 		respond.FromError(w, r, err, "export")
 		return
 	}
-	// Required range — this table is unbounded.
+	// The range is required, because this table has no bound.
 	if from.IsZero() || to.IsZero() {
 		respond.BadRequest(w, r, "usage-events export requires `from` and `to` query params (RFC3339)")
 		return
@@ -604,10 +609,11 @@ func (h *exportsHandler) exportUsageEvents(w http.ResponseWriter, r *http.Reques
 	cw := writeCSVHeaders(w, r, filename)
 	defer cw.Flush()
 
-	// provider_cost_* columns (ADR-079; cents, ADR-130 §3): the operator-warehouse margin
-	// join is the verified peer workflow (Metronome exports events with
-	// cost metadata for exactly this) — the in-app margin card covers the
-	// common case; the CSV keeps finance reconciliation possible.
+	// The provider_cost_* columns (ADR-079, in cents per ADR-130 §3) serve
+	// the margin join in an operator's own data warehouse. That is the
+	// checked peer workflow: Metronome exports events with cost metadata for
+	// this purpose. The in-app margin card covers the common case, and the
+	// CSV keeps finance reconciliation possible.
 	if err := cw.Write([]string{
 		"id", "customer_id", "meter_id",
 		"quantity", "timestamp",
@@ -651,55 +657,56 @@ func (h *exportsHandler) exportUsageEvents(w http.ResponseWriter, r *http.Reques
 		exportAbort(r.Context(), cw, "usage_events", err)
 		return
 	}
-	// Flush the final partial batch to the SOCKET. The periodic flush above only
-	// fires on an exportPageSize boundary, so without this an export smaller than
-	// one batch would never reach http.Flusher — and the deferred cw.Flush() only
-	// pushes the csv.Writer into the ResponseWriter, not the ResponseWriter onto
-	// the wire.
+	// Flush the last partial batch to the socket. The periodic flush above
+	// runs only on an exportPageSize boundary. Without this call, an export
+	// smaller than one batch would never reach http.Flusher. The deferred
+	// cw.Flush() only pushes the csv.Writer into the ResponseWriter, not the
+	// ResponseWriter onto the wire.
 	_ = flushAndContinue(cw, w)
 }
 
 // ---- Audit log ----
 
-// exportAuditLog streams the tenant's audit log as CSV — the compliance evidence
-// pack, produced SERVER-SIDE.
+// exportAuditLog streams the tenant's audit log as CSV: the compliance
+// evidence pack, built on the server.
 //
-// It replaces a dashboard Export button that paged /v1/audit-log in the browser
-// and stopped at 50,000 rows: a silent truncation of the evidence itself. The
-// operator got a file that looked complete, and nothing in it said otherwise.
-// audit.Logger.Stream applies no cap — the export is bounded by its filters and
-// nothing else.
+// audit.Logger.Stream applies no cap, so the export is bounded only by its
+// filters. A cap would silently cut the evidence itself, and the operator
+// would get a file that looks complete, with nothing in it saying otherwise.
 //
-// The export audits itself: the row is written BEFORE the stream begins, so it is
-// always in the LOG. "Who took a copy of the audit log" is the one question a
-// tamper-evidence system must never be unable to answer about itself.
+// The export audits itself. The row is written before the stream begins, so
+// it is always in the log. "Who took a copy of the audit log?" is the one
+// question a tamper-evidence system must always be able to answer about
+// itself.
 //
-// Whether it is in the FILE is a different claim, and a weaker one: an UNFILTERED
-// export contains its own row (the snapshot is taken after the write, newest
-// first, so it is the first data row) — but any filter that does not match it
-// excludes it, exactly as it would exclude any other row. A clock-scoped export
-// (?test_clock_id=) NEVER contains it: the export row is a wall-clock row with
-// NULL sim columns. That is correct behavior, not a hole — the row is in the log
-// either way — but the file is not self-certifying in general, and three places
-// used to say it was.
+// Whether the row is in the file is a different, weaker claim. An unfiltered
+// export contains its own row: the snapshot is taken after the write, newest
+// first, so the row is the first data row. But any filter that does not match
+// the row excludes it, as it would exclude any other row. A clock-scoped
+// export (?test_clock_id=) never contains it, because the export row is a
+// wall-clock row with NULL sim columns. That is correct, not a gap, since the
+// row is in the log either way. But in general the file does not certify
+// itself.
 func (h *exportsHandler) exportAuditLog(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	if tenantID == "" {
 		respond.Unauthorized(w, r, "missing tenant context")
 		return
 	}
-	// Same param names + parsing as the audit-log READ route (audit.Handler.list),
-	// so the dashboard's on-screen filters and its Export produce the same set.
+	// Use the param names and parsing of the audit-log read route
+	// (audit.Handler.list), so the dashboard's on-screen filters and its
+	// Export select the same rows.
 	dateFrom, dateTo, err := timefilter.ParseRange(r, "date_from", "date_to")
 	if err != nil {
 		respond.FromError(w, r, err, "export")
 		return
 	}
-	// The sim axis (ADR-090 §5) is part of the on-screen slice: an operator
-	// looking at one simulation and clicking Export must get THAT simulation,
-	// not the whole log. An export that silently dropped the clock filter would
-	// hand an auditor a file that looks like one clock's history and is actually
-	// every tenant action — the worst kind of wrong, because nothing in the file
+	// The sim axis (ADR-090 §5), the simulated time on test-clock rows, is
+	// part of the on-screen slice. An operator who looks at one simulation
+	// and clicks Export must get that simulation, not the whole log. An
+	// export that silently dropped the clock filter would hand an auditor a
+	// file that looks like one clock's history but holds every tenant
+	// action. That is the worst kind of wrong, because nothing in the file
 	// says so.
 	simFrom, simTo, err := timefilter.ParseRange(r, "sim_from", "sim_to")
 	if err != nil {
@@ -725,8 +732,8 @@ func (h *exportsHandler) exportAuditLog(w http.ResponseWriter, r *http.Request) 
 		"resource_id":   filter.ResourceID,
 		"action":        filter.Action,
 		"actor_id":      filter.ActorID,
-		// Recorded on the export's OWN audit row: "which slice left the
-		// building" is the question this row exists to answer.
+		// Recorded on the export's own audit row: "which slice was taken
+		// out?" is the question this row exists to answer.
 		"test_clock_id": filter.TestClockID,
 	} {
 		if v != "" {
@@ -749,12 +756,13 @@ func (h *exportsHandler) exportAuditLog(w http.ResponseWriter, r *http.Request) 
 	cw := writeCSVHeaders(w, r, filename)
 	defer cw.Flush()
 
-	// sim_effective_at / test_clock_id: a simulation's rows all share one
-	// wall-clock created_at (an advance settles everything at one moment), so in
-	// the CSV of a simulated tenant created_at cannot tell the reader WHEN, in
-	// the simulation, anything happened. These two columns are the only ones
-	// that can, and after ADR-086 teardown they are the only surviving record
-	// that the clock existed at all. Empty on wall-clock rows.
+	// sim_effective_at and test_clock_id: a simulation's rows all share one
+	// wall-clock created_at, because an advance settles everything at one
+	// moment. So in a simulated tenant's CSV, created_at cannot tell the
+	// reader when, in the simulation, anything happened. Only these two
+	// columns can. After teardown (ADR-086), they are the only surviving
+	// record that the clock existed at all. They are empty on wall-clock
+	// rows.
 	if err := cw.Write([]string{
 		"id", "created_at", "actor_type", "actor_id", "actor_name",
 		"action", "resource_type", "resource_id", "resource_label",
@@ -776,26 +784,25 @@ func (h *exportsHandler) exportAuditLog(w http.ResponseWriter, r *http.Request) 
 				metaJSON = string(b)
 			}
 		}
-		// csvSafe every column that is not a Hardcount-minted id or a closed
-		// vocabulary. resource_label carries customer display names and
-		// plan/subscription codes; actor_name is a customer's display name on
-		// customer-actor rows; metadata is a free-form bag.
+		// Run csvSafe on every column that is not an id Hardcount made or a
+		// closed vocabulary. resource_label carries customer display names
+		// and plan or subscription codes. actor_name is a customer's display
+		// name on customer-actor rows. metadata is a free-form bag.
 		//
-		// request_id is neutralized too, and deliberately so. It is
-		// server-minted TODAY (ADR-090 §6 replaced chi's middleware, which
-		// copied an inbound X-Request-Id verbatim) — but audit_log is
-		// APPEND-ONLY, so every row written before that change still carries
-		// whatever string its caller chose, including a live formula. The
-		// column cannot be cleaned retroactively; it can only be rendered
-		// safely.
+		// request_id is neutralized too, on purpose. Hardcount makes it on
+		// the server today (ADR-090 §6). Before that, chi's middleware
+		// copied an inbound X-Request-Id as it came. audit_log is
+		// append-only, so a row written before that change still carries
+		// whatever string its caller chose, a live formula included. The
+		// column cannot be cleaned afterwards. It can only be shown safely.
 		//
-		// ip_address gets the SAME treatment, for the SAME reason — an earlier
-		// version of this comment exempted it ("TrustedRealIP only ever yields a
-		// net.ParseIP-validated value"), which is an argument about what the code
-		// writes TODAY and therefore exactly the argument the append-only rule
-		// defeats. The log outlives its writers. csvSafe on a well-formed IP is a
-		// no-op (no address begins with = + - @), so the exemption bought nothing
-		// and cost the one guarantee that has to hold for a permanent record.
+		// ip_address gets the same treatment, for the same reason.
+		// TrustedRealIP only yields a value that net.ParseIP accepts, but
+		// that is an argument about what the code writes today, and the
+		// append-only rule defeats it: the log outlives its writers. csvSafe
+		// on a well-formed IP changes nothing (no address begins with
+		// = + - @). So an exemption would gain nothing, and lose the one
+		// guarantee that has to hold for a permanent record.
 		if err := cw.Write([]string{
 			e.ID,
 			e.CreatedAt.UTC().Format(time.RFC3339),

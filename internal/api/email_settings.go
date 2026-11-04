@@ -17,11 +17,11 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 )
 
-// Settings → Email: a read-only view of this server's email setup and a
+// Settings → Email: a read-only view of this server's email setup, and a
 // "Send test email" action. Email settings live in the server environment
-// (SMTP_*, the link base URLs), not in the database, so an operator could
-// only learn that email was off from a per-invoice notice or the Team tab.
-// This puts the whole picture on one page.
+// (SMTP_*, the link base URLs), not in the database. Without this page, an
+// operator would learn that email is off only from a per-invoice notice or
+// the Team tab. This page puts the whole picture in one place.
 
 // emailLinkEnv is one environment variable an email link is built from.
 type emailLinkEnv struct {
@@ -57,15 +57,15 @@ type emailSettingsHandler struct {
 	links              []emailLinkEnv
 	canEmailSetupLinks bool
 	canSendInvites     bool
-	// userEmail resolves the signed-in member's email; the test email only
-	// goes there, so this endpoint can't be used to mail arbitrary people.
+	// userEmail resolves the signed-in member's email. The test email goes
+	// only there, so this endpoint cannot be used to mail anyone else.
 	userEmail func(ctx context.Context, userID string) (string, error)
 	audit     auth.AuditWriter
 	timeout   time.Duration
 }
 
-// emailLinkEnvs reads the link env vars once at boot, the same values the
-// boot WARNs report.
+// emailLinkEnvs reads the link env vars once at boot: the same values the
+// boot warnings report.
 func emailLinkEnvs(getenv func(string) string) []emailLinkEnv {
 	set := func(k string) bool { return strings.TrimSpace(getenv(k)) != "" }
 	return []emailLinkEnv{
@@ -143,8 +143,8 @@ func (h *emailSettingsHandler) sendTest(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// The recipient is the actor's own address, already on the row as the
-	// actor; it is not repeated in metadata. audit is non-nil: router.go
-	// passes this handler to audit.MustWired.
+	// actor, so it is not repeated in metadata. audit is non-nil, because
+	// router.go passes this handler to audit.MustWired.
 	_ = h.audit.Log(ctx, tenantID, domain.AuditActionSend, "setting", "smtp", "SMTP test send",
 		map[string]any{"action": "test_email_sent"})
 	respond.JSON(w, r, http.StatusOK, map[string]string{"sent_to": to})
