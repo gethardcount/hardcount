@@ -18,8 +18,8 @@ import (
 // customerDetailHandler serves the per-customer overview on the operator
 // dashboard's Customer Detail page. The page lists a customer's invoices and
 // subscriptions through GET /v1/invoices?customer_id= and
-// GET /v1/subscriptions?customer_id=. The handler lives in the API package
-// because it crosses domain boundaries, so the domain packages stay
+// GET /v1/subscriptions?customer_id=. The handler crosses domain
+// boundaries, so it lives in the API package. That keeps the domain packages
 // independent.
 //
 // It is an operator route (PermCustomerRead) under /v1/customers/{id}/*. It

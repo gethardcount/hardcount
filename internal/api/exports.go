@@ -39,9 +39,10 @@ import (
 //
 // The single snapshot is what makes an export correct, not an optimization.
 // LIMIT/OFFSET pages over a newest-first order, each in its own transaction,
-// would duplicate and skip rows. A row inserted during the export enters at
-// the head and shifts every later row down by one, so each page-boundary row
-// is written twice, and a delete skips one. The usage export has a
+// would duplicate and skip rows. A row inserted during such an export would
+// enter at the head and shift every later row down by one. Each
+// page-boundary row would then be written twice, and a delete would skip
+// one. The usage export has a
 // five-minute timeout because it streams many rows, and concurrent ingest is
 // certain in that window. A duplicated usage row in a finance CSV reads as
 // usage that did not happen. Under one MVCC snapshot, this cannot arise
@@ -204,7 +205,8 @@ func extendExportWriteDeadline(w http.ResponseWriter, r *http.Request) {
 //     the connection dies mid-stream, a 5-minute timeout fires or the
 //     process restarts, pages of customer PII have already left Hardcount
 //     and the completion row is never written. audit_log would say nothing
-//     happened, and an append-only log gives no second chance to write it.
+//     happened, and an append-only compliance log gives no second chance to
+//     write it.
 //
 // So the row records the attempt: an operator asked Hardcount for the
 // tenant's customers, invoices, subscriptions, usage or audit log. That is
@@ -219,8 +221,8 @@ func extendExportWriteDeadline(w http.ResponseWriter, r *http.Request) {
 // starts still leaves the row behind.
 //
 // The row has no row count, on purpose. The count is unknown before the first
-// page is fetched, and a number Hardcount cannot stand behind is a lie in a
-// permanent record. resource_id is empty for the same reason: a bulk export
+// page is fetched, and a number Hardcount cannot know to be true is a lie in
+// a permanent record. resource_id is empty for the same reason: a bulk export
 // has no single subject.
 func (h *exportsHandler) auditExport(r *http.Request, tenantID, resourceType, filename string, filters map[string]any) error {
 	return h.audit.Log(r.Context(), tenantID, domain.AuditActionExport, resourceType, "", "",
@@ -424,14 +426,18 @@ func (h *exportsHandler) exportInvoices(w http.ResponseWriter, r *http.Request) 
 		//
 		// tax_provider and tax_transaction_id are what the tenant needs to
 		// claim bad-debt tax relief itself (ADR-111). Hardcount does not
-		// reverse tax on a write-off, so the claim is the tenant's own, and
-		// has conditions (UK: 6 months, and written off to a separate
-		// bad-debt account; CA/NY/TX: charged off for federal income tax
-		// purposes). Every other input those tests need is already here:
-		// status, tax_amount_cents, uncollectible_at, due_at, paid_at and
-		// amount_paid_cents. These columns add whether Hardcount already
-		// reversed the tax at the provider. That one fact decides whether
-		// the tenant's own claim would be a double claim.
+		// reverse tax on a write-off, so the claim is the tenant's own, and it
+		// has conditions. In the UK, the debt must have stayed unpaid for 6
+		// months and be written off to a separate bad-debt account. In CA, NY
+		// and TX, it must be charged off for federal income tax purposes.
+		// Every other input those tests need is already here: status,
+		// tax_amount_cents, uncollectible_at, due_at, paid_at and
+		// amount_paid_cents.
+		//
+		// tax_reversed_at adds whether Hardcount already reversed the tax at
+		// the provider, as it did for invoices written off before ADR-111.
+		// That one fact decides whether the tenant's own claim would be a
+		// double claim.
 		"tax_provider", "tax_transaction_id", "tax_reversed_at",
 		"issued_at", "due_at", "paid_at", "voided_at", "uncollectible_at",
 		"created_at",
@@ -796,13 +802,14 @@ func (h *exportsHandler) exportAuditLog(w http.ResponseWriter, r *http.Request) 
 		// whatever string its caller chose, a live formula included. The
 		// column cannot be cleaned afterwards. It can only be shown safely.
 		//
-		// ip_address gets the same treatment, for the same reason.
-		// TrustedRealIP only yields a value that net.ParseIP accepts, but
-		// that is an argument about what the code writes today, and the
-		// append-only rule defeats it: the log outlives its writers. csvSafe
-		// on a well-formed IP changes nothing (no address begins with
-		// = + - @). So an exemption would gain nothing, and lose the one
-		// guarantee that has to hold for a permanent record.
+		// ip_address gets the same treatment, for the same reason. An
+		// exemption would rest on "TrustedRealIP only ever yields a
+		// net.ParseIP-validated value". That is an argument about what the
+		// code writes today, and the append-only rule defeats it: the log
+		// outlives its writers. csvSafe on a well-formed IP changes nothing
+		// (no address begins with = + - @). So an exemption would gain
+		// nothing, and lose the one guarantee that has to hold for a
+		// permanent record.
 		if err := cw.Write([]string{
 			e.ID,
 			e.CreatedAt.UTC().Format(time.RFC3339),

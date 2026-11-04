@@ -7,17 +7,17 @@ import "strings"
 //
 // One central table states, for every mutating route in the live chi route
 // table, where that route's audit evidence comes from. Coverage is declared,
-// not inferred by a catch-all middleware. A middleware that infers the
-// action and resource from the URL writes false permanent rows into an
-// append-only compliance log. It also sees no route outside the block it is
-// mounted on (ADR-090, RC1 and RC2).
+// not inferred by a catch-all middleware. Such a middleware would infer the
+// action and resource from the URL, and so write false permanent rows into
+// an append-only compliance log (ADR-090 RC2). It would also miss every
+// route outside the /v1 block it is mounted on (RC1).
 //
 // Each route has one of two kinds of coverage:
 //
 //   - explicit: the route emits a real, typed audit row. That is a LogInTx
-//     emission on the business transaction, or a Logger.Log on its own
-//     transaction where a route has no business transaction. Every entry
-//     below was checked by reading the emitting code.
+//     emission on the business transaction, or a residual Logger.Log on its
+//     own transaction, on a route not yet moved to LogInTx (ADR-090). Every
+//     entry below was checked by reading the emitting code.
 //   - exempt: the route writes no audit row, on purpose. The reason comes
 //     from a closed enum, and the note records why, plus any accepted loss.
 //
@@ -174,11 +174,11 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	// --- machine ingest -------------------------------------------------
 	// Accepted loss, for all four: "which credential ingested this event"
 	// cannot be recovered, because usage_events has no key_id column. The
-	// events tables record what was ingested, but not by whom. Revisit this
-	// at the first billing dispute that turns on provenance. The fix is a
-	// key_id column on usage_events, one per event, not a per-request audit
-	// row. At ingest volumes, one audit row per call would outweigh the
-	// events themselves.
+	// events tables record what was ingested, but not by whom. Close this
+	// loss at the first billing dispute that turns on provenance. The fix is
+	// a key_id column on usage_events, so each event records the credential
+	// that sent it, not a per-request audit row. At ingest volumes, one audit
+	// row per call would outweigh the events themselves.
 	{"POST", "/v1/usage-events"}:       exempt(reasonMachineIngest, "High-volume metering ingest (~1000/s); usage_events IS the record, and a row per event would double the write volume of the hottest path. ACCEPTED LOSS, stated precisely: until this PR the retired catch-all wrote a generic 'create usage_event' row per REQUEST, so these routes DO lose audit_log rows they were getting — what is lost with them is (a) WHICH CREDENTIAL ingested an event (usage_events carries no key_id) and (b) the request-level trail. The events themselves, their timestamps and their origin tag remain. Closure trigger: a billing dispute or an injected-usage incident → stamp key_id at ingest (plumb the fact; no heuristics)."),
 	{"POST", "/v1/usage-events/batch"}: exempt(reasonMachineIngest, "Batch form of the same ingest. Same accepted loss."),
 	// Backfill is not exempt, on purpose: it is an operator action on the
@@ -360,8 +360,8 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 //     the dashboard (every page load of every table). The noise would make
 //     the audit log unreadable. The same volume argument keeps usage ingest
 //     exempt above.
-//   - Revisit this when a design partner or an auditor asks for evidence of
-//     PII reads (SOC 2 CC6.x-style "who accessed customer records"). The
+//   - Close this loss when a design partner or an auditor asks for evidence
+//     of PII reads (SOC 2 CC6.x-style "who accessed customer records"). The
 //     answer then is a read trail built from the access log, grouped per
 //     session or actor, not one audit_log row per GET.
 //

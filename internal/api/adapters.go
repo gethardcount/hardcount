@@ -225,7 +225,7 @@ func (a *invoiceWriterAdapter) CreateInvoiceWithLineItemsTx(ctx context.Context,
 	return a.CreateWithLineItemsTx(ctx, tx, tenantID, inv, items)
 }
 
-// creditGrantAdapter bridges credit.Service → creditnote.CreditGranter.
+// creditGrantAdapter implements creditnote.CreditGranter over credit.Service.
 type creditGrantAdapter struct {
 	svc *credit.Service
 }
@@ -252,8 +252,8 @@ func (a *creditGrantAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.T
 
 // LockCommitGrantForReliefTx and RetireCommitSliceForReliefTx (below) pass
 // the relief pair to credit.Service, on the credit note's coordinator
-// transaction. A relief credit note refunds a paid prepaid commit and
-// retires its unused credits (ADR-080).
+// transaction. A relief credit note refunds part or all of a paid prepaid
+// commit by retiring credits the customer has not used (ADR-080).
 func (a *creditGrantAdapter) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (int64, int64, int64, bool, error) {
 	return a.svc.LockCommitGrantForReliefTx(ctx, tx, tenantID, invoiceID)
 }
@@ -266,7 +266,8 @@ func (a *creditGrantAdapter) RetireCommitSliceForReliefTx(ctx context.Context, t
 	return res.RemainingAfterCents, nil
 }
 
-// creditNoteListerAdapter bridges creditnote.Service → invoice.CreditNoteLister.
+// creditNoteListerAdapter implements invoice.CreditNoteLister over
+// creditnote.Service.
 type creditNoteListerAdapter struct {
 	svc *creditnote.Service
 }
@@ -347,8 +348,8 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 // classifyDunningRetryResult is the one rule for which retry results use up
 // a dunning attempt. These results count:
 //   - a decline Stripe returned (*payment.PaymentError with Unknown=false);
-//   - no card to charge, counted so a card-less invoice reaches the end of
-//     its dunning run (ADR-060);
+//   - no card to charge, counted so a card-less invoice reaches the final
+//     action of its dunning run (ADR-060);
 //   - a card the bank refused for good, or whose payment it wants the
 //     customer to confirm;
 //   - an amount below Stripe's minimum charge (domain.ErrBelowMinimumCharge),
@@ -362,7 +363,8 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 // run the final action with no final charge.
 //
 // The rule sits here, at the boundary, so no call site decides it alone.
-// Fixing it one call site at a time took three fixes (#940, #978, #1302).
+// The same class of bug was fixed one call site at a time, three times
+// (#940, #978, #1302).
 func classifyDunningRetryResult(ctx context.Context, invoiceID string, err error) error {
 	// ErrPaymentInFlight passes: Stripe was asked and a PaymentIntent exists,
 	// so the attempt counts and the run waits for its outcome (#1289).
@@ -705,8 +707,9 @@ type dunningRunStarter interface {
 // StartDunning maps that ErrNotFound to InvalidState, so an optional feature
 // left unconfigured never fails the money-path sweep. A tenant in either
 // state gets no automatic retries for a missing card, as it gets none for a
-// declined card. So the sweep, which runs every tick, does not log a false
-// error for every stalled invoice. A real error (the database is down, for
+// declined card. Turning both cases into a no-op means the sweep, which runs
+// every tick, does not report a false error for every stalled invoice. A
+// real error (the database is down, for
 // example) is not InvalidState, and still returns as a sweep error.
 type dunningStarterAdapter struct {
 	dunning dunningRunStarter
@@ -822,7 +825,7 @@ func (a *invoiceAuditStampsAdapter) ListByResource(ctx context.Context, tenantID
 	// transition stamps the join wants. Such a row then shows bare rather
 	// than wrong. This is accepted: 100 audit rows on one invoice means
 	// about 90 operator sends or exports. If a real invoice ever gets there,
-	// switch to a query filtered by Action.
+	// revisit this with a query filtered by Action.
 	entries, _, err := a.logger.Query(ctx, tenantID, audit.QueryFilter{
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
@@ -865,7 +868,8 @@ func (a *subscriptionInvoiceLabelAdapter) InvoiceNumber(ctx context.Context, ten
 	return inv.InvoiceNumber, nil
 }
 
-// dunningTimelineAdapter bridges dunning.Store → invoice.DunningTimelineFetcher.
+// dunningTimelineAdapter implements invoice.DunningTimelineFetcher over
+// dunning.Store.
 type dunningTimelineAdapter struct {
 	store *dunning.PostgresStore
 }
@@ -974,7 +978,7 @@ func (a *invoiceEmailEventsAdapter) ListByInvoice(ctx context.Context, tenantID,
 // emailSendFailure maps a failed outbox row's stored error to a send failure
 // that the activity line names in plain words (activity.SendFailure*). The
 // stored error is the dispatcher's hErr.Error(), which keeps each sentinel's
-// own message. So matching a sentinel's text is an exact key into the email
+// own message. So matching a sentinel's text is an exact key into this
 // package's own errors. Any other error has no plain-words name, and stays in
 // the server's records.
 func emailSendFailure(status, lastError string) string {
@@ -1063,8 +1067,8 @@ func canEmailSetupLinks(smtpConfigured bool, paymentUpdateURL string) bool {
 // The link goes to the SPA with a token, not straight to Stripe Checkout.
 // The SPA checks the customer-scoped token, shows "for invoice X, $Y", and
 // only then creates a Checkout session. That suits a link the customer may
-// click days after it is sent, and the operator can invalidate tokens at any
-// time.
+// click days after it is sent: the operator can invalidate tokens at any
+// time, and the customer sees the invoice before reaching Stripe.
 type noPaymentMethodNotifierAdapter struct {
 	email            paymentSetupEmailSender
 	customerEmail    *customerEmailFetcherAdapter
@@ -1172,8 +1176,8 @@ func (a *prorationTaxApplierAdapter) ApplyTaxToLineItems(ctx context.Context, te
 		return subscription.ProrationTaxResult{}, err
 	}
 	return subscription.ProrationTaxResult{
-		// One assignment carries every tax fact (see domain/tax_facts.go),
-		// so a field-by-field copy cannot drop one.
+		// One assignment carries every tax fact (see domain/tax_facts.go). A
+		// field-by-field copy here could drop a fact. One assignment cannot.
 		TaxFacts:      r.TaxFacts,
 		SubtotalCents: r.SubtotalCents,
 		DiscountCents: r.DiscountCents,
@@ -1210,8 +1214,8 @@ func (a *pmCustomerLookupAdapter) GetForSetupLink(ctx context.Context, tenantID,
 // ReportBounce with (tenantID, email, reason). This adapter finds the
 // customers with that email through the blind index: a keyed hash of the
 // address, so an encrypted email can still be found by exact match. It then
-// sets email_status on every matching customer in that tenant. Two customers
-// can share an email, which is rare, and then both are marked.
+// sets email_status on every matching customer in that tenant. Several
+// customers can share an email, which is rare, and then all are marked.
 //
 // It lives in internal/api so email does not import customer, which keeps
 // the layers coupled one way only.
@@ -1249,11 +1253,11 @@ func (a *bounceReporterAdapter) ReportBounce(ctx context.Context, tenantID, emai
 // SuppressBounced and SuppressComplained (below) satisfy
 // email.RecipientSuppressor for the Postmark webhook (ADR-098). They find
 // customers through the blind index, as ReportBounce does, but they return
-// their errors. A passing database failure can then answer 5xx, and
-// Postmark's redelivery runs the writes again, which are idempotent. Zero
-// matches is harmless: the address may be a CC alias that was never a
-// customer, which is only logged (ADR-082). So is a store-level ErrNotFound,
-// when the customer was deleted between the lookup and the write.
+// their errors. A transient database failure then makes the webhook answer
+// 5xx, and Postmark's redelivery runs the idempotent writes again. Zero
+// matches is harmless, and is only logged (ADR-082): the address may be a CC
+// alias that was never a customer. A store-level ErrNotFound is harmless
+// too, when the customer was deleted between the lookup and the write.
 func (a *bounceReporterAdapter) SuppressBounced(ctx context.Context, tenantID, email, reason string) error {
 	return a.suppress(ctx, tenantID, email, reason, false)
 }
@@ -1923,9 +1927,9 @@ type usageThresholdReader interface {
 //   - where the customer's other subscriptions stopped covering a meter in
 //     the period.
 //
-// Then, in one more transaction, it reads the prices of each plan of the
-// period at its pin of the period, in the subscription's own time domain
-// (ADR-130 §4), each with whether its pin had passed. From the meters the
+// Then, in one more transaction, it reads each plan's prices at the plan's
+// pin of the period, in the subscription's own time domain (ADR-130 §4).
+// Each set of prices records whether its pin had passed. From the meters the
 // plans price at their pins, it builds the period's usage windows, the same
 // ones the close uses (billing.PeriodPlan.UsageWindows).
 //
@@ -2058,7 +2062,7 @@ func (a customerCurrencyFactsAdapter) CustomerCurrencyFacts(ctx context.Context,
 	return profile, plans, nil
 }
 
-// heldReliefIssuerAdapter bridges creditnote.Service to
+// heldReliefIssuerAdapter adapts creditnote.Service to
 // invoice.HeldReliefIssuer: finalize issues the relief notes held on a draft
 // on its own transaction, and runs their after-commit steps once it commits.
 type heldReliefIssuerAdapter struct {
