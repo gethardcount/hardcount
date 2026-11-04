@@ -25,7 +25,7 @@ original text.
 
 ### Changed
 
-- **Generated code nothing used is deleted.** `make gen` now writes only the dashboard's orval hooks and types. The Go types in `internal/api/generated`, `web-v2/src/lib/api.gen.ts` and its generator `openapi-typescript` are gone, and `web-v2/public/openapi.yaml` is no longer committed. The dashboard still serves `/openapi.yaml`. No API change. ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM))
+- **Generated code nothing used is deleted.** `make gen` now writes only the dashboard's orval hooks and types. The Go types in `internal/api/generated`, `web-v2/src/lib/api.gen.ts` and its generator `openapi-typescript` are gone, and `web-v2/public/openapi.yaml` is no longer committed. The dashboard still serves `/openapi.yaml`. No API change. ([#1604](https://github.com/gethardcount/hardcount/pull/1604))
 - **The user docs read more clearly.** About 170 places across the concept pages, guides, API pages, self-host pages, runbooks and the API reference's descriptions: dense sentences split, terms defined where they are first used, and one name for each thing (the reconciler, the charge hold, a lost result, a spend threshold, a usage-only key, an account). Facts are unchanged. ([#1585](https://github.com/gethardcount/hardcount/pull/1585))
 
 ### Fixed
