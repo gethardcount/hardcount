@@ -941,6 +941,9 @@ func (m *memStore) ListWithThresholds(ctx context.Context, _ bool, _ string, _ i
 	return out, nil
 }
 
+// hydrateItems returns a subscription's items in the real store's order
+// (created_at, then id), so a check that walks them answers the same way
+// on every run.
 func (m *memStore) hydrateItems(subID string) []domain.SubscriptionItem {
 	var out []domain.SubscriptionItem
 	for _, it := range m.items {
@@ -948,6 +951,12 @@ func (m *memStore) hydrateItems(subID string) []domain.SubscriptionItem {
 			out = append(out, it)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
 }
 

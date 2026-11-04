@@ -1200,27 +1200,16 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 			crossIntervalSwap = oi != ni
 		}
 	}
-	atomic := h.invoices != nil && (wantProration || crossIntervalSwap)
 	var result ItemChangeResult
-	if atomic {
-		var err error
+	var err error
+	if h.invoices != nil && (wantProration || crossIntervalSwap) {
 		result, err = h.atomicUpdateItemWithProration(ctx, tenantID, subID, itemID, input)
-		if errors.Is(err, errAtomicNotApplicable) {
-			// UpdateItemTx refuses a scheduled change, which
-			// svc.UpdateItem below writes.
-			atomic = false
-		} else if err != nil {
-			respond.FromError(w, r, err, "subscription item")
-			return
-		}
-	}
-	if !atomic {
-		var err error
+	} else {
 		result, err = h.svc.UpdateItem(ctx, tenantID, subID, itemID, input)
-		if err != nil {
-			respond.FromError(w, r, err, "subscription item")
-			return
-		}
+	}
+	if err != nil {
+		respond.FromError(w, r, err, "subscription item")
+		return
 	}
 
 	// Audit the item change after its proration, so the outcome (proration
@@ -1560,8 +1549,7 @@ func (h *Handler) addProrationDays(ctx context.Context, tenantID string, sub dom
 // atomicUpdateItemWithProration mirrors atomicAddItemWithProration for
 // the UpdateItem path: write the item change and its proration on one
 // tenant transaction, then run the steps outside the database after the
-// commit. Returns errAtomicNotApplicable for a scheduled change, which the
-// caller writes with svc.UpdateItem.
+// commit.
 //
 // The proration is priced from result.pricedFrom: the subscription and the
 // item as UpdateItemTx read them under the subscription row lock (#1270).
