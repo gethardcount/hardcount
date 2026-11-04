@@ -18,7 +18,7 @@ import (
 // customer would be paid back twice. The handler refuses each top-level split
 // field with a 422 naming it, before the service runs.
 func TestCreateCommitRelief_TopLevelSplitRefused(t *testing.T) {
-	srv := NewHandler(nil).Routes()
+	srv := NewHandler(nil, HandlerDeps{}).Routes()
 	for _, c := range []struct{ field, value string }{
 		{"out_of_band_amount_cents", `5000`},
 		{"refund_amount_cents", `5000`},

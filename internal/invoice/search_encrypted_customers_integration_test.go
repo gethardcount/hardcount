@@ -51,7 +51,7 @@ func TestListInvoices_SearchByCustomerWithEncryption(t *testing.T) {
 				t.Fatalf("create other invoice: %v", err)
 			}
 
-			routes := NewHandler(r.svc, r.customers, r.settings).Routes()
+			routes := NewHandler(r.svc, r.customers, r.settings, HandlerDeps{}).Routes()
 			search := func(t *testing.T, q string) []string {
 				t.Helper()
 				req := httptest.NewRequest(http.MethodGet, "/?search="+url.QueryEscape(q), nil)

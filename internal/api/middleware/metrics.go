@@ -48,14 +48,14 @@ var (
 		},
 	)
 
-	// idempotencyCacheErrors counts idempotency-layer DB failures by stage.
-	// None of them runs a handler twice:
+	// idempotencyCacheErrors counts idempotency-layer database failures by
+	// stage. None of them runs a handler twice:
 	//   - reserve: the key could not be claimed, so the request was refused
 	//     with a retryable 503 and the handler did not run.
-	//   - finalize: the handler ran but its response was not stored; the key
-	//     stays pending and retries with it get 409.
-	//   - release: a 409/422 (or an ingest 5xx) could not free the key; it
-	//     stays pending and retries with it get 409 instead of running again.
+	//   - finalize: the handler ran but its response was not stored. The key
+	//     stays pending, and retries with it get 409.
+	//   - release: a 409 or 422 (or an ingest 5xx) could not free the key. It
+	//     stays pending, and retries with it get 409 instead of running again.
 	// A sustained rate means clients are being refused or stuck on 409s.
 	idempotencyCacheErrors = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -83,9 +83,9 @@ var (
 		prometheus.HistogramOpts{
 			Name: "hardcount_billing_cycle_duration_seconds",
 			Help: "Duration of billing cycle runs in seconds.",
-			// A tick bills everything due (P27), so a busy billing day runs
-			// for hours. Buckets reach 4h; capped at 300s, histogram_quantile
-			// would report 300 for any long tick.
+			// A tick bills everything due (ADR-006, amendment P27), so a busy
+			// billing day runs for hours. The buckets reach 4h: capped at
+			// 300s, histogram_quantile would report 300 for any long tick.
 			Buckets: []float64{0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200, 14400},
 		},
 	)
@@ -280,12 +280,14 @@ func RecordLeaderLeaseLost(role, reason string) {
 }
 
 // InitLeaderLeaseLost exports hardcount_leader_lease_lost_total{role,
-// reason="panicked"} at 0 for each role, at boot. The page row is
+// reason="panicked"} at 0 for each role, at boot. The alert that pages is
 // increase(...[1h]) > 0, and a series first exported at 1 has no earlier
-// sample, so the first panicked tick after a start never paged. Prometheus:
-// export a default value such as 0 for any time series you know may exist.
-// Only "panicked" is created: a heartbeat_timeout series created now would
-// page on one timeout, which waits for the heartbeat fix (RL-F2).
+// sample. Without the 0, the first panicked tick after a start would never
+// page. Prometheus advises exporting a default value, such as 0, for any time
+// series you know may exist. Only "panicked" is created. A heartbeat_timeout
+// series created now would page on one timeout, and that waits for the
+// heartbeat fix, RL-F2. ADR-114 records the same rule in its amendment
+// 2026-10-19, "a panic stops one step", item 6.
 func InitLeaderLeaseLost(roles ...string) {
 	for _, role := range roles {
 		leaderLeaseLost.WithLabelValues(role, "panicked")
@@ -302,11 +304,12 @@ type LeaderStatusRow struct {
 	Paused             bool
 }
 
-// leaderStatusCollector exposes leader_leases as gauges on every scrape —
-// a query per scrape, not a cache, because a cached "last tick 30s ago"
-// is exactly the lie an operator alerts on. hardcount_leader_last_tick_age_seconds
-// is the cluster fact (WHEN did the role last finish anywhere); the
-// per-replica hardcount_scheduler_last_run_timestamp_seconds only says this
+// leaderStatusCollector exposes leader_leases as gauges, with a query on
+// every scrape. It does not cache, because a cached "last tick 30s ago" is
+// exactly the false value an operator alerts on.
+// hardcount_leader_last_tick_age_seconds is the cluster fact: when the role
+// last finished a tick on any replica. The per-replica
+// hardcount_scheduler_last_run_timestamp_seconds only says that this
 // replica's loop is alive.
 type leaderStatusCollector struct {
 	query   func(context.Context) ([]LeaderStatusRow, error)
@@ -316,9 +319,9 @@ type leaderStatusCollector struct {
 	scrapeE *prometheus.Desc
 }
 
-// RegisterLeaderStatus wires the leader_status collector. Call once at
-// boot; a second call panics (duplicate registration), which is the right
-// outcome for a double-wire.
+// RegisterLeaderStatus wires the leader_status collector. Call it once, at
+// boot. A second call panics on the duplicate registration, which is the
+// right outcome for wiring it twice.
 func RegisterLeaderStatus(query func(context.Context) ([]LeaderStatusRow, error)) {
 	prometheus.MustRegister(&leaderStatusCollector{
 		query:   query,
@@ -458,9 +461,9 @@ func RecordWebhookOutboxEnqueueFailure(eventType string) {
 	webhookOutboxEnqueueFailures.WithLabelValues(eventType).Inc()
 }
 
-// RecordDunningRun records a processed dunning run outcome ("succeeded" or
-// "failed"). The outcome split backs the runbook's dunning-machinery alert
-// on {outcome="failed"} — without it, failed runs had zero metric visibility.
+// RecordDunningRun records the outcome of a processed dunning run
+// ("succeeded" or "failed"). The runbook's dunning-machinery alert on
+// {outcome="failed"} needs this split, or failed runs would show in no metric.
 func RecordDunningRun(outcome string) {
 	dunningRunsProcessed.WithLabelValues(outcome).Inc()
 }
@@ -475,11 +478,11 @@ func RecordAutoChargeRetry(result string) {
 	autoChargeRetries.WithLabelValues(result).Inc()
 }
 
-// RecordReconcilerSweep records one recovery-reconciler sweep: a 'run' tick
-// (always, so operators can alert on a reconciler that stops running), plus the
-// items advanced and per-row errors this tick. `mode` is "live"/"test".
-// Powers per-reconciler dashboards/alerts (e.g. a stuck tax-reversal backlog) —
-// previously only auto-charge was metered.
+// RecordReconcilerSweep records one recovery-reconciler sweep. It always
+// counts a 'run', so operators can alert on a reconciler that stops running.
+// It also adds the items advanced and the per-row errors of this tick. mode
+// is "live" or "test". The counts feed dashboards and alerts per reconciler,
+// such as one for a stuck tax-reversal backlog.
 func RecordReconcilerSweep(reconciler, mode string, advanced, errs int) {
 	reconcilerSweeps.WithLabelValues(reconciler, mode, "run").Inc()
 	if advanced > 0 {
@@ -500,25 +503,24 @@ func RecordScheduledCleanup(table string, rows int) {
 	scheduledCleanupRows.WithLabelValues(table).Add(float64(rows))
 }
 
-// unmatchedRoute is the path label for any request chi did not route to a
-// registered pattern (404/405 at the root, unknown verbs). One constant, so
-// a scanner walking /wp-admin, /.env, /phpmyadmin... creates ONE series, not
-// one per probe. Same word audit_detector.go uses for the same situation.
+// unmatchedRoute is the path label for any request that chi did not route to
+// a registered pattern: a 404 or 405 at the root, or an unknown verb. It is
+// one constant, so a scanner walking /wp-admin, /.env, /phpmyadmin and so on
+// creates one series, not one per probe. audit_detector.go uses the same word
+// for the same case.
 const unmatchedRoute = "unmatched"
 
-// routeLabel returns the chi ROUTE PATTERN for the request (e.g.
-// /v1/customers/{id}) — a closed set: registered patterns, one "prefix/*"
-// per Mount, and unmatchedRoute. It must be read synchronously after
-// next.ServeHTTP, while the *chi.Context is still checked out (chi puts it
-// back to the pool only after the mux handler returns); router.go's
-// requestLogger and audit_detector.go already read it this way.
+// routeLabel returns the chi route pattern for the request, such as
+// /v1/customers/{id}. The set is closed: the registered patterns, one
+// "prefix/*" per Mount, and unmatchedRoute. Read it synchronously after
+// next.ServeHTTP, while the *chi.Context is still checked out. chi puts it
+// back in the pool only after the mux handler returns. router.go's
+// requestLogger and audit_detector.go read it the same way.
 //
-// Why not the raw path: client_golang never evicts vec children, so every
-// distinct label value is ~2 KB of heap for the life of the process. The
-// previous path heuristic (rewrite hc_-prefixed or >20-char segments)
-// left every other client-chosen path — every 404 probe — as its own
-// series: attacker-controlled memory growth, measured at 900 probes → 900
-// series.
+// The label is never the raw path. client_golang never evicts vec children,
+// so every distinct label value holds about 2 KB of heap for the life of the
+// process. The raw path would give every client-chosen path, such as each
+// 404 probe, its own series: memory growth that an attacker controls.
 func routeLabel(r *http.Request) string {
 	if rctx := chi.RouteContext(r.Context()); rctx != nil {
 		if p := rctx.RoutePattern(); p != "" {
@@ -528,8 +530,9 @@ func routeLabel(r *http.Request) string {
 	return unmatchedRoute
 }
 
-// methodLabel bounds the method axis to the verbs chi routes plus "other";
-// the method is client-chosen text and was the second unbounded label.
+// methodLabel bounds the method label to the verbs chi routes, plus "other".
+// The method is text the client chooses, so without this bound it would be a
+// second unbounded label.
 func methodLabel(m string) string {
 	switch m {
 	case http.MethodConnect, http.MethodDelete, http.MethodGet, http.MethodHead,
@@ -542,8 +545,6 @@ func methodLabel(m string) string {
 
 // schedulerLastRunTimestamp backs the runbook's "scheduler is alive" alert:
 // `time() - hardcount_scheduler_last_run_timestamp_seconds > 2 * interval`.
-// Pre-2026-07-06 the runbook told operators to alert on scheduler last-run
-// age with NO exported metric (only /health/ready encoded it).
 var schedulerLastRunTimestamp = promauto.NewGauge(
 	prometheus.GaugeOpts{
 		Name: "hardcount_scheduler_last_run_timestamp_seconds",
@@ -551,21 +552,19 @@ var schedulerLastRunTimestamp = promauto.NewGauge(
 	},
 )
 
-// RecordSchedulerTick stamps the scheduler-liveness gauge; called by the
-// same hook that feeds /health/ready.
+// RecordSchedulerTick stamps the scheduler-liveness gauge. The same hook that
+// feeds /health/ready calls it.
 func RecordSchedulerTick() {
 	schedulerLastRunTimestamp.SetToCurrentTime()
 }
 
-// RegisterQueueDepthGauges exports the queue-depth gauges the shipped
-// Grafana dashboard and runbook alert on. Pre-2026-07-06 the dashboard
-// queried hardcount_email_outbox_pending / hardcount_webhook_outbox_pending /
-// hardcount_dunning_active_runs masked by `OR vector(0)` — gauges the binary
-// never exported, so the panels flatlined at 0 through a real backlog.
+// RegisterQueueDepthGauges exports the queue-depth gauges that the shipped
+// Grafana dashboard and the runbook alert on.
 //
-// Gauges resolve at SCRAPE time via one COUNT each (cheap: partial/status
-// indexes; 3s cap). A query failure reports -1 — visibly wrong rather than
-// a healthy-looking 0.
+// Each gauge runs one COUNT at scrape time. The queries are cheap, because
+// they use partial or status indexes, and each is capped at 3s. A query
+// failure reports -1, which is visibly wrong, instead of a 0 that looks
+// healthy.
 func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query string) (float64, error)) {
 	gauge := func(name, help, query string) {
 		promauto.NewGaugeFunc(prometheus.GaugeOpts{Name: name, Help: help}, func() float64 {
@@ -576,21 +575,23 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 			return n
 		})
 	}
-	// Parked invoices (ADR-107) — a cluster fact, so it is computed from the
-	// database on every replica's scrape. Until sweep-2026-08-30 S4 it was a
-	// per-process Set() gauge stamped only by whichever replica led the
-	// billing tick; followers exported a stale copy and the runbook's alert
-	// fired from replicas whose number had resolved.
+	// Parked invoices (ADR-107) are those whose last charge got an unclear
+	// answer from Stripe that named no payment. The count is a cluster fact, so
+	// every replica computes it from the database on each scrape. A gauge set
+	// only by the replica that led the billing tick would leave the others
+	// exporting a stale copy. The runbook's alert would then fire from replicas
+	// whose number had resolved.
 	//
-	// Since REC-5 the stale-hold sweep ends a park at the first hourly tick
-	// 24 hours after its charge's hold (domain.ParkedNothingWait), so the
-	// gauge counts only the parks it has not ended on schedule: a hold more
-	// than 26 hours old (one tick plus an hour for a late one), or no hold,
-	// which nothing checks. A count of every park would stay above 0 for as
-	// long as parks kept arriving, so a Stripe incident that parked invoices
-	// over a few hours would page on parks that were on schedule. This
-	// package imports no domain package; the hand copy of the 24 hours is
-	// pinned by TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay.
+	// The stale-hold sweep ends a park at the first hourly tick 24 hours after
+	// its charge's hold (domain.ParkedNothingWait; ADR-127, amendment REC-5).
+	// So the gauge counts only the parks the sweep has not ended on schedule.
+	// Those have a hold more than 26 hours old (one tick plus an hour for a
+	// late one), or no hold, which nothing checks. A count of every park
+	// would stay above 0 for as long as parks kept arriving. A Stripe incident
+	// that parked invoices over a few hours would then page on parks that were
+	// on schedule. This package imports no domain package, so it keeps a hand
+	// copy of the 24 hours, which
+	// TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay pins.
 	parkedHelp := "Invoices whose last charge got an unclear answer from Stripe that named no payment (ADR-107) and that Hardcount has not ended on schedule: still parked 26 hours after the charge's hold, or with no hold. By disposition: open (finalized) or written_off (uncollectible). Hardcount records a payment that appears at Stripe and, with none 24 hours after the hold, ends the park at the next hourly tick (an open invoice is charged again); parks inside that are not counted. Alert on open > 0: Stripe cannot be asked or read about it, or nothing is checking it. -1 = metric query failed."
 	for _, m := range []struct {
 		label string
@@ -608,30 +609,31 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 			})
 		}
 	}
-	// Billing backlog (P27). The scheduler drains every due subscription in
-	// one tick, so on a busy day one tick can run for hours. That looks like a
-	// wedged tick on hardcount_leader_last_tick_age_seconds. These two tell the
-	// cases apart: a draining tick shrinks the count; a wedged one doesn't.
-	// The predicate is GetDueBilling's: wall-clock subs only, because
-	// test-clock subs bill on Advance.
+	// Billing backlog (ADR-006, amendment P27). The scheduler drains every due
+	// subscription in one tick, so on a busy day a tick can run for hours. On
+	// hardcount_leader_last_tick_age_seconds that looks like a wedged tick.
+	// These two gauges tell the cases apart: a draining tick shrinks the count,
+	// and a wedged one does not. The predicate is GetDueBilling's: wall-clock
+	// subscriptions only, because test-clock subscriptions bill on Advance.
 	//
-	// A sub with a saved billing failure (ADR-119) is left out of both and is
-	// counted by hardcount_billing_failing_subscriptions below, so every owed
-	// wall-clock sub is in exactly one of the two: "due and not failing" or
-	// "failing". What still grows the age here is billing that is behind, and
-	// a sub whose attempts fail without being saved (an interrupted run, a
-	// lost connection); its id is in the "bill subscription failed" log.
+	// A subscription with a saved billing failure (ADR-119) is left out of both
+	// and counted by hardcount_billing_failing_subscriptions below. So each
+	// owed wall-clock subscription is in exactly one of the two: "due and not
+	// failing" or "failing". What still grows the age here is billing that is
+	// behind, and a subscription whose attempts fail without being saved (an
+	// interrupted run, a lost connection). Its id is in the "bill subscription
+	// failed" log.
 	//
-	// "Due" is the billing runs' own rule, invoice grace included (ADR-120):
-	// a sub inside its grace is not counted, and the age is counted from when
-	// the grace ran out. Otherwise every period end would show as backlog for
-	// the length of the grace, and the age alert (2x the billing interval)
-	// would fire on a healthy install with a long grace.
+	// "Due" is the billing runs' own rule, invoice grace included (ADR-120). A
+	// subscription inside its grace is not counted, and the age counts from the
+	// end of the grace. Otherwise every period end would show as backlog for
+	// the length of the grace. The age alert (2x the billing interval) would
+	// then fire on a healthy install with a long grace.
 	//
-	// billingFailing is a hand copy of domain.SubscriptionBillingFailingSQL,
-	// as duePredicate is of the scan's: this package imports no domain
-	// package. TestBillingGauges_DueAndFailingPartition pins the two copies
-	// to each other on real rows.
+	// billingFailing is a hand copy of domain.SubscriptionBillingFailingSQL, as
+	// duePredicate is of the scan's, because this package imports no domain
+	// package. TestBillingGauges_DueAndFailingPartition pins the two copies to
+	// each other on real rows.
 	const billingFailing = `status IN ('active','trialing') AND test_clock_id IS NULL
 		AND billing_failed_for IS NOT NULL
 		AND billing_failed_for IS NOT DISTINCT FROM LEAST(next_billing_at, CASE WHEN status = 'active' THEN cancel_at END)`
@@ -667,12 +669,13 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 			})
 		}
 	}
-	// Subscriptions whose billing is failing (ADR-119), by state. retrying =
-	// the billing run will attempt it again on its own; parked = eight
-	// attempts failed and nothing retries it until an operator calls
-	// POST /v1/subscriptions/{id}/retry-billing. A cluster fact, computed
-	// from the database on every replica's scrape. The livemode literal is
-	// explicit because the scrape's bypass transaction sets no app.livemode.
+	// Subscriptions whose billing is failing (ADR-119), by state. retrying
+	// means the billing run will try it again on its own. parked means eight
+	// attempts failed, and nothing retries it until an operator calls
+	// POST /v1/subscriptions/{id}/retry-billing. It is a cluster fact, so every
+	// replica computes it from the database on each scrape. The livemode
+	// literal is explicit, because the scrape's bypass transaction sets no
+	// app.livemode.
 	failingHelp := "Subscriptions with a saved billing failure on the work they have due, by state. retrying = waiting for the next automatic attempt; parked = automatic attempts have stopped and an invoice is not being issued until an operator retries billing. Alert on parked > 0, and on the sum rising: one cause is failing many subscriptions. -1 = metric query failed."
 	for _, m := range []struct {
 		label string
@@ -690,10 +693,11 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 		}
 	}
 	// Auto-charge queue depth. The predicate is ListAutoChargePending's, so
-	// this counts exactly what the sweep visits each tick. Card-less invoices
-	// stay queued on purpose (charge-on-attach), so a steady baseline is
-	// normal. ADR-116 amendment: sustained > 5,000 is the trigger to park
-	// them instead.
+	// this counts exactly what the sweep visits each tick. Invoices with no
+	// card stay queued on purpose, to be charged when a card is attached
+	// (charge-on-attach), so a steady baseline is normal. Under an ADR-116
+	// amendment, a sustained count above 5,000 is the trigger to park them
+	// instead.
 	for _, m := range []struct {
 		label string
 		live  bool
@@ -720,11 +724,11 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 	gauge("hardcount_webhook_outbox_pending",
 		"Outbound webhook events waiting for the outbox dispatcher (status='pending'). -1 = metric query failed.",
 		`SELECT COUNT(*) FROM webhook_outbox WHERE status = 'pending'`)
-	// Outbox stall and relay signals, by mode (page on live). A pending count
-	// never pages a small install, and one oldest-pending age would page for
-	// three days over one email on the backoff ramp, so the email stall is
-	// measured from when a row came due. The livemode literal is explicit
-	// because the scrape's bypass transaction sets no app.livemode.
+	// Outbox stall and relay signals, by mode; page on live. A pending count
+	// never pages a small install. An oldest-pending age would page for three
+	// days over one email on the backoff ramp. So the email stall is measured
+	// from when a row came due. The livemode literal is explicit, because the
+	// scrape's bypass transaction sets no app.livemode.
 	for _, m := range []struct {
 		label string
 		live  bool

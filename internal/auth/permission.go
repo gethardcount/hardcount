@@ -63,10 +63,10 @@ func (kt KeyType) TypePrefix() string {
 	}
 }
 
-// KeyPrefix returns the full "hc_{type}_{mode}_" prefix used on new keys.
-// Stripe-style: hc_secret_live_..., hc_secret_test_..., etc. A visible mode
-// infix lets operators spot "test key in prod config" misrouting without
-// decoding the key.
+// KeyPrefix returns the full "hc_{type}_{mode}_" prefix used on new keys, in
+// Stripe's style: hc_secret_live_..., hc_secret_test_... and so on. The
+// visible mode infix lets an operator spot a test key in a production config
+// without decoding the key.
 func KeyPrefix(kt KeyType, livemode bool) string {
 	mode := "test"
 	if livemode {
@@ -104,15 +104,16 @@ var keyPermissions = map[KeyType]map[Permission]bool{
 	KeyTypeIngest: {
 		PermUsageIngest: true,
 	},
-	// Dashboard sessions inherit the full secret-key permission set today.
-	// Invites shipped (ADR-081) but roles are deliberately NOT enforced:
-	// user_tenants.role records owner/admin/member for the future split,
-	// and every session still gets this full set. When role-scoped
-	// permissions land, this map gets replaced by a per-role lookup driven
-	// by user_tenants.role.
+	// Dashboard sessions get the full secret-key permission set. Roles are
+	// recorded but, on purpose, not enforced (ADR-081). user_tenants.role
+	// records owner, admin or member for a later split, and every session
+	// still gets this full set. When role-scoped permissions are built, a
+	// per-role lookup on user_tenants.role replaces this map.
 	KeyTypeSession: fullAccess,
 }
 
+// HasPermission reports whether keyType holds perm. An unknown key type
+// holds no permission.
 func HasPermission(keyType KeyType, perm Permission) bool {
 	perms, ok := keyPermissions[keyType]
 	if !ok {
@@ -121,6 +122,8 @@ func HasPermission(keyType KeyType, perm Permission) bool {
 	return perms[perm]
 }
 
+// AllPermissions returns every permission keyType holds, in no set order,
+// or nil for an unknown key type.
 func AllPermissions(keyType KeyType) []Permission {
 	perms, ok := keyPermissions[keyType]
 	if !ok {

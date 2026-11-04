@@ -1,3 +1,6 @@
+// Package auth issues and validates API keys, decides what each key type may
+// do, and carries the authenticated principal (tenant, key, user and key
+// type) in the request context.
 package auth
 
 import (
@@ -23,6 +26,7 @@ const (
 	keySecretLen = 32 // random bytes = 64 hex chars
 )
 
+// Service creates, validates, rotates and revokes API keys.
 type Service struct {
 	store Store
 
@@ -36,19 +40,18 @@ type Service struct {
 	now func() time.Time
 }
 
-// lastUsedTouchInterval: last_used_at is written at most once per key per this
-// interval. The column feeds "Last used 3 minutes ago" on the API-keys page
-// and nothing else — no auth decision reads it — so minute granularity is fine.
+// lastUsedTouchInterval is how often, at most, last_used_at is written for
+// one key. The column feeds "Last used 3 minutes ago" on the API-keys page and
+// nothing else. No auth decision reads it, so minute granularity is fine.
 //
-// Why it is not written on every request: it used to be, from a fire-and-forget
-// goroutine per request, and on the AWS benchmark rig that was THE ceiling for
-// a single API key. Every request updated the SAME row; a row lock hands off at
-// about one round trip (~1.75 ms same-AZ), so one key could not exceed ~570
-// requests/s on any hardware, more connections only added waiters, and
-// pg_stat_activity sampled mid-run showed 50-55 of 61 backends waiting on
-// `UPDATE api_keys SET last_used_at`. Issue #818.
+// It is not written on every request, because then every request of one key
+// would update the same row. A row lock passes to the next writer in about
+// one round trip (~1.75 ms within one availability zone). So one key could
+// not go past ~570 requests/s on any hardware, and more connections would
+// only add waiters (#818).
 const lastUsedTouchInterval = time.Minute
 
+// NewService returns a Service backed by store.
 func NewService(store Store) *Service {
 	return &Service{store: store, touchInterval: lastUsedTouchInterval, now: func() time.Time { return time.Now().UTC() }}
 }
@@ -73,18 +76,24 @@ func (s *Service) touchLastUsed(id string) bool {
 	return true
 }
 
-// CreateKeyResult contains the key record + raw key (shown once).
+// CreateKeyResult contains the key record and the raw key, which is shown
+// once.
 type CreateKeyResult struct {
 	Key    domain.APIKey `json:"key"`
 	RawKey string        `json:"raw_key"`
 }
 
+// CreateKeyInput is the request to create a key. An empty KeyType means a
+// secret key.
 type CreateKeyInput struct {
 	Name      string     `json:"name"`
 	KeyType   KeyType    `json:"key_type"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
+// CreateKey mints a key for tenantID, in the mode that ctx carries, and
+// returns it with its raw value. It refuses an empty name, a key type other
+// than secret or ingest, and an expires_at that is not in the future.
 func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
@@ -102,19 +111,20 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 		return CreateKeyResult{}, errs.Invalid("key_type", "must be one of: secret, ingest")
 	}
 
-	// Reject past expires_at — a key that's already expired at creation
-	// is DOA (any auth attempt fails with `api key expired`). Industry
-	// parity (Stripe rejects past expiry on credentials). API keys are
-	// tenant-level resources used outside any per-customer clock-pin
-	// context, so wall-clock comparison is the correct reference frame.
+	// Reject an expires_at in the past. A key that has already expired at
+	// creation is dead on arrival: every auth attempt fails with `api key
+	// expired`. Stripe also rejects a past expiry on credentials. API keys
+	// belong to the tenant and are used outside any customer's test clock
+	// (simulated time), so the wall clock is the right reference.
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now().UTC()) {
 		return CreateKeyResult{}, errs.Invalid("expires_at",
 			"must be in the future — a key that expires at or before now is dead on arrival")
 	}
 
-	// Mode inherits from caller ctx, matching Stripe: a test-mode key creates
-	// new test-mode keys, a live-mode key creates live. There is no cross-mode
-	// key creation path — caller must switch authenticators to switch mode.
+	// The mode comes from the caller's ctx, as in Stripe: a test-mode key
+	// creates test-mode keys, and a live-mode key creates live ones. No path
+	// creates a key in the other mode. To switch mode, the caller must
+	// authenticate in that mode.
 	livemode, err := postgres.Livemode(ctx)
 	if err != nil {
 		return CreateKeyResult{}, err
@@ -163,25 +173,27 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 	return CreateKeyResult{Key: key, RawKey: rawKey}, nil
 }
 
-// ErrInvalidKey marks a DEFINITIVE credential rejection — bad format, no
-// matching key, hash mismatch, or expiry. Middlewares map it (and only it)
-// to the generic 401. Any other ValidateKey error means the verdict never
-// happened (store/DB failure) and must surface as a retryable 5xx: during a
-// DB outage a 401 tells every integrator their key went bad and to start
-// rotating credentials, which is a lie about the key (#560). A fleet-wide
-// 503 reveals nothing about any individual key, so ADR-026's
-// anti-enumeration stance is preserved.
+// ErrInvalidKey marks a definitive credential rejection: a bad format, no
+// matching key, a hash mismatch or an expired key. Middlewares map it, and
+// only it, to the generic 401. Any other ValidateKey error means no verdict
+// was reached (a store or database failure), and it must surface as a
+// retryable 5xx. During a database outage, a 401 would tell every
+// integrator that their key went bad and to start rotating credentials,
+// which is false about the key (#560). A 503 for every caller reveals
+// nothing about any one key, so ADR-026's rule against key enumeration
+// holds.
 var ErrInvalidKey = errors.New("invalid api key")
 
-// ValidateKey looks up a key by prefix, verifies hash, checks expiry.
+// ValidateKey looks up a key by its prefix, verifies the hash and checks
+// expiry.
 //
-// Accepts three prefix forms, in priority order:
-//  1. "hc_{type}_live_..." (new, post-FEAT-8)
-//  2. "hc_{type}_test_..." (new, post-FEAT-8)
-//  3. "hc_{type}_..."       (legacy, pre-FEAT-8 — treated as live)
+// It accepts three prefix forms, in priority order:
+//  1. "hc_{type}_live_..."
+//  2. "hc_{type}_test_..."
+//  3. "hc_{type}_..." (the older form with no mode, treated as live)
 //
-// Backward compat for (3) keeps existing production keys working through
-// the cutover. Newly issued keys always use form (1) or (2).
+// Form 3 keeps keys issued before the mode infix working. Newly issued keys
+// always use form 1 or 2.
 func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey, error) {
 	rawKey = strings.TrimSpace(rawKey)
 
@@ -203,7 +215,7 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 			keyType = kt
 			fullPrefix = typeP + "test_"
 		default:
-			// Legacy format (pre-FEAT-8): no mode infix — treat as live.
+			// The older format has no mode infix: treat it as live.
 			keyType = kt
 			fullPrefix = typeP
 		}
@@ -226,8 +238,8 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 		if errors.Is(err, errs.ErrNotFound) {
 			return domain.APIKey{}, ErrInvalidKey
 		}
-		// The lookup never reached a verdict — this is an infrastructure
-		// failure, not a credential one. Callers surface it as 5xx.
+		// The lookup reached no verdict. This is an infrastructure failure,
+		// not a credential one, and callers answer it with a 5xx.
 		return domain.APIKey{}, fmt.Errorf("api key lookup: %w", err)
 	}
 
@@ -247,33 +259,36 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 		return domain.APIKey{}, fmt.Errorf("api key expired: %w", ErrInvalidKey)
 	}
 
-	// Touch last used — debounced, at most once per key per interval (#818).
+	// Touch last_used_at, debounced to at most once per key per interval
+	// (#818).
 	s.touchLastUsed(key.ID)
 
 	return key, nil
 }
 
+// RevokeKey revokes the tenant's key with id and returns the revoked key.
 func (s *Service) RevokeKey(ctx context.Context, tenantID, id string) (domain.APIKey, error) {
 	return s.store.Revoke(ctx, tenantID, id)
 }
 
 // MaxRotationGraceSeconds caps how long a caller can keep the old key alive
-// during rotation. Seven days matches the longest grace window Stripe offers
-// in its dashboard "roll key" flow — long enough for a scheduled deploy
-// cadence, short enough that a forgotten rotation still self-heals.
+// during a rotation. Seven days matches the longest grace window Stripe
+// offers in its dashboard "roll key" flow. It is long enough for a scheduled
+// deploy cycle, and short enough that a forgotten rotation still ends on its
+// own.
 const MaxRotationGraceSeconds = 7 * 24 * 60 * 60
 
-// RotateKeyInput parameterises rotation. ExpiresInSeconds=0 revokes the old
-// key immediately on rotation; a positive value keeps it valid for that many
-// seconds past now, giving deployed clients time to swap credentials without
-// a hard cutover.
+// RotateKeyInput sets how a rotation treats the old key. ExpiresInSeconds=0
+// revokes the old key at once. A positive value keeps it valid for that many
+// seconds past now, which gives deployed clients time to swap credentials
+// without a hard cutover.
 type RotateKeyInput struct {
 	ExpiresInSeconds int64 `json:"expires_in_seconds,omitempty"`
 }
 
 // RotateKeyResult returns both sides of a rotation. RawKey is the new key's
-// plaintext — shown once, never persisted or returned on any subsequent
-// fetch. OldKey's ExpiresAt (grace window) or RevokedAt (immediate) reflects
+// plaintext. It is shown once, and never stored or returned on a later
+// fetch. OldKey's ExpiresAt (a grace window) or RevokedAt (immediate) shows
 // which path the caller took.
 type RotateKeyResult struct {
 	OldKey domain.APIKey `json:"old_key"`
@@ -281,11 +296,11 @@ type RotateKeyResult struct {
 	RawKey string        `json:"raw_key"`
 }
 
-// RotateKey issues a replacement key for `id`, preserving its name, type,
-// livemode, and any configured expires_at. The old key is either revoked
-// immediately (grace=0) or scheduled to expire after input.ExpiresInSeconds
-// seconds; callers trading zero-downtime deploys for slightly wider blast
-// radius pick a non-zero grace.
+// RotateKey issues a replacement for key `id`, keeping its name, type,
+// livemode and any configured expires_at. The old key is revoked at once
+// (grace 0), or scheduled to expire after input.ExpiresInSeconds seconds. A
+// caller picks a non-zero grace to deploy with no downtime, at the cost of a
+// slightly wider blast radius.
 func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input RotateKeyInput) (RotateKeyResult, error) {
 	if input.ExpiresInSeconds < 0 {
 		return RotateKeyResult{}, errs.Invalid("expires_in_seconds", "must be >= 0")
@@ -303,19 +318,19 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 		return RotateKeyResult{}, errs.InvalidState("cannot rotate a revoked key")
 	}
 
-	// Mint the replacement through the same CreateKey path so livemode
-	// propagation, hashing, and prefix generation stay in one place. The new
-	// key inherits name+type+expires_at from the old; a rotation is a
+	// Mint the replacement through the same CreateKey path, so livemode
+	// handling, hashing and prefix generation stay in one place. The new key
+	// takes the old key's name, type and expires_at. A rotation is a
 	// credential swap, not a reconfiguration.
 	createInput := CreateKeyInput{
 		Name:      old.Name,
 		KeyType:   KeyType(old.KeyType),
 		ExpiresAt: old.ExpiresAt,
 	}
-	// The new key must land on the same livemode as the old — postgres.Livemode(ctx)
-	// depends on the request ctx, which the caller controls. We force the
-	// ctx to match the old key's mode so a live key rotated from a test-mode
-	// caller still produces a live replacement.
+	// The new key must have the old key's livemode. postgres.Livemode(ctx)
+	// depends on the request ctx, which the caller controls. So ctx is set to
+	// the old key's mode, and a live key rotated by a test-mode caller still
+	// gets a live replacement.
 	created, err := s.CreateKey(postgres.WithLivemode(ctx, old.Livemode), tenantID, createInput)
 	if err != nil {
 		return RotateKeyResult{}, fmt.Errorf("mint replacement key: %w", err)
@@ -323,24 +338,25 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 
 	var oldAfter domain.APIKey
 	if input.ExpiresInSeconds == 0 {
-		// Immediate revocation: old key stops authenticating on the next
-		// ValidateKey call. Any request already in flight under the old key
-		// completes; subsequent ones fail.
+		// Immediate revocation: the old key stops authenticating on the next
+		// ValidateKey call. A request already in flight under the old key
+		// completes, and later ones fail.
 		oldAfter, err = s.store.Revoke(ctx, tenantID, id)
 	} else {
 		graceUntil := time.Now().UTC().Add(time.Duration(input.ExpiresInSeconds) * time.Second)
 		oldAfter, err = s.store.ScheduleExpiry(ctx, tenantID, id, graceUntil)
 	}
 	if err != nil {
-		// The replacement is already stored but its secret is never returned,
-		// so nobody can use it; the old key is unchanged and still works. The
-		// caller retries the rotation and revokes the leftover replacement,
-		// which shows in the key list. Its id goes in the error for the log.
+		// The replacement is already stored, but its secret is never
+		// returned, so nobody can use it. The old key is unchanged and still
+		// works. The caller retries the rotation and revokes the leftover
+		// replacement, which shows in the key list. Its id goes in the error
+		// for the log.
 		//
-		// The wording is kept clear of the phrases respond.FromError's
-		// message-text fallback matches (" must be ", " is required", ...), so
-		// a store failure here is logged and answered as a 500, not sent to
-		// the client as a 422 carrying this text.
+		// The wording avoids the phrases that respond.FromError's
+		// message-text fallback matches (" must be ", " is required", ...).
+		// So a store failure here is logged and answered as a 500, not sent
+		// to the client as a 422 carrying this text.
 		return RotateKeyResult{}, fmt.Errorf("retire old key after creating replacement %s: %w", created.Key.ID, err)
 	}
 
@@ -351,6 +367,8 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 	}, nil
 }
 
+// ListKeys returns one page of the keys that filter selects, and how many
+// match.
 func (s *Service) ListKeys(ctx context.Context, filter ListFilter) ([]domain.APIKey, int, error) {
 	return s.store.List(ctx, filter)
 }

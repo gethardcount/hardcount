@@ -1,3 +1,7 @@
+// Package respond writes the API's JSON responses: success bodies, list
+// pages and the error envelope. FromError turns a service error into its
+// HTTP response. DecodeStrict reads a request body under one strict rule,
+// and ParsePage reads the paging parameters.
 package respond
 
 import (
@@ -11,9 +15,9 @@ import (
 	"github.com/gethardcount/hardcount/internal/version"
 )
 
-// apiVersion feeds the Hardcount-Version response header — the build-time
-// stamp (git tag in released images, "dev" locally), not a hardcoded date
-// that went stale within weeks.
+// apiVersion feeds the Hardcount-Version response header. It is the
+// build-time stamp (the git tag in released images, "dev" locally), not a
+// hardcoded date, which would go stale within weeks.
 var apiVersion = version.Version
 
 // JSON writes a success response with standard headers.
@@ -21,11 +25,11 @@ func JSON(w http.ResponseWriter, r *http.Request, status int, data any) {
 	setHeaders(w, r)
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
-	// Default Go HTML-escapes <, >, & to < etc. for safety when JSON
-	// is embedded in HTML. API responses are served as application/json,
-	// so the escaping is unnecessary and just makes errors harder to read
-	// (e.g. "must be <= 604800"). Stripe / Vercel / GitHub all return
-	// raw <, >, &.
+	// By default Go escapes <, > and & (as \u003c and so on), for safety
+	// when JSON is embedded in HTML. API responses are served as
+	// application/json, so the escaping is not needed and only makes errors
+	// harder to read (for example "must be <= 604800"). Stripe, Vercel and
+	// GitHub all return <, > and & unescaped.
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(data)
 }
@@ -49,8 +53,8 @@ func Error(w http.ResponseWriter, r *http.Request, status int, errType, code, me
 	errorField(w, r, status, errType, code, "", message)
 }
 
-// errorField is the underlying writer that includes the optional field name in
-// the envelope's Param slot. All shortcut helpers funnel through here.
+// errorField is the underlying writer, which also puts the optional field
+// name in the envelope's Param slot. Every shortcut helper goes through it.
 func errorField(w http.ResponseWriter, r *http.Request, status int, errType, code, field, message string) {
 	setHeaders(w, r)
 	w.WriteHeader(status)
@@ -85,33 +89,36 @@ func ErrorWith(w http.ResponseWriter, r *http.Request, status int, errType, code
 
 // Common error shortcuts
 
+// BadRequest writes a 400 with code invalid_request and the message.
 func BadRequest(w http.ResponseWriter, r *http.Request, message string) {
 	Error(w, r, http.StatusBadRequest, "invalid_request_error", "invalid_request", message)
 }
 
+// NotFound writes a 404 with code not_found that names the resource.
 func NotFound(w http.ResponseWriter, r *http.Request, resource string) {
 	Error(w, r, http.StatusNotFound, "invalid_request_error", "not_found", resource+" not found")
 }
 
+// Validation writes a 422 with code validation_error and no field.
 func Validation(w http.ResponseWriter, r *http.Request, message string) {
 	errorField(w, r, http.StatusUnprocessableEntity, "invalid_request_error", "validation_error", "", message)
 }
 
-// ValidationField writes a 422 response with the offending field name in the
-// envelope's Param slot. Use for inline handler validation where the field is
-// known at the call site (service-layer validation is routed via FromError,
-// which pulls the field off DomainError automatically).
+// ValidationField writes a 422 with the offending field name in the
+// envelope's Param slot. Use it for inline handler validation, where the
+// field is known at the call site. Service-layer validation goes through
+// FromError, which takes the field from the DomainError.
 func ValidationField(w http.ResponseWriter, r *http.Request, field, message string) {
 	errorField(w, r, http.StatusUnprocessableEntity, "invalid_request_error", "validation_error", field, message)
 }
 
-// ValidationCoded writes a 422 response with a domain-specific error code
-// in the envelope's Code slot, the offending field (optional) in Param, and
-// the message. Use when the caller has a stable code (e.g. "invoice_number_taken")
-// that API integrators will switch on.
+// ValidationCoded writes a 422 with a domain-specific error code in the
+// envelope's Code slot, the offending field (optional) in Param, and the
+// message. Use it when the caller has a stable code, such as
+// "invoice_number_taken", that API integrators will switch on.
 //
-// An empty code falls back to "validation_error" so the envelope is never
-// missing a code.
+// An empty code falls back to "validation_error", so the envelope always
+// has a code.
 func ValidationCoded(w http.ResponseWriter, r *http.Request, field, code, message string) {
 	if code == "" {
 		code = "validation_error"
@@ -119,8 +126,9 @@ func ValidationCoded(w http.ResponseWriter, r *http.Request, field, code, messag
 	errorField(w, r, http.StatusUnprocessableEntity, "invalid_request_error", code, field, message)
 }
 
-// ConflictCoded is the 409 analogue of ValidationCoded — same code+field
-// plumbing, different status. Default code is "already_exists".
+// ConflictCoded is the 409 counterpart of ValidationCoded: the same code and
+// field handling, with a different status. The default code is
+// "already_exists".
 func ConflictCoded(w http.ResponseWriter, r *http.Request, field, code, message string) {
 	if code == "" {
 		code = "already_exists"
@@ -128,8 +136,9 @@ func ConflictCoded(w http.ResponseWriter, r *http.Request, field, code, message 
 	errorField(w, r, http.StatusConflict, "invalid_request_error", code, field, message)
 }
 
-// NotFoundCoded is the 404 analogue — message is built by the caller since
-// domain-specific 404s often have more context than "<resource> not found".
+// NotFoundCoded is the 404 counterpart. The caller builds the message,
+// because a domain-specific 404 often has more context than "<resource> not
+// found".
 func NotFoundCoded(w http.ResponseWriter, r *http.Request, code, message string) {
 	if code == "" {
 		code = "not_found"
@@ -137,10 +146,10 @@ func NotFoundCoded(w http.ResponseWriter, r *http.Request, code, message string)
 	Error(w, r, http.StatusNotFound, "invalid_request_error", code, message)
 }
 
-// PreconditionFailed writes a 412 response. The canonical use is optimistic
-// concurrency: the caller sent If-Match with the ETag they last saw and a
-// concurrent writer has since bumped the version. The client should GET the
-// resource, re-apply its edits against the fresh copy, and retry.
+// PreconditionFailed writes a 412. The usual case is optimistic concurrency:
+// the caller sent If-Match with the ETag it last saw, and a concurrent
+// writer has since bumped the version. The client should GET the resource,
+// apply its edits again to the fresh copy, and retry.
 func PreconditionFailed(w http.ResponseWriter, r *http.Request, message string) {
 	Error(w, r, http.StatusPreconditionFailed, "invalid_request_error", "precondition_failed", message)
 }
@@ -167,28 +176,36 @@ func Timeout(w http.ResponseWriter, r *http.Request) {
 	Error(w, r, http.StatusGatewayTimeout, "api_error", "timeout", "the request ran past its time limit")
 }
 
+// InternalError writes a 500 with code internal_error and a generic
+// message.
 func InternalError(w http.ResponseWriter, r *http.Request) {
 	Error(w, r, http.StatusInternalServerError, "api_error", "internal_error", "an internal error occurred")
 }
 
+// Unauthorized writes a 401 authentication_error with code unauthorized.
 func Unauthorized(w http.ResponseWriter, r *http.Request, message string) {
 	Error(w, r, http.StatusUnauthorized, "authentication_error", "unauthorized", message)
 }
 
+// Forbidden writes a 403 authentication_error with code forbidden.
 func Forbidden(w http.ResponseWriter, r *http.Request, message string) {
 	Error(w, r, http.StatusForbidden, "authentication_error", "forbidden", message)
 }
 
+// RateLimited writes a 429 rate_limit_error with code rate_limited.
 func RateLimited(w http.ResponseWriter, r *http.Request) {
 	Error(w, r, http.StatusTooManyRequests, "rate_limit_error", "rate_limited", "too many requests — please retry after the rate limit resets")
 }
 
 // Types
 
+// ErrorBody is the error envelope: {"error": {...}}.
 type ErrorBody struct {
 	Error ErrorDetail `json:"error"`
 }
 
+// ErrorDetail is the error object inside ErrorBody. Param names the field
+// at fault and is left out when empty.
 type ErrorDetail struct {
 	Type      string `json:"type"`
 	Code      string `json:"code"`

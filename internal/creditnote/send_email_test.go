@@ -147,7 +147,7 @@ func TestCreditNoteSendEmail(t *testing.T) {
 	if rr := cnSendReq(t, h, issued.ID, `{"email":"a@b.co","cc":["c@d.co"]}`); rr.Code != http.StatusUnprocessableEntity || !strings.Contains(rr.Body.String(), `"param":"cc"`) {
 		t.Fatalf("unknown key: status %d %s, want 422 on cc", rr.Code, rr.Body.String())
 	}
-	bare := NewHandler(NewService(store, nil, nil))
+	bare := NewHandler(NewService(store, nil, nil), HandlerDeps{})
 	if rr := cnSendReq(t, bare, issued.ID, `{"email":"a@b.co"}`); rr.Code != http.StatusConflict {
 		t.Fatalf("no sender wired: status %d, want 409", rr.Code)
 	}

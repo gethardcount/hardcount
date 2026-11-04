@@ -213,10 +213,12 @@ func customerReadFailed(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	respond.InternalError(w, r)
 }
 
-// writeOnlinePaymentUnavailable answers a checkout when the seller has no
-// Stripe keys for the mode: a state, not an outage, so a 409 the page
-// explains (the hosted invoice page's code for the same state), not a 502.
-// Stripe was never called.
+// writeOnlinePaymentUnavailable answers a checkout that can't add a card
+// online: the seller has no Stripe keys for the mode, or this server has no
+// PAYMENT_UPDATE_RETURN_URL for Stripe to send the customer back to. It is a
+// state, not an outage, so it is a 409 the page explains (the hosted invoice
+// page's code for the same state), not a 502. Stripe was never called. The
+// message names no setting, because the customer can't change one.
 func writeOnlinePaymentUnavailable(w http.ResponseWriter, r *http.Request) {
 	respond.Error(w, r, http.StatusConflict, "invalid_request_error", errs.CodeOnlinePaymentUnavailable,
 		"Adding a card online isn't available for this account right now. Please contact your billing administrator.")
@@ -241,6 +243,16 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 	if err != nil {
 		respond.Error(w, r, http.StatusUnauthorized, "authentication_error", "invalid_token",
 			"invalid or expired token")
+		return
+	}
+
+	// Without PAYMENT_UPDATE_RETURN_URL, Stripe would have no page to send the
+	// customer back to. Refuse before any Stripe call and before the token is
+	// consumed, so the same link works once the setting is fixed.
+	if h.returnURL == "" {
+		slog.WarnContext(r.Context(), "PAYMENT_UPDATE_RETURN_URL NOT SET — a customer opened an add-a-card link and was refused, because Stripe would have no page to send them back to. Set it to your dashboard's /payment-method-added page and restart.",
+			"tenant_id", token.TenantID)
+		writeOnlinePaymentUnavailable(w, r)
 		return
 	}
 
@@ -328,21 +340,12 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 		return
 	}
 
-	// Build the return URL: the public, unauthenticated /payment-method-added
-	// SPA page — the same terminal the operator-driven "Add payment method"
-	// flow uses (paymentmethods.setupCompletePath). A customer arriving from an
-	// email link has NO portal session, so the fallback MUST be a public route;
-	// the legacy /customers/{id} fallback was an operator ProtectedRoute that
-	// bounced the customer to login.
-	returnURL := h.returnURL
-	if returnURL == "" {
-		returnURL = "http://localhost:5173/payment-method-added"
-	}
-	// Success vs. cancel get distinct ?status= so the landing page renders the
-	// right copy (mirrors the paymentmethods setup-session flow); Stripe calls
-	// one of the two depending on outcome.
-	successURL := appendStatusQuery(returnURL, "success")
-	cancelURL := appendStatusQuery(returnURL, "cancel")
+	// The return URL is the public /payment-method-added page, the same page
+	// the operator's "Add payment method" flow uses. A customer arriving from
+	// an email link has no session, so it must be a public route. Success and
+	// cancel get distinct ?status= values so the page shows the right words.
+	successURL := appendStatusQuery(h.returnURL, "success")
+	cancelURL := appendStatusQuery(h.returnURL, "cancel")
 
 	// Create a Checkout Session in setup mode for new payment method
 	sess, err := sc.V1CheckoutSessions.Create(r.Context(), &stripe.CheckoutSessionCreateParams{

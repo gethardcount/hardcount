@@ -12,27 +12,28 @@ import (
 // The version record is public.goose_db_version, which goose writes: one
 // row per applied migration, plus row 0.
 //
-// readState reads it, whether a tenants table exists, and whether that
-// table was made by Velox, read-only: no lock, and it creates nothing
-// (goose's own Status, HasPending and GetVersions all create
-// goose_db_version). decide turns what it read into an action. Up, Down,
-// CheckSchemaReady and `hardcount migrate status` all use the same pair.
+// readState reads that record, whether a tenants table exists, and whether
+// Velox made that table. It reads without a lock and creates nothing,
+// unlike goose's own Status, HasPending and GetVersions, which all create
+// goose_db_version. decide turns what readState found into an action. Up,
+// Down, CheckSchemaReady and `hardcount migrate status` all use the same
+// pair.
 //
 // Nothing reads public.schema_migrations, the record of Velox 0.8.x. A
-// database that moved to goose may still have it; it is left alone.
+// database that moved to goose may still have it, and it is left alone.
 
 // state is what readState found.
 type state struct {
-	// tenantsTable: a tenants table exists in public, or in a schema on the
-	// connection's search_path. The baseline creates public.tenants. Velox
-	// 0.8.x created its tables unqualified, so an install could keep them in
-	// another schema, such as the admin user's own, which the default
-	// search_path ("$user", public) lists first.
+	// tenantsTable is true when a tenants table exists in public, or in a
+	// schema on the connection's search_path. The baseline creates
+	// public.tenants. Velox 0.8.x created its tables unqualified, so an
+	// install could keep them in another schema, such as the admin user's
+	// own, which the default search_path ("$user", public) lists first.
 	tenantsTable bool
-	// veloxSchema: public.tenants gives new rows a vlx_ id, so a build of
-	// Velox, Hardcount's old name, ran the baseline. Hardcount's baseline
-	// gives hc_ ids. The two schemas share version numbers, so goose's
-	// record cannot tell them apart.
+	// veloxSchema is true when public.tenants gives new rows a vlx_ id,
+	// which means a build of Velox, Hardcount's old name, ran the baseline.
+	// Hardcount's baseline gives hc_ ids. The two schemas share version
+	// numbers, so goose's record cannot tell them apart.
 	veloxSchema bool
 	gooseTable  bool
 	// applied lists the versions in goose_db_version, ascending, without
@@ -72,8 +73,8 @@ func versionStore() (database.StoreExtender, error) {
 
 // readState reads in one read-only REPEATABLE READ transaction, so all
 // three reads see the same snapshot. Read one by one, a check could miss
-// row 180 and then see the tenants table that another copy's baseline
-// committed in between, and refuse a database that is fine.
+// row 180, then see the tenants table that another copy's baseline
+// committed in between. It would then refuse a database that is fine.
 func readState(ctx context.Context, db *sql.DB) (state, error) {
 	var st state
 	store, err := versionStore()
@@ -85,8 +86,8 @@ func readState(ctx context.Context, db *sql.DB) (state, error) {
 		return st, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	// pg_tables, not to_regclass: to_regclass reads the catalog as of now,
-	// not as of the transaction's snapshot. current_schemas is this
+	// Use pg_tables, not to_regclass. to_regclass reads the catalog as of
+	// now, not as of the transaction's snapshot. current_schemas is this
 	// connection's search_path, before the migration session sets it to
 	// public.
 	if err := tx.QueryRowContext(ctx, `
@@ -137,20 +138,20 @@ const (
 	actRefuseVelox                   // Velox ran the baseline: no command migrates it
 )
 
-// decide is pure:
+// decide turns a state into an action. It has no side effects:
 //
 //	goose has 180, Velox schema  ->  refuse (ErrVeloxDatabase)
 //	goose has 180                ->  run goose
 //	tables, no 180               ->  refuse (ErrNoMigrationRecord)
 //	otherwise                    ->  migration 180 runs the baseline
 //
-// The first covers a database a build of Velox's main branch made after
-// the switch to goose (#1198): v0.9.0 is the first Hardcount release and
-// installs fresh only. The third covers a Velox 0.8.x database, one from
-// an older build of main, and a backup restored without its migration
-// table: Hardcount cannot tell which version the tables are at.
-// "Otherwise" covers no goose table and one holding only row 0, which a
-// rolled-back migration 180 leaves behind.
+// The first row covers a database that a build of Velox's main branch made
+// after the switch to goose (#1198). v0.9.0 is the first Hardcount
+// release, and it installs fresh only. The third row covers a Velox 0.8.x
+// database, one from an older build of main, and a backup restored without
+// its migration table. In each of these cases, Hardcount cannot tell which
+// version the tables are at. "Otherwise" covers no goose table, and one
+// that holds only row 0, which a rolled-back migration 180 leaves behind.
 func decide(s state) action {
 	switch {
 	case s.has(baselineVersion) && s.veloxSchema:

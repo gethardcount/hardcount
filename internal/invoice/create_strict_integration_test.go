@@ -33,7 +33,7 @@ func TestCreateInvoice_UnknownFieldRefused(t *testing.T) {
 	}
 
 	svc := invoice.NewService(invoice.NewPostgresStore(db), nil, tenant.NewSettingsStore(db))
-	srv := invoice.NewHandler(svc, nil, nil).Routes()
+	srv := invoice.NewHandler(svc, nil, nil, invoice.HandlerDeps{}).Routes()
 
 	post := func(path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))

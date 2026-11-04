@@ -14,9 +14,9 @@ var ErrNothingToRollBack = errors.New("no migration is applied: nothing to roll 
 
 // Down rolls back the latest migration, one step, and returns the version
 // the database is at afterwards. It is the local loop for writing a new
-// migration: `hardcount migrate rollback` refuses outside APP_ENV=local, because
-// rolling back loses data the newer release wrote. Migration 180 never
-// rolls back (errBaselineDown).
+// migration. `hardcount migrate rollback` refuses outside APP_ENV=local,
+// because rolling back loses data the newer release wrote. Migration 180
+// never rolls back (errBaselineDown).
 func Down(dsn string) (int64, error) {
 	return down(context.Background(), dsn, migrationFiles(), -1)
 }

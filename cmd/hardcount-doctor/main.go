@@ -1,15 +1,15 @@
-// hardcount-doctor sweeps a Hardcount database for money-invariant violations —
-// states no legal writer can produce. Read-only; exits 1 if any violation
-// is found, 2 if any check failed to run.
+// hardcount-doctor sweeps a Hardcount database for money-invariant
+// violations: states that no legal writer can produce. It only reads. It
+// exits 1 if it finds a violation, and 2 if a check failed to run.
 //
 //	DATABASE_URL="postgres://…" go run ./cmd/hardcount-doctor
 //
-// DATABASE_URL must be a role that sees every row — the table owner or an
-// admin. An RLS-scoped app role (hardcount_app) sees NOTHING and the doctor
-// would report a spotless bill of health over rows it cannot see.
+// DATABASE_URL must be a role that sees every row, such as the table owner
+// or an admin. An RLS-scoped app role (hardcount_app) sees nothing, so the
+// doctor would report a clean result over rows it cannot see.
 //
 // See internal/doctor for the invariant catalog and the exactness rule, and
-// docs/dev/records/product-stability-plan.md for why this exists.
+// docs/dev/records/product-stability-plan.md for why the doctor exists.
 package main
 
 import (

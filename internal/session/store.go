@@ -9,15 +9,12 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// Store is the persistence interface for dashboard_sessions rows.
-// Narrow on purpose — the dashboard auth flow only needs Insert,
-// GetByIDHash, Revoke. Any further surface (pruning expired rows,
-// listing for an ops UI) belongs on a sibling type when it ships,
-// not here.
-//
-// Pre-ADR-011 included RevokeAllForKey for the API-key-revoke
-// fan-out path; that's gone now that sessions are user-bound and
-// independent of API key lifecycle.
+// Store is the persistence interface for dashboard_sessions rows. It is
+// narrow on purpose: the dashboard auth flow needs only Insert, GetByIDHash
+// and Revoke. Any further surface (pruning expired rows, listing for an ops
+// UI) belongs on a sibling type when it ships, not here. Sessions are bound
+// to a user and are independent of the API key lifecycle (ADR-011), so the
+// Store has no method that revokes sessions by key.
 type Store interface {
 	Insert(ctx context.Context, s Session) error
 	GetByIDHash(ctx context.Context, idHash string) (Session, error)
@@ -30,11 +27,10 @@ type postgresStore struct {
 	db *postgres.DB
 }
 
-// NewPostgresStore wires the postgres-backed implementation. Sessions
-// query by id_hash (PK) so RLS isn't strictly necessary — there's no
-// cross-tenant overlap on the id space — but inserts and tenant-scoped
-// reads still run inside TxBypass since the session id is the auth
-// boundary itself.
+// NewPostgresStore returns the Postgres-backed Store. Sessions are queried
+// by id_hash (the primary key), so RLS is not strictly needed: the id space
+// has no overlap across tenants. Inserts and tenant-scoped reads run inside
+// TxBypass, because the session id is itself the auth boundary.
 func NewPostgresStore(db *postgres.DB) Store {
 	return &postgresStore{db: db}
 }
@@ -112,12 +108,11 @@ func (s *postgresStore) Revoke(ctx context.Context, idHash string) error {
 	return tx.Commit()
 }
 
-// RevokeAllForUser revokes every active session for a user in one
-// statement. Backs the password-reset flow: changing the password
-// must invalidate any session a thief minted from a stolen cookie,
-// not let it ride out the 7-day TTL. Uses idx_dashboard_sessions_user
-// (migration 0070). Idempotent — already-revoked rows are skipped by
-// the revoked_at IS NULL guard.
+// RevokeAllForUser revokes every active session of a user in one statement.
+// It backs the password-reset flow: changing the password must end any
+// session a thief minted from a stolen cookie, not let it run out its 7-day
+// TTL. It uses idx_dashboard_sessions_user. It is idempotent, because the
+// revoked_at IS NULL guard skips rows already revoked.
 func (s *postgresStore) RevokeAllForUser(ctx context.Context, userID string) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {

@@ -1048,12 +1048,16 @@ func (a *customerSentEmailsAdapter) ListByCustomer(ctx context.Context, tenantID
 	return out, nil
 }
 
-// canEmailSetupLinks reports whether a setup-link email can be sent at all:
-// it needs SMTP, and the link needs the payment-update page to point at
-// (NotifyNoPaymentMethod refuses without it). The invoice notices read this to
-// decide whether to say a link is emailed and whether to offer Resend.
-func canEmailSetupLinks(smtpConfigured bool, paymentUpdateURL string) bool {
-	return smtpConfigured && paymentUpdateURL != ""
+// canEmailSetupLinks reports whether a setup-link email can be sent at all.
+// It needs SMTP, the payment-update page for the link to open
+// (PAYMENT_UPDATE_URL), and the page Stripe sends the customer back to
+// (PAYMENT_UPDATE_RETURN_URL). Without the last one, the page refuses to add
+// the card, so the email would carry a link that can never work.
+// NotifyNoPaymentMethod refuses without either address. The invoice notices
+// read this to decide whether to say a link is emailed and whether to offer
+// Resend.
+func canEmailSetupLinks(smtpConfigured bool, paymentUpdateURL, paymentUpdateReturnURL string) bool {
+	return smtpConfigured && paymentUpdateURL != "" && paymentUpdateReturnURL != ""
 }
 
 // noPaymentMethodNotifierAdapter implements billing.NoPaymentMethodNotifier
@@ -1073,8 +1077,11 @@ type noPaymentMethodNotifierAdapter struct {
 	email            paymentSetupEmailSender
 	customerEmail    *customerEmailFetcherAdapter
 	paymentUpdateURL string
-	tokenSvc         *payment.TokenService
-	auditLogger      *audit.Logger // optional — engine fires this background task; audit row records the send for operator forensics.
+	// paymentUpdateReturnURL is PAYMENT_UPDATE_RETURN_URL. The page the link
+	// opens refuses without it, so the email is not sent either.
+	paymentUpdateReturnURL string
+	tokenSvc               *payment.TokenService
+	auditLogger            *audit.Logger // optional — engine fires this background task; audit row records the send for operator forensics.
 }
 
 // NotifyNoPaymentMethod emails the customer a setup link for inv. The caller
@@ -1085,6 +1092,9 @@ type noPaymentMethodNotifierAdapter struct {
 func (a *noPaymentMethodNotifierAdapter) NotifyNoPaymentMethod(ctx context.Context, tenantID string, inv domain.Invoice, trigger string) (domain.NotifyOutcome, error) {
 	if a.paymentUpdateURL == "" {
 		return "", errors.New("PAYMENT_UPDATE_URL not configured")
+	}
+	if a.paymentUpdateReturnURL == "" {
+		return "", errors.New("PAYMENT_UPDATE_RETURN_URL not configured")
 	}
 	if a.tokenSvc == nil {
 		// The SPA requires ?token= and rejects a URL without it ("Link

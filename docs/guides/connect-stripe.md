@@ -177,16 +177,16 @@ More: [Card disputes](../ops/runbook/card-disputes.md).
 
 ## Addresses Stripe sends customers back to
 
-After a customer saves a card, Stripe sends them to a page of your
-dashboard. Set these on your Hardcount server, or customers land on
-`http://localhost:5173`, which exists only in local development. The card
-is saved either way.
+After a customer saves a card or pays, Stripe sends them to a page of
+your dashboard. Set these on your Hardcount server. None has a default:
+while one is unset, the flow it serves is refused, so no customer is sent
+to an address that doesn't exist.
 
-| Setting | The page after | Where the customer lands |
-|---|---|---|
-| `CUSTOMER_PORTAL_URL` | a setup link from step 3, with no `return_url` | `<CUSTOMER_PORTAL_URL>/payment-method-added?status=success` (or `cancel`) |
-| `PAYMENT_UPDATE_RETURN_URL` | the "add a payment method" email Hardcount sends when an invoice finds no card | `<PAYMENT_UPDATE_RETURN_URL>?status=success` (or `cancel`); it is a full address |
-| `HOSTED_INVOICE_BASE_URL` | **Pay** on the hosted invoice page | `<HOSTED_INVOICE_BASE_URL>/invoice/<token>?paid=1`, the invoice's own page |
+| Setting | The page after | Where the customer lands | While it is unset |
+|---|---|---|---|
+| `CUSTOMER_PORTAL_URL` | a setup link from step 3, with no `return_url` | `<CUSTOMER_PORTAL_URL>/payment-method-added?status=success` (or `cancel`) | The setup link is refused with `return_address_not_set` |
+| `PAYMENT_UPDATE_RETURN_URL` | the "add a payment method" email Hardcount sends when an invoice finds no card | `<PAYMENT_UPDATE_RETURN_URL>?status=success` (or `cancel`); it is a full address | That email is not sent |
+| `HOSTED_INVOICE_BASE_URL` | **Pay** on the hosted invoice page | `<HOSTED_INVOICE_BASE_URL>/invoice/<token>?paid=1`, the invoice's own page | The page shows no **Pay** button |
 
 More: [Settings](../settings.md).
 

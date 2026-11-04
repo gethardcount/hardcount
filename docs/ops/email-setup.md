@@ -69,11 +69,11 @@ Hardcount starts without any of these. It logs one warning at start-up for each 
 | Setting | What Hardcount uses it for | Without it |
 |---|---|---|
 | `SMTP_HOST` | Your provider's SMTP server | No email is sent. Queued emails are retried for about 52 hours, then marked failed. Actions that send email right away (send an invoice or a credit note, send a setup link, invite a teammate) refuse with 409 `email_not_configured`. |
-| `HOSTED_INVOICE_BASE_URL` | The "View & pay invoice" and "View receipt" buttons. Hardcount adds `/invoice/<token>`. | Invoice, receipt, dunning and payment-failed emails have no link in their button. |
-| `PAYMENT_UPDATE_URL` | The link in the email that asks a customer to add a payment method. Hardcount adds `?token=…`. | That email is not sent. Hardcount sends it when an invoice has no payment method on file, and when you click Resend setup link. Payment-failed and dunning emails link to the invoice page instead, so they do not need it. |
+| `HOSTED_INVOICE_BASE_URL` | The "View & pay invoice" and "View receipt" buttons. Hardcount adds `/invoice/<token>`. Stripe also sends a customer who paid on that page back there. | Invoice, receipt, dunning and payment-failed emails have no link in their button, and the hosted invoice page shows no **Pay** button. |
+| `PAYMENT_UPDATE_URL` | The link in the email that asks a customer to add a payment method. Hardcount adds `?token=…`. | That email is not sent, and neither is it without `PAYMENT_UPDATE_RETURN_URL`. Hardcount sends it when an invoice has no payment method on file, and when you click Resend setup link. Payment-failed and dunning emails link to the invoice page instead, so they do not need it. |
 | `DASHBOARD_BASE_URL` | Password-reset and team-invite links | Password-reset emails are not sent, and team invites are refused. Hardcount never builds these links from the address in a request. |
-| `PAYMENT_UPDATE_RETURN_URL` | Not an email link: where Stripe sends a customer after they add a card from the `PAYMENT_UPDATE_URL` email. A full address. Hardcount adds `?status=success` or `?status=cancel`. | Stripe sends the customer to `http://localhost:5173/payment-method-added`, which exists only in local development. The card is still saved. |
-| `CUSTOMER_PORTAL_URL` | Not an email link: where Stripe sends a customer after they save a card from a card-setup page you started: the setup-link email you send (`send-setup-email`), or a `setup-session` link. Hardcount adds `/payment-method-added`. | Stripe sends the customer to `http://localhost:5173/payment-method-added`, which exists only in local development. The card is still saved. |
+| `PAYMENT_UPDATE_RETURN_URL` | Not an email link: where Stripe sends a customer after they add a card from the `PAYMENT_UPDATE_URL` email. A full address. Hardcount adds `?status=success` or `?status=cancel`. | The "add a payment method" email is not sent, because its page could not add the card. A link sent earlier answers that adding a card isn't available, and works again once this is set. |
+| `CUSTOMER_PORTAL_URL` | Not an email link: where Stripe sends a customer after they save a card from a card-setup page you started: the setup-link email you send (`send-setup-email`), or a `setup-session` link. Hardcount adds `/payment-method-added`. | Those setup links are refused with 409 `return_address_not_set`. A `setup-session` call that sends its own `return_url` still works. |
 
 ## Settings for each provider
 
@@ -194,6 +194,7 @@ Mailpit is a local email catcher with a web inbox. It comes with the source code
    HOSTED_INVOICE_BASE_URL=http://localhost:5173
    CUSTOMER_PORTAL_URL=http://localhost:5173
    PAYMENT_UPDATE_URL=http://localhost:5173/update-payment
+   PAYMENT_UPDATE_RETURN_URL=http://localhost:5173/payment-method-added
    DASHBOARD_BASE_URL=http://localhost:5173
    ```
 
