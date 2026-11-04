@@ -16,8 +16,8 @@ export type CreateCustomerPaymentSetupSessionBody = {
   /**
      * Where Stripe sends the customer afterwards. Defaults to
      * `/payment-method-added` on the server's
-     * `CUSTOMER_PORTAL_URL` (`http://localhost:5173` when that
-     * is unset).
+     * `CUSTOMER_PORTAL_URL`. With neither, the call answers 409
+     * `return_address_not_set`.
      */
   return_url?: string;
 };

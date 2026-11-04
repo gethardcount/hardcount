@@ -17,8 +17,8 @@ type StatusRow struct {
 	PauseReason  string
 }
 
-// Status reads the leader_status view (all roles). It is the cluster fact
-// behind the hardcount_leader_* gauges and the runbook's first query; a role
+// Status reads the leader_status view for all roles. It is the cluster fact
+// behind the hardcount_leader_* gauges and the runbook's first query. A role
 // that has never ticked reports HasTicked=false with LastTickAgeS=0.
 func Status(ctx context.Context, db *sql.DB) ([]StatusRow, error) {
 	rows, err := db.QueryContext(ctx, `

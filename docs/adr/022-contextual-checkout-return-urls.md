@@ -9,6 +9,8 @@ Stripe Checkout started from the operator's `/checkout/setup` returns to the pag
 
 **2026-10-23:** `POST /v1/checkout/setup` was removed ([#1368](https://github.com/gethardcount/hardcount/pull/1368)), and with it the `?payment=success` / `?payment=cancel` return. The operator's setup session (`POST /v1/customers/{id}/payment-methods/setup-session`) still takes a `return_url`; without one, it returns to `/payment-method-added` on `CUSTOMER_PORTAL_URL` (`http://localhost:5173` when that is unset). The payment-update link takes no `return_url`: it returns to `PAYMENT_UPDATE_RETURN_URL`, or to `http://localhost:5173/payment-method-added` when that is unset. Both add `?status=success` or `?status=cancel`.
 
+**2026-11-04:** None of these return addresses has a default any more: not `CUSTOMER_PORTAL_URL`, not `PAYMENT_UPDATE_RETURN_URL`, and not `HOSTED_INVOICE_BASE_URL` for the hosted invoice page's Pay. While one is unset, the flow it serves is refused before any Stripe call, so no customer is sent to `http://localhost:5173`. See the amendment at the end.
+
 ## Context
 
 Operator-reported bug: setting up a payment method from the customer
@@ -95,3 +97,33 @@ of the codebase already uses:
 - **Keep the env override as a power-user knob** with the contextual
   default underneath. Adds two config surfaces for one capability.
   Pre-launch with one operator, the env knob is pure config debt.
+
+## Amendment 2026-11-04: no default return address
+
+Every return address fell back to `http://localhost:5173` when its setting
+was unset, in every environment. In production a customer paid or saved a
+card, then landed on "site can't be reached". The money still settled by
+webhook, but the customer could not tell.
+
+Now none has a default, the same as `DASHBOARD_BASE_URL` and
+`PAYMENT_UPDATE_URL` already behaved. While one is unset:
+
+| Setting | Refused |
+|---|---|
+| `HOSTED_INVOICE_BASE_URL` | The hosted invoice page shows no Pay button (`pay_unavailable_reason` `online_payment_unavailable`), and a checkout POST answers 409 with that code. |
+| `CUSTOMER_PORTAL_URL` | A setup session with no `return_url`, and Send setup link, answer 409 `return_address_not_set`. A caller's own `return_url` still works. |
+| `PAYMENT_UPDATE_RETURN_URL` | The "add a payment method" email is not sent. A link sent earlier answers 409 `online_payment_unavailable` before its token is used, so it works once the setting is set. |
+
+Each refusal comes before any Stripe call. Start-up logs `<NAME> NOT SET`
+for each, and the invoice notices stop offering what can't work.
+
+Refusing to start was rejected. Compose defaults to `APP_ENV=production`
+with these settings empty, the one-VM guide sets them only after the stack
+first starts, and saved-card charges and dunning retries need none of
+them. ADR-095 rejected a boot refusal over these same settings for the
+same reason: it would stop billing on an upgrade.
+
+Changing `HOSTED_INVOICE_BASE_URL` while a hosted checkout is half-made
+(a pending claim left by a crash) changes the session's parameters, so
+Stripe refuses that one replay. The customer's next Pay makes a new
+session.

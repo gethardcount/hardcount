@@ -26,7 +26,7 @@ import (
 // every billing draft takes the line (201) and its subtotal moves.
 func TestAddLineItem_RefusedOnBillingDraft(t *testing.T) {
 	r := newSnapRig(t, "Add Line Billing Draft")
-	routes := NewHandler(r.svc, r.customers, r.settings).Routes()
+	routes := NewHandler(r.svc, r.customers, r.settings, HandlerDeps{}).Routes()
 	add := func(t *testing.T, id string) *httptest.ResponseRecorder {
 		t.Helper()
 		body, _ := json.Marshal(AddLineItemInput{Description: "Extra seat", Quantity: 1, UnitAmountCents: 2000})

@@ -106,11 +106,10 @@ func NewService(store Store, stripe StripeAPI, _ any) *Service {
 	return &Service{store: store, stripe: stripe}
 }
 
-// SetPortalBaseURL sets the SPA base URL used to compose Stripe
-// Checkout return URLs. Production wires CUSTOMER_PORTAL_URL via
-// router.go; local dev falls through to http://localhost:5173 when
-// unset. Without this, Stripe redirects the customer to a hardcoded
-// default that may not match the deployment's SPA host.
+// SetPortalBaseURL sets the dashboard address (CUSTOMER_PORTAL_URL) that a
+// setup session returns the customer to when the caller passes no
+// return_url. Empty means there is no such page, so CreateSetupSession
+// refuses those calls.
 func (s *Service) SetPortalBaseURL(u string) {
 	s.portalBaseURL = strings.TrimRight(strings.TrimSpace(u), "/")
 }
@@ -144,6 +143,11 @@ func (s *Service) CreateSetupSession(ctx context.Context, tenantID, customerID, 
 	if tenantID == "" || customerID == "" {
 		return "", "", errs.Required("tenant_id, customer_id")
 	}
+	// With no return_url and no CUSTOMER_PORTAL_URL, Stripe would have no
+	// page to send the customer back to. Refuse before any Stripe call.
+	if returnURL == "" && s.portalBaseURL == "" {
+		return "", "", errs.ReturnAddressNotSet("CUSTOMER_PORTAL_URL")
+	}
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
 		return "", "", err
@@ -158,18 +162,11 @@ func (s *Service) CreateSetupSession(ctx context.Context, tenantID, customerID, 
 		}
 		return "", "", fmt.Errorf("ensure stripe customer: %w", err)
 	}
-	// Build the default return URL: portalBaseURL + setupCompletePath
-	// (the public SPA success page). When the SPA base isn't configured
-	// (local dev / tests), fall through to the dev SPA host. The path
-	// must point at a route that EXISTS in the SPA — the legacy
-	// hardcoded "/customer-portal" was a non-existent route, leaving
-	// the customer on a blank page after Stripe Checkout success.
+	// The default return URL is the public success page on the dashboard
+	// address. The path must be a route the SPA has, or the customer lands
+	// on a blank page after Stripe.
 	if returnURL == "" {
-		base := s.portalBaseURL
-		if base == "" {
-			base = "http://localhost:5173"
-		}
-		returnURL = base + setupCompletePath
+		returnURL = s.portalBaseURL + setupCompletePath
 	}
 	// Split success vs. cancel into separate URLs via ?status= so the
 	// landing page can render the right copy without a separate route.

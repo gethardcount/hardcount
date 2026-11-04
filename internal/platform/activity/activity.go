@@ -1,20 +1,20 @@
 // Package activity holds the shape of an activity line and the words that
 // more than one activity surface shares (ADR-128).
 //
-// An activity line is one row on an activity card: the invoice and
-// subscription Activity cards, the Dunning page's recovery timeline and the
-// customer's Sent emails card. The backend builds every word of a line; the
-// dashboard formats money and times, turns a link into a route, maps the tone
-// to a colour and lays the row out.
+// An activity line is one row on an activity card. The cards are the invoice
+// and subscription Activity cards, the Dunning page's recovery timeline and
+// the customer's Sent emails card. The backend builds every word of a line.
+// The dashboard formats money and times, turns a link into a route, maps the
+// tone to a colour and lays the row out.
 //
 // Each domain keeps its own describe functions and returns a Line. This
 // package holds what they share: the Line type, the tones, the actor mapping,
 // the email names and outcome words, the credit-note reason labels and refund
 // parts, and the decline-code words.
 //
-// A describe function takes no clock input. Times are attached afterwards by
-// Stamp, so a test-clock line can differ from a real-clock line only by its
-// Recorded time.
+// A describe function takes no clock input. Stamp attaches the times
+// afterwards, so a test-clock line can differ from a real-clock line only by
+// its Recorded time.
 package activity
 
 import (
@@ -22,18 +22,18 @@ import (
 	"time"
 )
 
-// Tone is the meaning a line's dot repeats. The words carry the meaning; the
-// dot only repeats it.
+// Tone is the meaning that a line's dot repeats. The words carry the
+// meaning, and the dot only repeats it.
 type Tone string
 
 const (
-	// ToneNeutral: something happened.
+	// ToneNeutral means something happened.
 	ToneNeutral Tone = "neutral"
-	// ToneSuccess: money arrived, or was returned as intended.
+	// ToneSuccess means money arrived, or was returned as intended.
 	ToneSuccess Tone = "success"
-	// ToneWarning: needs a look, or money will not be collected.
+	// ToneWarning means the row needs a look, or money will not be collected.
 	ToneWarning Tone = "warning"
-	// ToneFailure: an attempt failed.
+	// ToneFailure means an attempt failed.
 	ToneFailure Tone = "failure"
 )
 
@@ -67,11 +67,12 @@ type Part struct {
 	Link  *Link      `json:"link,omitempty"`
 }
 
-// Segment is one item of the meta line: its parts read as one phrase
+// Segment is one item of the meta line. Its parts read as one phrase
 // ("$15.00 refunded to card"), and segments are joined by " · ".
 type Segment []Part
 
-// ActorKind is who did what a line tells, from a fixed set.
+// ActorKind is the kind of actor that did what a line tells, from a fixed
+// set.
 type ActorKind string
 
 const (
@@ -89,8 +90,8 @@ const (
 	ViaPortal      Via = "portal"
 )
 
-// Actor is who did it. It comes from a fact written with the row; a row with
-// no such fact has no actor.
+// Actor is who did what the line tells. It comes from a fact written with
+// the row, and a row with no such fact has no actor.
 type Actor struct {
 	Kind ActorKind `json:"kind"`
 	Name string    `json:"name,omitempty"`
@@ -113,13 +114,13 @@ type Line struct {
 	Problem string `json:"problem,omitempty"`
 	// Detail is the meta line before the actor.
 	Detail []Segment `json:"detail"`
-	// Actor is the meta line's last part. Nil when no fact names one.
+	// Actor is the meta line's last part. It is nil when no fact names one.
 	Actor *Actor `json:"actor,omitempty"`
 	Tone  Tone   `json:"tone"`
 	// OccurredAt is the event's instant on the entity's calendar.
 	OccurredAt time.Time `json:"occurred_at"`
-	// RecordedAt is the real-world instant, set only for an entity on a test
-	// clock that has one.
+	// RecordedAt is the real-world instant. It is set only for an entity on
+	// a test clock, and only when the row has one.
 	RecordedAt *time.Time `json:"recorded_at,omitempty"`
 }
 
@@ -155,7 +156,7 @@ func Amount(cents int64, currency string) *Money {
 }
 
 // Stamp attaches a line's times. occurred is the instant on the entity's
-// calendar. recorded is the real-world instant; it is kept only when the
+// calendar. recorded is the real-world instant. Stamp keeps it only when the
 // entity is on a test clock (pinned) and the row has one.
 func Stamp(l Line, occurred, recorded time.Time, pinned bool) Line {
 	l.OccurredAt = occurred.UTC()
@@ -221,9 +222,9 @@ func ActorText(a *Actor) string {
 	return ""
 }
 
-// MetaText renders the meta line as plain text, without the Recorded part:
-// the detail segments, then the actor, joined by " · ". It is what the
-// invoice timeline's legacy `detail` field carries until the dashboard
+// MetaText renders the meta line as plain text: the detail segments, then
+// the actor, joined by " · ". It leaves out the Recorded part. The invoice
+// timeline's legacy `detail` field carries this text until the dashboard
 // renders lines itself.
 func MetaText(l Line) string {
 	var segs []string

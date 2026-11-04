@@ -39,6 +39,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -99,7 +100,9 @@ type StripeReadiness interface {
 }
 
 // PayUnavailableOnline is pay_unavailable_reason when the invoice is owed
-// but the seller has no payment provider connected for its mode.
+// but it can't be paid online: the seller has no payment provider connected
+// for its mode, or this server has no HOSTED_INVOICE_BASE_URL for Stripe to
+// send the customer back to.
 const PayUnavailableOnline = errs.CodeOnlinePaymentUnavailable
 
 // PayUnavailableBelowMinimum is pay_unavailable_reason when Stripe refused to
@@ -114,12 +117,14 @@ type Handler struct {
 	creditNotes CreditNoteLister
 	stripe      CheckoutSessionCreator
 	stripeReady StripeReadiness
-	// baseURL is the customer-facing SPA origin, e.g. https://app.example.com.
-	// Used to build Stripe Checkout return URLs. If empty, the handler
-	// falls back to localhost for dev. Kept as a config value rather than
-	// hardcoded so single-tenant self-hosted deployments can point it at
-	// their own branded domain without touching code.
+	// baseURL is the hosted invoice page's origin (HOSTED_INVOICE_BASE_URL),
+	// e.g. https://billing.example.com. Stripe Checkout sends the customer
+	// back there. Empty means there is no page to send them to, so the page
+	// offers no Pay button and checkout is refused.
 	baseURL string
+	// noBaseWarned makes the "no address" warning print once per process,
+	// not on every page view.
+	noBaseWarned sync.Once
 }
 
 type Deps struct {
@@ -174,8 +179,10 @@ type HostedInvoicePayload struct {
 	// server-side so the rule lives in one place.
 	PayEnabled bool `json:"pay_enabled"`
 	// PayUnavailableReason says why an owed invoice has no Pay button:
-	// "online_payment_unavailable" when the seller has no payment provider
-	// connected. Empty when Pay is enabled, or when nothing is owed.
+	// "online_payment_unavailable" when it can't be paid online (no payment
+	// provider connected, or no hosted invoice address on this server), or
+	// the below-minimum code. Empty when Pay is enabled, or when nothing is
+	// owed.
 	PayUnavailableReason string `json:"pay_unavailable_reason,omitempty"`
 	// Livemode marks whether this invoice is real money. The SPA shows a
 	// "Test mode" banner when false — an unmarked test invoice is
@@ -570,13 +577,11 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 // hint — the authoritative payment state comes from the Stripe webhook,
 // but the flag lets the SPA render the thank-you view immediately instead
 // of waiting a beat for the status to refresh.
+// The caller has already checked onlinePaymentReady, which refuses an empty
+// baseURL.
 func (h *Handler) checkoutReturnURLs(token string) (successURL, cancelURL string) {
-	base := h.baseURL
-	if base == "" {
-		base = "http://localhost:5173"
-	}
-	successURL = base + "/invoice/" + token + "?paid=1"
-	cancelURL = base + "/invoice/" + token
+	successURL = h.baseURL + "/invoice/" + token + "?paid=1"
+	cancelURL = h.baseURL + "/invoice/" + token
 	return successURL, cancelURL
 }
 
@@ -597,11 +602,19 @@ func payEnabled(inv domain.Invoice) bool {
 		!inv.PaymentInFlight()
 }
 
-// onlinePaymentReady: the seller can take this invoice's payment online —
-// a Stripe adapter is wired and the tenant has keys for the invoice's mode
-// (pinned on ctx by resolveInvoice).
+// onlinePaymentReady reports whether the seller can take this invoice's
+// payment online. That needs a Stripe adapter, a hosted invoice address for
+// Stripe to send the customer back to, and Stripe keys for the invoice's
+// mode (pinned on ctx by resolveInvoice).
 func (h *Handler) onlinePaymentReady(ctx context.Context, inv domain.Invoice) (bool, error) {
 	if h.stripe == nil {
+		return false, nil
+	}
+	if h.baseURL == "" {
+		h.noBaseWarned.Do(func() {
+			slog.WarnContext(ctx, "HOSTED_INVOICE_BASE_URL NOT SET — a customer opened a hosted invoice page, and it offers no Pay button, because Stripe would have no page to send them back to. Set it to the hosted invoice page's address (e.g. https://billing.example.com) and restart.",
+				"tenant_id", inv.TenantID)
+		})
 		return false, nil
 	}
 	if h.stripeReady == nil {
@@ -616,8 +629,7 @@ func (h *Handler) onlinePaymentReady(ctx context.Context, inv domain.Invoice) (b
 
 // payUnavailableReason is set only when money is owed but can't be paid
 // online, so the page can say "contact the seller" instead of nothing: the
-// amount is below Stripe's minimum charge, or the seller has no payment
-// provider connected.
+// amount is below Stripe's minimum charge, or onlinePaymentReady is false.
 func payUnavailableReason(owed, online, belowMinimum bool) string {
 	switch {
 	case owed && belowMinimum:
