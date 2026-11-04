@@ -9,21 +9,21 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 )
 
-// ContextHandler wraps a slog.Handler and injects request_id and tenant_id
-// pulled from the call's ctx into every record. Callers must use the
-// *Context-suffixed slog methods (InfoContext, ErrorContext, etc.) for the
-// attributes to appear — bare slog.Error("msg") has no ctx to read from.
+// ContextHandler wraps a slog.Handler and adds request_id and tenant_id from
+// the call's ctx to every record. Callers must use the slog methods that end
+// in Context (InfoContext, ErrorContext and so on) for these attributes to
+// appear. A bare slog.Error("msg") has no ctx to read from.
 //
-// This is the single place log enrichment happens, so handlers and services
-// don't need to remember to stamp request_id on every call site. A design
-// partner hits a bug → they report the request_id from the Hardcount-Request-Id
-// response header → one grep over structured JSON logs shows the full trace.
+// This is the one place logs are enriched, so handlers and services do not
+// have to stamp request_id at every call site. A design partner who hits a
+// bug can report the request_id from the Hardcount-Request-Id response
+// header. One grep over the structured JSON logs then shows the full trace.
 type ContextHandler struct {
 	slog.Handler
 }
 
-// NewContextHandler wraps h so records emitted via *Context slog methods
-// carry request_id and tenant_id attrs when present in the ctx.
+// NewContextHandler wraps h, so records from the slog methods that end in
+// Context carry request_id and tenant_id attrs when ctx has them.
 func NewContextHandler(h slog.Handler) *ContextHandler {
 	return &ContextHandler{Handler: h}
 }
