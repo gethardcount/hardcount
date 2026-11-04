@@ -82,7 +82,7 @@ func TestResendSetupLink_NotCollectibleEnvelope(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/"+inv.ID+"/resend-setup-link", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", inv.ID)
-	reqCtx := context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1")
+	reqCtx := auth.WithTenantID(req.Context(), "t1")
 	req = req.WithContext(context.WithValue(reqCtx, chi.RouteCtxKey, rctx))
 	rr := httptest.NewRecorder()
 	h.resendSetupLink(rr, req)
@@ -101,7 +101,7 @@ func TestResendSetupLink_HonestDispositions(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/"+invID+"/resend-setup-link", nil)
 		rctx := chi.NewRouteContext()
 		rctx.URLParams.Add("id", invID)
-		reqCtx := context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1")
+		reqCtx := auth.WithTenantID(req.Context(), "t1")
 		reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
 		return req.WithContext(reqCtx), httptest.NewRecorder()
 	}

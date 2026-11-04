@@ -97,7 +97,7 @@ func TestUpdateItem_Downgrade_RoutesGrossTaxReversingCreditNote(t *testing.T) {
 	h.SetCreditNoteIssuer(cn)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -176,7 +176,7 @@ func TestUpdateItem_Downgrade_LIFOAcrossFundingInvoices(t *testing.T) {
 	h.SetCreditNoteIssuer(cn)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 
@@ -241,7 +241,7 @@ func TestUpdateItem_Downgrade_LIFOTiebreak_SameInstantFunding(t *testing.T) {
 	h.SetCreditNoteIssuer(cn)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 
@@ -290,7 +290,7 @@ func TestUpdateItem_QuantityDecrease_RoutesGrossCreditNote(t *testing.T) {
 	// Decrease 3 → 1 seats: delta -2 × $10 = -2000/full period, 15/30 → net 1000.
 	newQty := int64(1)
 	body, _ := json.Marshal(UpdateItemInput{Quantity: &newQty})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -360,7 +360,7 @@ func TestUpdateItem_Downgrade_InFlightSource_DraftsInsteadOfDroppingCredit(t *te
 		h.SetCreditNoteIssuer(cn)
 
 		body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
-		req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+		req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 		rr := httptest.NewRecorder()
 		h.updateItem(rr, req)
 		if rr.Code != http.StatusOK {

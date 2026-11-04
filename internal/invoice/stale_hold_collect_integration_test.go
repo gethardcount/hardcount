@@ -49,7 +49,7 @@ func (c creditsCoverAll) ApplyToInvoiceAt(ctx context.Context, _, _, invoiceID s
 func postCollect(t *testing.T, h *invoice.Handler, tenantID, invoiceID string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/"+invoiceID+"/collect", nil)
-	req = req.WithContext(context.WithValue(postgres.WithLivemode(req.Context(), false), auth.TestTenantIDKey(), tenantID))
+	req = req.WithContext(auth.WithTenantID(postgres.WithLivemode(req.Context(), false), tenantID))
 	rr := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rr, req)
 	return rr

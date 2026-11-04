@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"maps"
 	"slices"
 	"testing"
 )
@@ -24,7 +25,7 @@ func TestHasPermission_SecretAndSessionHoldAll(t *testing.T) {
 				t.Errorf("%s should have %s", kt, p)
 			}
 		}
-		if got := len(AllPermissions(kt)); got != len(everyPermission) {
+		if got := len(keyPermissions[kt]); got != len(everyPermission) {
 			t.Errorf("%s has %d permissions, want %d", kt, got, len(everyPermission))
 		}
 	}
@@ -34,7 +35,7 @@ func TestHasPermission_SecretAndSessionHoldAll(t *testing.T) {
 // Mutation: give it any other permission, such as usage:write (which
 // gates backfill and the held-usage release), and this fails.
 func TestHasPermission_IngestHoldsOnlyUsageIngest(t *testing.T) {
-	if got := AllPermissions(KeyTypeIngest); !slices.Equal(got, []Permission{PermUsageIngest}) {
+	if got := slices.Collect(maps.Keys(keyPermissions[KeyTypeIngest])); !slices.Equal(got, []Permission{PermUsageIngest}) {
 		t.Fatalf("ingest key permissions = %v, want only %s", got, PermUsageIngest)
 	}
 	for _, p := range everyPermission {

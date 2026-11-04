@@ -33,7 +33,7 @@ func (s *stubCredentials) GetPlaintext(_ context.Context, tenantID string, livem
 }
 
 func ctxForTenant(tenantID string, livemode bool) context.Context {
-	ctx := context.WithValue(context.Background(), auth.TestTenantIDKey(), tenantID)
+	ctx := auth.WithTenantID(context.Background(), tenantID)
 	return postgres.WithLivemode(ctx, livemode)
 }
 
@@ -66,7 +66,7 @@ func TestStripeClients_ResolveCtx_ResolvesPerTenantMode(t *testing.T) {
 // is an error, never read as "Stripe not connected".
 func TestStripeClients_MissingModeOrTenantIsAnError(t *testing.T) {
 	c := NewStripeClients(&stubCredentials{})
-	noMode := context.WithValue(context.Background(), auth.TestTenantIDKey(), "t1")
+	noMode := auth.WithTenantID(context.Background(), "t1")
 	if _, err := c.ResolveCtx(noMode); !errors.Is(err, postgres.ErrLivemodeUnset) {
 		t.Errorf("ResolveCtx with no mode: err = %v, want postgres.ErrLivemodeUnset", err)
 	}

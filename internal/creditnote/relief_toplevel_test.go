@@ -1,7 +1,6 @@
 package creditnote
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -27,7 +26,7 @@ func TestCreateCommitRelief_TopLevelSplitRefused(t *testing.T) {
 		t.Run(c.field, func(t *testing.T) {
 			body := `{"invoice_id":"inv_1","reason":"Lost card dispute","commit_relief":{"retire_all":true},"` + c.field + `":` + c.value + `}`
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-			req = req.WithContext(context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1"))
+			req = req.WithContext(auth.WithTenantID(req.Context(), "t1"))
 			rr := httptest.NewRecorder()
 			srv.ServeHTTP(rr, req)
 			if rr.Code != http.StatusUnprocessableEntity {

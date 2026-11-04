@@ -12,39 +12,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// Middleware accepts a `hardcount_session` httpOnly cookie. On a hit it
-// resolves the session, puts the parent key's tenant context on the
-// request, and passes it on. On a miss it answers 401 and does not fall
-// back to API-key auth. Use MiddlewareOrAPIKey for routes that should
-// accept either credential.
-func Middleware(svc *Service) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			c, err := r.Cookie(CookieName)
-			if err != nil || c.Value == "" {
-				respond.Unauthorized(w, r, "missing session — sign in at /login")
-				return
-			}
-			sess, err := svc.Resolve(r.Context(), c.Value)
-			if err != nil {
-				if !errors.Is(err, ErrNotFound) {
-					// A store failure is no verdict on the session. Answer
-					// with a retryable 5xx, not a false credential error
-					// (#560).
-					slog.ErrorContext(r.Context(), "session resolve unavailable", "error", err)
-					respond.Error(w, r, http.StatusServiceUnavailable, "api_error",
-						"authentication_unavailable",
-						"authentication is temporarily unavailable — retry shortly")
-					return
-				}
-				respond.Unauthorized(w, r, "invalid or expired session")
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(applyToCtx(r.Context(), sess)))
-		})
-	}
-}
-
 // MiddlewareOrAPIKey accepts either a session cookie or an
 // `Authorization: Bearer <api_key>` header. The dashboard uses the cookie,
 // and SDKs and curl callers use the API key. The cookie takes precedence

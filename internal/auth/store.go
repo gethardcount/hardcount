@@ -24,11 +24,9 @@ type Store interface {
 	TouchLastUsed(ctx context.Context, id string, usedAt time.Time) error
 }
 
-// ListFilter selects a page of a tenant's keys. Role, when set, matches
-// key_type.
+// ListFilter selects a page of a tenant's keys.
 type ListFilter struct {
 	TenantID string
-	Role     string
 	Limit    int
 	Offset   int
 }

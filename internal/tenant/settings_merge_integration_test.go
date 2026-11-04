@@ -16,7 +16,7 @@ import (
 func settingsRequest(t *testing.T, tenantID, body string) (*httptest.ResponseRecorder, *http.Request) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPut, "/v1/settings", bytes.NewBufferString(body))
-	reqCtx := context.WithValue(req.Context(), auth.TestTenantIDKey(), tenantID)
+	reqCtx := auth.WithTenantID(req.Context(), tenantID)
 	reqCtx = postgres.WithLivemode(reqCtx, false)
 	req = req.WithContext(reqCtx)
 	return httptest.NewRecorder(), req

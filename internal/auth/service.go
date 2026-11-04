@@ -33,9 +33,6 @@ type Service struct {
 	// lastTouched debounces the last_used_at write per key: unix-nano of the
 	// last touch this process issued, keyed by api key id. See touchLastUsed.
 	lastTouched sync.Map // map[string]*atomic.Int64
-	// touchInterval is how often, per key, last_used_at is written. A field
-	// so tests can shorten it; production uses lastUsedTouchInterval.
-	touchInterval time.Duration
 	// now is the clock, injectable for the debounce tests.
 	now func() time.Time
 }
@@ -53,27 +50,26 @@ const lastUsedTouchInterval = time.Minute
 
 // NewService returns a Service backed by store.
 func NewService(store Store) *Service {
-	return &Service{store: store, touchInterval: lastUsedTouchInterval, now: func() time.Time { return time.Now().UTC() }}
+	return &Service{store: store, now: func() time.Time { return time.Now().UTC() }}
 }
 
-// touchLastUsed writes last_used_at for key id at most once per touchInterval
-// per process, and returns whether it issued the write. Exactly one caller wins
-// a given interval even under a concurrent burst: the per-key timestamp is
-// advanced with a compare-and-swap, so N simultaneous requests produce one
-// UPDATE, not N goroutines queueing on one row.
-func (s *Service) touchLastUsed(id string) bool {
+// touchLastUsed writes last_used_at for key id at most once per
+// lastUsedTouchInterval per process. Exactly one caller wins a given interval
+// even under a concurrent burst: the per-key timestamp is advanced with a
+// compare-and-swap, so N simultaneous requests produce one UPDATE, not N
+// goroutines queueing on one row.
+func (s *Service) touchLastUsed(id string) {
 	nowNs := s.now().UnixNano()
 	v, _ := s.lastTouched.LoadOrStore(id, new(atomic.Int64))
 	last := v.(*atomic.Int64)
 	prev := last.Load()
-	if prev != 0 && nowNs-prev < int64(s.touchInterval) {
-		return false
+	if prev != 0 && nowNs-prev < int64(lastUsedTouchInterval) {
+		return
 	}
 	if !last.CompareAndSwap(prev, nowNs) {
-		return false // another request in this instant won the interval
+		return // another request in this instant won the interval
 	}
 	go func() { _ = s.store.TouchLastUsed(context.Background(), id, time.Unix(0, nowNs).UTC()) }()
-	return true
 }
 
 // CreateKeyResult contains the key record and the raw key, which is shown
@@ -197,10 +193,7 @@ var ErrInvalidKey = errors.New("invalid api key")
 func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey, error) {
 	rawKey = strings.TrimSpace(rawKey)
 
-	var (
-		keyType    KeyType
-		fullPrefix string
-	)
+	var fullPrefix string
 	for _, kt := range StoredKeyTypes {
 		typeP := kt.TypePrefix()
 		if !strings.HasPrefix(rawKey, typeP) {
@@ -209,14 +202,11 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 		after := rawKey[len(typeP):]
 		switch {
 		case strings.HasPrefix(after, "live_"):
-			keyType = kt
 			fullPrefix = typeP + "live_"
 		case strings.HasPrefix(after, "test_"):
-			keyType = kt
 			fullPrefix = typeP + "test_"
 		default:
 			// The older format has no mode infix: treat it as live.
-			keyType = kt
 			fullPrefix = typeP
 		}
 		break
@@ -224,7 +214,6 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 	if fullPrefix == "" {
 		return domain.APIKey{}, fmt.Errorf("invalid key format: %w", ErrInvalidKey)
 	}
-	_ = keyType // retained for future use (permission routing pre-lookup)
 
 	secretPart := strings.TrimPrefix(rawKey, fullPrefix)
 	if len(secretPart) < keyPrefixLen {

@@ -43,7 +43,7 @@ func TestUpdateItem_Upgrade_EnrollsProrationInvoiceForAutoCharge(t *testing.T) {
 	h.SetProrationDeps(plans, invoices)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 
@@ -87,7 +87,7 @@ func TestUpdateItem_Downgrade_DoesNotEnrollForAutoCharge(t *testing.T) {
 	h.SetCreditNoteIssuer(&fakeCNIssuer{})
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 
