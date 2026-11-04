@@ -8,10 +8,11 @@ import (
 	"github.com/rs/xid"
 )
 
-// requestIDPrefix marks an id as minted by the server. Rows written before
-// this middleware existed may carry a request_id the client chose, and the
-// log is append-only, so they cannot be rewritten. The prefix also tells a
-// forensic reader which era a row belongs to: a `req_` id is provably ours.
+// requestIDPrefix marks an id as minted by the server. audit_log rows written
+// before this middleware existed may carry a request_id the client chose, and
+// audit_log is append-only, so they cannot be rewritten. The prefix also
+// tells a forensic reader which era a row belongs to: a `req_` id is provably
+// ours.
 const requestIDPrefix = "req_"
 
 // RequestID replaces chi's middleware.RequestID. It always mints the id on
@@ -32,7 +33,7 @@ const requestIDPrefix = "req_"
 // request id and GCP's insertId are all minted on the server for this reason.
 //
 // The inbound value is dropped entirely, not kept under a second key for log
-// correlation:
+// correlation, for these reasons:
 //
 //   - Nothing consumes it as input. The name still appears in tests that
 //     forge the header to prove it is ignored, and in the docs that record
@@ -68,11 +69,12 @@ func RequestID(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), chimw.RequestIDKey, id)
 		// Set the published header here, not only in respond.JSON. Otherwise
 		// a response that never reaches a respond helper has no id in the
-		// header or the body: chi's default "404 page not found" for an
-		// unrouted path, or net/http's "400 Bad Request" for a malformed
-		// request line. With no envelope to parse, the caller needs the
-		// header most. Setting it before next.ServeHTTP covers whoever
-		// writes the status. respond.JSON sets the same value again, a no-op.
+		// header or the body. Two such responses are chi's default "404 page
+		// not found" for an unrouted path and net/http's "400 Bad Request"
+		// for a malformed request line. With no envelope to parse, the
+		// caller needs the header most. Setting it before next.ServeHTTP
+		// covers whoever writes the status. respond.JSON sets the same value
+		// again, a no-op.
 		w.Header().Set("Hardcount-Request-Id", id)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

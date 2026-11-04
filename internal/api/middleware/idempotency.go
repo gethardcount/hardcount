@@ -36,8 +36,8 @@ const statusPending = 0
 // idempotencyPollInterval and idempotencyPollTimeout bound how long a losing
 // concurrent request waits for the winner to store its response before it
 // gives up with 409. The timeout is shorter than typical handler budgets. A
-// request still pending after it either died mid-flight, or is a slow
-// operation that the client should retry instead of blocking on.
+// request still pending after the timeout either died mid-flight, or is a
+// slow operation that the client should retry instead of blocking on.
 const (
 	idempotencyPollInterval = 25 * time.Millisecond
 	idempotencyPollTimeout  = 5 * time.Second
@@ -119,10 +119,11 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 			_ = r.Body.Close()
 			if len(bodyBytes) > maxIdempotentBodyBytes {
 				// The body is over the hash cap. Hash the method, the path
-				// and the body's first part instead of refusing, so large
-				// requests still work. The fingerprint is weaker, because
-				// two bodies with the same first part match. Such requests
-				// are rare, so that is acceptable.
+				// and the first maxIdempotentBodyBytes of the body instead
+				// of refusing, so large requests still work. The
+				// fingerprint is weaker, because two bodies with the same
+				// first 1 MiB match. Such requests are rare, so that is
+				// acceptable.
 				bodyBytes = bodyBytes[:maxIdempotentBodyBytes]
 			}
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
@@ -383,9 +384,9 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 	for {
 		c, found, pending, err := readKey(ctx, db, tenantID, key)
 		if err != nil {
-			// A database error while resolving the conflict. Failing open is
-			// unsafe, since the side effect may already be running, so answer
-			// a 409 that the client retries instead of running it again.
+			// On a database error while resolving the conflict, do not fail
+			// open: the side effect may already be running. Answer a 409 that
+			// the client retries, instead of running the operation again.
 			idempotencyError(w, r, http.StatusConflict, "conflict_idempotency",
 				"A request with this idempotency key is being processed. Please retry.")
 			return
@@ -493,8 +494,8 @@ func CleanExpired(ctx context.Context, db *postgres.DB) (int, error) {
 
 // IdempotencyCleaner adapts CleanExpired to the scheduler's cleaner interface,
 // Cleanup(ctx) (int, error), the shape payment.TokenService also has. That
-// keeps the scheduler wiring the same for every cleanup task, and the
-// scheduler package imports nothing from middleware.
+// keeps the scheduler wiring the same for every cleanup task, and it means the
+// scheduler package does not need to import middleware.
 type IdempotencyCleaner struct {
 	db *postgres.DB
 }

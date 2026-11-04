@@ -37,22 +37,23 @@ import (
 //     bearer key is not an ambient credential: an attacker cannot make a
 //     victim's browser attach it. So the SDK and server-to-server path
 //     (bearer, no cookie) is immune to CSRF, and rightly sends no Origin. A
-//     request with both a bearer header and a session cookie is not a real
-//     shape: the SDK has no cookie, and the dashboard sends no bearer. It is
-//     a dodge: add a junk Authorization header to trip the exemption, and
-//     let the ambient cookie authenticate. A CORS config that let the
-//     attacker's origin send credentials would pass it through a preflight
-//     (CORS `*` sends none; see CORS). So the guard origin-checks such a
-//     request instead of exempting it, and the dodge fails whatever the CORS
-//     config.
+//     request with both a bearer header and a session cookie is not a shape
+//     any honest client sends: the SDK has no cookie, and the dashboard
+//     sends no bearer. It is a dodge: add a junk Authorization header to
+//     trip the exemption, and let the ambient cookie authenticate. A CORS
+//     config that let the attacker's origin send credentials would pass it
+//     through a preflight (CORS `*` sends none; see CORS). So the guard
+//     origin-checks such a request instead of exempting it, and the dodge
+//     fails whatever the CORS config.
 //   - Otherwise the browser's Sec-Fetch-Site header is the main signal, and
 //     page JS cannot forge it. same-origin and none pass, and cross-site is
 //     rejected. same-site passes only when its Origin is an allowlisted
 //     dashboard origin. That stops a sibling subdomain (a subdomain takeover,
 //     a user-content host) from using the same-site label and the Lax cookie
 //     to make a mutation. Only browsers from before 2020 omit Sec-Fetch-Site.
-//     For them the guard falls back to the same Origin allowlist, the
-//     CORS_ALLOWED_ORIGINS list, so the two cannot drift apart.
+//     For them the guard falls back to the same Origin allowlist. It is the
+//     CORS_ALLOWED_ORIGINS list that CORS also uses, so the CSRF and CORS
+//     allowlists cannot drift apart.
 //   - A request with neither Sec-Fetch-Site nor Origin is allowed: the guard
 //     does not fail closed here, on purpose. A real cross-site attack needs a
 //     browser, and every browser that can run the dashboard sets at least one
@@ -64,7 +65,7 @@ import (
 // Mount it only on the route groups that serve the dashboard: /v1/auth, and
 // the /v1 group that takes a cookie or a bearer key. Keep it off the Stripe
 // webhook group (HMAC-authenticated, server to server, no Origin). Keep it off
-// the public payment and invoice pages too: they need no sign-in, so they
+// the public payment and invoice routes too: they need no sign-in, so they
 // carry no operator session to abuse.
 func CSRFGuard(allowedOrigins []string) func(http.Handler) http.Handler {
 	allow := make(map[string]bool, len(allowedOrigins))
@@ -90,7 +91,8 @@ func CSRFGuard(allowedOrigins []string) func(http.Handler) http.Handler {
 }
 
 // isSafeMethod reports whether the HTTP method changes no state. The guard
-// never checks these methods, and OPTIONS is the CORS preflight.
+// never checks these methods: they change no state, and OPTIONS is the CORS
+// preflight.
 func isSafeMethod(method string) bool {
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
@@ -132,8 +134,9 @@ func isCrossSiteBrowserRequest(r *http.Request, allow map[string]bool) bool {
 		return true
 	}
 	// Sec-Fetch-Site is absent or unrecognized, so fall back to Origin. With
-	// no Origin either, nothing shows a browser sent it. The caller is curl
-	// or an SDK, not a CSRF vector, so allow it.
+	// no Origin either, nothing shows a browser sent it. The caller is not a
+	// browser (curl or an SDK, for example), so it is not a CSRF vector.
+	// Allow it.
 	if strings.TrimSpace(r.Header.Get("Origin")) == "" {
 		return false
 	}

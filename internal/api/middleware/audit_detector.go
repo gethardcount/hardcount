@@ -16,8 +16,8 @@ import (
 // auditUncoveredMutations counts mutating requests that succeeded (2xx), left
 // no audit evidence and are not declared exempt. Its label is the route
 // pattern, never the raw path. The raw path carries ids, and on the public
-// pages live payment tokens, so it would make the number of series grow
-// without limit.
+// routes it carries live payment tokens, so it would make the number of
+// series grow without limit.
 //
 // A value above zero means a state change committed with no compliance
 // record. Either the route is missing its audit emission, or a new route
@@ -35,8 +35,8 @@ var auditUncoveredMutations = promauto.NewCounterVec(
 )
 
 // AuditCoverage returns a middleware that detects uncovered mutations:
-// mutating requests that succeeded but left no audit row and are not declared
-// exempt. It only observes.
+// mutating requests that succeeded, left no audit evidence (a row or a
+// MarkSkip) and are not declared exempt. It only observes.
 //
 // Coverage is declared in the route-audit registry, and each row is written
 // in the business transaction (audit.Logger.LogInTx). This middleware only
@@ -47,17 +47,19 @@ var auditUncoveredMutations = promauto.NewCounterVec(
 //
 //  1. It never changes the response: no status swap, no body rewrite, no
 //     injected error. The business transaction has already committed, so a
-//     changed answer would be false. The Idempotency layer would cache that
-//     false answer for 24h. That strands the real response and invites a
-//     second mutation under a fresh key (ADR-089). Telemetry never overwrites
-//     the answer of a committed money mutation.
+//     changed answer would be false. A client told that a committed change
+//     failed may retry with a fresh key and make the change twice. A layer
+//     mounted inside Idempotency would also get the false answer cached for
+//     24h, which strands the real response (ADR-089). Telemetry never
+//     overwrites the answer of a committed money mutation.
 //
 //  2. It never buffers the body. chi's WrapResponseWriter records the status
 //     with a pass-through Write. Only Tee() buffers, and this code never
-//     calls it. Its typed wrappers keep http.Flusher, http.Hijacker and
-//     io.ReaderFrom. A buffer without those interfaces would make a streaming
-//     route collect its response in memory instead. The CSV exports are such a
-//     route: they get a 5-minute timeout because they stream.
+//     calls it. WrapResponseWriter's typed wrappers keep http.Flusher,
+//     http.Hijacker and io.ReaderFrom. A buffer without those interfaces
+//     would make a streaming route collect its response in memory instead.
+//     The CSV exports are such a route: they get a 5-minute timeout because
+//     they stream.
 //
 // isExempt looks up (method, canonical route pattern) in the registry. It is
 // passed in because the registry lives in package api, which imports this

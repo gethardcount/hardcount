@@ -286,7 +286,8 @@ func RecordLeaderLeaseLost(role, reason string) {
 // page. Prometheus advises exporting a default value, such as 0, for any time
 // series you know may exist. Only "panicked" is created. A heartbeat_timeout
 // series created now would page on one timeout, and that waits for the
-// heartbeat fix (RL-F2 in ADR-114).
+// heartbeat fix, RL-F2. ADR-114 records the same rule in its amendment
+// 2026-10-19, "a panic stops one step", item 6.
 func InitLeaderLeaseLost(roles ...string) {
 	for _, role := range roles {
 		leaderLeaseLost.WithLabelValues(role, "panicked")
@@ -503,9 +504,10 @@ func RecordScheduledCleanup(table string, rows int) {
 }
 
 // unmatchedRoute is the path label for any request that chi did not route to
-// a registered pattern: a 404 or 405 at the root, or an unknown verb. As one
-// constant, a scanner walking /wp-admin, /.env, /phpmyadmin and so on creates
-// one series, not one per probe. audit_detector.go uses the same word too.
+// a registered pattern: a 404 or 405 at the root, or an unknown verb. It is
+// one constant, so a scanner walking /wp-admin, /.env, /phpmyadmin and so on
+// creates one series, not one per probe. audit_detector.go uses the same word
+// for the same case.
 const unmatchedRoute = "unmatched"
 
 // routeLabel returns the chi route pattern for the request, such as
@@ -582,13 +584,14 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 	//
 	// The stale-hold sweep ends a park at the first hourly tick 24 hours after
 	// its charge's hold (domain.ParkedNothingWait; ADR-127, amendment REC-5).
-	// So the gauge counts only the parks the sweep has not ended on schedule: a
-	// hold more than 26 hours old (one tick plus an hour for a late one), or no
-	// hold, which nothing checks. A count of every park would stay above 0 for
-	// as long as parks kept arriving. A Stripe incident that parked invoices
-	// over a few hours would then page on parks that were on schedule. This
-	// package imports no domain package, so it keeps a hand copy of the 24
-	// hours, which TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay pins.
+	// So the gauge counts only the parks the sweep has not ended on schedule.
+	// Those have a hold more than 26 hours old (one tick plus an hour for a
+	// late one), or no hold, which nothing checks. A count of every park
+	// would stay above 0 for as long as parks kept arriving. A Stripe incident
+	// that parked invoices over a few hours would then page on parks that were
+	// on schedule. This package imports no domain package, so it keeps a hand
+	// copy of the 24 hours, which
+	// TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay pins.
 	parkedHelp := "Invoices whose last charge got an unclear answer from Stripe that named no payment (ADR-107) and that Hardcount has not ended on schedule: still parked 26 hours after the charge's hold, or with no hold. By disposition: open (finalized) or written_off (uncollectible). Hardcount records a payment that appears at Stripe and, with none 24 hours after the hold, ends the park at the next hourly tick (an open invoice is charged again); parks inside that are not counted. Alert on open > 0: Stripe cannot be asked or read about it, or nothing is checking it. -1 = metric query failed."
 	for _, m := range []struct {
 		label string

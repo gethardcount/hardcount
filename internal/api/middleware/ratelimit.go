@@ -46,7 +46,8 @@ type RateLimiter struct {
 // shape every limiter accepts. The caller decides what an error means.
 // Production refuses to start on one (cmd/hardcount/main.go), because the
 // general and hosted-invoice limiters fail closed without Redis. A replica
-// would otherwise start as healthy and answer 429 to its share of traffic.
+// that started anyway would look healthy and answer 429 to its share of
+// traffic.
 // Other environments warn and continue, failing open.
 func OpenRedis(ctx context.Context, url string) (*goredis.Client, error) {
 	if url == "" {
