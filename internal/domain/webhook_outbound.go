@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+// WebhookEndpoint is a tenant's URL that receives the outbound webhook
+// events it subscribes to, signed with its secret.
 type WebhookEndpoint struct {
 	ID          string   `json:"id"`
 	TenantID    string   `json:"tenant_id,omitempty"`
@@ -15,13 +17,13 @@ type WebhookEndpoint struct {
 	SecretLast4 string   `json:"secret_last4"`
 	Events      []string `json:"events"`
 	Active      bool     `json:"active"`
-	// During a grace-period rotation, SecondarySecret carries the previous
-	// signing key and SecondarySecretExpiresAt is set 72h in the future.
-	// The dispatcher signs outbound events with both during the window
-	// (two v1= entries in Hardcount-Signature, Stripe-style) so partners can
-	// stage a verifier update without breaking production webhooks. After
-	// expiry, both fields are skipped at sign time; the row keeps them as
-	// cold data until the next rotation overwrites them.
+	// During a rotation with a grace period, SecondarySecret carries the
+	// previous signing key, and SecondarySecretExpiresAt is set 72h in the
+	// future. The dispatcher signs outbound events with both keys during the
+	// window (two v1= entries in Hardcount-Signature, as Stripe does). So
+	// partners can roll out a verifier update without breaking production
+	// webhooks. After expiry, signing skips both fields. The row keeps them
+	// as unused data until the next rotation overwrites them.
 	SecondarySecret          string     `json:"-"`
 	SecondarySecretLast4     string     `json:"secondary_secret_last4,omitempty"`
 	SecondarySecretExpiresAt *time.Time `json:"secondary_secret_expires_at,omitempty"`
@@ -29,6 +31,8 @@ type WebhookEndpoint struct {
 	UpdatedAt                time.Time  `json:"updated_at"`
 }
 
+// WebhookEvent is one outbound event: its type and its payload. Each
+// endpoint it is sent to gets its own WebhookDelivery.
 type WebhookEvent struct {
 	ID        string         `json:"id"`
 	TenantID  string         `json:"tenant_id,omitempty"`
@@ -36,13 +40,12 @@ type WebhookEvent struct {
 	EventType string         `json:"event_type"`
 	Payload   map[string]any `json:"payload"`
 	CreatedAt time.Time      `json:"created_at"`
-	// ReplayOfEventID is set when this row was produced by an operator
-	// clicking "Replay" on an earlier event in the dashboard. It points
-	// back to the event the operator was looking at — not to the most
-	// recent replay clone — so the audit chain stays single-pivot
-	// (original → many clones, never original → A → B → …). The list-
-	// deliveries endpoint stitches the original and its clones into one
-	// unified attempt timeline.
+	// ReplayOfEventID is set when an operator produced this row by clicking
+	// "Replay" on an earlier event in the dashboard. It points back to the
+	// event the operator was looking at, not to the latest replay clone. So
+	// the audit chain has one pivot: the original has many clones, never
+	// original → A → B → …. The list-deliveries endpoint joins the original
+	// and its clones into one attempt timeline.
 	ReplayOfEventID *string `json:"replay_of_event_id,omitempty"`
 	// ReplayOfCreatedAt is the created_at of the ReplayOfEventID event. A
 	// replay goes to receivers under that event's id and this time, so a
@@ -52,6 +55,7 @@ type WebhookEvent struct {
 	ReplayOfCreatedAt time.Time `json:"-"`
 }
 
+// DeliveryStatus is where one delivery of an event to an endpoint stands.
 type DeliveryStatus string
 
 const (
@@ -60,6 +64,8 @@ const (
 	DeliveryFailed    DeliveryStatus = "failed"
 )
 
+// WebhookDelivery is one event's delivery to one endpoint: its attempts,
+// the receiver's last answer and when it retries next.
 type WebhookDelivery struct {
 	ID                string         `json:"id"`
 	TenantID          string         `json:"tenant_id,omitempty"`
@@ -74,17 +80,17 @@ type WebhookDelivery struct {
 	NextRetryAt       *time.Time     `json:"next_retry_at,omitempty"`
 	CreatedAt         time.Time      `json:"created_at"`
 	CompletedAt       *time.Time     `json:"completed_at,omitempty"`
-	// EndpointURL / EndpointDescription are hydrated only by the
-	// delivery-listing JOIN, for historical attribution on the operator
-	// timeline: a delivery must stay attributable to a human-readable
-	// receiver even after that endpoint is deleted (0168 deletes are
-	// soft, so the join still resolves). Writers never set these.
+	// EndpointURL and EndpointDescription are filled only by the
+	// delivery-listing JOIN, to name the receiver on the operator timeline.
+	// A delivery must keep a human-readable receiver even after its endpoint
+	// is deleted. Deletes are soft (migration 0168), so the join still finds
+	// the endpoint. Writers never set these.
 	EndpointURL         string `json:"endpoint_url,omitempty"`
 	EndpointDescription string `json:"endpoint_description,omitempty"`
-	// EventType / EventReplayOfID are hydrated only by the endpoint-scoped
-	// delivery-listing JOIN (the endpoint drill-down): that surface lists
-	// deliveries ACROSS events, so each row must say which business fact it
-	// carried without a per-row event fetch. Writers never set these.
+	// EventType and EventReplayOfID are filled only by the endpoint-scoped
+	// delivery-listing JOIN (the endpoint drill-down). That view lists
+	// deliveries across events, so each row must say which business fact it
+	// carried without fetching the event per row. Writers never set these.
 	EventType       string `json:"event_type,omitempty"`
 	EventReplayOfID string `json:"event_replay_of_id,omitempty"`
 }
@@ -99,57 +105,59 @@ const (
 	EventInvoiceFinalized = "invoice.finalized"
 	EventInvoicePaid      = "invoice.paid"
 	EventInvoiceVoided    = "invoice.voided"
-	// EventInvoiceMarkedUncollectible matches Stripe's same-named event
+	// EventInvoiceMarkedUncollectible matches Stripe's event of the same name
 	// (https://docs.stripe.com/api/events/types#event_types-invoice.marked_uncollectible).
-	// Fired when an invoice transitions to status=uncollectible —
-	// either via dunning's mark_uncollectible final-action or via the
-	// operator-driven ResolveRun(invoice_not_collectible) + the direct
-	// API call. Subscribers should treat this as a bad-debt write-off
-	// signal: stop expecting payment, exclude from AR/revenue rollups.
+	// It fires when an invoice moves to status=uncollectible: through
+	// dunning's mark_uncollectible final action, through the operator's
+	// ResolveRun(invoice_not_collectible), or through the direct API call.
+	// Subscribers should treat it as a bad-debt write-off: stop expecting
+	// payment, and leave the invoice out of receivables and revenue
+	// rollups.
 	EventInvoiceMarkedUncollectible = "invoice.marked_uncollectible"
 	// EventInvoicePaymentRecorded fires when an operator records an
-	// out-of-band payment (cheque, wire, cash). Distinct from
-	// invoice.paid (engine-collected via PaymentIntent) so analytics
-	// can tell the two apart — Stripe-parity (their paid_out_of_band
-	// flag on the invoice surfaces the same distinction).
+	// out-of-band payment (cheque, wire, cash). It is distinct from
+	// invoice.paid (collected by the engine through a PaymentIntent), so
+	// analytics can tell the two apart. Stripe makes the same distinction
+	// with the paid_out_of_band flag on the invoice.
 	EventInvoicePaymentRecorded = "invoice.payment_recorded"
 	EventPaymentSucceeded       = "payment.succeeded"
 	EventPaymentFailed          = "payment.failed"
 	// EventPaymentMethodAttached fires when a payment method lands on a
-	// customer via a completed Checkout setup (setup_intent.succeeded) —
-	// the webhook-side signal that charge-on-attach will now proceed for
+	// customer through a completed Checkout setup (setup_intent.succeeded).
+	// It is the webhook-side signal that charge-on-attach now proceeds for
 	// any queued invoices. Payload: customer_id, stripe_payment_method_id.
 	EventPaymentMethodAttached = "payment_method.attached"
-	// EventPaymentMethodUpdated fires when a customer's payment-method
-	// setup completes/refreshes (hosted update-payment / portal flow) with
-	// card metadata. Payload: customer_id, stripe_customer_id, card_brand,
-	// card_last4. Both payment_method.* events were EMITTED long before
-	// they were admitted to this catalog — subscriptions to them were
-	// rejected as "Hardcount never emits it" (2026-07-10 design census).
+	// EventPaymentMethodUpdated fires when a customer's payment-method setup
+	// completes or refreshes with card metadata (the hosted update-payment
+	// or portal flow). Payload: customer_id, stripe_customer_id, card_brand,
+	// card_last4.
 	EventPaymentMethodUpdated = "payment_method.updated"
-	// EventPaymentDuplicateCharge fires when a SECOND, different
+	// EventPaymentDuplicateCharge fires when a second, different
 	// PaymentIntent succeeds against an already-paid invoice (two devices,
-	// a stale-but-live Checkout session): money was captured twice and
-	// exists only in Stripe until the operator refunds. Per-cause event
-	// (webhook_events_per_cause) — no auto-refund (ADR-068).
+	// or an old Checkout session that is still live). Money was captured
+	// twice, and the extra exists only in Stripe until the operator refunds
+	// it. It is its own event for this cause, and nothing refunds it
+	// automatically (ADR-068).
 	EventPaymentDuplicateCharge = "payment.duplicate_charge"
 	// EventPaymentAmountMismatch fires when a charge settles for an amount
-	// different from the invoice's amount_due at settle time (a Checkout
-	// session paid after a credit note changed the due — the accepted ≤1h
-	// drift residual). Detection-only: books show the delta, operator
-	// reconciles. ADR-068.
+	// other than the invoice's amount_due at settle time. An example is a
+	// Checkout session paid after a credit note changed the amount due: the
+	// accepted residual, a drift window of at most 1h. It only reports: the
+	// books show the difference, and the operator reconciles it (ADR-068).
 	EventPaymentAmountMismatch = "payment.amount_mismatch"
 	// EventPaymentCurrencyMismatch fires when a charge settles in a currency
-	// different from the invoice header's — Stripe's independently-reported
-	// charge currency vs Hardcount's label, compared case-folded on the webhook
-	// settle path (the one entry point carrying Stripe's value). Hardcount
-	// creates the PaymentIntent from the header, so this firing means the
-	// label moved (or an out-of-band charge) — detection-only. ADR-100.
+	// other than the invoice header's. It compares the charge currency
+	// Stripe reports with Hardcount's label, case-folded, on the webhook
+	// settle path, the one entry point that carries Stripe's value.
+	// Hardcount creates the PaymentIntent from the header, so this event
+	// means the label moved, or the charge was made out of band. It only
+	// reports (ADR-100).
 	EventPaymentCurrencyMismatch = "payment.currency_mismatch"
 	// EventPaymentReceivedOnVoidedInvoice fires when a payment lands on a
-	// voided (or otherwise non-payable) invoice — the void's session-expire
-	// leg failed and the customer paid inside the residual. Distinct cause
-	// from duplicate_charge: the money is owed BACK, not double-collected.
+	// voided (or otherwise non-payable) invoice. The void's step that expires
+	// the Checkout session failed, and the customer paid in the window that
+	// was left. It is a different cause from duplicate_charge: the money is
+	// owed back, not collected twice.
 	EventPaymentReceivedOnVoidedInvoice = "payment.received_on_voided_invoice"
 	// EventPaymentDisputeOpened fires once per Stripe dispute, when Hardcount
 	// first records it against an invoice (charge.dispute.*, #979). Queued in
@@ -186,59 +194,62 @@ const (
 	EventSubscriptionThresholdCrossed       = "subscription.threshold_crossed"
 	EventCustomerEmailBounced               = "customer.email_bounced"
 	// EventCustomerEmailComplained fires when the email provider's
-	// SpamComplaint webhook reports the recipient marked a message as
-	// spam (ADR-098). Per-cause, deliberately not folded into
-	// email_bounced: a complaint is a person opting out, not a dead
-	// mailbox, and it is the more severe (provider-irreversible) state.
+	// SpamComplaint webhook reports that the recipient marked a message as
+	// spam (ADR-098). It is its own event on purpose, not folded into
+	// email_bounced. A complaint is a person opting out, not a dead mailbox,
+	// and it is the more severe state, which the provider cannot undo.
 	EventCustomerEmailComplained = "customer.email_complained"
 	EventDunningStarted          = "dunning.started"
 	EventDunningEscalated        = "dunning.escalated"
 	EventDunningResolved         = "dunning.resolved"
-	// Credit balance-VALUE crossing events (ADR-078). Computed on
-	// SUM(amount_cents) before/after inside each ledger-writing tx and
-	// enqueued on the same tx (transactional outbox) — well-ordered per
-	// customer because every balance writer holds the per-customer
-	// advisory lock. Payloads carry customer_id + balance_cents (+
-	// threshold_cents on balance_low) so consumers with heterogeneous
-	// commit sizes can layer per-customer logic without server config.
+	// The credit balance events fire when the balance value crosses a line
+	// (ADR-078). Each ledger-writing transaction computes SUM(amount_cents)
+	// before and after, and enqueues the event in the same transaction
+	// (transactional outbox). They are well ordered per customer, because
+	// every balance writer holds the per-customer advisory lock. Payloads
+	// carry customer_id and balance_cents (plus threshold_cents on
+	// balance_low). So consumers with commits of different sizes can add
+	// per-customer logic without server config.
 	//
-	// The three balance events are per currency (ADR-129): each one is about
-	// the balance in the payload's `currency`, which the crossing is computed
-	// on. Payload: customer_id, currency, balance_cents (+ threshold_cents on
-	// low).
-	//
-	// EventCreditBalanceLow fires when the balance crosses from >= to
-	// < the tenant's configured threshold (tenant_settings.
-	// credit_balance_low_threshold_cents, applied in each currency's own
-	// units; unset = never fires).
+	// The three balance events are per currency (ADR-129). Each one is about
+	// the balance in the payload's `currency`, which the crossing is
+	// computed on. Payload: customer_id, currency, balance_cents (plus
+	// threshold_cents on low).
+
+	// EventCreditBalanceLow fires when the balance crosses from >= to < the
+	// tenant's configured threshold
+	// (tenant_settings.credit_balance_low_threshold_cents). The threshold
+	// applies in each currency's own units, and when it is unset the event
+	// never fires.
 	EventCreditBalanceLow = "credit.balance_low"
-	// EventCreditBalanceDepleted fires on the >0 → <=0 crossing. Known
-	// lag: an expired-but-unswept block keeps SUM positive until the
-	// expiry sweep retires it — the sweep's expiry entry produces the
-	// crossing (minutes-scale, matches the expiry discipline).
+	// EventCreditBalanceDepleted fires on the >0 → <=0 crossing. It has a
+	// known lag: an expired block that is not swept yet keeps SUM positive
+	// until the expiry sweep retires it. The sweep's expiry entry produces
+	// the crossing, within minutes, which matches how expiry works.
 	EventCreditBalanceDepleted = "credit.balance_depleted"
-	// EventCreditBalanceRecovered fires on the <=0 → >0 crossing. Kept
-	// not for parity (single-peer, Orb) but as the state-machine
-	// complement of depleted — without it a consumer's depleted state
-	// could never clear.
+	// EventCreditBalanceRecovered fires on the <=0 → >0 crossing. It is not
+	// kept for parity, since only one peer (Orb) has it. It is the
+	// state-machine complement of depleted: without it, a consumer's
+	// depleted state could never clear.
 	EventCreditBalanceRecovered = "credit.balance_recovered"
 	// EventCreditCommitRetired fires when a relief credit note retires
-	// commit credits (ADR-080): payload carries customer_id, grant_id,
+	// commit credits (ADR-080). The payload carries customer_id, grant_id,
 	// currency, funding_invoice_id, credit_note_id, retired_cents,
-	// refunded_gross_cents, remaining_after_cents. Enqueued IN the CN
-	// coordinator tx — exactly-once with the retire.
+	// refunded_gross_cents and remaining_after_cents. It is enqueued in the
+	// credit-note coordinator's transaction, so the event is stored exactly
+	// once, and only if the retire commits.
 	EventCreditCommitRetired = "credit.commit_retired"
 )
 
-// KnownWebhookEventTypes is the canonical emit catalog — every event type
-// the engine actually dispatches, and nothing else. Endpoint create/update
-// validates subscriptions against it: pre-2026-07-05 any string was
-// accepted and matchesEvent silently never fired, so a Stripe-trained
-// subscriber to "invoice.payment_failed" (real name: payment.failed) got
-// silence forever — Hardcount's own shipped recipes carried two such phantom
-// names. Keep in lockstep with the constants above, the dashboard's
-// EVENT_GROUPS picker (web-v2/src/pages/Webhooks.tsx) and docs/api/webhook-events.md;
-// webhook_catalog_test.go and webhook_events_doc_test.go fail when they differ.
+// KnownWebhookEventTypes is the emit catalog: every event type the engine
+// dispatches, and nothing else. Endpoint create and update check
+// subscriptions against it. Without the check, a subscription to a name
+// Hardcount never sends (such as "invoice.payment_failed", which is
+// payment.failed here) would match nothing and stay silent forever. Keep it
+// in step with the constants above, the dashboard's EVENT_GROUPS picker
+// (web-v2/src/pages/Webhooks.tsx) and docs/api/webhook-events.md.
+// webhook_catalog_test.go and webhook_events_doc_test.go fail when they
+// differ.
 var KnownWebhookEventTypes = map[string]bool{
 	EventInvoiceFinalized:                   true,
 	EventInvoicePaid:                        true,
