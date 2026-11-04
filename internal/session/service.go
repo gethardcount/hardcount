@@ -5,10 +5,10 @@ import (
 	"time"
 )
 
-// Service is the auth-flow facade over Store. Issue mints a session
-// for an authenticated user (caller has already verified the
-// password); Resolve looks up a raw cookie value and returns the
-// Session if it's still active; Revoke handles logout.
+// Service is the auth-flow facade over Store. Issue mints a session for an
+// authenticated user (the caller has already verified the password).
+// Resolve looks up a raw cookie value and returns the Session if it is still
+// active. Revoke handles logout.
 type Service struct {
 	store Store
 	now   func() time.Time
@@ -20,9 +20,9 @@ func NewService(store Store) *Service {
 	return &Service{store: store, now: time.Now, ttl: DefaultTTL}
 }
 
-// IssueInput is the contract for Issue. Callers (the login handler)
-// pass everything needed to mint a session row — the user has already
-// been authenticated by user.Service.Authenticate.
+// IssueInput is the contract for Issue. Callers (the login handler) pass
+// everything needed to mint a session row. The user has already been
+// authenticated by user.Service.Authenticate.
 type IssueInput struct {
 	UserID    string
 	TenantID  string
@@ -31,10 +31,9 @@ type IssueInput struct {
 	IP        string
 }
 
-// Issue creates a session row and returns the raw cookie value the
-// caller should set on the response. The raw value is shown to the
-// caller exactly once; the DB stores sha256(raw) so a snapshot can't
-// be replayed.
+// Issue creates a session row and returns the raw cookie value the caller
+// should set on the response. The raw value is shown to the caller exactly
+// once. The database stores sha256(raw), so a snapshot cannot be replayed.
 func (s *Service) Issue(ctx context.Context, in IssueInput) (rawID string, sess Session, err error) {
 	rawID, err = newRawID()
 	if err != nil {
@@ -58,9 +57,9 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (rawID string, sess 
 	return rawID, sess, nil
 }
 
-// Resolve looks up a raw cookie value and returns the Session if it's
-// active. Revoked or expired rows return ErrNotFound — the middleware
-// collapses both into 401 to deny session-id enumeration.
+// Resolve looks up a raw cookie value and returns the Session if it is
+// active. Revoked or expired rows return ErrNotFound. The middleware turns
+// both into a 401, so session ids cannot be enumerated.
 func (s *Service) Resolve(ctx context.Context, rawID string) (Session, error) {
 	if rawID == "" {
 		return Session{}, ErrNotFound
@@ -75,8 +74,8 @@ func (s *Service) Resolve(ctx context.Context, rawID string) (Session, error) {
 	return sess, nil
 }
 
-// Revoke marks the session row as revoked. Idempotent — revoking an
-// already-revoked or non-existent row is a no-op.
+// Revoke marks the session row as revoked. It is idempotent: revoking an
+// already-revoked or missing row does nothing.
 func (s *Service) Revoke(ctx context.Context, rawID string) error {
 	if rawID == "" {
 		return nil
@@ -84,10 +83,10 @@ func (s *Service) Revoke(ctx context.Context, rawID string) error {
 	return s.store.Revoke(ctx, HashID(rawID))
 }
 
-// RevokeAllForUser revokes every active session belonging to a user.
-// The password-reset flow calls this after the new password is set so
-// a session minted from a stolen cookie can't outlive the credential
-// change. Idempotent — no active sessions is a no-op.
+// RevokeAllForUser revokes every active session of a user. The
+// password-reset flow calls it after the new password is set, so a session
+// minted from a stolen cookie cannot outlive the credential change. It is
+// idempotent: with no active sessions it does nothing.
 func (s *Service) RevokeAllForUser(ctx context.Context, userID string) error {
 	if userID == "" {
 		return nil
@@ -95,9 +94,9 @@ func (s *Service) RevokeAllForUser(ctx context.Context, userID string) error {
 	return s.store.RevokeAllForUser(ctx, userID)
 }
 
-// SetLivemode flips the active mode (test/live) on the cookie session.
-// Same operator switches between modes without re-authenticating; every
-// downstream request inherits the new mode via session.Resolve.
+// SetLivemode switches the active mode (test or live) on the cookie session.
+// The same operator switches modes without signing in again, and every later
+// request gets the new mode through session.Resolve.
 func (s *Service) SetLivemode(ctx context.Context, rawID string, livemode bool) error {
 	if rawID == "" {
 		return ErrNotFound

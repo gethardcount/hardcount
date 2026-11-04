@@ -1,3 +1,5 @@
+// Package config reads Hardcount's settings from the environment and checks
+// them at start-up.
 package config
 
 import (
@@ -16,69 +18,74 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
+// Config is the server's settings, as Load reads them from the environment.
 type Config struct {
 	Port    string
 	Env     string // local, staging, production
 	DB      DBConfig
 	Migrate bool
 
-	// Redis — REQUIRED in production: the general and hosted-invoice rate
-	// limiters fail CLOSED without it (every covered request 429) and a
-	// replica would boot green and serve 1/N of traffic that way, so
-	// production refuses to start without a reachable Redis (validateFatal +
-	// cmd/hardcount/main.go). Optional elsewhere: limiters fail open, except
-	// /v1/auth's, which counts in the process.
+	// RedisURL is REDIS_URL, and it is required in production. Without Redis
+	// the general and hosted-invoice rate limiters fail closed, and every
+	// request they cover gets a 429. A replica with no Redis would start
+	// normally and serve its share (1/N) of traffic that way. So production
+	// refuses to start without a reachable Redis (validateFatal and
+	// cmd/hardcount/main.go). Elsewhere Redis is optional: the limiters fail
+	// open, except the one on /v1/auth, which counts in the process.
 	RedisURL string
-	// TrustProxy is the TRUST_PROXY CIDR list the router honours forwarded
-	// client addresses from. Required in production: behind a balancer with
-	// it unset, every request's client address is the balancer's and the
-	// per-IP limits on the public pay pages and /v1/auth collapse into ONE
-	// bucket for the whole install. "none" declares there is no proxy.
+	// TrustProxy is the TRUST_PROXY CIDR list. The router honours forwarded
+	// client addresses only from these. It is required in production. Behind
+	// a balancer with it unset, every request's client address is the
+	// balancer's, so the per-IP limits on the public pay pages and /v1/auth
+	// collapse into one bucket for the whole install. "none" declares that
+	// there is no proxy.
 	TrustProxy string
 
-	// ShutdownDrainDelay is how long a replica keeps its listener open AFTER
-	// flipping /health/ready to 503 'draining' on SIGTERM, so a health-check
-	// driven load balancer stops routing to it before in-flight requests are
-	// drained. Env SHUTDOWN_DRAIN_DELAY (Go duration). Default 5s outside
-	// local, 0 in local. It comes before the published 90s three-stage
-	// shutdown budget (cmd/hardcount/main.go), so the worst case is this delay
-	// plus 90s.
+	// ShutdownDrainDelay is how long a replica keeps its listener open after
+	// SIGTERM sets /health/ready to 503 'draining'. A load balancer that
+	// follows health checks then stops routing to the replica before the
+	// requests in flight are drained. Env SHUTDOWN_DRAIN_DELAY (a Go
+	// duration). The default is 5s outside local and 0 in local. The delay
+	// comes before the published 90s shutdown budget in three stages
+	// (cmd/hardcount/main.go), so the worst case is this delay plus 90s.
 	ShutdownDrainDelay time.Duration
 
 	// InvoiceGracePeriod is how long after a billing period ends (or after a
-	// mid-period scheduled cancel) the billing runs wait before they build its
-	// invoice, so usage that arrives late but is stamped inside the period is
-	// billed (ADR-120). It delays every subscription's period-end invoice,
-	// flat-fee ones included. Env INVOICE_GRACE_PERIOD (Go duration), default
-	// 1h, 0 to 72h; 0 closes a period as soon as it is due.
+	// mid-period scheduled cancel) the billing runs wait before they build
+	// its invoice. Usage that arrives late but is stamped inside the period
+	// is then billed (ADR-120). It delays every subscription's period-end
+	// invoice, flat-fee ones included. Env INVOICE_GRACE_PERIOD (a Go
+	// duration): the default is 1h and the range is 0 to 72h. 0 closes a
+	// period as soon as it is due.
 	InvoiceGracePeriod time.Duration
 
 	// RateLimits are the HARDCOUNT_RATE_LIMIT_* request limits (internal/api).
 	RateLimits RateLimits
 
-	// Bootstrap
+	// BootstrapToken is HARDCOUNT_BOOTSTRAP_TOKEN, the token the HTTP
+	// bootstrap route requires. validateFatal checks its length.
 	BootstrapToken string
 }
 
-// RateLimits are the request limits the API enforces per API key, per
-// tenant for dashboard sessions, or per client address before sign-in. Each must be a
-// whole number of 1 or more; anything else stops start-up. A bad value used
-// to fall back to the default without a word, so the install ran on a limit
-// nobody chose.
+// RateLimits are the request limits the API enforces: per API key, per
+// tenant for dashboard sessions, or per client address before sign-in. Each
+// must be a whole number of 1 or more, and anything else stops start-up. A
+// bad value does not fall back to the default, so the install never runs on
+// a limit nobody chose.
 type RateLimits struct {
 	// GeneralPerMinute is HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN, default 1000:
-	// the API and dashboard bucket, per API key or per account and mode for
-	// dashboard sessions. One dashboard page sends about 10 requests, so 100
-	// a minute stopped one operator after about 10 pages (ADR-095 amendment
-	// 2026-10-31).
+	// the API and dashboard bucket, per API key, or per account and mode for
+	// dashboard sessions. One dashboard page sends about 10 requests, so a
+	// limit of 100 a minute would stop one operator after about 10 pages
+	// (ADR-095, amendment of 2026-10-31).
 	GeneralPerMinute int
 	// AuthPerMinute is HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN, default 100: the
 	// per-address limit on /v1/auth (sign-in, password reset, invites) and
 	// /v1/bootstrap, before anyone has signed in. Kept apart from the general
 	// limit so raising that one never loosens sign-in.
 	AuthPerMinute int
-	// IngestPerSecond is HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC, default 1000: usage
-	// events and LiteLLM callbacks.
+	// IngestPerSecond is HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC, default 1000:
+	// usage events and LiteLLM callbacks.
 	IngestPerSecond int
 }
 
@@ -87,13 +94,14 @@ func DefaultRateLimits() RateLimits {
 	return RateLimits{GeneralPerMinute: 1000, AuthPerMinute: 100, IngestPerSecond: 1000}
 }
 
+// DBConfig is the database connection and pool settings.
 type DBConfig struct {
 	URL string
-	// AppURL is APP_DATABASE_URL — the least-privilege hardcount_app role
-	// the request path runs under (RLS enforced). Used VERBATIM when
-	// set (ADR-073). Empty in local dev = derive hardcount_app:hardcount_app
-	// from URL; empty in staging/production = the server refuses to
-	// boot (see cmd/hardcount openAppPool).
+	// AppURL is APP_DATABASE_URL: the least-privilege hardcount_app role
+	// that the request path runs under, with RLS enforced. When set, it is
+	// used exactly as given (ADR-073). When it is empty, local dev derives
+	// hardcount_app:hardcount_app from URL, and in staging or production the
+	// server refuses to start (see openAppPool in cmd/hardcount).
 	AppURL          string
 	MaxOpenConns    int
 	MaxIdleConns    int
@@ -111,6 +119,8 @@ func AppEnv() string {
 	return strings.ToLower(strings.TrimSpace(envOr("APP_ENV", "local")))
 }
 
+// Load reads the settings from the environment. It logs each Validate
+// warning, and returns an error for a value that must stop start-up.
 func Load() (Config, error) {
 	env := AppEnv()
 
@@ -168,10 +178,10 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-// validateFatal returns an error for misconfigurations that must not be
-// tolerated at startup. These are a strict subset of Validate's warnings:
-// conditions where continuing would risk silent data loss, compliance
-// violation, or secret exposure.
+// validateFatal returns an error for a misconfiguration that must not be
+// tolerated at start-up. These are a strict subset of Validate's warnings:
+// the cases where going on would risk silent data loss, a compliance
+// violation or secret exposure.
 func (c Config) validateFatal() error {
 	encKey := strings.TrimSpace(os.Getenv("HARDCOUNT_ENCRYPTION_KEY"))
 
@@ -200,17 +210,17 @@ func (c Config) validateFatal() error {
 		return fmt.Errorf("%w — set TRUST_PROXY to the balancer/ingress IP(s) or CIDR(s), comma-separated (e.g. 10.0.0.0/8,127.0.0.1), or TRUST_PROXY=none if replicas accept client connections directly (docs/ops/high-availability.md)", err)
 	}
 
-	// Otherwise a pattern meant to allow a dashboard would allow nothing, or
-	// a * beside it would keep it from signing in, and the operator would
-	// not know why. Checked in every environment.
+	// Refuse a CORS_ALLOWED_ORIGINS value that ParseCORSOrigins rejects, in
+	// every environment. Otherwise a pattern meant to allow a dashboard would
+	// allow nothing, or a * beside it would keep it from signing in, and the
+	// operator would not know why.
 	if _, err := ParseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS")); err != nil {
 		return fmt.Errorf("%w (docs/settings.md)", err)
 	}
 
-	// An unknown SMTP_TLS used to send with starttls behind a warning, so a
-	// value meant as implicit or none, such as tls, failed every send for a
-	// reason only that warning gave. Checked in every environment, with or
-	// without SMTP_HOST.
+	// Refuse an unknown SMTP_TLS, in every environment and with or without
+	// SMTP_HOST. A value meant as implicit or none, such as tls, must not
+	// fail every send for a reason only a warning gives.
 	if _, err := ParseSMTPTLS(os.Getenv("SMTP_TLS")); err != nil {
 		return fmt.Errorf("%w (docs/ops/email-setup.md)", err)
 	}
@@ -231,16 +241,16 @@ func (c Config) validateFatal() error {
 		}
 	}
 
-	// The bootstrap token mints the owner login AND the first live key —
-	// a guessable one is deployment takeover during the pre-bootstrap
-	// window. Same fail-closed spirit as the encryption key (ADR-073).
+	// The bootstrap token mints the owner login and the first live key. A
+	// guessable one lets anyone take over the deployment before it is
+	// bootstrapped. It fails closed, as the encryption key does (ADR-073).
 	if c.Env != "local" && c.BootstrapToken != "" && len(c.BootstrapToken) < 16 {
 		return fmt.Errorf("HARDCOUNT_BOOTSTRAP_TOKEN is %d chars — require at least 16 outside local dev (it authorizes owner-credential + live-key creation; generate with: openssl rand -hex 32)", len(c.BootstrapToken))
 	}
 
-	// Stripe credentials live per-tenant in stripe_provider_credentials (see
-	// migration 0032), so there's nothing Stripe-related to validate at boot.
-	// Webhook signature secrets are resolved per endpoint id at request time.
+	// Stripe credentials live per tenant in stripe_provider_credentials, so
+	// there is nothing Stripe-related to validate at start-up. Webhook
+	// signature secrets are resolved per endpoint id at request time.
 
 	return nil
 }
@@ -257,7 +267,8 @@ var publicAddressSettings = []string{
 	"HARDCOUNT_API_BASE_URL",
 }
 
-// Validate checks the config for common misconfigurations.
+// Validate returns a warning for each common misconfiguration it finds.
+// Load logs them.
 func (c Config) Validate() []string {
 	var warnings []string
 
@@ -291,7 +302,7 @@ func (c Config) Validate() []string {
 	// (session.DefaultCookieConfig), so they are meant to be served over
 	// HTTPS (ADR-095 Phase 0(b)). An address setting that starts with
 	// http:// says one is not. Hardcount cannot see the browser's scheme at
-	// start-up; these settings are what it can see.
+	// start-up, and these settings are what it can see.
 	if c.Env == "production" || c.Env == "staging" {
 		for _, name := range publicAddressSettings {
 			u, err := neturl.Parse(strings.TrimSpace(os.Getenv(name)))
@@ -318,7 +329,8 @@ func (c Config) Validate() []string {
 	return warnings
 }
 
-// LoadDBOnly loads just the database config without validating Stripe/Redis/etc.
+// LoadDBOnly loads just the database config, without validating Stripe,
+// Redis and the rest.
 func LoadDBOnly() (DBConfig, error) {
 	dbURL, err := loadDatabaseURL()
 	if err != nil {
@@ -353,6 +365,9 @@ func loadDBConfig(dbURL string) (DBConfig, error) {
 	return cfg, nil
 }
 
+// OpenPostgres opens a pool with cfg's limits and pings it within
+// cfg.PingTimeout. When the ping fails, it closes the pool and returns the
+// error.
 func OpenPostgres(cfg DBConfig) (*sql.DB, error) {
 	db, err := sql.Open("pgx", cfg.URL)
 	if err != nil {
@@ -413,8 +428,9 @@ func envOr(key, fallback string) string {
 }
 
 // intEnv reads an integer setting: unset → fallback. A value that does not
-// parse is a configuration error, not a silent default — an operator who
-// wrote DB_QUERY_TIMEOUT_MS=5s would otherwise run on a number they never set.
+// parse is a configuration error, not a silent default. Otherwise an
+// operator who wrote DB_QUERY_TIMEOUT_MS=5s would run on a number they never
+// set.
 func intEnv(key string, fallback int) (int, error) {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
@@ -531,8 +547,8 @@ func ParseSMTPTLS(raw string) (string, error) {
 }
 
 // ParseLogLevel reads LOG_LEVEL: debug, info (the default when unset), warn
-// (or warning) or error, in any case. Anything else is an error naming them:
-// an unknown level used to mean info without a word.
+// (or warning) or error, in any case. Anything else is an error that names
+// them, so an unknown level never means info without a word.
 func ParseLogLevel(raw string) (slog.Level, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "", "info":

@@ -11,10 +11,12 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
+// PostgresStore is the Store on the api_keys table.
 type PostgresStore struct {
 	db *postgres.DB
 }
 
+// NewPostgresStore returns a PostgresStore on db.
 func NewPostgresStore(db *postgres.DB) *PostgresStore {
 	return &PostgresStore{db: db}
 }
@@ -28,6 +30,7 @@ func scanKey(row interface{ Scan(...any) error }) (domain.APIKey, error) {
 	return k, err
 }
 
+// Create inserts key in its tenant's transaction and returns the stored row.
 func (s *PostgresStore) Create(ctx context.Context, key domain.APIKey) (domain.APIKey, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, key.TenantID)
 	if err != nil {
@@ -52,6 +55,7 @@ func (s *PostgresStore) Create(ctx context.Context, key domain.APIKey) (domain.A
 	return k, nil
 }
 
+// Get returns the tenant's key with id, or errs.ErrNotFound.
 func (s *PostgresStore) Get(ctx context.Context, tenantID, id string) (domain.APIKey, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -67,8 +71,11 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, id string) (domain.AP
 	return k, err
 }
 
+// GetByPrefix returns the key that is not revoked and has the given lookup
+// prefix, with its hash and salt, or errs.ErrNotFound.
 func (s *PostgresStore) GetByPrefix(ctx context.Context, prefix string) (domain.APIKey, error) {
-	// API key lookup bypasses RLS — we need to find the key to determine the tenant.
+	// The lookup bypasses RLS, because the key must be found before its
+	// tenant is known.
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return domain.APIKey{}, err
@@ -89,16 +96,13 @@ func (s *PostgresStore) GetByPrefix(ctx context.Context, prefix string) (domain.
 	return key, err
 }
 
-// Revoke flips revoked_at on the target key. Idempotent: revoking an
-// already-revoked or expired key returns ErrNotFound (the UPDATE
-// matches zero rows). Caller decides how to surface that.
+// Revoke sets revoked_at on the target key. It is idempotent: revoking an
+// already-revoked or expired key returns ErrNotFound, because the UPDATE
+// matches zero rows. The caller decides how to report that.
 //
-// Pre-ADR-011 included a last-active-secret/platform safeguard that
-// refused to leave the tenant with zero active manage-keys-capable
-// credentials — necessary when the API key was the dashboard sign-in
-// credential. With user accounts (ADR-011), revoking all API keys
-// no longer locks the tenant out: the operator still signs in via
-// email + password and creates new keys.
+// Revoking the tenant's last key is allowed. The operator signs in with
+// email and password (ADR-011), so revoking every API key does not lock the
+// tenant out: the operator can still sign in and create new keys.
 func (s *PostgresStore) Revoke(ctx context.Context, tenantID, id string) (domain.APIKey, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -123,6 +127,8 @@ func (s *PostgresStore) Revoke(ctx context.Context, tenantID, id string) (domain
 	return k, nil
 }
 
+// ScheduleExpiry sets expires_at on a key that is not revoked, and returns
+// the updated row or errs.ErrNotFound.
 func (s *PostgresStore) ScheduleExpiry(ctx context.Context, tenantID, id string, expiresAt time.Time) (domain.APIKey, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -130,9 +136,9 @@ func (s *PostgresStore) ScheduleExpiry(ctx context.Context, tenantID, id string,
 	}
 	defer postgres.Rollback(tx)
 
-	// Only schedule expiry on keys that aren't already revoked — rotating a
-	// revoked key makes no sense, and the predicate guards against racing
-	// revoke+rotate for the same row.
+	// Schedule expiry only on a key that is not already revoked. Rotating a
+	// revoked key makes no sense, and the predicate guards against a revoke
+	// and a rotate racing on the same row.
 	k, err := scanKey(tx.QueryRowContext(ctx, `
 		UPDATE api_keys SET expires_at = $1
 		WHERE id = $2 AND revoked_at IS NULL
@@ -195,6 +201,7 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.A
 	return keys, total, rows.Err()
 }
 
+// TouchLastUsed sets the key's last_used_at to usedAt.
 func (s *PostgresStore) TouchLastUsed(ctx context.Context, id string, usedAt time.Time) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
