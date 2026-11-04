@@ -19,21 +19,23 @@ import (
 // right only for a send that has no business transaction to join.
 //
 // This pins every production call of a standalone sender, with the reason it
-// has no business transaction. A new call fails until it is listed here.
+// has no business transaction. A new call fails until it is listed here. The
+// pin is by function and sender: a second call of the same sender in a listed
+// function is covered by that entry's reason.
 
 // standaloneEmailSends maps each production call of a standalone OutboxSender
-// method, as "<file> <Func>" or "<file> <Recv.Func>", to why the send has no
-// business transaction to ride.
+// method, as "<file> <Func> <Sender>" or "<file> <Recv.Func> <Sender>", to why
+// the send has no business transaction to ride.
 var standaloneEmailSends = map[string]string{
-	"internal/invoice/invoice_email.go Handler.emailInvoice": "The operator's Email invoice has no business transaction: the email is the action, and the request returns the enqueue error. " +
+	"internal/invoice/invoice_email.go Handler.emailInvoice SendInvoice": "The operator's Email invoice has no business transaction: the email is the action, and the request returns the enqueue error. " +
 		"The collector's automatic send stamps invoice_emailed_at only after the enqueue, so its next visit sends again.",
-	"internal/api/adapters.go noPaymentMethodNotifierAdapter.NotifyNoPaymentMethod": "The engine stamps no_pm_notified_at only after the send, so its next visit sends again. " +
+	"internal/api/adapters.go noPaymentMethodNotifierAdapter.NotifyNoPaymentMethod SendPaymentSetupRequest": "The engine stamps no_pm_notified_at only after the send, so its next visit sends again. " +
 		"The operator's resend has no business transaction and returns the error.",
-	"internal/paymentmethods/handler.go Handler.operatorSendSetupEmail":    "An operator action with no business transaction (a Stripe setup session, then the email). The error goes back to the operator.",
-	"internal/creditnote/handler.go Handler.sendEmail":                     "The operator's Email credit note: the note is already issued, and the email is the whole action. The error goes back to the operator.",
-	"internal/user/handler.go Handler.requestPasswordReset":                "Account plane, no money. A single-use reset token is useless without the email, and the user asks again.",
-	"internal/api/adapters.go passwordResetEmailAdapter.SendPasswordReset": "Forwards the password reset to OutboxSender, for user.Handler.requestPasswordReset.",
-	"internal/dashmembers/service.go Service.Invite": "Account plane. The invitation is written on a TxBypass transaction, which sets no app.livemode, so the email_outbox insert would be refused on it. " +
+	"internal/paymentmethods/handler.go Handler.operatorSendSetupEmail SendPaymentSetupLink": "An operator action with no business transaction (a Stripe setup session, then the email). The error goes back to the operator.",
+	"internal/creditnote/handler.go Handler.sendEmail SendCreditNote":                        "The operator's Email credit note: the note is already issued, and the email is the whole action. The error goes back to the operator.",
+	"internal/user/handler.go Handler.requestPasswordReset SendPasswordReset":                "Account plane, no money. A single-use reset token is useless without the email, and the user asks again.",
+	"internal/api/adapters.go passwordResetEmailAdapter.SendPasswordReset SendPasswordReset": "Forwards the password reset to OutboxSender, for user.Handler.requestPasswordReset.",
+	"internal/dashmembers/service.go Service.Invite SendMemberInvite": "Account plane. The invitation is written on a TxBypass transaction, which sets no app.livemode, so the email_outbox insert would be refused on it. " +
 		"An invite whose email is lost shows as pending on the Team page, and the operator can revoke and send it again.",
 }
 
@@ -73,7 +75,7 @@ func TestStandaloneEmailSendsAreListed(t *testing.T) {
 		t.Fatalf("found %d OutboxSender methods that call s.enqueue; want at least 6 (SendInvoice, SendCreditNote, …). The parse is broken, not the code", len(senders))
 	}
 
-	found := map[string]string{} // site key -> sender it calls
+	found := map[string]bool{} // "<file> <Func> <Sender>" of each call
 	for _, top := range []string{"internal", "cmd"} {
 		err := filepath.WalkDir(filepath.Join(root, top), func(p string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -105,7 +107,7 @@ func TestStandaloneEmailSendsAreListed(t *testing.T) {
 						return true
 					}
 					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && senders[sel.Sel.Name] {
-						found[rel+" "+funcKey(fd)] = sel.Sel.Name
+						found[rel+" "+funcKey(fd)+" "+sel.Sel.Name] = true
 					}
 					return true
 				})
@@ -118,16 +120,17 @@ func TestStandaloneEmailSendsAreListed(t *testing.T) {
 	}
 
 	var problems []string
-	for key, sender := range found {
+	for key := range found {
 		if _, ok := standaloneEmailSends[key]; !ok {
-			problems = append(problems, key+" calls "+sender+", which queues the email after the caller's transaction commits, so a crash in between loses it. "+
+			i := strings.LastIndex(key, " ")
+			problems = append(problems, key[:i]+" calls "+key[i+1:]+", which queues the email after the caller's transaction commits, so a crash in between loses it. "+
 				"Send it with the OutboxSender ...Tx method on the business transaction (ADR-040). "+
 				"If the send has no business transaction, add it to standaloneEmailSends with the reason")
 		}
 	}
 	for key, reason := range standaloneEmailSends {
-		if _, ok := found[key]; !ok {
-			problems = append(problems, "standaloneEmailSends lists "+key+", which no longer calls a standalone email sender: remove it")
+		if !found[key] {
+			problems = append(problems, "standaloneEmailSends lists "+key+", but that function no longer calls that sender: remove it")
 		}
 		if strings.TrimSpace(reason) == "" {
 			problems = append(problems, "standaloneEmailSends lists "+key+" with no reason: say why the send has no business transaction")
@@ -137,5 +140,5 @@ func TestStandaloneEmailSendsAreListed(t *testing.T) {
 	for _, p := range problems {
 		t.Error(p)
 	}
-	t.Logf("%d standalone email senders, called from %d production functions", len(senders), len(found))
+	t.Logf("%d standalone email senders, called from %d pairs of production function and sender", len(senders), len(found))
 }

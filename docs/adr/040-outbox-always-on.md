@@ -19,7 +19,7 @@ Producers persist an event/email intent inside the business-op
 transaction; a background dispatcher drains the queue with retry +
 DLQ.
 
-> **Amendment (2026-08-30): email is post-commit, and so are 26 webhook event types.**
+> **Amendment (2026-08-30): the four money emails and 15 webhook event types are queued in the transaction; other emails and 26 webhook event types are queued after it.**
 > The paragraph above is true of 15 of the 41 webhook event types:
 > `invoice.paid`, `payment.succeeded`, `payment.failed`,
 > `payment.dispute_opened`, `payment.dispute_closed`,

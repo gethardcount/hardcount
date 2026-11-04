@@ -548,10 +548,11 @@ func IsUnknownPaymentFailure(err error) bool {
 // has committed. A queue insert failure is logged, not returned: the change is
 // already saved, so failing the request would not undo it. Nothing sends the
 // event again, so an insert failure, a crash or a cancelled ctx between the
-// commit and this insert loses it. The settle and dispute paths queue their
-// events in the transaction instead (ADR-040);
-// internal/arch/webhook_emit_catalog_test.go lists the sites that still come
-// through here.
+// commit and this insert loses it. invoice.paid, payment.succeeded,
+// payment.failed and the dispute events are queued in their transaction
+// instead (ADR-040). The payment anomaly events still come after the commit,
+// through escalatePaymentAnomaly. internal/arch/webhook_emit_catalog_test.go
+// lists every site that queues an event after its commit.
 func (s *Stripe) fireEvent(ctx context.Context, tenantID, eventType string, payload map[string]any) {
 	if s.events == nil {
 		return
