@@ -92,8 +92,9 @@ interface HostedInvoicePayload {
     support_url?: string
   }
   pay_enabled: boolean
-  // "online_payment_unavailable" when the invoice is owed but the seller
-  // has no payment provider connected.
+  // "online_payment_unavailable" when the invoice is owed but can't be paid
+  // online: no payment provider connected, or no hosted invoice address on
+  // the server.
   pay_unavailable_reason?: string
   livemode: boolean
 }

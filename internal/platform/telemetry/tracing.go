@@ -1,6 +1,8 @@
-// Package telemetry provides OpenTelemetry tracing initialization for Hardcount.
+// Package telemetry sets up OpenTelemetry tracing for Hardcount. It also
+// holds ContextHandler, which adds the request and tenant IDs to log
+// records.
 //
-// Configure via environment:
+// Configure tracing through the environment:
 //
 //	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318  (Jaeger, Grafana Tempo, etc.)
 //	OTEL_SERVICE_NAME=hardcount                            (defaults to "hardcount")
@@ -25,9 +27,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Init sets up the global OpenTelemetry tracer provider.
-// Returns a shutdown function that must be called on application exit.
-// If OTEL_EXPORTER_OTLP_ENDPOINT is not set, returns a noop — zero overhead.
+// Init sets up the global OpenTelemetry tracer provider. It returns a
+// shutdown function that must be called on application exit. If
+// OTEL_EXPORTER_OTLP_ENDPOINT is not set, it returns a no-op, with zero
+// overhead.
 func Init(ctx context.Context) (shutdown func(context.Context) error, err error) {
 	endpoint := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
 	if endpoint == "" {
@@ -40,19 +43,18 @@ func Init(ctx context.Context) (shutdown func(context.Context) error, err error)
 		serviceName = "hardcount"
 	}
 
-	// Schemaless on purpose. resource.Merge REFUSES to merge two resources
-	// carrying different schema URLs, and resource.Default() reports whatever
-	// schema the SDK ships with — so pairing it with a pinned
-	// semconv/vX.Y.Z resource breaks the moment the SDK's schema moves ahead
-	// of the import. It had: the SDK sits at 1.44.0 (schema 1.41.0) while the
-	// import pinned 1.27.0, and Init returned
-	// "conflicting Schema URL: …/1.41.0 and …/1.27.0". That error is fatal at
-	// boot, so simply setting OTEL_EXPORTER_OTLP_ENDPOINT — the documented way
-	// to turn tracing on — stopped the server from starting at all.
+	// The service resource is schemaless on purpose. resource.Merge refuses
+	// to merge two resources with different schema URLs, and
+	// resource.Default() reports whatever schema the SDK ships with. A
+	// pinned semconv/vX.Y.Z resource would fail to merge as soon as the SDK's
+	// schema moved ahead of the import. Init would return "conflicting Schema
+	// URL", which is fatal at boot. Then setting OTEL_EXPORTER_OTLP_ENDPOINT,
+	// the documented way to turn tracing on, would stop the server from
+	// starting.
 	//
 	// A schemaless resource merges with anything, so the attribute lands and
-	// Default()'s schema is preserved. This cannot drift again on an SDK bump;
-	// re-pinning semconv to match would only reset the clock.
+	// Default()'s schema is kept. An SDK upgrade cannot break this. Pinning
+	// semconv to match the SDK would only hold until the next upgrade.
 	res, err := resource.Merge(
 		resource.Default(),
 		resource.NewSchemaless(
@@ -86,8 +88,8 @@ func Init(ctx context.Context) (shutdown func(context.Context) error, err error)
 	return tp.Shutdown, nil
 }
 
-// Tracer returns a named tracer for the given package/component.
-// Safe to call even when tracing is disabled (returns noop tracer).
+// Tracer returns a named tracer for the given package or component. It is
+// safe to call when tracing is disabled, and then returns a no-op tracer.
 func Tracer(name string) trace.Tracer {
 	return otel.Tracer(name)
 }

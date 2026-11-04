@@ -142,6 +142,8 @@ and `amount_due_cents` is 0. The total stays $28.84.
   - money is due;
   - no payment is in flight;
   - Stripe is connected in the invoice's mode;
+  - the server has `HOSTED_INVOICE_BASE_URL`, the page's own address, for
+    Stripe to send the customer back to;
   - Stripe has not refused the amount as below its minimum charge
     ([what to do](../ops/runbook/below-stripe-minimum.md)).
 

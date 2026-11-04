@@ -25,7 +25,7 @@ export type GetEmailSettings200 = {
   tls_mode: GetEmailSettings200TlsMode;
   /** Every environment variable an email link is built from, set or not. */
   links: GetEmailSettings200LinksItem[];
-  /** Whether this server can email a customer a link to add a payment method (SMTP and `PAYMENT_UPDATE_URL` are set up). */
+  /** Whether this server can email a customer a link to add a payment method (SMTP, `PAYMENT_UPDATE_URL` and `PAYMENT_UPDATE_RETURN_URL` are set up). */
   can_email_setup_links: boolean;
   /** Whether this server can invite a teammate (SMTP and `DASHBOARD_BASE_URL` are set up). */
   can_send_invites: boolean;

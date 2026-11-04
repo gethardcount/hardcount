@@ -6015,7 +6015,9 @@ type HostedInvoice struct {
 
 	// PayUnavailableReason Sent only when money is owed but can't be paid online:
 	// `online_payment_unavailable` when the seller has no payment
-	// provider connected for this mode, `amount_below_minimum` when
+	// provider connected for this mode, or the server has no
+	// `HOSTED_INVOICE_BASE_URL` for Stripe to send the customer back
+	// to; `amount_below_minimum` when
 	// Stripe's latest answer refused the amount as below its minimum
 	// charge.
 	PayUnavailableReason HostedInvoicePayUnavailableReason `json:"pay_unavailable_reason,omitempty"`
@@ -6023,7 +6025,9 @@ type HostedInvoice struct {
 
 // HostedInvoicePayUnavailableReason Sent only when money is owed but can't be paid online:
 // `online_payment_unavailable` when the seller has no payment
-// provider connected for this mode, `amount_below_minimum` when
+// provider connected for this mode, or the server has no
+// `HOSTED_INVOICE_BASE_URL` for Stripe to send the customer back
+// to; `amount_below_minimum` when
 // Stripe's latest answer refused the amount as below its minimum
 // charge.
 type HostedInvoicePayUnavailableReason string
@@ -10773,8 +10777,8 @@ type SendCustomerPaymentSetupEmailParams struct {
 type CreateCustomerPaymentSetupSessionJSONBody struct {
 	// ReturnUrl Where Stripe sends the customer afterwards. Defaults to
 	// `/payment-method-added` on the server's
-	// `CUSTOMER_PORTAL_URL` (`http://localhost:5173` when that
-	// is unset).
+	// `CUSTOMER_PORTAL_URL`. With neither, the call answers 409
+	// `return_address_not_set`.
 	ReturnUrl string `json:"return_url,omitempty"`
 }
 

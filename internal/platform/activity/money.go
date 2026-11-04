@@ -5,10 +5,10 @@ import (
 	"strings"
 )
 
-// currencySymbols is the dashboard's symbol table (web-v2/src/lib/money.ts,
-// CURRENCY_SYMBOLS), so an amount the backend writes into plain text reads
-// exactly as the dashboard's own formatter prints it. TestCurrencySymbols
-// MatchDashboard keeps the two lists equal.
+// currencySymbols is the dashboard's symbol table (CURRENCY_SYMBOLS in
+// web-v2/src/lib/money.ts). The copy makes an amount that the backend writes
+// into plain text read exactly as the dashboard's own formatter prints it.
+// TestCurrencySymbolsMatchDashboard keeps the two lists equal.
 var currencySymbols = map[string]string{
 	"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "CNY": "¥",
 	"INR": "₹", "BRL": "R$", "CAD": "CA$", "AUD": "A$", "CHF": "CHF ",
@@ -21,8 +21,8 @@ var currencySymbols = map[string]string{
 
 // FormatMoney prints an amount the way the dashboard's formatCents does:
 // "$1,234.50", "CA$12.00", and the ISO code followed by a space for a
-// currency with no symbol. Integer math, hundredths, like every cents field
-// in the schema.
+// currency with no symbol. It uses integer math in hundredths, like every
+// cents field in the schema.
 func FormatMoney(m Money) string {
 	code := strings.ToUpper(strings.TrimSpace(m.Currency))
 	symbol, ok := currencySymbols[code]

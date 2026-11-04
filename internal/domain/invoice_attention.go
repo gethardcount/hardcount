@@ -466,6 +466,19 @@ type AttentionContext struct {
 	// works — what every production boot wires explicitly.
 	SetupLinkEmailOff bool
 
+	// HostedPayOff is true when this server has no HOSTED_INVOICE_BASE_URL: the
+	// hosted invoice page offers no Pay button (Stripe would have no page to
+	// send the customer back to), and invoice emails carry no payment link. The
+	// payment-failure notices then stop sending the operator to that page.
+	// Zero value (false) means the page takes payment.
+	HostedPayOff bool
+
+	// SetupLinkCopyOff is true when this server has no CUSTOMER_PORTAL_URL:
+	// the customer page cannot make a setup link to copy, because the setup
+	// session is refused (return_address_not_set). The no-payment-method
+	// notice then stops offering that. Zero value (false) means it works.
+	SetupLinkCopyOff bool
+
 	// InvoiceEmailOff is true when this server cannot send email at all (SMTP
 	// is not set up). Read only by the no-payment-method notices while Stripe
 	// is not connected (StripeConnected false): the collector then emails the
@@ -1134,9 +1147,9 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 	}
 	switch code := atc.RetryBlockingDeclineCode; {
 	case IsHardDecline(code):
-		return classifyRefusedCard(inv, code, atc.DunningRetrying, since)
+		return classifyRefusedCard(inv, code, atc.DunningRetrying, atc.HostedPayOff, since)
 	case IsAuthenticationRequired(code):
-		return classifyNeedsConfirmation(inv, atc.DunningRetrying, since)
+		return classifyNeedsConfirmation(inv, atc.DunningRetrying, atc.HostedPayOff, since)
 	}
 	// Update Payment Method is the primary action: the card on file
 	// is broken, retrying with the same card will decline again.
@@ -1175,13 +1188,16 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 // unpaused run has a retry to come. A card the customer saves now replaces
 // the refused default by itself (ADR-126; a setup or update link's card
 // always does, ADR-021); a card already on file stays beside it, so the
-// operator is told to make that one the default.
-func classifyRefusedCard(inv Invoice, declineCode string, retrying bool, since time.Time) *Attention {
-	const (
-		final     = "Stripe's decline code is %s, which Stripe and the card networks treat as final. "
-		newCard   = "A card the customer saves now, through a setup or update link or by paying on the hosted invoice page, becomes the default by itself; a card already on file needs Set as default on the customer page. "
-		hostedPay = "The customer can also pay on the hosted invoice page."
-	)
+// operator is told to make that one the default. With hostedPayOff the hosted
+// invoice page takes no payment, so the notice does not offer it.
+func classifyRefusedCard(inv Invoice, declineCode string, retrying, hostedPayOff bool, since time.Time) *Attention {
+	const final = "Stripe's decline code is %s, which Stripe and the card networks treat as final. "
+	newCard := "A card the customer saves now, through a setup or update link or by paying on the hosted invoice page, becomes the default by itself; a card already on file needs Set as default on the customer page. "
+	hostedPay := "The customer can also pay on the hosted invoice page."
+	if hostedPayOff {
+		newCard = "A card the customer saves now, through a setup or update link, becomes the default by itself; a card already on file needs Set as default on the customer page. "
+		hostedPay = ""
+	}
 	message := "The customer's bank refused this card for good, so automatic retries won't charge it; the customer needs a different card."
 	detail := fmt.Sprintf(final, declineCode) +
 		"Dunning keeps its schedule and counts each retry; the next retry charges a different card once it is the customer's default. " +
@@ -1196,7 +1212,7 @@ func classifyRefusedCard(inv Invoice, declineCode string, retrying bool, since t
 		Reason:   AttentionReasonPaymentFailed,
 		Code:     "payment.card_refused",
 		Message:  message,
-		Detail:   detail,
+		Detail:   strings.TrimSpace(detail),
 		DocURL:   docURL("payment-failed"),
 		Actions: []AttentionActionItem{
 			{Code: AttentionActionUpdatePaymentMethod, Label: "Update payment method"},
@@ -1218,12 +1234,25 @@ func classifyRefusedCard(inv Invoice, declineCode string, retrying bool, since t
 //
 // Warning, not Critical: nothing is broken, the customer has to act, as on
 // the no-payment-method notice.
-func classifyNeedsConfirmation(inv Invoice, retrying bool, since time.Time) *Attention {
+//
+// With hostedPayOff the hosted invoice page takes no payment and the payment
+// email carries no link, so the notice says to set the address first and
+// offers no email action.
+func classifyNeedsConfirmation(inv Invoice, retrying, hostedPayOff bool, since time.Time) *Attention {
 	const (
 		why     = "Stripe's code is authentication_required: the bank wants the customer to confirm this payment, usually with 3-D Secure, and a charge made without the customer can't do that. "
-		howPay  = "The customer pays on the hosted invoice page, where their bank may ask them to confirm. "
 		newCard = "A different card the customer saves through a setup or update link becomes the default; "
 	)
+	howPay := "The customer pays on the hosted invoice page, where their bank may ask them to confirm. "
+	message := "The customer's bank needs them to confirm this payment; email them the payment link to pay and confirm it."
+	actions := []AttentionActionItem{
+		{Code: AttentionActionSendReminder, Label: "Email payment link"},
+	}
+	if hostedPayOff {
+		howPay = "The customer confirms on the hosted invoice page, but this server has no HOSTED_INVOICE_BASE_URL, so that page offers no Pay button and the payment email has no link. Set it to the page's address and restart, then email them the payment link. "
+		message = "The customer's bank needs them to confirm this payment on the hosted invoice page, which this server can't offer until HOSTED_INVOICE_BASE_URL is set."
+		actions = nil
+	}
 	detail := why + howPay +
 		"Dunning keeps its schedule and counts each retry, but doesn't charge this card; each reminder email carries the payment link. " +
 		newCard + "the next retry charges it."
@@ -1232,15 +1261,13 @@ func classifyNeedsConfirmation(inv Invoice, retrying bool, since time.Time) *Att
 			newCard + "Collect payment charges it."
 	}
 	return &Attention{
-		Severity: AttentionSeverityWarning,
-		Reason:   AttentionReasonPaymentFailed,
-		Code:     "payment.authentication_required",
-		Message:  "The customer's bank needs them to confirm this payment; email them the payment link to pay and confirm it.",
-		Detail:   detail,
-		DocURL:   docURL("payment-failed"),
-		Actions: []AttentionActionItem{
-			{Code: AttentionActionSendReminder, Label: "Email payment link"},
-		},
+		Severity:         AttentionSeverityWarning,
+		Reason:           AttentionReasonPaymentFailed,
+		Code:             "payment.authentication_required",
+		Message:          message,
+		Detail:           detail,
+		DocURL:           docURL("payment-failed"),
+		Actions:          actions,
 		ProviderResponse: inv.LastPaymentError,
 		Since:            &since,
 	}
@@ -1534,17 +1561,30 @@ func classifyNoPaymentMethod(inv Invoice, atc AttentionContext) *Attention {
 	// "is emailed … once" states the engine's send-once behavior
 	// (no_pm_notified_at) rather than asserting this invoice's send, which
 	// the outbox may still fail; the Details point at where delivery shows.
+	//
+	// With SetupLinkCopyOff the customer page can't make a link to copy
+	// (no CUSTOMER_PORTAL_URL), so the notice doesn't offer that.
+	const copyFix = " To copy a setup link from the customer page, set CUSTOMER_PORTAL_URL to your dashboard's address."
 	var emailLine, emailDetail string
 	switch {
+	case !atc.CustomerHasEmail && atc.SetupLinkCopyOff:
+		emailLine = "Setup links are emailed only to customers with an email address, and this server can't make one to copy."
+		emailDetail = "Adding an email address on the customer page lets Hardcount send the link." + copyFix
 	case !atc.CustomerHasEmail:
 		// False also when the customer read failed, so the sentence states
 		// Hardcount's rule rather than this customer's state: honest either way,
 		// and the customer page shows the real address.
 		emailLine = "Setup links are emailed only to customers with an email address, so copy one from the customer page and send it."
 		emailDetail = "Adding an email address on the customer page lets Hardcount send the link."
+	case atc.SetupLinkEmailOff && atc.SetupLinkCopyOff:
+		emailLine = "This server can't email setup links or make one to copy, so none was sent."
+		emailDetail = "To let Hardcount email setup links, set up email sending (SMTP) and the payment-update page addresses (PAYMENT_UPDATE_URL and PAYMENT_UPDATE_RETURN_URL)." + copyFix
 	case atc.SetupLinkEmailOff:
 		emailLine = "This server can't email setup links, so none was sent; copy one from the customer page instead."
-		emailDetail = "To let Hardcount email setup links, set up email sending (SMTP) and the payment-update page address (PAYMENT_UPDATE_URL)."
+		emailDetail = "To let Hardcount email setup links, set up email sending (SMTP) and the payment-update page addresses (PAYMENT_UPDATE_URL and PAYMENT_UPDATE_RETURN_URL)."
+	case atc.SetupLinkCopyOff:
+		emailLine = "A setup link is emailed to the customer once; use Resend setup link to send it again."
+		emailDetail = "The invoice's activity shows whether the email was sent." + copyFix
 	default:
 		emailLine = "A setup link is emailed to the customer once; use Resend setup link to send it again."
 		emailDetail = "The invoice's activity shows whether the email was sent. The customer page can also copy the link to share directly."
