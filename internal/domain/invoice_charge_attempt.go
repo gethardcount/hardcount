@@ -3,9 +3,10 @@ package domain
 import "time"
 
 // ChargeAttemptOutcome is the lifecycle of one charge attempt. Only
-// 'succeeded' and 'below_minimum' are terminal — a 3DS PaymentIntent can go failed →
-// succeeded on the customer's second try within one checkout session,
-// so every other transition stays open until provider truth settles it.
+// 'succeeded' and 'below_minimum' are final. Every other outcome stays open
+// until the provider's answer settles it, because a 3-D Secure (3DS)
+// PaymentIntent can go from failed to succeeded on the customer's second try
+// within one checkout session.
 type ChargeAttemptOutcome string
 
 const (
@@ -31,20 +32,23 @@ func ChargeAttemptOutcomes() []ChargeAttemptOutcome {
 type ChargeAttemptTrigger string
 
 const (
-	// ChargeTriggerAutoCharge: the saved-PM chokepoint charging on its own
-	// — cycle close, finalize, the auto-charge sweep. "On its own" means no
-	// one pressed Charge now; the actor can still be a person or an API key
-	// when their finalize request led to the charge.
+	// ChargeTriggerAutoCharge: the single charge path for a saved payment
+	// method, charging on its own at cycle close, at finalize or from the
+	// auto-charge sweep. "On its own" means no one pressed Charge now. The
+	// actor can still be a person or an API key, when their finalize request
+	// led to the charge.
 	ChargeTriggerAutoCharge ChargeAttemptTrigger = "auto_charge"
-	// ChargeTriggerChargeNow: the same chokepoint, because someone asked for
-	// it: "Charge now" in the dashboard, or POST /v1/invoices/{id}/collect.
-	// It answers "why was this charged?" apart from the automatic charges;
-	// the attempt's actor columns say who asked.
+	// ChargeTriggerChargeNow: the same charge path, because someone asked
+	// for it: "Charge now" in the dashboard, or
+	// POST /v1/invoices/{id}/collect. It answers "why was this charged?"
+	// apart from the automatic charges. The attempt's actor columns say who
+	// asked.
 	ChargeTriggerChargeNow ChargeAttemptTrigger = "charge_now"
-	// ChargeTriggerDunningRetry: same chokepoint, dunning-retry purpose.
+	// ChargeTriggerDunningRetry: the same charge path, for a dunning retry.
 	ChargeTriggerDunningRetry ChargeAttemptTrigger = "dunning_retry"
-	// ChargeTriggerExternal: a settle path recorded a PI Hardcount didn't
-	// mint inline (hosted-checkout attempts).
+	// ChargeTriggerExternal: a settle path recorded a PaymentIntent that
+	// Hardcount did not create in its own charge call (hosted Checkout
+	// attempts).
 	ChargeTriggerExternal ChargeAttemptTrigger = "external"
 )
 
@@ -55,12 +59,12 @@ func ChargeAttemptTriggers() []ChargeAttemptTrigger {
 	return []ChargeAttemptTrigger{ChargeTriggerAutoCharge, ChargeTriggerChargeNow, ChargeTriggerDunningRetry, ChargeTriggerExternal}
 }
 
-// InvoiceChargeAttempt is one charge attempt on an invoice — a
-// first-class billing fact (ADR-102). Written at PaymentIntent-create
-// time and upserted by PI as settle paths learn the outcome, so the
-// billing-axis timeline can render every attempt exactly once without
-// borrowing the dunning subsystem's events or the webhook stream's
-// wall-clock rows.
+// InvoiceChargeAttempt is one charge attempt on an invoice, a billing fact of
+// its own (ADR-102). It is written when the PaymentIntent is created, and
+// upserted by PaymentIntent as settle paths learn the outcome. So the
+// billing-axis timeline (on the invoice's own calendar, simulated under a
+// test clock) can show every attempt exactly once, without borrowing the
+// dunning subsystem's events or the webhook stream's wall-clock rows.
 type InvoiceChargeAttempt struct {
 	ID                    string
 	TenantID              string
@@ -90,7 +94,7 @@ type InvoiceChargeAttempt struct {
 // of the three sources that learn it: the charge call's own response, the
 // payment_intent.payment_failed webhook, or the reconciler.
 //
-// The invoice records only one attempt at a time — the one it is waiting on
+// The invoice records only one attempt at a time: the one it is waiting on
 // (its stripe_payment_intent_id and payment_status). A report changes those
 // fields only when it is about that attempt. Every report still lands on its
 // own attempt row, so a failure that does not move the invoice stays visible.
@@ -101,19 +105,19 @@ type PaymentFailureReport struct {
 	// the bank's reason and the card it refused. Each report that knows them
 	// writes them on the attempt row, in the same transaction as the failure,
 	// so a hard decline (IsHardDecline) is on record the moment the invoice
-	// reads failed. Empty when the source did not say; an empty value never
-	// erases one already recorded.
+	// reads failed. They are empty when the source did not say. An empty
+	// value never erases one already recorded.
 	DeclineCode     string
 	PaymentMethodID string
 	// ChargedAtSeq is set only by the charge call reporting its own attempt:
 	// the charge_attempt_seq it charged with. It is that attempt's identity
-	// before the invoice has seen its PaymentIntent, so the report is
-	// recorded only if no other outcome was recorded during the call (P13).
+	// before the invoice has seen its PaymentIntent. So the report is
+	// recorded only if no other outcome was recorded during the call.
 	// Webhook and reconciler reports leave it nil.
 	ChargedAtSeq *int64
 	// External marks a PaymentIntent created outside Hardcount's charge paths
-	// (hosted Checkout). Hardcount never waits on one, so its failure never moves
-	// the invoice: it is recorded on its attempt row only.
+	// (hosted Checkout). Hardcount never waits on one, so its failure never
+	// moves the invoice. The failure is recorded on its attempt row only.
 	External bool
 }
 
@@ -131,15 +135,17 @@ type PaymentFailureResult struct {
 
 // AttemptStanding is where a reported PaymentIntent sits in the invoice's
 // own attempt history (invoice_charge_attempts), among the attempts Hardcount
-// made itself (auto_charge, charge_now, dunning_retry). Hardcount writes that row when its
-// charge call returns, before it reports the outcome, and its charges are
-// serialized by the charge lease, so the row order is the attempt order.
+// made itself (auto_charge, charge_now, dunning_retry). Hardcount writes that
+// row when its charge call returns, before it reports the outcome. The
+// charge lease runs its charges one at a time, so the row order is the
+// attempt order.
 type AttemptStanding int
 
 const (
-	// AttemptNotHardcount: no Hardcount-made attempt row names this PaymentIntent —
-	// a hosted Checkout attempt, an attempt whose id Hardcount never learned (a
-	// parked one), or one whose row write was lost.
+	// AttemptNotHardcount: no attempt row that Hardcount made names this
+	// PaymentIntent. It is a hosted Checkout attempt, an attempt whose id
+	// Hardcount never learned (a parked one), or one whose row write was
+	// lost.
 	AttemptNotHardcount AttemptStanding = iota
 	// AttemptNewest: the newest Hardcount-made attempt on the invoice.
 	AttemptNewest
@@ -148,25 +154,27 @@ const (
 )
 
 // MovesInvoice reports whether this report records its failure on an invoice
-// in the given state — its status, payment status, the PaymentIntent it
+// in the given state: its status, its payment status, the PaymentIntent it
 // holds, its charge_attempt_seq, and where the reported PaymentIntent stands
-// in its attempt history. The store applies it under the row lock; it lives
-// here so every implementation applies the same rule.
+// in its attempt history. The store applies it under the row lock. It lives
+// here so every implementation applies the same rule:
 //
-//   - a paid invoice → never;
-//   - the invoice already holds this PaymentIntent → yes, whoever created
-//     it (the stale-hold sweep can put a payment it found on a parked
-//     invoice, a hosted one included);
-//   - an External attempt otherwise → never: Hardcount does not wait on it;
-//   - the charge call reporting its own attempt → only if the seq is still
-//     the one it charged with (nothing recorded during the call, P13);
-//   - a webhook or reconciler report about a different PaymentIntent:
-//     never while the invoice waits on an in-flight attempt (no Hardcount charge
-//     starts from 'processing' or 'unknown'); yes if it is Hardcount's newest
-//     attempt (its charge call's own report was lost); no if Hardcount has made a
-//     newer one (a late decline for an older attempt); and with no Hardcount row
-//     to judge by, only if the invoice holds no PaymentIntent yet (the first
-//     attempt, or a parked attempt whose id Hardcount never learned).
+//   - A paid invoice: never.
+//   - The invoice already holds this PaymentIntent: yes, whoever created it.
+//     The stale-hold sweep can put a payment it found on a parked invoice, a
+//     hosted one included.
+//   - Otherwise, an External attempt: never, because Hardcount does not wait
+//     on it.
+//   - The charge call reporting its own attempt: only if the seq is still the
+//     one it charged with, which means nothing was recorded during the call.
+//   - A webhook or reconciler report about a different PaymentIntent: never
+//     while the invoice waits on an in-flight attempt, since no Hardcount
+//     charge starts from 'processing' or 'unknown'. Yes if it is Hardcount's
+//     newest attempt, whose charge call's own report was lost. No if
+//     Hardcount has made a newer one (a late decline for an older attempt).
+//     With no Hardcount row to judge by, only if the invoice holds no
+//     PaymentIntent yet (the first attempt, or a parked attempt whose id
+//     Hardcount never learned).
 func (r PaymentFailureReport) MovesInvoice(status InvoiceStatus, paymentStatus InvoicePaymentStatus, holdsPI string, seq int64, standing AttemptStanding) bool {
 	switch {
 	case status == InvoicePaid || paymentStatus == PaymentSucceeded:

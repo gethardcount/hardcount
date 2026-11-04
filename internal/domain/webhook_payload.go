@@ -60,8 +60,8 @@ func WebhookEventResource(eventType string) string {
 
 // WebhookEventExtras lists, for every event type in the catalog, the keys
 // its data may carry beside the resource. An empty list means the event
-// carries the resource alone. docs/api/webhook-events.md shows the same list per
-// event; webhook_events_doc_test.go fails when the two differ.
+// carries the resource alone. docs/api/webhook-events.md shows the same list
+// per event, and webhook_events_doc_test.go fails when the two differ.
 var WebhookEventExtras = map[string][]string{
 	EventInvoiceFinalized:           {},
 	EventInvoicePaid:                {},
@@ -73,12 +73,12 @@ var WebhookEventExtras = map[string][]string{
 
 	EventPaymentSucceeded: {},
 	EventPaymentFailed:    {},
-	// The charge that raised the anomaly. The invoice's
+	// The extras name the charge that raised the anomaly. The invoice's
 	// stripe_payment_intent_id is not always another charge: on
 	// amount_mismatch it is this one (docs/api/webhook-events.md, per event).
 	EventPaymentDuplicateCharge: {"incoming_payment_intent_id", "captured_cents"},
 	EventPaymentAmountMismatch:  {"incoming_payment_intent_id", "captured_cents"},
-	// charge_currency: the charge's currency (upper case); the invoice
+	// charge_currency: the charge's currency (upper case). The invoice
 	// carries its own.
 	EventPaymentCurrencyMismatch:        {"incoming_payment_intent_id", "captured_cents", "charge_currency"},
 	EventPaymentReceivedOnVoidedInvoice: {"incoming_payment_intent_id", "captured_cents"},
@@ -219,7 +219,7 @@ func webhookData(resourceKey string, resource any, extra map[string]any) map[str
 
 // WebhookEventCustomerID returns the customer an event is about: the
 // customer_id of its resource (the id, for a customer.* event). Events
-// stored before ADR-131 carried customer_id at the top of data; they are
+// stored before ADR-131 carry customer_id at the top of data, and those are
 // read too.
 func WebhookEventCustomerID(eventType string, data map[string]any) string {
 	if v, ok := data["customer_id"].(string); ok {

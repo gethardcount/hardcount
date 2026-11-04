@@ -8,11 +8,12 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/money"
 )
 
-// MulCents and AddCents are overflow-checked arithmetic for non-negative
-// minor-unit amounts. int64 multiplication and addition wrap silently: a
-// credit-note line of 3e9 × 4e9 cents wrapped to a NEGATIVE total, which then
-// passed the "not more than the invoice" cap. They return ErrAmountOverflow
-// instead, for the caller to refuse the request.
+// MulCents multiplies two non-negative minor-unit amounts, checked for
+// overflow. MulCents and AddCents return ErrAmountOverflow where int64
+// multiplication and addition would wrap silently, and the caller refuses the
+// request. A wrapped result is dangerous: a credit-note line of 3e9 × 4e9
+// cents wraps to a negative total, which then passes the "not more than the
+// invoice" cap.
 func MulCents(a, b int64) (int64, error) {
 	if a < 0 || b < 0 {
 		return 0, ErrAmountOverflow
@@ -23,7 +24,8 @@ func MulCents(a, b int64) (int64, error) {
 	return a * b, nil
 }
 
-// AddCents adds two non-negative minor-unit amounts; see MulCents.
+// AddCents adds two non-negative minor-unit amounts, checked for overflow as
+// MulCents describes.
 func AddCents(a, b int64) (int64, error) {
 	if a < 0 || b < 0 || a > math.MaxInt64-b {
 		return 0, ErrAmountOverflow
@@ -32,7 +34,7 @@ func AddCents(a, b int64) (int64, error) {
 }
 
 // SumCents adds two minor-unit amounts of any sign (a ledger entry, a credit
-// back), returning ErrAmountOverflow when the sum does not fit int64. Inside
+// back). It returns ErrAmountOverflow when the sum does not fit int64. Inside
 // int64 it is a + b.
 func SumCents(a, b int64) (int64, error) {
 	c, ok := money.Add(a, b)
@@ -42,32 +44,29 @@ func SumCents(a, b int64) (int64, error) {
 	return c, nil
 }
 
-// FormatMoneyMinor renders a minor-unit amount for operator-facing prose:
-// FormatMoneyMinor(10000000, "usd") == "100,000.00 USD".
+// FormatMoneyMinor renders a minor-unit amount for operator-facing text:
+// FormatMoneyMinor(10000000, "usd") == "100,000.00 USD". It makes three
+// deliberate choices:
 //
-// Three deliberate choices, each of which had a wrong version in this repo:
+//   - The ISO code, never a bare symbol. A hardcoded "$" mislabels the money
+//     of every tenant that does not bill in USD. ADR-100 makes one currency
+//     per meter, plan, subscription and customer a structural invariant, and
+//     showing the code is the cheap half of keeping that true.
+//   - Integer math, not float64. The amounts here are commit grants, which
+//     run to six and seven figures. Past 2^53 minor units a float64 division
+//     is no longer exact. A displayed balance that the engine rounded is a
+//     number that reconciles against nothing.
+//   - Thousands separators. The commit exposure an operator sees routinely
+//     shows amounts above five digits. A person misreads "10000000.00 USD"
+//     by an order of magnitude at a glance, which defeats the point of
+//     showing it.
 //
-//   - ISO code, never a bare symbol. A hardcoded "$" mislabels every non-USD
-//     tenant's money, which is the exact defect `formatAmountForTimeline`
-//     (internal/subscription/handler.go) was written to fix. ADR-100 makes one
-//     currency per meter/plan/subscription/customer a structural invariant;
-//     rendering it is the cheap half of keeping that honest.
-//
-//   - Integer math, not float64. Amounts here are commit grants, which run to
-//     six and seven figures — past 2^53 minor units a float64 division stops
-//     being exact, and a billing engine that rounds a displayed balance has
-//     told the operator a number that reconciles against nothing.
-//
-//   - Thousands separators. Commit exposure is the first operator surface in
-//     Hardcount that routinely shows amounts above five digits; "10000000.00 USD"
-//     is a number a human misreads by an order of magnitude at a glance, which
-//     defeats the point of surfacing it.
-//
-// Minor units are assumed to be hundredths. That is already baked into every
-// int64 cents field in the schema — a zero-decimal currency (JPY, KRW) would
-// need a currency-exponent table, and inventing an exponent here rather than
-// looking one up is the banned silent-fallback class. Hardcount has no zero-decimal
-// tenant today; when one arrives this is the single place that changes.
+// Minor units are assumed to be hundredths, as in every int64 cents field in
+// the schema. A zero-decimal currency (JPY, KRW) would need a table of
+// currency exponents. Guessing an exponent here instead of looking one up
+// would be a silent fallback, which the project bans. Hardcount has no
+// zero-decimal tenant today. When one arrives, this is the single place that
+// changes.
 func FormatMoneyMinor(cents int64, currency string) string {
 	code := strings.ToUpper(strings.TrimSpace(currency))
 

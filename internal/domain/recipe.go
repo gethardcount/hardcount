@@ -4,12 +4,13 @@ import (
 	"time"
 )
 
-// RecipeInstance is the DB-backed record of a recipe being instantiated for
-// a tenant. The canonical entities a recipe creates (meters, plans and their
-// prices) live in their own per-domain tables; RecipeInstance only tracks
-// instantiation metadata so we can answer "is this recipe already installed?" idempotently and
-// record what it created (CreatedObjects) for the dashboard's install badge.
-// (ADR-085: apply is idempotent additive — no force, no uninstall.)
+// RecipeInstance is the stored record of a recipe instantiated for a tenant.
+// The canonical entities a recipe creates (meters, and plans with their
+// prices) live in their own domain tables. RecipeInstance tracks only the
+// instantiation, so Hardcount can answer "is this recipe already installed?"
+// idempotently. It also records what the apply created (CreatedObjects) for
+// the dashboard's install badge. An apply only adds, and repeating it is
+// idempotent: there is no force and no uninstall (ADR-085).
 //
 // See docs/dev/design/recipes.md.
 type RecipeInstance struct {
@@ -24,21 +25,21 @@ type RecipeInstance struct {
 }
 
 // CreatedObjects is the per-role map of entity IDs a recipe apply produced.
-// Persisted as JSONB on recipe_instances.created_object_ids and returned in
-// the apply response so the dashboard can link to the new plan and meter. It
-// is the ledger of what a recipe made: catalog objects only (ADR-130 §15). A
-// recipe never creates customers, subscriptions, dunning policies or webhook
-// endpoints.
+// It is stored as JSONB on recipe_instances.created_object_ids, and returned
+// in the apply response so the dashboard can link to the new plan and meter.
+// It is the ledger of what a recipe made: catalog objects only (ADR-130 §15).
+// A recipe never creates customers, subscriptions, dunning policies or
+// webhook endpoints.
 type CreatedObjects struct {
 	MeterIDs []string `json:"meter_ids,omitempty"`
 	PlanIDs  []string `json:"plan_ids,omitempty"`
 	PriceIDs []string `json:"price_ids,omitempty"`
 }
 
-// Recipe is the parsed, validated form of a recipe YAML file. Loaded once
-// at process boot from the embedded FS and held in the registry; never
-// mutated after load. A recipe is catalog only (ADR-130 §15): meters, and
-// plans with their prices.
+// Recipe is the parsed, validated form of a recipe YAML file. It is loaded
+// once at process boot from the embedded FS and held in the registry, and it
+// is never changed after load. A recipe is catalog only (ADR-130 §15):
+// meters, and plans with their prices.
 //
 // JSON tags use snake_case to match the rest of /v1/* and the wire
 // contract in docs/dev/design/recipes.md.
@@ -55,7 +56,7 @@ type Recipe struct {
 }
 
 // RecipeOverride is one override key declared in a recipe's `overridable`
-// list. Drives validation at instantiate time and the override form in
+// list. It drives validation at instantiate time, and the override form in
 // the dashboard's preview dialog.
 type RecipeOverride struct {
 	Key       string   `json:"key"`
@@ -66,6 +67,7 @@ type RecipeOverride struct {
 	Pattern   string   `json:"pattern,omitempty"`
 }
 
+// RecipeMeter is a meter a recipe declares.
 type RecipeMeter struct {
 	EventName   string `json:"event_name"`
 	Name        string `json:"name"`
@@ -73,15 +75,17 @@ type RecipeMeter struct {
 	Aggregation string `json:"aggregation"`
 }
 
+// RecipePlan is a plan a recipe declares, with its usage prices.
 type RecipePlan struct {
 	Code            string          `json:"code"`
 	Name            string          `json:"name"`
 	Currency        string          `json:"currency"`
 	BillingInterval BillingInterval `json:"billing_interval"`
 	BaseAmountCents int64           `json:"base_amount_cents"`
-	// BaseBillTiming is the operator's packaging choice (in_advance /
-	// in_arrears). Empty → CreatePlanTx defaults to in_arrears. Honored
-	// verbatim on the generated plan; the recipe never second-guesses it.
+	// BaseBillTiming is the operator's packaging choice (in_advance or
+	// in_arrears). When it is empty, CreatePlanTx defaults to in_arrears.
+	// The generated plan takes it exactly as written, and the recipe never
+	// second-guesses it.
 	BaseBillTiming BillTiming `json:"base_bill_timing,omitempty"`
 	// Prices are the plan's usage prices. Each takes the plan's currency.
 	Prices []RecipePrice `json:"prices"`

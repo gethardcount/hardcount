@@ -7,11 +7,11 @@ import "errors"
 // ("The card was declined because the transaction requires authentication",
 // https://docs.stripe.com/declines/codes). Stripe sends it as the decline
 // code, and as the error code itself
-// (https://docs.stripe.com/error-codes); the payment package reads both.
+// (https://docs.stripe.com/error-codes). The payment package reads both.
 //
 // The card works: the customer confirms the payment on the hosted invoice
 // page, where Stripe runs 3-D Secure. What cannot work is another charge
-// without the customer, so Hardcount follows Stripe Billing, which lists the
+// without the customer. So Hardcount follows Stripe Billing, which lists the
 // code among those it does not retry: "the scheduled retries continue but
 // the payment only executes if you obtain a new payment method"
 // (https://docs.stripe.com/billing/revenue-recovery/smart-retries#non-retryable-decline-codes).
@@ -30,9 +30,9 @@ func IsAuthenticationRequired(declineCode string) bool {
 
 // ErrCardNeedsConfirmation is what a dunning retry returns when it charged
 // nothing because the bank asked the customer to confirm the last charge of
-// the customer's default card on this invoice. Like ErrCardNeedsReplacing it
+// the customer's default card on this invoice. Like ErrCardNeedsReplacing, it
 // provably never reached Stripe and still counts as an attempt (Stripe
-// Billing keeps its schedule and attempt count); the next retry charges a
+// Billing keeps its schedule and attempt count). The next retry charges a
 // different card once it is the default.
 var ErrCardNeedsConfirmation = errors.New("the bank asked the customer to confirm the payment; an off-session retry cannot")
 
@@ -42,14 +42,14 @@ type DeclineAsk string
 
 const (
 	// DeclineAskNone: an ordinary decline. Pay the invoice or update the
-	// card; dunning retries the same card.
+	// card. Dunning retries the same card.
 	DeclineAskNone DeclineAsk = ""
 	// DeclineAskNewCard: the bank refused the card for good (IsHardDecline).
-	// Pay with a different card; no retry charges this one.
+	// Pay with a different card. No retry charges this one.
 	DeclineAskNewCard DeclineAsk = "new_card"
 	// DeclineAskConfirm: the bank wants the customer to confirm the payment
 	// (IsAuthenticationRequired). Pay on the hosted invoice page, where the
-	// bank asks for the confirmation; no retry charges this card.
+	// bank asks for the confirmation. No retry charges this card.
 	DeclineAskConfirm DeclineAsk = "confirm"
 	// DeclineAskAddCard: no card is on file, so the retry charged nothing
 	// (ErrNoPaymentMethodOnRetry). Nothing was declined and no retry can
@@ -59,8 +59,8 @@ const (
 	// DeclineAskPayInvoice: Stripe is not connected for the invoice's mode,
 	// so the retry charged nothing and no card can be added online
 	// (ErrNoOnlinePaymentOnRetry). The reminder asks the customer to pay the
-	// invoice and links the hosted invoice page; it mentions no card and
-	// promises no retry (ADR-060 amendment 2026-10-30).
+	// invoice and links the hosted invoice page. It mentions no card and
+	// promises no retry (ADR-060, amendment of 2026-10-30).
 	DeclineAskPayInvoice DeclineAsk = "pay_invoice"
 )
 

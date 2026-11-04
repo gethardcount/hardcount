@@ -7,22 +7,25 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/money"
 )
 
-// CreditShare is one invoice's part of the credit for unused, prepaid time:
+// CreditShare is one invoice's part of the credit for unused, prepaid time.
 // GrossCents is the credit note's amount, tax included. ToBalance says the
-// note is a balance credit: the invoice is paid, or its charge is in flight,
-// which Issue holds until the charge settles and which normally succeeds.
-// Otherwise the note lowers what the invoice asks for.
+// note is a balance credit: the invoice is paid, or its charge is in flight.
+// For an in-flight charge, Issue holds the note until the charge settles,
+// which it normally does by succeeding. Otherwise the note lowers what the
+// invoice asks for.
 //
 // BalanceCents, DueCents and HeldCents say where the share's money goes, as
-// creditnote.Service.Issue applies it to the invoice as allocation read it.
+// creditnote.Service.Issue applies it to the invoice that allocation read.
 // They add up to GrossCents:
-//   - BalanceCents: to the customer's balance. All of a ToBalance share, and
-//     on an open invoice the part above what it still asks for: that part
-//     relieves the customer credits applied to it, which Issue hands back to
-//     the balance (ADR-061 amendment 2026-10-12).
+//
+//   - BalanceCents: to the customer's balance. It is all of a ToBalance
+//     share, and on an open invoice the part above what it still asks for.
+//     That part relieves the customer credits applied to the invoice, which
+//     Issue hands back to the balance (ADR-061 amendment 2026-10-12).
 //   - DueCents: off what an open invoice still asks for.
-//   - HeldCents: on a draft invoice. Issue holds the note until the invoice is
-//     finalized, and where it goes then depends on whether it is paid by then.
+//   - HeldCents: on a draft invoice. Issue holds the note until the invoice
+//     is finalized, and where it goes then depends on whether the invoice is
+//     paid by then.
 type CreditShare struct {
 	InvoiceID    string
 	GrossCents   int64
@@ -64,27 +67,30 @@ func creditShareFor(inv Invoice, gross int64) CreditShare {
 //     item B. With no itemID (cancel, swap: the whole subscription) every
 //     funding invoice is a candidate.
 //   - Order. Newest first by CreatedAt. On a tie the subscription_update
-//     invoice goes first: it is the later price level (a test-clock catchup
-//     stamps every invoice it makes with one instant). Then the later row in
-//     sources' order (FindFundingInvoicesForPeriod orders base first).
-//   - Room. A paid invoice, or one whose charge is in flight, can take what is
-//     left of its total: total − credited. For an in-flight invoice Issue
+//     invoice goes first, because it is the later price level (a test-clock
+//     catch-up stamps every invoice it makes with one instant). Then the
+//     later row in sources' order goes first (FindFundingInvoicesForPeriod
+//     orders base first).
+//   - Room. A paid invoice, or one whose charge is in flight, can take what
+//     is left of its total: total − credited. For an in-flight invoice, Issue
 //     picks the channel once the charge settles. An unpaid invoice can take
 //     what it still asks for plus the customer credits applied to it, which
-//     the note hands back (ADR-061), and never more than total − credited:
-//     a note held while a charge was in flight has not reduced what is due
-//     yet, and the credit-note writer counts it. An invoice with no room is
-//     skipped.
+//     the note hands back (ADR-061). It never takes more than
+//     total − credited, because a note held while a charge was in flight has
+//     not reduced what is due yet, and the credit-note writer counts it. An
+//     invoice with no room is skipped.
 //
-// credited maps an invoice id to the credit notes already on it (counting
-// drafts). Callers MUST read it outside the change's transaction: the change's
-// own drafts would otherwise shrink their own room. The credit-note store
-// re-checks the cap under the invoice lock when the draft is written, so a
-// concurrent note makes the change fail and retry, never over-credit.
+// credited maps an invoice id to the credit notes already on it, drafts
+// included. Callers must read it outside the change's transaction.
+// Otherwise the change's own drafts would shrink their own room. The
+// credit-note store re-checks the cap under the invoice lock when the draft
+// is written. So a concurrent note makes the change fail and retry, and
+// never over-credits.
 //
 // unplacedCents (net) is what did not fit. It is not owed: every invoice is
-// either credited up to its total or, unpaid, relieved of all it asks for. The
-// caller records it on the change (uncredited_cents) rather than logging it.
+// either credited up to its total or, if unpaid, relieved of all it asks for.
+// The caller records it on the change (uncredited_cents) instead of logging
+// it.
 func AllocateUnusedCredit(sources []Invoice, credited map[string]int64, itemID string, netCents int64) (shares []CreditShare, unplacedCents int64) {
 	if netCents <= 0 {
 		return nil, 0
@@ -160,9 +166,10 @@ func AllocateUnusedCredit(sources []Invoice, credited map[string]int64, itemID s
 }
 
 // TaxPendingShare returns the invoice of the first share that is a draft
-// whose tax is not calculated yet. It has no final total, so no credit can be
-// sized against it: the change is refused (funding_invoice_tax_pending) and
-// retried once the tax retry settles it, normally within minutes.
+// whose tax is not calculated yet. That invoice has no final total, so no
+// credit can be sized against it. The change is refused
+// (funding_invoice_tax_pending), and retried once the tax retry settles the
+// invoice, normally within minutes.
 func TaxPendingShare(sources []Invoice, shares []CreditShare) (Invoice, bool) {
 	for _, sh := range shares {
 		for _, inv := range sources {
