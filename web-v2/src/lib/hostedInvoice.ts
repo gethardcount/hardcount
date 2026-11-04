@@ -86,7 +86,8 @@ export function payErrorCopy(code: string | undefined, seller: string, status = 
 // payUnavailableCopy is the line shown in place of the Pay button when the
 // invoice is owed but can't be paid online: the amount is below Stripe's
 // minimum charge, or (any other reason) the seller has no payment provider
-// connected.
+// connected or the server has no address for Stripe to send the customer
+// back to. The copy names no setting: the customer can't change one.
 export function payUnavailableCopy(seller: string, reason?: string): string {
   const who = seller || 'the sender of this invoice'
   if (reason === 'amount_below_minimum') return belowMinimumCopy(who)

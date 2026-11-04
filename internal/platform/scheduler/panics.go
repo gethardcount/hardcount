@@ -22,8 +22,8 @@ import (
 // A part that panics stops, and the others still run. Repanic then raises
 // the first panic again, so the tick still ends as panicked: the leader gate
 // releases it as not completed, and the lease-lost counter pages. Without
-// this, a panic on one row stopped every later step for every tenant, and the
-// next tick panicked on the same row again.
+// Panics, a panic on one row would stop every later step for every tenant,
+// and the next tick would panic on the same row again.
 //
 // The zero value is ready to use. A Panics is not safe for concurrent use.
 type Panics struct {
@@ -31,9 +31,9 @@ type Panics struct {
 }
 
 // Guard recovers a panic in the part it is deferred in. It logs the panic at
-// ERROR with the stack and args, which name the part (a step, or a row id),
-// and keeps the first panic for Repanic. Guard must be the deferred call
-// itself (`defer p.Guard(...)`); called any other way it recovers nothing.
+// error level with the stack and args, which name the part (a step, or a row
+// id). It keeps the first panic for Repanic. Guard must be the deferred call
+// itself (`defer p.Guard(...)`). Called any other way, it recovers nothing.
 func (p *Panics) Guard(args ...any) {
 	r := recover()
 	if r == nil {
@@ -47,9 +47,9 @@ func (p *Panics) Guard(args ...any) {
 	}
 }
 
-// Panicked reports whether Guard kept a panic. The panic Repanic raises drops
-// the caller's return values, so a caller that collected errors for its own
-// caller to log logs them itself first.
+// Panicked reports whether Guard kept a panic. The panic that Repanic raises
+// drops the caller's return values. So a caller that collected errors for
+// its own caller to log logs them itself first.
 func (p *Panics) Panicked() bool { return p.first != nil }
 
 // Repanic raises the first panic Guard kept, if any.

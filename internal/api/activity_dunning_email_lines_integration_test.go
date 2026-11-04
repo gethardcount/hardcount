@@ -213,6 +213,8 @@ func TestActivityLines_SkippedEmailSaysWhy(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("SMTP_HOST", "smtp.skipped-email.invalid")
 	t.Setenv("PAYMENT_UPDATE_URL", "https://billing.skipped-email.test/update-payment")
+	// The setup-link email is sent only when its page can add the card.
+	t.Setenv("PAYMENT_UPDATE_RETURN_URL", "https://billing.skipped-email.test/payment-method-added")
 	srv := NewServer(db, clock.Real(), nil)
 	ts := httptest.NewServer(srv)
 	defer ts.Close()

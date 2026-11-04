@@ -600,8 +600,8 @@ export interface paths {
          *     fails to create the session, the token works again.
          *
          *     Stripe sends the customer to the server's `PAYMENT_UPDATE_RETURN_URL`
-         *     (`http://localhost:5173/payment-method-added` when that is unset) with
-         *     `?status=success` or `?status=cancel` added. The card is saved when
+         *     with `?status=success` or `?status=cancel` added. Without that
+         *     setting the call answers 409 and the token is not used up. The card is saved when
          *     Stripe reports the setup succeeded. Writes an audit row. Send no body.
          */
         post: operations["createPublicPaymentUpdateCheckout"];
@@ -13312,7 +13312,9 @@ export interface components {
             /**
              * @description Sent only when money is owed but can't be paid online:
              *     `online_payment_unavailable` when the seller has no payment
-             *     provider connected for this mode, `amount_below_minimum` when
+             *     provider connected for this mode, or the server has no
+             *     `HOSTED_INVOICE_BASE_URL` for Stripe to send the customer back
+             *     to; `amount_below_minimum` when
              *     Stripe's latest answer refused the amount as below its minimum
              *     charge.
              * @enum {string}
@@ -15689,8 +15691,10 @@ export interface operations {
             /**
              * @description Nothing was sent. `email_not_configured`: this server has no SMTP
              *     set up, and no setup link was created. `stripe_not_connected`:
-             *     Stripe is not connected for this mode. Like any other call that
-             *     gets this far, it starts the one-minute cooldown.
+             *     Stripe is not connected for this mode. `return_address_not_set`:
+             *     the server has no `CUSTOMER_PORTAL_URL`, so Stripe would have no
+             *     page to send the customer back to. Like any other call that gets
+             *     this far, it starts the one-minute cooldown.
              */
             409: {
                 headers: {
@@ -15843,8 +15847,8 @@ export interface operations {
                     /**
                      * @description Where Stripe sends the customer afterwards. Defaults to
                      *     `/payment-method-added` on the server's
-                     *     `CUSTOMER_PORTAL_URL` (`http://localhost:5173` when that
-                     *     is unset).
+                     *     `CUSTOMER_PORTAL_URL`. With neither, the call answers 409
+                     *     `return_address_not_set`.
                      */
                     return_url?: string;
                 };
@@ -15898,7 +15902,10 @@ export interface operations {
             };
             /**
              * @description `stripe_not_connected`: Stripe is not connected for this mode.
-             *     Connect it under Settings.
+             *     Connect it under Settings. `return_address_not_set`: no
+             *     `return_url` was sent and the server has no `CUSTOMER_PORTAL_URL`,
+             *     so Stripe would have no page to send the customer back to.
+             *     Nothing is created at Stripe.
              */
             409: {
                 headers: {
@@ -16654,7 +16661,9 @@ export interface operations {
              *     payment status is `processing` or `unknown`.
              *     `payment_in_progress` when another payment for it has started.
              *     `online_payment_unavailable` when the seller has no Stripe keys
-             *     for the invoice's mode. `amount_below_minimum` when Stripe's
+             *     for the invoice's mode, or the server has no
+             *     `HOSTED_INVOICE_BASE_URL` for Stripe to send the customer back
+             *     to. `amount_below_minimum` when Stripe's
              *     latest answer for the amount was that it is below Stripe's
              *     minimum charge, so no payment page is made for it.
              */
@@ -16878,9 +16887,11 @@ export interface operations {
                 };
             };
             /**
-             * @description The seller has not connected Stripe for this mode, so a card
-             *     cannot be added online. Code `online_payment_unavailable`. The
-             *     token still works.
+             * @description A card cannot be added online: the seller has not connected
+             *     Stripe for this mode, or the server has no
+             *     `PAYMENT_UPDATE_RETURN_URL` for Stripe to send the customer back
+             *     to. Code `online_payment_unavailable`. Stripe was not called, and
+             *     the token still works.
              */
             409: {
                 headers: {
@@ -29532,9 +29543,9 @@ export interface operations {
                         livemode: boolean;
                         /**
                          * @description Whether this server can email a customer a link to add
-                         *     a payment method. False when email sending (SMTP) or
-                         *     PAYMENT_UPDATE_URL is not set up; resending a setup
-                         *     link then fails.
+                         *     a payment method. False when email sending (SMTP),
+                         *     PAYMENT_UPDATE_URL or PAYMENT_UPDATE_RETURN_URL is not
+                         *     set up; resending a setup link then fails.
                          */
                         can_email_setup_links: boolean;
                         /**
@@ -34817,7 +34828,7 @@ export interface operations {
                      *         {
                      *           "env": "HOSTED_INVOICE_BASE_URL",
                      *           "set": true,
-                     *           "effect": "Invoice, receipt and reminder emails go out without a link to view and pay the invoice."
+                     *           "effect": "Invoice, receipt and reminder emails go out without a link to view and pay the invoice, and the invoice page has no Pay button."
                      *         },
                      *         {
                      *           "env": "PAYMENT_UPDATE_URL",
@@ -34858,7 +34869,7 @@ export interface operations {
                             /** @description What doesn't work while it is unset. */
                             effect: string;
                         }[];
-                        /** @description Whether this server can email a customer a link to add a payment method (SMTP and `PAYMENT_UPDATE_URL` are set up). */
+                        /** @description Whether this server can email a customer a link to add a payment method (SMTP, `PAYMENT_UPDATE_URL` and `PAYMENT_UPDATE_RETURN_URL` are set up). */
                         can_email_setup_links: boolean;
                         /** @description Whether this server can invite a teammate (SMTP and `DASHBOARD_BASE_URL` are set up). */
                         can_send_invites: boolean;
