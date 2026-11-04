@@ -32,7 +32,7 @@ const (
 // natural period. SubscriptionCreate is the prorated first invoice when a
 // subscription starts mid-cycle. Manual is a standalone invoice an operator
 // creates. Threshold is the early invoice that the threshold scan tick
-// finalizes when usage crosses a spend threshold.
+// finalizes (see BillingThresholds).
 type InvoiceBillingReason string
 
 const (
@@ -200,7 +200,7 @@ const (
 // the rule "tax_status=pending or pause_collection set → draft" cannot drift
 // between flows.
 //
-//   - Tax pending: a finalized invoice implies its amounts are final. With
+//   - Tax pending: a finalized invoice implies its amounts are correct. With
 //     tax deferred, TotalAmountCents is the subtotal plus zero tax, which is
 //     wrong at finalize. The retry worker moves the invoice from draft to
 //     finalized when calculation succeeds.
@@ -332,7 +332,7 @@ type Invoice struct {
 	// invoices, so callers leave out the period row. Every surface that shows
 	// the period (PDF, dashboard, list) shows this one value as is, so the Go
 	// and TS code cannot drift apart. The hosted invoice page shows no
-	// period, and its linked PDF does.
+	// period, but its linked PDF does.
 	BillingPeriodDisplay string     `json:"billing_period_display,omitempty"`
 	IssuedAt             *time.Time `json:"issued_at,omitempty"`
 	DueAt                *time.Time `json:"due_at,omitempty"`

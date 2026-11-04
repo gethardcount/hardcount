@@ -31,8 +31,8 @@ type WebhookEndpoint struct {
 	UpdatedAt                time.Time  `json:"updated_at"`
 }
 
-// WebhookEvent is one outbound event: its type and payload, delivered to
-// every endpoint that subscribes to the type.
+// WebhookEvent is one outbound event: its type and its payload. Each
+// endpoint it is sent to gets its own WebhookDelivery.
 type WebhookEvent struct {
 	ID        string         `json:"id"`
 	TenantID  string         `json:"tenant_id,omitempty"`
@@ -215,7 +215,7 @@ const (
 	// the balance in the payload's `currency`, which the crossing is
 	// computed on. Payload: customer_id, currency, balance_cents (plus
 	// threshold_cents on low).
-	//
+
 	// EventCreditBalanceLow fires when the balance crosses from >= to < the
 	// tenant's configured threshold
 	// (tenant_settings.credit_balance_low_threshold_cents). The threshold
@@ -236,8 +236,8 @@ const (
 	// commit credits (ADR-080). The payload carries customer_id, grant_id,
 	// currency, funding_invoice_id, credit_note_id, retired_cents,
 	// refunded_gross_cents and remaining_after_cents. It is enqueued in the
-	// credit-note coordinator's transaction, so it is sent exactly once with
-	// the retire.
+	// credit-note coordinator's transaction, so the event is stored exactly
+	// once, and only if the retire commits.
 	EventCreditCommitRetired = "credit.commit_retired"
 )
 

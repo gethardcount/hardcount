@@ -35,7 +35,8 @@ type PaymentBlock struct {
 //
 // There are three cases:
 //   - No payment in flight: nothing is blocked here. The caller's own status
-//     rules (paid, voided, draft) still apply, because they differ per action.
+//     rules (paid, voided, draft) still apply. They stay out of this function
+//     on purpose, because they differ per action.
 //   - Parked (payment_status 'unknown' with no PaymentIntent ID): Stripe's
 //     answer was unclear and named no payment. Hardcount checks Stripe's list
 //     of the customer's payments within a day (ADR-127 amendment 2026-10-20).
@@ -44,13 +45,6 @@ type PaymentBlock struct {
 //     next.
 //   - In flight with a known PaymentIntent: the charge is resolving, so every
 //     action is refused and the operator is told to wait.
-//
-// If ADR-106's charge-intent ledger is resumed, its state plugs in here,
-// joined onto the invoice read model the way stripe_payment_intent_id is. An
-// open intent is then the wait case, and a needs_review intent the parked
-// case. A new parameter instead would make every caller load the intent, and
-// internal/invoice reading internal/payment fails
-// internal/arch/boundaries_test.go.
 //
 // See ADR-107 and ADR-127 for the parked state.
 func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
@@ -85,12 +79,13 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 
 // PaymentBlocksActionHeld is PaymentBlocksAction plus the charge hold, for
 // the three actions that settle what is owed: void, write-off and offline
-// payment (#975, ADR-127). The charge hold is the short claim a charge puts
-// on the invoice. hold is the invoice's hold, read in the same transaction
-// as inv with the invoice row locked (ChargeHeldTx). On any other copy it
-// answers a question about the past. The card settlement path must never
-// call this, because the charge that holds the hold must be able to record
-// its own success.
+// payment (#975, ADR-127). The charge hold
+// (invoices.auto_charge_claimed_until) is the claim that a charge, or
+// dunning's final action, writes on the invoice while it works. hold is the
+// invoice's hold, read in the same transaction as inv with the invoice row
+// locked (ChargeHeldTx). On any other copy it answers a question about the
+// past. The card settlement path must never call this, because the charge
+// that holds the hold must be able to record its own success.
 //
 // The hold counts as in flight because every charge claim writes only the
 // hold. payment_status stays 'pending' or 'failed' until Stripe answers, so
@@ -103,23 +98,24 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 //     A stale hold refuses too (ADR-127): its charge may have been sent and
 //     its result lost, so Stripe may hold a payment Hardcount has not
 //     recorded. It stays set until the stale-hold sweep has asked Stripe,
-//     within about an hour (a parked invoice's within a day). Write-off is
-//     the one action a stale hold allows. It moves no money, a payment the
-//     sweep finds later still settles the invoice (uncollectible → paid),
-//     and it is the exit when Stripe can never answer (disconnected, the
-//     customer deleted). This is ADR-107's carve-out reasoning.
+//     within about an hour. Write-off is the one action a stale hold allows.
+//     It moves no money, a payment the sweep finds later still settles the
+//     invoice (uncollectible → paid), and it is the exit when Stripe can
+//     never answer (disconnected, the customer deleted). This is ADR-107's
+//     carve-out reasoning.
 //   - On a parked invoice, only a live hold counts. A park keeps its claim's
-//     hold, so a stale hold there is the normal wait, and write-off stays
-//     allowed: the exit for a customer who paid another way (ADR-107). A
-//     live hold on a park belongs to a charge request made for it. Today
-//     that is the charge that parked it, in its first five minutes. Once the
-//     stale-hold sweep resends a parked charge, it is that resend. A
-//     write-off must not land while such a request may still reach Stripe,
-//     or the request can charge an invoice written off because the customer
-//     paid another way. So write-off waits a few minutes there, like every
-//     other action (ADR-127 amendment 2026-10-29).
-//   - Otherwise only 'pending' and 'failed' consult the hold.
-//     PaymentBlocksAction already decides 'processing'.
+//     hold, so a stale hold there is the normal wait. The stale-hold sweep
+//     asks Stripe about a parked invoice within a day. Write-off stays
+//     allowed during that wait: the exit for a customer who paid another way
+//     (ADR-107). A live hold on a park belongs to a charge request made for
+//     it. Today that is the charge that parked it, in its first five
+//     minutes. Once the stale-hold sweep resends a parked charge, it is that
+//     resend. A write-off must not land while such a request may still reach
+//     Stripe, or the request can charge an invoice written off because the
+//     customer paid another way. So write-off waits a few minutes there, like
+//     every other action (ADR-127 amendment 2026-10-29).
+//   - Any other invoice ignores the hold. PaymentBlocksAction already
+//     decides 'processing'.
 func PaymentBlocksActionHeld(inv Invoice, action InvoiceAction, hold ChargeHoldState) PaymentBlock {
 	if b := PaymentBlocksAction(inv, action); b.Blocked {
 		return b
@@ -211,10 +207,11 @@ func inFlightMessage(action InvoiceAction) string {
 	}
 }
 
-// Nothing charges a written-off invoice (ADR-113), so no check for that
-// lives here. Charging in place would aim money at an invoice that carries
-// stale state. A customer who returns later gets a fresh recovery invoice on
-// the normal payment paths, and a fresh invoice carries no stale state.
+// There is no RecoveryBlocksCharge: nothing charges a written-off invoice
+// (ADR-113), so no check for that lives here. Charging in place would aim
+// money at an invoice that carries stale state. A customer who returns later
+// gets a fresh recovery invoice on the normal payment paths, and a fresh
+// invoice carries no stale state.
 // RecoveryWarnsOnOfflinePayment below still applies: recording money that
 // already arrived is never refused, but the operator is told when it will
 // not reconcile.
@@ -231,9 +228,9 @@ func inFlightMessage(action InvoiceAction) string {
 // record it would only make the books wrong as well, on top of a payment
 // that exists either way.
 //
-// Not refusing is not the same as saying nothing. Both conditions below mean
-// the recorded payment does not reconcile with what the tenant has told the
-// tax authority, or with what was already billed elsewhere. Nothing
+// Recording the payment can still call for a warning. Both conditions below
+// mean the recorded payment does not reconcile with what the tenant has told
+// the tax authority, or with what was already billed elsewhere. Nothing
 // downstream will notice: MarkPaid sets status to 'paid', which takes the
 // invoice out of the tax-reversal sweep's own predicate
 // (status IN ('voided','uncollectible')). The mismatch becomes permanently

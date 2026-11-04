@@ -11,9 +11,10 @@ import (
 // own column: what happens to the subscription, and what happens to the
 // unpaid invoice.
 //
-// A single setting for both cannot express Stripe's own default outcome:
-// cancel the subscription and write off the invoice. Stripe, Recurly and
-// Chargebee all keep the two apart (ADR-112 quotes each).
+// With one column for each question, a policy can express Stripe's own
+// default outcome: cancel the subscription and write off the invoice.
+// Stripe, Recurly and Chargebee all settle both questions (ADR-112 quotes
+// each).
 //
 // The old `manual_review` value is (SubActionNone, InvActionNone), which
 // matches Chargebee's "remain active" + "not paid".
@@ -311,8 +312,8 @@ type InvoiceDunningRun struct {
 	// Date.now(). The server's value is authoritative.
 	EffectiveNow *time.Time `json:"effective_now,omitempty"`
 	// TestClockID is the owning customer's clock when pinned. The server
-	// sets it, so the amber test-clock badge shows on every run, one-off
-	// invoices and later pages included.
+	// sets it, so the amber test-clock badge shows on every pinned run,
+	// one-off invoices and later pages included.
 	TestClockID string `json:"test_clock_id,omitempty"`
 	// MaxRetryAttempts is how many retries the bound policy makes (the
 	// length of its retry_days). The list reads (ListRuns,
@@ -333,11 +334,11 @@ func (r InvoiceDunningRun) RetryScheduled() bool {
 	return r.State == DunningActive && !r.Paused && r.AttemptCount < r.MaxRetryAttempts
 }
 
-// There is no per-customer dunning override (ADR-036). A partial override
-// (the retry count, the first wait and the terminal action, with the rest
-// of the schedule inherited) has no industry precedent. Stripe, Lago, Orb
-// and Recurly all assign whole named templates. A customer gets its own
-// schedule through `customers.dunning_policy_id`, which names a
+// There is no CustomerDunningOverride (ADR-036). A partial per-customer
+// override (the retry count, the first wait and the terminal action, with
+// the rest of the schedule inherited) has no industry precedent. Stripe,
+// Lago, Orb and Recurly all assign whole named templates. A customer gets
+// its own schedule through `customers.dunning_policy_id`, which names a
 // DunningPolicy row.
 
 // InvoiceDunningEvent is one entry in a dunning run's history.
@@ -353,9 +354,9 @@ type InvoiceDunningEvent struct {
 	Metadata     map[string]any   `json:"metadata,omitempty"`
 	CreatedAt    time.Time        `json:"created_at"`
 	// RecordedAt is the real-world instant of the INSERT (ADR-104
-	// Invariant A). CreatedAt follows the entity's calendar, which is
-	// simulated during catch-up (ADR-030). Catch-up is the work Hardcount
-	// does after a test clock moves forward. So RecordedAt is the row's only
-	// wall-clock stamp. It is nil on rows written before migration 0164.
+	// Invariant A). It is the row's only wall-clock stamp, because CreatedAt
+	// follows the entity's calendar, which is simulated during catch-up (the
+	// work Hardcount does after a test clock moves forward, ADR-030). It is
+	// nil on rows written before migration 0164.
 	RecordedAt *time.Time `json:"recorded_at,omitempty"`
 }

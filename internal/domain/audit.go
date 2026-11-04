@@ -174,11 +174,12 @@ type TenantSettings struct {
 	// invoices issued after it. A draft shows the current text.
 	InvoiceFooter string `json:"invoice_footer,omitempty"`
 	// There is no audit_fail_closed setting (ADR-089), and migration 0149
-	// dropped its column. Its 503 after a committed change would be cached
-	// by the idempotency layer and leave the change behind an error
-	// permanently. Fail-closed comes from the design instead of a setting:
-	// audit rows commit in the business transaction (ADR-090, LogInTx). So
-	// there is no window after commit to guard, and nothing to opt into.
+	// dropped its column. The setting swapped the response to a committed
+	// change for a 503. The idempotency layer caches that 503, which leaves
+	// the change behind an error permanently. Fail-closed comes from the
+	// design instead of a setting: audit rows commit in the business
+	// transaction (ADR-090, LogInTx). So there is no window after commit to
+	// guard, and nothing to opt into.
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
