@@ -195,10 +195,23 @@ func StripeNotConnected() *DomainError {
 	return InvalidState("Stripe is not connected for this mode. Connect it under Settings, then try again.").WithCode(CodeStripeNotConnected)
 }
 
+// CodeReturnAddressNotSet is the stable code an operator action that sends a
+// customer to Stripe answers with when this server has no address for Stripe
+// to send the customer back to. Without the address there is no page that
+// works, so the action is refused before any Stripe call.
+const CodeReturnAddressNotSet = "return_address_not_set"
+
+// ReturnAddressNotSet is the 409 for that state. setting names the server
+// setting that holds the address, such as CUSTOMER_PORTAL_URL.
+func ReturnAddressNotSet(setting string) *DomainError {
+	return InvalidState(setting + " isn't set on this server, so Stripe has no page to send the customer back to. Set it to your dashboard's address, then restart.").WithCode(CodeReturnAddressNotSet)
+}
+
 // CodeOnlinePaymentUnavailable is the customer-facing code for the same
-// state on a public page (hosted invoice Pay, update payment method): the
-// seller has not connected Stripe for the mode. The page explains it in its
-// own words, and the code names no setting the customer could change.
+// states on a public page (hosted invoice Pay, update payment method): the
+// seller has not connected Stripe for the mode, or this server has no
+// address for Stripe to send the customer back to. The page explains it in
+// its own words, and the code names no setting the customer could change.
 const CodeOnlinePaymentUnavailable = "online_payment_unavailable"
 
 // The 409 codes of a plan price write (ADR-130 §4, §16). price_exists: the

@@ -62,8 +62,13 @@ write_env() {
     # Secure cookie at http://localhost, so sign-in would fail there.
     echo "APP_ENV=local"
     echo "NGINX_HTTP_PORT=${PORT_DEFAULT}"
-    # Where Stripe returns a customer after they save a card.
+    # Where Stripe returns a customer: after they save a card from a setup
+    # link, after they pay on the hosted invoice page, and after they add a
+    # card from the "add a payment method" email. None has a default, so
+    # without them those pages refuse.
     echo "CUSTOMER_PORTAL_URL=http://localhost:${PORT_DEFAULT}"
+    echo "HOSTED_INVOICE_BASE_URL=http://localhost:${PORT_DEFAULT}"
+    echo "PAYMENT_UPDATE_RETURN_URL=http://localhost:${PORT_DEFAULT}/payment-method-added"
     if [ "$build" = no ]; then
       echo "HARDCOUNT_IMAGE=ghcr.io/gethardcount/hardcount:${HARDCOUNT_VERSION}"
       echo "HARDCOUNT_DASHBOARD_IMAGE=ghcr.io/gethardcount/hardcount-dashboard:${HARDCOUNT_VERSION}"

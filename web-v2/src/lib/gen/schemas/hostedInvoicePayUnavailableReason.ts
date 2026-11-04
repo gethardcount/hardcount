@@ -15,7 +15,9 @@
 /**
  * Sent only when money is owed but can't be paid online:
  * `online_payment_unavailable` when the seller has no payment
- * provider connected for this mode, `amount_below_minimum` when
+ * provider connected for this mode, or the server has no
+ * `HOSTED_INVOICE_BASE_URL` for Stripe to send the customer back
+ * to; `amount_below_minimum` when
  * Stripe's latest answer refused the amount as below its minimum
  * charge.
  */

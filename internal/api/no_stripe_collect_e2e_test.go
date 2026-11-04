@@ -38,6 +38,8 @@ func newNoStripeRig(t *testing.T, name string, env ...string) *noStripeRig {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("SMTP_HOST", "smtp.no-stripe.invalid")
 	t.Setenv("PAYMENT_UPDATE_URL", "https://billing.no-stripe.test/update-payment")
+	// The setup-link email is sent only when its page can add the card.
+	t.Setenv("PAYMENT_UPDATE_RETURN_URL", "https://billing.no-stripe.test/payment-method-added")
 	for i := 0; i+1 < len(env); i += 2 {
 		t.Setenv(env[i], env[i+1])
 	}

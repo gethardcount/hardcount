@@ -156,7 +156,8 @@ decide.
 |---|---|---|
 | `email_not_configured` | An action that sends email, on a server with no email set up (`SMTP_HOST`). Nothing was sent. | The person who runs your server sets up email: [Email setup](../ops/email-setup.md) |
 | `stripe_not_connected` | An action that needs Stripe, in a mode with no Stripe keys | Connect Stripe under **Settings** |
-| `online_payment_unavailable` | The hosted invoice or payment-update page cannot take a card: the seller has not connected Stripe for this mode | The customer pays another way; do not retry |
+| `return_address_not_set` | A setup link (`send-setup-email`, or `setup-session` with no `return_url`) on a server with no `CUSTOMER_PORTAL_URL`, so Stripe would have no page to send the customer back to. Nothing was created at Stripe. | The person who runs your server sets `CUSTOMER_PORTAL_URL`: [Settings](../settings.md) |
+| `online_payment_unavailable` | The hosted invoice or payment-update page cannot take a card: the seller has not connected Stripe for this mode, or the server has no address for Stripe to send the customer back to (`HOSTED_INVOICE_BASE_URL`, `PAYMENT_UPDATE_RETURN_URL`) | The customer pays another way. A payment-update link is not used up, so it works once the seller fixes the setup |
 
 **Rare: a record that must be unique already exists**
 

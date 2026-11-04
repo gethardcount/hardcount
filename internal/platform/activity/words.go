@@ -2,8 +2,9 @@ package activity
 
 import "strings"
 
-// Credit-note reasons the engine and the refund form write as codes. Any
-// other reason is the operator's own text and is shown as written.
+// creditNoteReasons labels the credit-note reasons that the engine and the
+// refund form write as codes. Any other reason is the operator's own text
+// and is shown as written.
 var creditNoteReasons = map[string]string{
 	"subscription_downgrade":         "Plan downgrade",
 	"subscription_quantity_decrease": "Quantity decrease",
@@ -35,8 +36,8 @@ func CreditNoteReasonCodes() []string {
 	return out
 }
 
-// RefundParts says where a credit note's total went: each part that is not
-// zero, as a meta segment.
+// RefundParts says where a credit note's total went. It returns each part
+// that is not zero as a meta segment.
 func RefundParts(refundCents, creditCents, outOfBandCents int64, currency string) []Segment {
 	var out []Segment
 	if refundCents > 0 {
@@ -51,10 +52,10 @@ func RefundParts(refundCents, creditCents, outOfBandCents int64, currency string
 	return out
 }
 
-// Decline reasons, written about the cardholder, not to them: "Card
-// declined: insufficient funds", not the provider's "Your card has
-// insufficient funds." The provider's "your" means the operator on the
-// operator's screen.
+// declineReasons words each decline code about the cardholder, not to them:
+// "Card declined: insufficient funds", not the provider's "Your card has
+// insufficient funds." On the operator's screen, the provider's "your" means
+// the operator.
 var declineReasons = map[string]string{
 	"insufficient_funds": "Card declined: insufficient funds",
 	"expired_card":       "Card declined: expired card",
@@ -65,10 +66,10 @@ var declineReasons = map[string]string{
 	"generic_decline":    "Card declined by the bank",
 	"card_declined":      "Card declined by the bank",
 	"do_not_honor":       "Card declined by the bank",
-	// Not a decline of the card: the bank wants the customer to confirm the
-	// payment (3-D Secure), which a charge made without them can't do.
-	// Stripe's own message for it is written for developers ("If the
-	// customer is off session, ask them to return to your application").
+	// This is not a decline of the card. The bank wants the customer to
+	// confirm the payment (3-D Secure), which a charge made without them
+	// cannot do. Stripe's own message for it is written for developers ("If
+	// the customer is off session, ask them to return to your application").
 	"authentication_required": "The bank asked the customer to confirm this payment",
 }
 
@@ -81,8 +82,9 @@ func DeclineCodes() []string {
 	return out
 }
 
-// DeclineReason is a failed charge's problem line: the mapped decline code
-// when there is one, else the provider's own text without Hardcount's wrappers.
+// DeclineReason returns a failed charge's problem line. It is the mapped
+// decline code when there is one, or else the provider's own text without
+// Hardcount's wrappers.
 func DeclineReason(declineCode, providerText string) string {
 	if r, ok := declineReasons[strings.ToLower(strings.TrimSpace(declineCode))]; ok {
 		return r
@@ -90,9 +92,9 @@ func DeclineReason(declineCode, providerText string) string {
 	return StripWrapper(providerText)
 }
 
-// wrappers are the prefixes the charge path puts in front of the provider's
-// message (payment.Stripe's "%s: %w" with its verb), which the dunning retry
-// event stores as its reason.
+// wrappers are the prefixes that the charge path puts in front of the
+// provider's message (payment.Stripe's "%s: %w" with its verb). The dunning
+// retry event stores the wrapped message as its reason.
 var wrappers = []string{"payment failed: ", "payment state unknown: "}
 
 // StripWrapper removes Hardcount's own wrapper from a provider's message
