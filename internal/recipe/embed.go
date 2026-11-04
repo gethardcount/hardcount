@@ -1,7 +1,6 @@
-// Package recipe implements the pricing recipes feature: one-call
-// instantiation of a ready-made catalog, meters and a plan with its prices,
-// for AI-platform pricing patterns (ADR-085, ADR-130 §15). See
-// docs/dev/design/recipes.md.
+// Package recipe implements pricing recipes. One call installs a ready-made
+// catalog, meters and a plan with its prices, for an AI-platform pricing
+// pattern (ADR-085, ADR-130 §15). See docs/dev/design/recipes.md.
 package recipe
 
 import (
@@ -15,29 +14,29 @@ import (
 )
 
 // recipeFS holds the bundled YAML definitions. Each *.yaml file under
-// recipes/ is loaded once at package init and validated; a malformed file
-// fails the binary at boot rather than at first instantiation.
+// recipes/ is loaded once at package init and validated. A malformed file
+// fails the binary at boot, not at the first install.
 //
 //go:embed recipes/*.yaml
 var recipeFS embed.FS
 
-// Registry is the in-memory, immutable map of recipe key → parsed
-// domain.Recipe. Built once at process start via Load(); read by Service
-// without locks.
+// Registry is the in-memory, immutable map from recipe key to parsed
+// domain.Recipe. Load() builds it once at process start, and Service reads
+// it without locks.
 type Registry struct {
 	byKey map[string]domain.Recipe
 }
 
 // Load reads every *.yaml under the embedded recipes/ directory, parses
-// and validates each, and returns a Registry. A parse or validation
-// failure on any file is fatal — the caller is expected to bubble the
-// error up to main and abort.
+// and validates each one, and returns a Registry. A parse or validation
+// failure on any file is fatal. The caller is expected to pass the error
+// up to main and abort.
 func Load() (*Registry, error) {
 	return load(recipeFS, "recipes")
 }
 
-// load is the testable form of Load — accepts an arbitrary fs.FS so unit
-// tests can feed malformed fixtures.
+// load is the testable form of Load. It accepts any fs.FS, so unit tests
+// can feed it malformed fixtures.
 func load(fsys fs.FS, dir string) (*Registry, error) {
 	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
@@ -82,7 +81,7 @@ func (r *Registry) List() []domain.Recipe {
 	return out
 }
 
-// Keys returns just the keys, sorted. Useful for logging at boot.
+// Keys returns only the keys, sorted. It is useful for logging at boot.
 func (r *Registry) Keys() []string {
 	keys := make([]string, 0, len(r.byKey))
 	for k := range r.byKey {

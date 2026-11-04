@@ -16,20 +16,21 @@ import (
 type PlanState string
 
 const (
-	// PlanEmpty: goose has not recorded 180; migration 180 runs the
+	// PlanEmpty means goose has not recorded 180. Migration 180 runs the
 	// baseline, then the files after it.
 	PlanEmpty PlanState = "empty"
-	// PlanBehind: `hardcount migrate` would apply Plan.Pending.
+	// PlanBehind means `hardcount migrate` would apply Plan.Pending.
 	PlanBehind PlanState = "behind"
-	// PlanUpToDate: nothing to apply.
+	// PlanUpToDate means there is nothing to apply.
 	PlanUpToDate PlanState = "up to date"
-	// PlanAhead: the database has migrations this binary does not ship.
+	// PlanAhead means the database has migrations this binary does not
+	// ship.
 	PlanAhead PlanState = "ahead"
-	// PlanUnrecorded: tables, but goose has not recorded 180.
-	// `hardcount migrate` refuses it (ErrNoMigrationRecord).
+	// PlanUnrecorded means there are tables, but goose has not recorded
+	// 180. `hardcount migrate` refuses it (ErrNoMigrationRecord).
 	PlanUnrecorded PlanState = "no migration record"
-	// PlanVelox: a build of Velox made the database. `hardcount migrate`
-	// refuses it (ErrVeloxDatabase).
+	// PlanVelox means a build of Velox made the database.
+	// `hardcount migrate` refuses it (ErrVeloxDatabase).
 	PlanVelox PlanState = "made by Velox"
 )
 
@@ -56,13 +57,13 @@ type Plan struct {
 	Latest  int64
 	Pending []PlanFile    // in order; set for PlanEmpty and PlanBehind
 	Ahead   []PlanVersion // set for PlanAhead
-	// Running describes the process holding the migration lock now, ""
-	// when none does.
+	// Running describes the process that holds the migration lock now. It
+	// is "" when none does.
 	Running string
 }
 
 // ReadPlan reads the plan with a pool of its own. It takes no lock and
-// creates nothing: it never calls goose's Status, HasPending or
+// creates nothing. It never calls goose's Status, HasPending or
 // GetVersions, which create goose_db_version.
 func ReadPlan(dsn string) (Plan, error) {
 	db, err := openPool(dsn)
@@ -118,8 +119,8 @@ func embeddedFiles(db *sql.DB, fsys fs.FS) ([]PlanFile, error) {
 	return out, nil
 }
 
-// planFor is pure: it combines the state with the shipped files, which are
-// in ascending version order.
+// planFor has no side effects. It combines the state with the shipped
+// files, which are in ascending version order.
 func planFor(st state, files []PlanFile) Plan {
 	var p Plan
 	for _, f := range files {

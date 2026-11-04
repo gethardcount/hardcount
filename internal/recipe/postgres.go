@@ -12,10 +12,12 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
+// PostgresStore is the Postgres implementation of Store.
 type PostgresStore struct {
 	db *postgres.DB
 }
 
+// NewPostgresStore returns a PostgresStore on db.
 func NewPostgresStore(db *postgres.DB) *PostgresStore {
 	return &PostgresStore{db: db}
 }
@@ -25,6 +27,7 @@ const recipeInstanceColumns = `
 	overrides, created_object_ids, created_at, COALESCE(created_by, '')
 `
 
+// GetByKey implements Store, in a tenant transaction of its own.
 func (s *PostgresStore) GetByKey(ctx context.Context, tenantID, recipeKey string) (domain.RecipeInstance, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -41,6 +44,7 @@ func (s *PostgresStore) GetByKey(ctx context.Context, tenantID, recipeKey string
 	return inst, nil
 }
 
+// List implements Store, in a tenant transaction of its own.
 func (s *PostgresStore) List(ctx context.Context, tenantID string) ([]domain.RecipeInstance, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -76,6 +80,7 @@ func (s *PostgresStore) List(ctx context.Context, tenantID string) ([]domain.Rec
 	return out, nil
 }
 
+// GetByKeyTx implements Store on the caller's transaction.
 func (s *PostgresStore) GetByKeyTx(ctx context.Context, tx *sql.Tx, tenantID, recipeKey string) (domain.RecipeInstance, error) {
 	row := tx.QueryRowContext(ctx, `
 		SELECT `+recipeInstanceColumns+`
@@ -91,6 +96,7 @@ func (s *PostgresStore) GetByKeyTx(ctx context.Context, tx *sql.Tx, tenantID, re
 	return inst, nil
 }
 
+// CreateTx implements Store on the caller's transaction.
 func (s *PostgresStore) CreateTx(ctx context.Context, tx *sql.Tx, inst domain.RecipeInstance) (domain.RecipeInstance, error) {
 	overridesJSON, err := json.Marshal(safeMap(inst.Overrides))
 	if err != nil {
@@ -112,7 +118,7 @@ func (s *PostgresStore) CreateTx(ctx context.Context, tx *sql.Tx, inst domain.Re
 	out, err := scanInstance(row)
 	if err != nil {
 		// Another install of this recipe committed after this one read the
-		// badge. Answer 409 like the meter and plan-code conflicts; a retry
+		// badge. Answer 409, like the meter and plan-code conflicts. A retry
 		// returns that install.
 		if postgres.IsUniqueViolation(err) {
 			return domain.RecipeInstance{}, errs.AlreadyExists("recipe_key", fmt.Sprintf("recipe %q is already installed", inst.RecipeKey))
@@ -122,8 +128,8 @@ func (s *PostgresStore) CreateTx(ctx context.Context, tx *sql.Tx, inst domain.Re
 	return out, nil
 }
 
-// rowScanner abstracts QueryRowContext / Rows.Scan into one helper so the
-// per-column scan code only lives in scanInstance.
+// rowScanner is the Scan method that a QueryRowContext row and Rows share,
+// so the per-column scan code lives only in scanInstance.
 type rowScanner interface {
 	Scan(dest ...any) error
 }
