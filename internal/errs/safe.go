@@ -7,35 +7,32 @@ import (
 	"strings"
 )
 
-// SafeMessageError is the opt-in marker for error types that own their
-// own operator-safe rendering. ADR-026.
+// SafeMessageError is the opt-in marker for an error type that owns its
+// operator-safe rendering (ADR-026).
 //
-// Any error type that wraps an upstream-categorized message already
-// curated for the operator (Stripe card declines with decline_code,
-// classified tax provider failures, etc.) implements this interface
-// to bypass the default-generic sanitization. SanitizeForOperator
-// detects via errors.As and surfaces OperatorSafeMessage() when
-// present.
+// An error type implements it when it wraps a message that was categorized
+// upstream and is already curated for the operator. Examples are a Stripe
+// card decline with its decline_code and a classified tax provider failure.
+// The type then bypasses the default generic sanitizing. SanitizeForOperator
+// finds it with errors.As and returns OperatorSafeMessage() instead.
 //
-// NEVER implement this on errors that include raw provider strings,
-// DB internals, panic stacks, or anything operator-unsafe — that's
-// exactly what the boundary sanitizer is meant to suppress.
+// Never implement it on an error that includes raw provider strings,
+// database internals, panic stacks or anything else unsafe for an operator.
+// Those are exactly what the boundary sanitizer exists to suppress.
 //
-// This interface previously lived in internal/api/respond. Promoted
-// to internal/errs (2026-05-08) so non-HTTP contexts — catchup
-// orchestrator, scheduler error rollups, audit-log writers — can
-// reuse the same dispatch shape. respond.SafeMessageError is now an
-// alias of errs.SafeMessageError for backward compatibility.
+// It lives in internal/errs so that code outside HTTP can use the same
+// dispatch: the test-clock catch-up orchestrator, scheduler error rollups
+// and audit-log writers. respond.SafeMessageError is an alias of it.
 type SafeMessageError interface {
 	error
 	OperatorSafeMessage() string
 }
 
-// genericInternalError is the operator-grade fallback when an error
-// has no SafeMessageError implementation and contains internal-only
-// markers. The request_id lets support trace the full diagnostic in
-// slog. Capitalized first word is intentional — this string lands in
-// dashboard banners and toast bodies.
+// genericInternalError is the operator-grade fallback when an error has no
+// SafeMessageError implementation and contains internal-only markers. The
+// request_id lets support trace the full diagnostic in slog. The capital on
+// the first word is intended, because this string lands in dashboard
+// banners and toast bodies.
 func genericInternalError(requestID string) string {
 	if requestID == "" {
 		return "An internal error occurred. See server logs for details."
@@ -43,29 +40,28 @@ func genericInternalError(requestID string) string {
 	return fmt.Sprintf("An internal error occurred. Reference: %s", requestID)
 }
 
-// SanitizeForOperator returns an operator-safe rendering of err for
-// any boundary where the error message will land in the dashboard,
-// be persisted to a column the dashboard reads, or be returned in an
-// HTTP body. ADR-026.
+// SanitizeForOperator returns an operator-safe rendering of err, for any
+// boundary where the error message lands in the dashboard, in a column the
+// dashboard reads, or in an HTTP body (ADR-026).
 //
-// Dispatch:
+// It works in this order:
 //
-//  1. If err (or any wrapped error in its chain) implements
-//     SafeMessageError → return OperatorSafeMessage(). The error
-//     type opted into curated rendering.
-//  2. Else, scan the message for internal-only markers — SQLSTATE
-//     codes, Go file:line frames, panic markers, raw stack traces.
-//     If any is present, return the generic "internal error
-//     reference: REQ-XYZ" message; the full diagnostic stays in
-//     slog (caller's responsibility) for support to trace.
-//  3. Otherwise, the message is presumed operator-safe (Stripe text,
-//     domain-validation errors with curated copy, etc.) — pass it
-//     through after PII redaction via Scrub.
+//  1. If err, or any error in its chain, implements SafeMessageError,
+//     return OperatorSafeMessage(). The error type opted into curated
+//     rendering.
+//  2. Otherwise, scan the message for internal-only markers: SQLSTATE
+//     codes, Go file:line frames, panic markers and raw stack traces. If
+//     any is present, return the generic "internal error reference:
+//     REQ-XYZ" message. The caller's job is to log the full diagnostic to
+//     slog, for support to trace.
+//  3. Otherwise, treat the message as operator-safe (Stripe text, domain
+//     validation errors with curated copy and so on). Pass it through after
+//     Scrub redacts personal data (PII).
 //
-// The third branch is conservative on purpose: there's no whitelist
-// of "known safe" patterns. The marker detection in step 2 is the
-// load-bearing filter — anything matching a SQLSTATE / file:line /
-// panic shape is internal by construction. Tests pin the marker set.
+// The third branch is conservative on purpose: there is no allow-list of
+// known-safe patterns. The marker check in step 2 is the filter that does
+// the work. Anything shaped like a SQLSTATE, a file:line or a panic is
+// internal by construction. Tests pin the marker set.
 func SanitizeForOperator(err error, requestID string) string {
 	if err == nil {
 		return ""
@@ -81,19 +77,19 @@ func SanitizeForOperator(err error, requestID string) string {
 	return Scrub(msg)
 }
 
-// SummarizeForOperator builds a concise operator-grade summary of a
-// batch of errors — typically the per-row errors from a multi-row
-// catchup phase or scheduler tick. Returns "" when errs is empty.
+// SummarizeForOperator builds a short operator-grade summary of a batch of
+// errors, usually the per-row errors of a multi-row catch-up phase or a
+// scheduler tick. It returns "" when errs is empty.
 //
-// Shape of the output, by category:
+// The output, by category:
 //
-//   - Each error implementing SafeMessageError: included verbatim
+//   - Each error that implements SafeMessageError is included verbatim
 //     after Scrub, joined with "; ".
-//   - All others: counted; appears as "N internal error(s)" with
-//     the request_id reference.
+//   - All others are counted, and appear as "N internal error(s)" with the
+//     request_id reference.
 //
-// The full diagnostic for every error stays in slog (caller's job —
-// SummarizeForOperator never logs; that's a separate concern).
+// The full diagnostic for every error stays in slog. That is the caller's
+// job: SummarizeForOperator never logs.
 //
 // Examples:
 //
@@ -125,8 +121,8 @@ func SummarizeForOperator(errs []error, requestID string) string {
 			internal++
 			continue
 		}
-		// Plain message, no internal markers — operator-safe by
-		// default, pass through after PII scrub.
+		// A plain message with no internal markers is operator-safe by
+		// default. Pass it through after the PII scrub.
 		safe = append(safe, Scrub(msg))
 	}
 	parts := safe
@@ -140,11 +136,11 @@ func SummarizeForOperator(errs []error, requestID string) string {
 	return strings.Join(parts, "; ")
 }
 
-// hasInternalMarkers reports whether the message contains any pattern
-// that's only meaningful to engineers / support, never to operators —
-// SQLSTATE codes, Go panic markers, source file:line references,
-// stack-trace frame markers. Centralized so SanitizeForOperator and
-// SummarizeForOperator stay in sync.
+// hasInternalMarkers reports whether msg contains a pattern that means
+// something only to engineers and support, never to operators: SQLSTATE
+// codes, Go panic markers, source file:line references and stack-trace frame
+// markers. It is shared so that SanitizeForOperator and SummarizeForOperator
+// stay in sync.
 func hasInternalMarkers(msg string) bool {
 	return reSQLState.MatchString(msg) ||
 		reGoFileLine.MatchString(msg) ||
@@ -153,12 +149,12 @@ func hasInternalMarkers(msg string) bool {
 		strings.Contains(msg, "goroutine ")
 }
 
-// reSQLState matches Postgres/database SQLSTATE codes embedded in error
-// strings — "(SQLSTATE 42702)", "SQLSTATE: 23505", etc.
+// reSQLState matches a Postgres or other database SQLSTATE code inside an
+// error string, such as "(SQLSTATE 42702)" or "SQLSTATE: 23505".
 var reSQLState = regexp.MustCompile(`\bSQLSTATE\s*[:= ]?\s*[0-9A-Z]{5}\b`)
 
-// reGoFileLine matches Go-style file:line frames (e.g.
-// "/Users/.../engine.go:1234"). Indicates a stack frame leaked into
-// an error string. Anchored on the .go: suffix so we don't false-
-// match on UNIX paths in user-facing messages.
+// reGoFileLine matches a Go file:line frame (such as
+// "/Users/.../engine.go:1234"), which means a stack frame leaked into an
+// error string. It is anchored on the .go: suffix, so it does not match a
+// UNIX path in a user-facing message.
 var reGoFileLine = regexp.MustCompile(`\.go:\d+\b`)

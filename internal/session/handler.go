@@ -23,7 +23,7 @@ type CookieConfig struct {
 // Secure is on in staging and production, for every request, so a
 // browser sends the session cookie only over HTTPS, or to localhost
 // (ADR-095 Phase 0(b)). Chrome and Firefox keep a Secure cookie at
-// http://localhost; Safari does not. Plain HTTP is for local, where
+// http://localhost, but Safari does not. Plain HTTP is for local, where
 // Secure is off: make dev, and the Compose quickstart, which sets
 // APP_ENV=local so Safari can sign in at http://localhost.
 func DefaultCookieConfig(appEnv string) CookieConfig {

@@ -3,30 +3,31 @@ package api
 import "strings"
 
 // ---------------------------------------------------------------------------
-// The route-audit registry (ADR-090, final step).
+// The route-audit registry (ADR-090).
 //
-// ONE central table declaring, for EVERY mutating route in the live chi route
-// table, where that route's audit evidence comes from. It replaces the deleted
-// catch-all middleware, whose "safety net" was the disease: it wrote a row for
-// any mutating /v1 request a handler hadn't claimed, INFERRING the action and
-// resource from the URL and sniffing the response body for a label — fabricating
-// false permanent records in an append-only compliance log (ADR-090 RC2), while
-// silently covering NOTHING outside the /v1 block (RC1).
+// One central table states, for every mutating route in the live chi route
+// table, where that route's audit evidence comes from. Coverage is declared,
+// not inferred by a catch-all middleware. Such a middleware would infer the
+// action and resource from the URL, and so write false permanent rows into
+// an append-only compliance log (ADR-090 RC2). It would also miss every
+// route outside the /v1 block it is mounted on (RC1).
 //
-// Coverage is now DECLARED, not inferred:
+// Each route has one of two kinds of coverage:
 //
-//   - explicit — the route emits a real, typed audit row (an in-tx LogInTx
-//     emission on the business transaction, or a residual own-tx Logger.Log).
-//     Every entry below was verified by reading the emitting code.
-//   - exempt   — the route deliberately writes no audit row. The reason is a
-//     CLOSED enum, and the note records WHY plus any accepted loss.
+//   - explicit: the route emits a real, typed audit row. That is a LogInTx
+//     emission on the business transaction, or a residual Logger.Log on its
+//     own transaction, on a route not yet moved to LogInTx (ADR-090). Every
+//     entry below was checked by reading the emitting code.
+//   - exempt: the route writes no audit row, on purpose. The reason comes
+//     from a closed enum, and the note records why, plus any accepted loss.
 //
-// TestAuditRouteRegistry_MatchesLiveRoutes (audit_routes_test.go) walks the real
-// router and two-way-diffs it against this table: an undeclared mutating route
-// FAILS CI, and a stale entry FAILS CI. Adding a mutating route therefore forces
-// an audit decision at review time — that is the whole point. At runtime the
-// pure-observer detector (mw.AuditCoverage) reports any mutating 2xx that
-// produced no audit row and is not declared exempt here.
+// TestAuditRouteRegistry_MatchesLiveRoutes (audit_routes_test.go) walks the
+// real router and compares it with this table in both directions. An
+// undeclared mutating route fails CI, and so does a stale entry. So adding a
+// mutating route forces an audit decision at review time, which is the
+// purpose of the table. At runtime the detector (mw.AuditCoverage), which
+// only observes, reports any mutating 2xx that wrote no audit row and is not
+// declared exempt here.
 // ---------------------------------------------------------------------------
 
 // auditCoverage is how a route's audit evidence is produced.
@@ -39,37 +40,37 @@ const (
 	auditExempt
 )
 
-// exemptReason is a CLOSED enum. A new reason is a deliberate widening of what
-// "un-audited" is allowed to mean, so it lands here, in review, with a note —
+// exemptReason is a closed enum. A new reason widens, on purpose, what
+// "un-audited" may mean. So it is added here, in review, with a note, and
 // never as a free-text excuse at the call site.
 type exemptReason string
 
 const (
-	// reasonNonMutatingPreview: a read-only POST (POST only because the input
-	// doesn't fit a query string). It computes and returns; it writes nothing.
+	// reasonNonMutatingPreview: a read-only POST, a POST only because the
+	// input does not fit a query string. It computes a result and returns
+	// it, and writes nothing.
 	reasonNonMutatingPreview exemptReason = "non_mutating_preview"
 
-	// reasonMachineIngest: high-volume machine ingest where the events table
-	// IS the record. See the accepted loss recorded on each entry.
+	// reasonMachineIngest: high-volume machine ingest, where the events table
+	// is the record. See the accepted loss recorded on each entry.
 	reasonMachineIngest exemptReason = "machine_ingest"
 
 	// reasonSystemEndpoint: not an operator action on tenant data (no tenant to
 	// scope a row to).
 	reasonSystemEndpoint exemptReason = "system_endpoint"
 
-	// reasonWebhookOwned: an inbound provider webhook. Its EFFECTS are audited
-	// by the in-tx emissions its handlers make; the delivery itself is recorded
-	// in stripe_webhook_events.
+	// reasonWebhookOwned: an inbound provider webhook. Its handlers audit its
+	// effects, with emissions inside their transactions. The delivery itself
+	// is recorded in stripe_webhook_events.
 	reasonWebhookOwned exemptReason = "webhook_owned"
 )
 
-// There is deliberately NO `bootstrap` reason. One existed, justified as
-// "one-time, pre-tenant setup — there is no tenant (and no actor) to attribute a
-// row to until it succeeds." Both clauses were false: bootstrap mints a LIVE
-// secret key and the owner account, and by the time it can emit, the tenant it
-// just created exists to attribute to. POST /v1/bootstrap is `explicit` and
-// writes its provisioning rows into the new tenant's own log. Re-adding this
-// reason would un-audit the birth of a money-moving credential.
+// There is no `bootstrap` reason, on purpose. Bootstrap mints a live secret
+// key and the owner account. By the time it can emit, the tenant it just
+// created exists, so its rows have a tenant to belong to. POST /v1/bootstrap
+// is `explicit`, and writes its provisioning rows into the new tenant's own
+// log. A bootstrap reason would un-audit the creation of a credential that
+// can move money.
 
 // routeKey is (HTTP method, canonical chi route pattern).
 type routeKey struct {
@@ -80,7 +81,7 @@ type routeKey struct {
 // auditDecl is one registry entry.
 type auditDecl struct {
 	Coverage auditCoverage
-	// Reason is set iff Coverage == auditExempt.
+	// Reason is set when, and only when, Coverage == auditExempt.
 	Reason exemptReason
 	// Note names the emission site (explicit) or justifies the exemption and
 	// records any accepted loss (exempt).
@@ -95,20 +96,22 @@ func exempt(reason exemptReason, note string) auditDecl {
 	return auditDecl{Coverage: auditExempt, Reason: reason, Note: note}
 }
 
-// canonicalRoute normalizes a chi route pattern so the two sources of patterns
-// agree on one key: chi.Walk's pattern string (what the arch test sees) and
-// chi.RouteContext(r.Context()).RoutePattern() (what the detector sees at
-// runtime). They differ in exactly two ways — Walk does a SINGLE
-// strings.Replace("/*/", "/") pass, so a Mount("/", …) inside a Route(…) leaves
-// a residual "/*/" ("/v1/auth/*/login"), and Walk does not trim a trailing slash
-// (a subrouter's r.Post("/") arrives as "/v1/customers/"). RoutePattern() loops
-// the replace and trims. Applying chi's own normalization to BOTH sides makes
-// them meet.
+// canonicalRoute normalizes a chi route pattern, so the two sources of
+// patterns agree on one key. One is chi.Walk's pattern string, which the
+// arch test sees. The other is chi.RouteContext(r.Context()).RoutePattern(),
+// which the detector sees at runtime. They differ in exactly two ways:
+//   - Walk does a single strings.Replace("/*/", "/") pass. So a Mount("/", …)
+//     inside a Route(…) leaves a "/*/" behind ("/v1/auth/*/login").
+//   - Walk does not trim a trailing slash. So a subrouter's r.Post("/")
+//     arrives as "/v1/customers/".
 //
-// CRITICAL: do NOT also trim a trailing "/*". A 404 inside a mounted subtree
-// yields RoutePattern() == "/v1/customers/*", and trimming that would COLLAPSE
-// it onto the real "/v1/customers" key — a miss masquerading as a covered route.
-// Left intact, it matches no key at all, which is the honest answer.
+// RoutePattern() loops the replace and trims. Applying chi's own
+// normalization to both sides makes them meet.
+//
+// Do not also trim a trailing "/*". A 404 inside a mounted subtree yields
+// RoutePattern() == "/v1/customers/*". Trimming that would fold it onto the
+// real "/v1/customers" key, so a miss would pass for a covered route. Left as
+// it is, it matches no key at all, which is the correct answer.
 func canonicalRoute(p string) string {
 	for strings.Contains(p, "/*/") {
 		p = strings.ReplaceAll(p, "/*/", "/")
@@ -123,9 +126,9 @@ func canonicalRoute(p string) string {
 	return p
 }
 
-// isMutatingMethod reports whether a method can change state. Bulk read egress
-// (the GET /v1/exports/*.csv streams) is declared separately, in
-// auditEgressRegistry below — see the scope note there.
+// isMutatingMethod reports whether a method can change state. Bulk reads that
+// take data out (the GET /v1/exports/*.csv streams) are declared separately,
+// in auditEgressRegistry below. See the scope note there.
 func isMutatingMethod(m string) bool {
 	switch m {
 	case "POST", "PUT", "PATCH", "DELETE":
@@ -135,8 +138,9 @@ func isMutatingMethod(m string) bool {
 }
 
 // auditRouteExempt reports whether (method, canonical pattern) is declared
-// exempt. The runtime detector consults this before reporting an uncovered
-// mutation; anything not in the table is NOT exempt (fail loud, not silent).
+// exempt. The runtime detector asks it before reporting an uncovered
+// mutation. Anything not in the table is not exempt, so a gap is reported
+// rather than hidden.
 func auditRouteExempt(method, pattern string) bool {
 	d, ok := auditRouteRegistry[routeKey{Method: method, Pattern: canonicalRoute(pattern)}]
 	return ok && d.Coverage == auditExempt
@@ -144,15 +148,17 @@ func auditRouteExempt(method, pattern string) bool {
 
 // auditRouteRegistry is the table. Keys are canonical (method, RoutePattern).
 //
-// Populated by walking the live router (chi.Walk over NewServer) and reading
-// the emitting code for every mutating entry — not by guessing. Each explicit
-// note names the emitter, so a reviewer can check the claim in one grep.
+// The entries come from walking the live router (chi.Walk over NewServer)
+// and reading the emitting code for every mutating route, not from guessing.
+// Each explicit note names the emitter, so a reviewer can check the claim
+// with one grep.
 var auditRouteRegistry = map[routeKey]auditDecl{
 	// --- system ---------------------------------------------------------
-	// /metrics is registered with r.Handle, which chi expands to ALL 9
-	// methods — so the route walk legitimately yields POST/PUT/PATCH/DELETE
-	// /metrics. They are declared rather than filtered: silently skipping
-	// r.Handle routes would make the registry blind to any future mALL route.
+	// /metrics is registered with r.Handle, which chi expands to all 9
+	// methods. So the route walk rightly yields POST, PUT, PATCH and DELETE
+	// /metrics. They are declared, not filtered out. Skipping r.Handle routes
+	// without a word would hide from the registry any future route that chi
+	// registers for all methods (its mALL).
 	{"POST", "/metrics"}:   exempt(reasonSystemEndpoint, "Prometheus scrape endpoint; r.Handle expands to all 9 methods. No tenant, no operator action."),
 	{"PUT", "/metrics"}:    exempt(reasonSystemEndpoint, "same r.Handle expansion as POST /metrics."),
 	{"PATCH", "/metrics"}:  exempt(reasonSystemEndpoint, "same r.Handle expansion as POST /metrics."),
@@ -166,23 +172,24 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"POST", "/v1/webhooks/postmark"}: exempt(reasonWebhookOwned, "Inbound Postmark delivery/bounce/complaint report (ADR-098). Basic-Auth gated; tenant resolves from the stamped outbox row, never the blind POST. Its effects are provider-truth STATE (email_outbox.delivery_state, customers.email_status) with the customer.email_bounced/email_complained outbox events as the observable record — machine-driven with no operator to attribute, same ruling as the Stripe settle path above. ACCEPTED LOSS: audit_log cannot answer 'when did the provider report INV-1042's email bounced' — the timeline (delivery_state) and webhook events own that record."),
 
 	// --- machine ingest -------------------------------------------------
-	// ACCEPTED LOSS (all four): "which credential ingested this event" is
-	// unrecoverable — usage_events carries no key_id column. The events tables
-	// are the record of WHAT was ingested, but not BY WHOM. Closure trigger:
-	// the first billing dispute that turns on provenance. Fixing it means a
-	// key_id column on usage_events (per-event attribution), not a per-request
-	// audit row: at ingest volumes one audit row per call would outweigh the
-	// events themselves.
+	// Accepted loss, for all four: "which credential ingested this event"
+	// cannot be recovered, because usage_events has no key_id column. The
+	// events tables record what was ingested, but not by whom. Close this
+	// loss at the first billing dispute that turns on provenance. The fix is
+	// a key_id column on usage_events, so each event records the credential
+	// that sent it, not a per-request audit row. At ingest volumes, one audit
+	// row per call would outweigh the events themselves.
 	{"POST", "/v1/usage-events"}:       exempt(reasonMachineIngest, "High-volume metering ingest (~1000/s); usage_events IS the record, and a row per event would double the write volume of the hottest path. ACCEPTED LOSS, stated precisely: until this PR the retired catch-all wrote a generic 'create usage_event' row per REQUEST, so these routes DO lose audit_log rows they were getting — what is lost with them is (a) WHICH CREDENTIAL ingested an event (usage_events carries no key_id) and (b) the request-level trail. The events themselves, their timestamps and their origin tag remain. Closure trigger: a billing dispute or an injected-usage incident → stamp key_id at ingest (plumb the fact; no heuristics)."),
 	{"POST", "/v1/usage-events/batch"}: exempt(reasonMachineIngest, "Batch form of the same ingest. Same accepted loss."),
-	// NOT exempt, deliberately: backfill is an OPERATOR action on the money
-	// path. Inserting backdated usage changes what a customer is billed for a
-	// period that may already have closed — nothing like the machine metering
-	// above. usage.Service.Backfill emits on the ingest tx (ADR-090).
+	// Backfill is not exempt, on purpose: it is an operator action on the
+	// money path. Inserting backdated usage changes what a customer is billed
+	// for a period that may already have closed, unlike the machine metering
+	// above. usage.Service.Backfill emits on the ingest transaction
+	// (ADR-090).
 	{"POST", "/v1/usage-events/backfill"}: explicit("usage.Service.Backfill → IngestAudited (in-tx): action=create/usage_event, metadata.action=usage_backfilled with the backdated timestamp."),
 	// Held usage (#1044, ADR-122): operator actions on rows the LiteLLM
 	// callback could not ingest. Release changes what a customer is billed,
-	// exactly like backfill; discard decides that usage will never bill.
+	// as backfill does. Discard decides that the usage will never bill.
 	{"POST", "/v1/usage-events/held/release"}:  explicit("usage.Service.Release → PostgresStore.ReleaseHeld (in-tx): action=create/usage_event, metadata.action=held_usage_released with the counts and the event time range. A call that changed no row calls audit.MarkSkip."),
 	{"POST", "/v1/usage-events/held/discard"}:  explicit("usage.Service.Discard → PostgresStore.DiscardHeld (in-tx): action=delete/usage_event, metadata.action=held_usage_discarded with the row count. A call that changed no row calls audit.MarkSkip."),
 	{"POST", "/v1/integrations/litellm/spend"}: exempt(reasonMachineIngest, "LiteLLM proxy spend callback — one POST per LLM call, funnels into the same usage_events writer. Same accepted loss."),
@@ -191,7 +198,7 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"POST", "/v1/invoices/create_preview"}: exempt(reasonNonMutatingPreview, "Read-only estimate; POST only because the composer payload doesn't fit a query string. Writes nothing (billing/create_preview_handler.go calls audit.MarkSkip)."),
 	{"POST", "/v1/recipes/{key}/preview"}:   exempt(reasonNonMutatingPreview, "Read-only recipe render — returns the objects an instantiate WOULD create. Writes nothing (recipe/handler.go calls audit.MarkSkip)."),
 
-	// --- auth / session (outside the old catch-all's reach entirely) ----
+	// --- auth / session -------------------------------------------------
 	{"POST", "/v1/auth/login"}:                  explicit("user.Handler.login → Log(login, user). Failed logins are pre-auth: no tenant to scope a row to, so they stay in the security log."),
 	{"POST", "/v1/auth/logout"}:                 explicit("user.Handler.logout → Log(logout, user). A stale/absent cookie revokes nothing and declares MarkSkip."),
 	{"POST", "/v1/auth/mode"}:                   explicit("user.Handler.setMode → Log(mode_changed, user) — live/test plane switch."),
@@ -308,12 +315,13 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"PATCH", "/v1/settings/stripe/{mode}/webhook"}: explicit("tenantstripe.Handler.setWebhook → Log(rotate, stripe_credentials: webhook_secret_set) — never records the secret."),
 
 	// --- test clocks -------------------------------------------------------
-	// The clock routes stamp their rows onto their OWN clock's sim axis (ADR-090
-	// §5), so the clock's lifecycle sits INSIDE the timeline it explains: after
-	// ADR-086 teardown a clock-scoped query would otherwise return the effects
-	// (invoices finalized, subs canceled) with no cause — no "created", no
-	// "advanced to 2027-03-01", and no "deleted", which is the row that explains
-	// why every other trace of the simulation is gone.
+	// The clock routes stamp their rows on their own clock's simulated time
+	// (the sim axis, ADR-090 §5). So the clock's lifecycle sits inside the
+	// timeline it explains. Otherwise, after teardown (ADR-086), a
+	// clock-scoped query would return the effects (invoices finalized,
+	// subscriptions canceled) with no cause. It would show no "created", no
+	// "advanced to 2027-03-01" and no "deleted". The "deleted" row is the one
+	// that explains why every other trace of the simulation is gone.
 	{"POST", "/v1/test-clocks"}:                    explicit("testclock.Handler.create → Log(create, test_clock)."),
 	{"POST", "/v1/test-clocks/{id}/advance"}:       explicit("testclock.Handler.advance → Log(update, test_clock; metadata action=advanced)."),
 	{"POST", "/v1/test-clocks/{id}/retry-advance"}: explicit("testclock.Handler.retryAdvance → Log(update, test_clock; metadata action=retry_advance)."),
@@ -327,42 +335,42 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 // ---------------------------------------------------------------------------
 // The read-egress registry (ADR-090 §7).
 //
-// Mutations are only half of a chain of custody. A full-tenant EXPORT — every
-// customer and their PII, every invoice, every subscription, a year of usage
-// events, or the audit log itself — used to produce ZERO audit rows: the deleted
-// catch-all only ever considered mutating methods, and the export handlers wrote
-// nothing. A tamper-evidence system that cannot show who COPIED the evidence has
-// a hole in its chain of custody. Stripe and AWS CloudTrail both log data-export
-// / read events; so does this now.
+// Mutations are only half of a chain of custody. A full-tenant export can
+// take every customer and their PII, every invoice, every subscription, a
+// year of usage events, or the audit log itself. A tamper-evidence system
+// that cannot show who copied the evidence has a hole in its chain of
+// custody. Stripe and AWS CloudTrail both log data-export and read events,
+// and so does Hardcount.
 //
-// These five GET routes emit action=export BEFORE the first byte streams, and
-// FAIL CLOSED if the row cannot be written (exportsHandler.auditExport).
+// These five GET routes emit action=export before the first byte streams.
+// If the row cannot be written, they fail closed (exportsHandler.auditExport).
 //
-// SCOPE — and the loss this deliberately does NOT close (written down, because a
-// note that implies coverage it doesn't have is worse than no note):
+// The scope, and the loss this does not close on purpose, are written down.
+// A note that implies coverage it does not have is worse than no note.
 //
-//   - This covers the BULK EXPORT surface: /v1/exports/*.csv, the one-request
-//     "hand me the whole table" endpoints.
-//   - It does NOT audit ordinary paginated list reads (GET /v1/customers?limit=
-//     100&offset=…). An operator who walks those pages copies the same data and
-//     audit_log will not show it. What audit_log CAN answer is "did anyone take
-//     the one-click bulk export, and when" — the question an auditor actually
-//     asks, and the action a departing employee actually takes.
-//   - The reason is not laziness: a row per list call puts audit_log on the
-//     hottest read path in the dashboard (every page load of every table), and
-//     the resulting noise is what makes an audit log unreadable — the same
-//     volume argument that keeps usage ingest exempt above.
-//   - CLOSURE TRIGGER: a DP or auditor asking for PII-read evidence (SOC 2
-//     CC6.x-style "who accessed customer records"). The answer then is an
-//     access-log-derived read trail (aggregated per session/actor), not one
-//     audit_log row per GET.
+//   - This covers the bulk export routes, /v1/exports/*.csv, where one
+//     request returns the whole table.
+//   - It does not audit ordinary paged list reads
+//     (GET /v1/customers?limit=100&offset=…). An operator who walks those
+//     pages copies the same data, and audit_log will not show it. audit_log
+//     can answer "did anyone take the one-click bulk export, and when?".
+//     That is the question an auditor asks, and the action a departing
+//     employee takes.
+//   - A row per list call would put audit_log on the busiest read path in
+//     the dashboard (every page load of every table). The noise would make
+//     the audit log unreadable. The same volume argument keeps usage ingest
+//     exempt above.
+//   - Close this loss when a design partner or an auditor asks for evidence
+//     of PII reads (SOC 2 CC6.x-style "who accessed customer records"). The
+//     answer then is a read trail built from the access log, grouped per
+//     session or actor, not one audit_log row per GET.
 //
-// The arch test (audit_egress_routes_test.go) two-way-diffs this table against
-// the live GET routes under /v1/exports, so a NEW export route fails CI until it
-// declares its emission. It is deliberately NOT a general GET axis in the
-// mutating registry: five routes do not justify declaring an audit story for
-// every read endpoint in the product, and a registry nobody can keep current is
-// a registry that lies.
+// The arch test (audit_egress_routes_test.go) compares this table in both
+// directions with the live GET routes under /v1/exports. So a new export
+// route fails CI until it declares its emission. On purpose, this is not a
+// general GET axis in the mutating registry. Five routes do not justify an
+// audit story for every read endpoint in the product, and a registry nobody
+// can keep current is a registry that lies.
 // ---------------------------------------------------------------------------
 
 // auditEgressPrefix is the mounted subtree the egress gate walks.

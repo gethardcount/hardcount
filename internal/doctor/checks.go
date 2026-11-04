@@ -1,20 +1,25 @@
-// Code-adjacent data: the doctor's invariant catalog.
+// This file is the doctor's invariant catalog: data kept next to the code.
 //
-// Every check here was mined from the domain's writers and then SURVIVED an
-// adversarial pass hunting legal counterexamples (grandfathered cohorts,
-// deliberate states, simulated rows, lagging best-effort stamps) — the full
-// per-check reasoning and writer citations live in the mining run recorded in
-// the PR that added each check. Checks that a DB constraint already makes
-// unrepresentable were deliberately KILLED, not shipped (no belt-and-
-// suspenders). Exclusion fences you will see below and must not "simplify"
-// away:
+// Every check here was derived from the domain's writers, then passed a
+// search for legal counterexamples: grandfathered cohorts, deliberate states,
+// simulated rows and best-effort stamps that lag. The PR that added each
+// check records its full reasoning and the writers it cites. A check that a
+// database constraint already makes impossible was dropped on purpose, so
+// the same rule is not guarded twice.
 //
-//   - id NOT LIKE 'hc_inv_safe%%'     — old hardcount-migrate-safety seeder rows
-//   - created_at >= '2026-07-05'      — pre-#365/#347 grandfathered subs
-//   - grace intervals on sweeps       — post-commit stamps lag their tx
+// Some exclusions below look removable. Do not simplify them away:
+//
+//   - id NOT LIKE 'hc_inv_safe%': rows from the old
+//     hardcount-migrate-safety seeder.
+//   - created_at >= '2026-07-05': subscriptions grandfathered from before
+//     #365 and #347.
+//   - grace intervals on sweeps: stamps written after commit lag their
+//     transaction.
+
 package doctor
 
-// Checks is the shipping catalog. Order groups by domain for readable output.
+// Checks is the catalog that ships. Its order groups the checks by domain,
+// for readable output.
 var Checks = []Check{
 	{
 		Name:   "invoice_total_identity",
@@ -181,45 +186,46 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 		Name:   "cycle_invoice_unique_per_subscription_period",
 		Domain: "invoices",
 		Why:    "each closed billing period bills exactly once per subscription; a second live cycle invoice for the same period is a double charge (a manual invoice for the period is not a cycle invoice, #1331)",
-		// This duplicates what idx_invoices_billing_period_dedup already
-		// enforces, and that is the point: the two fail independently. An
-		// index can be absent after a restore, dropped by a migration, left
-		// INVALID by a failed CREATE INDEX CONCURRENTLY (which enforces
-		// nothing while still appearing in pg_indexes), or quietly narrowed
-		// by a predicate change — migration 0101 narrowed this exact
-		// predicate once already, and 00215 left manual invoices out of it. In every one of those cases the write path
-		// keeps succeeding and nothing raises an error, so the only way to
-		// learn about it is to look for the duplicate rows themselves.
-		// Measured: with the index removed, four concurrent billing leaders
-		// produced 129 invoices across 40 periods and reported no failures.
+		// This check duplicates what idx_invoices_billing_period_dedup
+		// already enforces, on purpose: the two fail independently. An index
+		// can be missing after a restore, or dropped by a migration. A failed
+		// CREATE INDEX CONCURRENTLY can leave it invalid, enforcing nothing
+		// while it still appears in pg_indexes. A change to its predicate can
+		// quietly narrow it, as 00215 did when it left manual invoices out.
+		// In each case the write path keeps succeeding and nothing raises an
+		// error, so the only way to find out is to look for the duplicate
+		// rows themselves. Measured: with the index removed, four concurrent
+		// billing leaders produced 129 invoices across 40 periods and
+		// reported no failures.
 		SQL: `SELECT i.id, i.tenant_id, i.subscription_id, i.billing_period_start, i.billing_period_end, i.status, i.total_amount_cents FROM invoices i WHERE i.subscription_id IS NOT NULL AND i.status <> 'voided' AND i.source_plan_changed_at IS NULL AND i.billing_reason IS DISTINCT FROM 'manual' AND EXISTS (SELECT 1 FROM invoices d WHERE d.tenant_id = i.tenant_id AND d.subscription_id = i.subscription_id AND d.billing_period_start = i.billing_period_start AND d.billing_period_end = i.billing_period_end AND d.status <> 'voided' AND d.source_plan_changed_at IS NULL AND d.billing_reason IS DISTINCT FROM 'manual' AND d.id <> i.id);`,
 	},
 	{
 		Name:   "usage_billed_once_per_customer_meter_window",
 		Domain: "invoices",
 		Why:    "the same usage instant of one (customer, meter, price bucket) must sit on at most one live subscription invoice; a second is a double charge the header-exact check cannot see (threshold + cycle, a rewound period re-billed, or a subscription recreated the same day re-billing its predecessor's usage)",
-		// Read-side twin of ADR-115's period CAS and of the usage window's
-		// floors (ADR-012 amendment 2026-10-22): it looks for the money shape
-		// both exist to prevent, two live invoices whose usage windows for
-		// the same meter overlap. Scoped per CUSTOMER, not per subscription:
-		// usage is aggregated per customer and meter with no subscription
-		// key, so two subscriptions of one customer billing one window bill
-		// the same events. Half-open compare, so a threshold window [P0,t1)
-		// beside its residual [t1,P1), or a predecessor's [P0,t1) beside its
-		// successor's [t1,P1), is clean. Paired per price within one
-		// subscription, not per meter: each of a meter's prices is its own
-		// bucket, and under the ADR-066 §4 deferred-bucket protocol a
-		// deferred bucket's full window legitimately overlaps a fire's line
-		// for another bucket. That exemption is one subscription's: across
-		// two subscriptions any overlap on the meter is the same events
-		// billed twice, whatever the bucket (each subscription's plan has its
-		// own prices).
-		// Lines on one invoice are excluded (i.id < j.id). Live means not
-		// voided: a written-off invoice still billed its window (ADR-066
-		// amendment 2026-10-23, as the period slot index already
-		// counts it), so a second invoice billing that window is the double
-		// charge, paid later or not. Before 2026-10-23 the threshold
-		// watermark re-billed exactly that shape and this check skipped it.
+		// The read-side twin of ADR-115's period compare-and-swap and of the
+		// usage window's floors (ADR-012, amendment of 2026-10-22). It looks
+		// for the money shape both exist to prevent: two live invoices whose
+		// usage windows for the same meter overlap.
+		//   - Per customer, not per subscription. Usage is aggregated per
+		//     customer and meter with no subscription key, so two
+		//     subscriptions of one customer billing one window bill the same
+		//     events.
+		//   - Half-open compare. A threshold window [P0,t1) beside its
+		//     residual [t1,P1), or a predecessor's [P0,t1) beside its
+		//     successor's [t1,P1), is clean.
+		//   - Paired per price within one subscription, not per meter. Each
+		//     of a meter's prices is its own bucket. Under the ADR-066 §4
+		//     deferred-bucket protocol, a deferred bucket's full window may
+		//     overlap a fire's line (a threshold invoice's) for another
+		//     bucket. That exemption holds only inside one subscription.
+		//     Across two, any overlap on the meter is the same events billed
+		//     twice, whatever the bucket, since each plan has its own prices.
+		//   - Lines on one invoice are excluded (i.id < j.id).
+		//   - Live means not voided. A written-off invoice still billed its
+		//     window (ADR-066, amendment of 2026-10-23), as the period slot
+		//     index already counts it. So a second invoice billing that
+		//     window is the double charge, paid later or not.
 		SQL: `SELECT a.invoice_id, a.tenant_id, i.subscription_id, a.meter_id, a.price_id, a.billing_period_start, a.billing_period_end, b.invoice_id AS other_invoice_id, j.subscription_id AS other_subscription_id
 		        FROM invoice_line_items a
 		        JOIN invoices i ON i.id = a.invoice_id
