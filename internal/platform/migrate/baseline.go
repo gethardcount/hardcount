@@ -23,7 +23,8 @@ const baselineName = "00180 baseline"
 //go:embed baseline/00180_baseline.sql
 var baselineSQL string
 
-// errBaselineDown is migration 180's Down: the database never goes below 180.
+// errBaselineDown is migration 180's Down. The database never goes below
+// 180.
 var errBaselineDown = errors.New("the baseline (migration 180) cannot be rolled back: restore the backup taken before the upgrade")
 
 // newMigration180 builds migration 180 for one provider. goose runs it

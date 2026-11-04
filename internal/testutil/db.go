@@ -1,3 +1,7 @@
+// Package testutil holds helpers that tests share: the integration test
+// database (SetupTestDB, AdminPool), a wait for a backend blocked on a lock
+// (WaitForLockWaiter), and small readers for credit balances and the mode
+// on a context.
 package testutil
 
 import (
@@ -17,22 +21,25 @@ import (
 )
 
 const (
-	// Superuser URL — used for migrations and cleanup (bypasses RLS).
-	// Points to hardcount_test database so tests never touch dev data.
+	// defaultAdminDBURL is the superuser URL, used for migrations and
+	// cleanup. It bypasses RLS. It points at the hardcount_test database, so
+	// tests never touch dev data.
 	defaultAdminDBURL = "postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable"
-	// App user URL — used for queries (RLS enforced).
+	// defaultAppDBURL is the app user URL, used for queries, with RLS
+	// enforced.
 	defaultAppDBURL = "postgres://hardcount_test_app:hardcount_test_app@localhost:5432/hardcount_test?sslmode=disable"
 )
 
-// SetupTestDB runs migrations as superuser, cleans data, and returns an
-// app-user connection where RLS is enforced.
-// utcOnce pins the test process to UTC exactly like cmd/hardcount/main (ADR-075),
-// so integration tests observe the same canonical-UTC timestamp behavior as
-// production regardless of the host timezone (a dev box on IST would otherwise
-// scan timestamptz back in +05:30 and diverge from CI/prod). sync.Once keeps the
-// global assignment race-free across parallel integration tests.
+// utcOnce pins the test process to UTC, exactly like cmd/hardcount/main
+// (ADR-075). Integration tests then see the same canonical-UTC timestamps
+// as production, whatever the host's time zone. Otherwise a dev machine on
+// IST would scan timestamptz back in +05:30, unlike CI and production.
+// sync.Once keeps the global assignment race-free across parallel
+// integration tests.
 var utcOnce sync.Once
 
+// SetupTestDB runs migrations as superuser, cleans data, and returns an
+// app-user connection where RLS is enforced.
 func SetupTestDB(t *testing.T) *postgres.DB {
 	t.Helper()
 
@@ -47,17 +54,17 @@ func SetupTestDB(t *testing.T) *postgres.DB {
 	runMigrations(t, adminURL)
 
 	adminPool := openPool(t, adminURL)
-	// Truncate ONCE, at setup. Setup-time truncation is what guarantees a
-	// clean start regardless of how the previous test ended (a test that
-	// Fatalf'd mid-way leaves residue; the next setup wipes it). A second
-	// truncate in t.Cleanup bought nothing and doubled the ACCESS EXCLUSIVE
-	// lock churn (700 truncates per integration run where 350 will do).
-	// Consequence to know: the LAST test in a process leaves its rows
-	// behind — the CI hardcount-doctor sweep after the integration job examines
-	// whatever the alphabetically-last DB package left.
+	// Truncate once, at setup. Truncating at setup guarantees a clean start
+	// however the previous test ended: a test that stopped part-way with
+	// Fatalf leaves rows behind, and the next setup wipes them. A second
+	// truncate in t.Cleanup would add nothing and double the ACCESS
+	// EXCLUSIVE lock churn (700 truncates per integration run where 350
+	// will do). One consequence: the last test in a process leaves its rows
+	// behind. The CI hardcount-doctor sweep after the integration job
+	// examines whatever the alphabetically last DB package left.
 	cleanDB(t, adminPool)
 
-	// App connection: actual queries (RLS enforced)
+	// The app connection runs the actual queries, with RLS enforced.
 	appPool := openPool(t, appURL)
 	db := postgres.NewDB(appPool, 5*time.Second)
 
@@ -69,11 +76,11 @@ func SetupTestDB(t *testing.T) *postgres.DB {
 	return db
 }
 
-// OpenTracedDB opens a second app-user (RLS-enforced) connection to the test
-// database whose every statement passes through tracer. Call it after
-// SetupTestDB (which migrates and cleans). For tests that assert how many
-// queries or transactions a read path costs — an N+1 regression shows up as
-// a count that grows with the row count (issue #1142).
+// OpenTracedDB opens a second app-user connection to the test database,
+// with RLS enforced, whose every statement passes through tracer. Call it
+// after SetupTestDB, which migrates and cleans. It is for tests that assert
+// how many queries or transactions a read path costs. An N+1 regression
+// shows up as a count that grows with the row count (issue #1142).
 func OpenTracedDB(t *testing.T, tracer pgx.QueryTracer) *postgres.DB {
 	t.Helper()
 	cfg, err := pgx.ParseConfig(envOr("TEST_DATABASE_URL", defaultAppDBURL))
@@ -111,7 +118,7 @@ func OpenExecModeDB(t *testing.T, mode pgx.QueryExecMode) *sql.DB {
 func openPool(t *testing.T, url string) *sql.DB {
 	t.Helper()
 
-	// Use "pgx" driver (pgx stdlib adapter) — same as production.
+	// Use the "pgx" driver (the pgx stdlib adapter), as production does.
 	pool, err := sql.Open("pgx", url)
 	if err != nil {
 		t.Fatalf("open db (%s): %v", url, err)
@@ -136,26 +143,28 @@ func cleanDB(t *testing.T, pool *sql.DB) {
 }
 
 // cleanDBErr truncates every public base table except the migration
-// record (goose_db_version), in ONE statement, with the table list derived
-// from the catalog at call time.
+// record (goose_db_version), in one statement. The table list comes from
+// the catalog at call time.
 //
-// Why derived, and why no EXCEPTION handler: the previous hand-maintained
-// list was wrapped in `EXCEPTION WHEN undefined_table THEN NULL`. When
-// migration 0083 dropped two tables the list still named, the handler
-// swallowed the whole TRUNCATE and cleanup silently became a no-op for
-// an entire run (commit 9f08e52b, 2026-05-17). A derived list cannot go
-// stale, and an error here is a real error and must surface.
+// The list is derived, so it cannot go stale the way a hand-maintained
+// list can. There is no EXCEPTION handler, because an error here is a real
+// error and must surface. With a hand-maintained list, a handler such as
+// `EXCEPTION WHEN undefined_table THEN NULL` would swallow the whole
+// TRUNCATE once the list named a dropped table. Cleanup would then do
+// nothing for a whole run, without a word.
 //
-// Why the record is excluded: truncating it leaves the schema in place
-// with no record; the next process's migrate.Up then refuses the database
-// (ErrNoMigrationRecord: tables, no record), and runMigrations drops and
-// rebuilds everything — a slower route to the same silent-no-op class.
+// The migration record is excluded because truncating it leaves the schema
+// in place with no record. The next process's migrate.Up then refuses the
+// database (ErrNoMigrationRecord: tables, no record), and runMigrations
+// drops and rebuilds everything. That is a slower route into the same
+// class of silent no-op.
 //
-// Why no CASCADE: every table is in the list, so FK ordering is moot.
+// There is no CASCADE. Every table is in the list, so foreign-key order
+// does not matter.
 //
-// audit_log carries a statement-level BEFORE TRUNCATE trigger (migration
-// 0115) that blocks TRUNCATE to keep the log tamper-evident; replica
-// mode disables it for this transaction only.
+// audit_log carries a statement-level BEFORE TRUNCATE trigger that blocks
+// TRUNCATE, to keep the log tamper-evident. Replica mode turns it off for
+// this transaction only.
 func cleanDBErr(pool *sql.DB) error {
 	_, err := pool.ExecContext(context.Background(), `
 		DO $$
@@ -176,8 +185,8 @@ func cleanDBErr(pool *sql.DB) error {
 	return err
 }
 
-// CreateTestTenant inserts a tenant via the app connection (bypass RLS).
-// Since tenants table has no RLS, this works directly.
+// CreateTestTenant inserts a tenant through the app connection, bypassing
+// RLS. The tenants table has no RLS, so the insert works directly.
 func CreateTestTenant(t *testing.T, db *postgres.DB, name string) string {
 	t.Helper()
 
@@ -201,22 +210,22 @@ func envOr(key, fallback string) string {
 	return v
 }
 
-// runMigrations applies pending migrations ONCE per test process (one
-// package's test binary): every SetupTestDB after the first reuses the
-// result instead of opening a migration pool, taking goose's advisory
-// lock, and re-checking the version — ~13 redundant round-trips per
-// package before this. On failure, drops everything and retries from
-// scratch (safe because this is a test-only database). migrate.Up manages
-// its own pool internally so the DSN is all we need here.
-//
-// migrateRuns is exported for the harness's own test, which asserts the
-// once-ness.
+// migrateOnce, migrateErr and migrateRuns hold the one migration run of
+// this test process. migrateRuns is exported for the harness's own test,
+// which checks that migrations run only once.
 var (
 	migrateOnce sync.Once
 	migrateErr  error
 	migrateRuns int
 )
 
+// runMigrations applies pending migrations once per test process, which is
+// one package's test binary. Every SetupTestDB after the first reuses the
+// result. Those later calls do not open a migration pool, take goose's
+// advisory lock or check the version again, which would cost ~13 round
+// trips per package. On failure, it drops everything and retries from
+// scratch. That is safe because this is a test-only database. migrate.Up
+// manages its own pool, so the DSN is all it needs.
 func runMigrations(t *testing.T, adminURL string) {
 	t.Helper()
 	migrateOnce.Do(func() {
@@ -224,8 +233,8 @@ func runMigrations(t *testing.T, adminURL string) {
 		if err := migrate.Up(adminURL); err == nil {
 			return
 		}
-		// A state migrate.Up cannot continue from — tables with no goose
-		// record, or a version from another branch, common after
+		// migrate.Up cannot continue from some states: tables with no goose
+		// record, or a version from another branch, which is common after
 		// switching branches. Drop everything and retry.
 		nukePool, err := sql.Open("pgx", adminURL)
 		if err != nil {
@@ -290,10 +299,10 @@ func dropAllTablesErr(pool *sql.DB) error {
 	return err
 }
 
-// AdminPool opens the owner-role connection — the same role that runs
-// migrations. For tests that must perform DDL, e.g. replaying a shipped
-// migration's data transform against a seeded pre-migration shape
-// (the app role can't drop/recreate indexes it doesn't own).
+// AdminPool opens the owner-role connection, the same role that runs
+// migrations. It is for tests that must run DDL, for example to replay a
+// shipped migration's data transform against a seeded pre-migration shape.
+// The app role cannot drop or recreate indexes it does not own.
 func AdminPool(t *testing.T) *sql.DB {
 	t.Helper()
 	pool := openPool(t, envOr("TEST_ADMIN_DATABASE_URL", defaultAdminDBURL))
