@@ -79,10 +79,8 @@ type CardFetcher interface {
 // EmailReceipt sends payment receipt emails. ctx carries livemode so
 // the enqueue/brand lookup runs against the right tenant_settings row.
 type EmailReceipt interface {
-	SendPaymentReceipt(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string) error
 	// SendPaymentReceiptTx enqueues on the settle transaction so the receipt
-	// commits with the paid-flip (ADR-040 amendment) — the settle path uses
-	// this one; the post-commit variant remains for non-transactional callers.
+	// commits with the paid-flip (ADR-040 amendment).
 	SendPaymentReceiptTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string) error
 }
 
@@ -94,14 +92,12 @@ type CustomerEmailResolver interface {
 // EmailPaymentFailed sends "your charge was declined" emails. Hits
 // after a Stripe charge attempt actually went through and was
 // declined — distinct from EmailPaymentSetup which fires when there's
-// no PM on file at finalize (no charge was ever attempted). Same
-// signature as dunning.EmailNotifier so OutboxSender satisfies both.
+// no PM on file at finalize (no charge was ever attempted).
 type EmailPaymentFailed interface {
-	// ask selects the copy (domain.DeclineAskOf the decline code):
-	// DeclineAskConfirm is the "confirm your payment" email, sent when the
-	// bank wants the customer to confirm the payment.
-	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error
-	// SendPaymentFailedTx enqueues on the settle transaction (ADR-040 amendment).
+	// SendPaymentFailedTx enqueues on the settle transaction (ADR-040
+	// amendment). ask selects the copy (domain.DeclineAskOf the decline
+	// code): DeclineAskConfirm is the "confirm your payment" email, sent when
+	// the bank wants the customer to confirm the payment.
 	SendPaymentFailedTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error
 }
 
@@ -548,12 +544,14 @@ func IsUnknownPaymentFailure(err error) bool {
 	return true
 }
 
-// fireEvent dispatches an outbound webhook event. Synchronous by design: when
-// the outbox path is enabled (RES-1, the default), Dispatch is a short DB
-// insert, and persisting-before-return is what the outbox exists to
-// guarantee. Errors are logged but not surfaced — the business op has
-// already committed, and we prefer that a missed event shows up in logs
-// over failing the end-user request for a webhook side-effect.
+// fireEvent queues an outbound webhook event after the business transaction
+// has committed. A queue insert failure is logged, not returned: the change is
+// already saved, so failing the request would not undo it. Nothing sends the
+// event again, so an insert failure, a crash or a cancelled ctx between the
+// commit and this insert loses it. The settle and dispute paths queue their
+// events in the transaction instead (ADR-040);
+// internal/arch/webhook_emit_catalog_test.go lists the sites that still come
+// through here.
 func (s *Stripe) fireEvent(ctx context.Context, tenantID, eventType string, payload map[string]any) {
 	if s.events == nil {
 		return

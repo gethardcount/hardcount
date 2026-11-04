@@ -132,12 +132,13 @@ func (e *Engine) SetAuditLogger(a AuditWriter) {
 // root to forget (the silent-un-audit failure mode ADR-090 exists to kill).
 func (e *Engine) auditWriter() AuditWriter { return e.auditLogger }
 
-// dispatchEvent enqueues an outbound webhook event and LOGS on failure rather
-// than silently dropping it. Once the enqueue commits the dispatcher delivers
-// durably (ADR-040 outbox); a non-nil error means the enqueue INSERT failed and
-// the event is lost — make that visible (no-silent-fallbacks) instead of the
-// prior `_ =` swallow. In-tx atomicity with the state change (DispatchTx) is the
-// deferred follow-up; this only closes the silent-error vector.
+// dispatchEvent queues an outbound webhook event after the business
+// transaction has committed, and logs when the queue insert fails. Nothing
+// sends the event again: an insert failure, a crash or a cancelled ctx
+// between the commit and this insert loses it. An event queued on the
+// change's own transaction (OutboxStore.Enqueue, ADR-040) cannot be lost
+// that way; internal/arch/webhook_emit_catalog_test.go lists the sites that
+// still come through here.
 func (e *Engine) dispatchEvent(ctx context.Context, tenantID, eventType string, payload map[string]any) {
 	if e.events == nil {
 		return
@@ -222,10 +223,11 @@ func (e *Engine) finalizeAuditEmit(ctx context.Context) func(tx *sql.Tx, out dom
 	}
 }
 
-// dispatchInvoiceFinalized fires the invoice.finalized WEBHOOK for an engine-born
-// invoice. It runs POST-COMMIT and stays here (the audit row moved in-tx, ADR-090):
-// a webhook is an external effect that must not ride a DB tx, and it is idempotent
-// per invoice via the same skip-drafts gate.
+// dispatchInvoiceFinalized sends the invoice.finalized webhook for an
+// engine-born invoice, after the transaction that created it committed. The
+// finalize audit row is written in that transaction (ADR-090); the webhook is
+// not, so a crash between the commit and this call loses the event (see
+// dispatchEvent). A draft sends nothing here.
 //
 // Engine-born invoices never pass service.Finalize, so until 2026-06-13 the normal
 // billing path (cycle / create / cancel-final / threshold) emitted NO
@@ -3402,16 +3404,17 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	// Counted after the commit: a close that lost its CAS or rolled back
 	// counted nothing, and the retry that wins counts once.
 	unpriced.record(live, sub)
-	// The period is closed (or the sub terminated) — every leg from here is
-	// post-commit and at-least-once.
+	// The period is closed (or the sub terminated). Every leg from here runs
+	// after the commit. A crash before the invoice.finalized webhook below is
+	// queued loses that event.
 	if out.canceled != nil {
 		e.afterScheduledCancel(ctx, sub, *out.canceled, now)
 	}
 
 	// The finalize AUDIT row already committed inside the closer tx above
 	// (emitFinalizeAuditTx → LogInTx, ADR-090 shared fate): a finalized invoice
-	// cannot exist without it. Here we fire only the post-commit WEBHOOK — an
-	// external effect that must not ride the DB tx.
+	// cannot exist without it. The invoice.finalized webhook is queued here,
+	// after that commit, so it can be lost (see dispatchEvent).
 	e.dispatchInvoiceFinalized(ctx, sub, inv)
 
 	// Stripe Tax: once the invoice is durably persisted, commit the

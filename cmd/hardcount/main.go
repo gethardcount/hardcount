@@ -313,10 +313,10 @@ func serve() {
 	recoveryCancel()
 
 	// The outbox dispatchers always run (ADR-040). The webhook dispatcher
-	// drains webhook_outbox into Service.Dispatch, and the email dispatcher
-	// drains email_outbox into *email.Sender. Each tick takes a leader lease
-	// (ADR-114), so with several copies only one drains at a time. An
-	// operator pauses a role, with no restart, by running
+	// turns webhook_outbox rows into events and their deliveries, and the
+	// email dispatcher drains email_outbox into *email.Sender. Each tick takes
+	// a leader lease (ADR-114), so with several copies only one drains at a
+	// time. An operator pauses a role, with no restart, by running
 	// `SELECT leader_pause('webhook_outbox', 'oncall', 'why')`
 	// (docs/ops/runbook/background-job-stuck.md).
 	workers.Add(1)

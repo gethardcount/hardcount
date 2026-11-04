@@ -5,7 +5,9 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,10 +32,60 @@ import (
 // event type at each call to be a constant whose value is in the catalog. A
 // string literal or another package's constant is checked by value, so
 // neither can slip past.
+//
+// The same walk tells the two ways an event reaches the outbox apart. Enqueue
+// inserts the row on the caller's transaction, so the event commits with its
+// change. EnqueueStandalone, and the Dispatch methods that call it, insert
+// the row in a second transaction after the change committed: a crash, a
+// deploy or a cancelled request between the two commits loses the event for
+// good. Every site that queues a constant event type the second way must be
+// in standaloneWebhookBacklog, and that list only shrinks.
 
 // webhookSinkNames are the webhook package's entry points that write an
 // event to the outbox or dispatch it.
 var webhookSinkNames = map[string]bool{"Dispatch": true, "Enqueue": true, "EnqueueStandalone": true}
+
+// standaloneSinkNames are the sink names that queue the event in a
+// transaction of their own, after the caller's change has committed. An
+// interface method takes the class of its name: domain.EventDispatcher's
+// Dispatch is standalone, and each domain's OutboxEnqueuer.Enqueue is not.
+var standaloneSinkNames = map[string]bool{"Dispatch": true, "EnqueueStandalone": true}
+
+// standaloneWebhookBacklog lists every site that queues a webhook event after
+// its business transaction commits, as "<pkg>.<Recv>.<Func> <event type>". A
+// new site fails the test: queue the event in the transaction that writes the
+// change instead. When a site moves into its transaction, delete its entry
+// and mark the event "Always sent" in docs/api/webhook-events.md
+// (TestAlwaysSentMarksMatchTheBacklog checks the two agree).
+var standaloneWebhookBacklog = map[string]bool{
+	"billing.Engine.DispatchInvoiceFinalized invoice.finalized":                         true,
+	"billing.Engine.applyDueScheduledPlanChanges subscription.pending_change.applied":   true,
+	"billing.Engine.fireThreshold subscription.threshold_crossed":                       true,
+	"customer.Service.MarkEmailBounced customer.email_bounced":                          true,
+	"customer.Service.MarkEmailComplained customer.email_complained":                    true,
+	"dunning.Service.exhaustRun dunning.escalated":                                      true,
+	"dunning.Service.resolveRunAt dunning.resolved":                                     true,
+	"invoice.Service.AfterVoid invoice.voided":                                          true,
+	"invoice.Service.MarkUncollectible invoice.marked_uncollectible":                    true,
+	"invoice.Service.RecordOfflinePayment invoice.payment_recorded":                     true,
+	"invoice.Service.finalize invoice.finalized":                                        true,
+	"payment.Stripe.RecordCheckoutCard payment_method.updated":                          true,
+	"payment.Stripe.SettleSucceeded payment.amount_mismatch":                            true,
+	"payment.Stripe.SettleSucceeded payment.duplicate_charge":                           true,
+	"payment.Stripe.SettleSucceeded payment.received_on_voided_invoice":                 true,
+	"payment.Stripe.handlePaymentSucceeded payment.currency_mismatch":                   true,
+	"payment.Stripe.handleSetupIntentSucceeded payment_method.attached":                 true,
+	"subscription.Handler.addItem subscription.item.added":                              true,
+	"subscription.Handler.cancelPendingItemChange subscription.pending_change.canceled": true,
+	"subscription.Handler.clearScheduledCancel subscription.cancel_cleared":             true,
+	"subscription.Handler.extendTrial subscription.trial_extended":                      true,
+	"subscription.Handler.pauseCollection subscription.collection_paused":               true,
+	"subscription.Handler.removeItem subscription.item.removed":                         true,
+	"subscription.Handler.resumeCollection subscription.collection_resumed":             true,
+	"subscription.Handler.scheduleCancel subscription.cancel_scheduled":                 true,
+	"subscription.Handler.updateItem subscription.item.updated":                         true,
+	"subscription.Handler.updateItem subscription.pending_change.scheduled":             true,
+}
 
 // webhookDynamicEmitAllowlist names the functions that hand the webhook
 // package an event type that is not a constant, each with its reason. The
@@ -61,7 +113,9 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 
 	// sinks maps a function (or interface method) to the indexes of its
 	// parameters that carry an event type into the webhook package.
+	// standalone marks the ones that reach a standalone sink.
 	sinks := map[*types.Func]map[int]bool{}
+	standalone := map[*types.Func]map[int]bool{}
 	add := func(fn *types.Func, i int) bool {
 		if sinks[fn] == nil {
 			sinks[fn] = map[int]bool{}
@@ -70,6 +124,16 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 			return false
 		}
 		sinks[fn][i] = true
+		return true
+	}
+	markStandalone := func(fn *types.Func, i int) bool {
+		if standalone[fn] == nil {
+			standalone[fn] = map[int]bool{}
+		}
+		if standalone[fn][i] {
+			return false
+		}
+		standalone[fn][i] = true
 		return true
 	}
 	eventParam := func(sig *types.Signature) int {
@@ -101,13 +165,16 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 				}
 				if idx := eventParam(fn.Type().(*types.Signature)); idx >= 0 {
 					add(fn, idx)
+					if standaloneSinkNames[fn.Name()] {
+						markStandalone(fn, idx)
+					}
 					seedRecv = append(seedRecv, ptr)
 				}
 			}
 		}
 	}
 	if len(sinks) < 3 {
-		t.Fatalf("found %d webhook entry points; want Service.Dispatch, OutboxStore.Enqueue and EnqueueStandalone at least", len(sinks))
+		t.Fatalf("found %d webhook entry points; want OutboxStore.Enqueue, OutboxStore.EnqueueStandalone and OutboxDispatcher.Dispatch at least", len(sinks))
 	}
 
 	// The consumer-defined interfaces those methods satisfy (domain's
@@ -139,6 +206,9 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 				}
 				if idx := eventParam(m.Type().(*types.Signature)); idx >= 0 {
 					add(m, idx)
+					if standaloneSinkNames[m.Name()] {
+						markStandalone(m, idx)
+					}
 				}
 			}
 		}
@@ -242,7 +312,8 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 		return i, ok
 	}
 
-	// A wrapper that passes its own parameter to a sink is a sink.
+	// A wrapper that passes its own parameter to a sink is a sink, and it is
+	// standalone when that sink is.
 	for changed := true; changed; {
 		changed = false
 		for _, c := range calls {
@@ -254,7 +325,14 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 				if idx >= len(c.expr.Args) {
 					continue
 				}
-				if pi, ok := passThrough(c, c.expr.Args[idx]); ok && add(c.encl, pi) {
+				pi, ok := passThrough(c, c.expr.Args[idx])
+				if !ok {
+					continue
+				}
+				if add(c.encl, pi) {
+					changed = true
+				}
+				if standalone[fn][idx] && markStandalone(c.encl, pi) {
 					changed = true
 				}
 			}
@@ -263,6 +341,8 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 
 	checked := 0
 	var problems []string
+	standaloneFound := map[string]bool{} // backlog keys the walk reached
+	var standaloneSites []string
 	for _, c := range calls {
 		fn := callee(c)
 		if fn == nil || sinks[fn] == nil {
@@ -297,8 +377,21 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 			if allConst {
 				for _, e := range values {
 					checked++
-					if v := constant.StringVal(c.pkg.TypesInfo.Types[e].Value); !domain.KnownWebhookEventTypes[v] {
+					v := constant.StringVal(c.pkg.TypesInfo.Types[e].Value)
+					if !domain.KnownWebhookEventTypes[v] {
 						problems = append(problems, where+": sends "+v+", which is not in domain.KnownWebhookEventTypes (an endpoint that names it gets 422 unknown event type)")
+					}
+					if !standalone[fn][idx] || c.encl == nil {
+						continue
+					}
+					key := c.pkg.Types.Name() + "." + funcName(c.encl) + " " + v
+					standaloneSites = append(standaloneSites, where+" "+key)
+					standaloneFound[key] = true
+					if !standaloneWebhookBacklog[key] {
+						problems = append(problems, where+" ("+key+") queues "+v+" after the business transaction commits, so a crash, "+
+							"a deploy or a cancelled request between the two commits loses it. Queue it in the transaction that writes the change: "+
+							"OutboxStore.Enqueue(ctx, tx, …) in the store method that commits the transition (ADR-040, the MarkPaid pattern), "+
+							"with the payload built from the row that transaction wrote (ADR-131)")
 					}
 				}
 				continue
@@ -317,10 +410,19 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 				"; pass a domain.Event* constant, or add the function to webhookDynamicEmitAllowlist with the reason its value is already in the catalog")
 		}
 	}
+	for key := range standaloneWebhookBacklog {
+		if !standaloneFound[key] {
+			problems = append(problems, "standaloneWebhookBacklog lists "+key+", but no site queues that event after its commit any more: "+
+				"delete the entry (the backlog only shrinks) and mark the event Always sent in docs/api/webhook-events.md")
+		}
+	}
 	sort.Strings(problems)
 	for _, p := range problems {
 		t.Error(p)
 	}
+	sort.Strings(standaloneSites)
+	t.Logf("%d sites queue a webhook event after its commit (%d backlog keys):\n%s",
+		len(standaloneSites), len(standaloneFound), strings.Join(standaloneSites, "\n"))
 	var names []string
 	for fn := range sinks {
 		names = append(names, fn.Pkg().Name()+"."+funcName(fn))
@@ -343,4 +445,65 @@ func funcName(fn *types.Func) string {
 		}
 	}
 	return fn.Name()
+}
+
+// TestAlwaysSentMarksMatchTheBacklog keeps docs/api/webhook-events.md true.
+// The page marks an event "Always sent" when it is queued in the transaction
+// of its change, so a crash cannot drop it. That holds for every catalog
+// event with no site in standaloneWebhookBacklog, and for no other.
+func TestAlwaysSentMarksMatchTheBacklog(t *testing.T) {
+	root := repoRoot(t)
+	b, err := os.ReadFile(filepath.Join(root, "docs", "api", "webhook-events.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	heading := regexp.MustCompile("^### `([a-z_.]+)`$")
+	marked := map[string]bool{}
+	headings := 0
+	current := ""
+	for _, line := range strings.Split(string(b), "\n") {
+		if m := heading.FindStringSubmatch(line); m != nil {
+			current = m[1]
+			headings++
+			continue
+		}
+		if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "### ") {
+			current = ""
+			continue
+		}
+		if current != "" && strings.HasPrefix(line, "**Always sent.**") {
+			marked[current] = true
+		}
+	}
+	if headings < 30 || len(marked) == 0 {
+		t.Fatalf("found %d event headings and %d Always sent marks in webhook-events.md; the parser no longer matches the page", headings, len(marked))
+	}
+
+	after := map[string][]string{} // event type -> its backlog keys
+	for key := range standaloneWebhookBacklog {
+		typ := key[strings.LastIndex(key, " ")+1:]
+		after[typ] = append(after[typ], key)
+	}
+	var problems []string
+	for typ := range domain.KnownWebhookEventTypes {
+		keys := after[typ]
+		switch {
+		case len(keys) == 0 && !marked[typ]:
+			problems = append(problems, typ+" is queued in the transaction of its change on every path now: mark it **Always sent.** in docs/api/webhook-events.md")
+		case len(keys) > 0 && marked[typ]:
+			sort.Strings(keys)
+			problems = append(problems, typ+" is marked Always sent in docs/api/webhook-events.md, but a site queues it after its commit, "+
+				"so a crash can drop it ("+strings.Join(keys, ", ")+"): remove the mark")
+		}
+	}
+	for typ := range marked {
+		if !domain.KnownWebhookEventTypes[typ] {
+			problems = append(problems, typ+" is marked Always sent but is not in domain.KnownWebhookEventTypes")
+		}
+	}
+	sort.Strings(problems)
+	for _, p := range problems {
+		t.Error(p)
+	}
+	t.Logf("%d of %d event types are marked Always sent", len(marked), len(domain.KnownWebhookEventTypes))
 }

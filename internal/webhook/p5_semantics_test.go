@@ -144,7 +144,7 @@ func TestP5_UpdateDeliveryCAS_StaleMarkDropped(t *testing.T) {
 	}
 }
 
-// TestP5_HandlerOwnsOutboxMark: DispatchFromOutbox marks the producing
+// TestP5_HandlerOwnsOutboxMark: dispatchFromOutbox marks the producing
 // webhook_outbox row dispatched INSIDE the event tx — a replayed
 // handler cannot mint a duplicate event (the old separate mark's crash
 // window did exactly that, with a fresh undedupable event id).
@@ -162,7 +162,7 @@ func TestP5_HandlerOwnsOutboxMark(t *testing.T) {
 		t.Fatalf("enqueue: %v", err)
 	}
 
-	if err := svc.DispatchFromOutbox(ctx, rowID, tenantID, "invoice.paid", map[string]any{"invoice_id": "inv_1"}); err != nil {
+	if err := svc.dispatchFromOutbox(ctx, rowID, tenantID, "invoice.paid", map[string]any{"invoice_id": "inv_1"}); err != nil {
 		t.Fatalf("dispatch from outbox: %v", err)
 	}
 
