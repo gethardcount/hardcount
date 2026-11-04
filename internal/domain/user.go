@@ -2,10 +2,11 @@ package domain
 
 import "time"
 
-// User is a dashboard operator account. Hardcount stores email + password
-// hash; sessions are user-bound (see ADR-011). Operators are
-// bootstrapped externally (`make bootstrap`) — there is no public
-// signup. Multi-user invite flows are deferred until a DP requests.
+// User is a dashboard operator account. Hardcount stores the email and a
+// password hash, and sessions are bound to the user (see ADR-011). Operators
+// are set up outside the app (`make bootstrap`), and there is no public
+// sign-up. Invite flows for more users wait until a design partner (DP) asks
+// for them.
 type User struct {
 	ID           string     `json:"id"`
 	Email        string     `json:"email"`
@@ -14,19 +15,19 @@ type User struct {
 	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
 }
 
-// UserTenant binds a user to a tenant with a role. v1 ships only the
-// `owner` role; the column shape supports member/viewer/etc when
-// invite flows land.
+// UserTenant binds a user to a tenant with a role. v1 has only the `owner`
+// role. The column shape can hold other roles, such as member or viewer,
+// once invite flows exist.
 type UserTenant struct {
 	UserID   string `json:"user_id"`
 	TenantID string `json:"tenant_id"`
 	Role     string `json:"role"`
 }
 
-// PasswordResetToken is a single-use, 1-hour-expiry credential for
-// resetting a forgotten password. The plaintext is sent to the user
-// via the reset-link email; the DB stores SHA-256 of the plaintext
-// so a snapshot can't be replayed.
+// PasswordResetToken is a single-use credential, valid for 1 hour, for
+// resetting a forgotten password. The plaintext goes to the user in the
+// reset-link email. The database stores the SHA-256 of the plaintext, so a
+// database snapshot cannot be replayed.
 type PasswordResetToken struct {
 	ID        string     `json:"id"`
 	UserID    string     `json:"user_id"`

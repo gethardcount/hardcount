@@ -1,12 +1,12 @@
 package domain
 
-// The words a subscription's audit rows are written with (ADR-090 frozen
-// vocabulary; ADR-128). The subscription activity timeline reads these rows
-// and words each one as an activity line, so a writer and the timeline must
-// name a row the same way. Every writer uses these constants, and the
-// timeline's golden and no-fallback tests range over the lists below: a new
-// row kind that has no words fails a test instead of reaching the screen as
-// "Subscription changed".
+// The words a subscription's audit rows are written with (ADR-090's frozen
+// vocabulary, and ADR-128). The subscription activity timeline reads these
+// rows and words each one as an activity line, so a writer and the timeline
+// must name a row the same way. Every writer uses these constants. The
+// timeline's golden and no-fallback tests range over the lists below, so a
+// new row kind that has no words fails a test instead of reaching the screen
+// as "Subscription changed".
 //
 // The wire strings are frozen: audit rows already written carry them.
 
@@ -24,7 +24,8 @@ const (
 	// an invoice was issued early.
 	AuditActionSubscriptionThresholdCrossed = "subscription.threshold_crossed"
 	// AuditActionSubscriptionThresholdDeferred: spend crossed a threshold,
-	// but the price bills on peak usage, so it is billed at cycle close.
+	// but the price bills on peak usage, so the usage is billed at cycle
+	// close.
 	AuditActionSubscriptionThresholdDeferred = "subscription.threshold_deferred"
 	// AuditActionSubscriptionProrationFailed: an item change was made, but
 	// its prorated charge or credit was not.

@@ -8,8 +8,8 @@ import (
 )
 
 // UsageEventOrigin is the ingest path that produced a usage_events row.
-// 'api' covers real-time POST /usage-events (and /batch); 'backfill' covers
-// the explicit historical-ingest endpoint. Extend as new sources appear.
+// 'api' covers real-time POST /usage-events (and /batch). 'backfill' covers
+// the explicit historical-ingest endpoint. Extend it as new sources appear.
 type UsageEventOrigin string
 
 const (
@@ -17,11 +17,11 @@ const (
 	UsageOriginBackfill UsageEventOrigin = "backfill"
 )
 
-// UsageEvent.Quantity is a NUMERIC(38, 12) decimal so AI usage primitives
-// (GPU-hours, cached-token ratios, partial KV-cache reads) round-trip
-// exactly. Maps to Stripe's quantity_decimal. JSON wire format is a string
-// ("0.50") on the response side; the unmarshaller accepts both number (5)
-// and string ("5.5") on the request side.
+// UsageEvent is one metered usage event. Its Quantity is a NUMERIC(38, 12)
+// decimal, so AI usage primitives (GPU-hours, cached-token ratios, partial
+// KV-cache reads) round-trip exactly. Quantity maps to Stripe's
+// quantity_decimal. A response sends it as a JSON string ("0.50"). On a
+// request, the unmarshaller accepts both a number (5) and a string ("5.5").
 type UsageEvent struct {
 	ID             string           `json:"id"`
 	TenantID       string           `json:"tenant_id,omitempty"`
@@ -33,33 +33,36 @@ type UsageEvent struct {
 	Timestamp      time.Time        `json:"timestamp"`
 	Origin         UsageEventOrigin `json:"origin,omitempty"`
 
-	// ProviderCostMicros is the COGS stamp (ADR-079): what serving this
-	// event cost the OPERATOR (their provider bill), in micro-dollars
-	// (1e-6), resolved from provider_cost_rates at INGEST time — snapshot
-	// semantics; later rate edits never rewrite it. Nil = unresolved
-	// (costable dims but no matching rate — the actionable "add a rate"
-	// signal — or a cost that does not fit BIGINT micros) or pre-feature
-	// row. Operator-facing only. The API sends it as provider_cost_cents
-	// (MarshalJSON).
+	// ProviderCostMicros is the cost-of-goods-sold (COGS) stamp (ADR-079):
+	// what serving this event cost the operator on their provider bill, in
+	// micro-dollars (1e-6). It is resolved from provider_cost_rates at ingest
+	// time, as a snapshot, so later rate edits never rewrite it. Nil means
+	// unresolved, or a row from before the feature. Unresolved is an event
+	// with costable dimensions but no matching rate (the signal to add a
+	// rate), or a cost that does not fit BIGINT micros. It is for the
+	// operator only. The API sends it as provider_cost_cents (MarshalJSON).
 	ProviderCostMicros *int64 `json:"-"`
-	// ProviderCostSource: 'table' (inferred from provider_cost_rates),
-	// 'not_applicable' (no costable dims — non-token meters), 'observed'
-	// (the sender's own per-half cost, ADR-079 D4 — wins over inference;
-	// stamped by usage/postgres.go when ObservedCostMicros is set).
-	// Empty = unresolved/pre-feature.
+	// ProviderCostSource is 'table' (inferred from provider_cost_rates),
+	// 'not_applicable' (no costable dimensions, as on meters that do not
+	// count tokens) or 'observed'. 'observed' is the sender's own per-half
+	// cost (ADR-079 D4), and it wins over inference. usage/postgres.go stamps
+	// it when ObservedCostMicros is set. Empty means unresolved, or a row
+	// from before the feature.
 	ProviderCostSource string `json:"provider_cost_source,omitempty"`
 
-	// BillingStatus is "after_close" on the answer that wrote an event whose
-	// period was already invoiced: stored, billed on no invoice (ADR-120).
-	// Set only on the write's own 201, never stored and never on a replay
-	// or a read: recomputed later it could call a row the close did bill
-	// "after_close". Absent otherwise, which promises nothing.
+	// BillingStatus is "after_close" on the answer to a write whose event
+	// falls in a period already invoiced: the event is stored but billed on
+	// no invoice (ADR-120). It is set only on the write's own 201. It is
+	// never stored, nor set on a replay or a read, because a later
+	// recomputation could call a row the close did bill "after_close".
+	// Otherwise it is absent, which promises nothing.
 	BillingStatus string `json:"billing_status,omitempty"`
 }
 
 // MarshalJSON sends the provider cost as provider_cost_cents, a decimal
-// string in cents (ADR-130 §3: every *_cents field is the currency's minor
-// unit). The stored micro-dollars convert exactly: cents = micros ÷ 10^4.
+// string in cents. Every *_cents field is in the currency's minor unit
+// (ADR-130 §3). The stored micro-dollars convert exactly:
+// cents = micros ÷ 10^4.
 func (e UsageEvent) MarshalJSON() ([]byte, error) {
 	type wire UsageEvent
 	var cents *decimal.Decimal
@@ -80,12 +83,12 @@ func MicrosToCents(micros int64) decimal.Decimal {
 }
 
 // ProviderCostRate is one row of the operator's provider cost table
-// (ADR-079): what THEY pay a provider per token for (provider, model,
-// token_type). UnitCostCents is in cents per token, a decimal (ADR-130 §3,
-// the unit rule every *_cents field follows): real rates reach 0.00015
-// cents a token, so never floats. CURRENT-rate semantics: one row per key
-// per mode, edited in place; the per-event stamp is the historical
-// snapshot, so edits never rewrite history.
+// (ADR-079): what the operator pays a provider per token, for one (provider,
+// model, token_type). UnitCostCents is in cents per token, as a decimal
+// (ADR-130 §3, the unit rule every *_cents field follows). Real rates reach
+// 0.00015 cents a token, so it is never a float. The table holds the current
+// rate: one row per key per mode, edited in place. The stamp on each event is
+// the historical snapshot, so an edit never rewrites history.
 type ProviderCostRate struct {
 	ID            string          `json:"id"`
 	TenantID      string          `json:"tenant_id,omitempty"`

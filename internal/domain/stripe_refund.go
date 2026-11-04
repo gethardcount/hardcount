@@ -5,8 +5,8 @@ import "time"
 // StripeRefundStatus is Stripe's Refund.status, stored as Stripe sends it
 // (https://docs.stripe.com/api/refunds/object#refund_object-status). The
 // invoice_stripe_refunds CHECK lists the same five values (migration 00222).
-// A status Stripe adds later is refused by the webhook handler, loudly, until
-// both are extended together.
+// The webhook handler refuses, loudly, a status that Stripe adds later, until
+// both lists are extended together.
 type StripeRefundStatus string
 
 const (
@@ -20,23 +20,24 @@ const (
 // Valid reports whether s is one of the five statuses Hardcount stores.
 func (s StripeRefundStatus) Valid() bool { return s.stage() > 0 }
 
-// MovedNoMoney reports whether the refund ended without returning money to
-// the customer: it failed, or the operator canceled it in time. Either way
-// the money went back to the Stripe balance.
 // InFlight reports whether the refund is still on its way: Stripe has not
 // said yet whether it went through. A refund made in Stripe is recorded as a
-// credit note only once it succeeded (ADR-134, 2026-10-30 review).
+// credit note only once it has succeeded (ADR-134).
 func (s StripeRefundStatus) InFlight() bool {
 	return s == StripeRefundPending || s == StripeRefundRequiresAction
 }
 
+// MovedNoMoney reports whether the refund ended without returning money to
+// the customer: it failed, or the operator canceled it in time. Either way
+// the money went back to the Stripe balance.
 func (s StripeRefundStatus) MovedNoMoney() bool {
 	return s == StripeRefundFailed || s == StripeRefundCanceled
 }
 
 // CreditNoteRefundStatus is the credit note's refund_status for a refund in
-// this Stripe status, the mapping ADR-063 set: canceled counts as failed (the
-// money went back to the Stripe balance), requires_action as pending.
+// this Stripe status, the mapping ADR-063 set. Canceled counts as failed,
+// because the money went back to the Stripe balance. requires_action counts
+// as pending.
 func (s StripeRefundStatus) CreditNoteRefundStatus() RefundStatus {
 	switch s {
 	case StripeRefundSucceeded:
@@ -73,16 +74,17 @@ const (
 	// whose card refund is this refund. Hardcount made no refund call for it.
 	StripeRefundRecordedAsCreditNote StripeRefundOutcome = "credit_note"
 	// StripeRefundAwaiting: first seen pending or requiring action. Nothing is
-	// recorded until a later event shows it succeeded (then it is decided as
-	// any first sighting, with the 24-hour rule measured from Hardcount's
-	// first sighting), or failed or was canceled (not_refunded).
+	// recorded until a later event shows that it succeeded, or that it failed
+	// or was canceled (not_refunded). A success is then decided as any first
+	// sighting is, with the 24-hour rule measured from Hardcount's first
+	// sighting.
 	StripeRefundAwaiting StripeRefundOutcome = "awaiting"
 	// StripeRefundOtherPayment: the refund is of a payment that did not pay
 	// the invoice (a second charge, or money on a voided invoice). That money
-	// was never on the invoice, so no credit note.
+	// was never on the invoice, so there is no credit note.
 	StripeRefundOtherPayment StripeRefundOutcome = "other_payment"
 	// StripeRefundNeedsReview: a refund of the invoice's own payment that
-	// Hardcount did not record; ReviewReason says why. The operator records
+	// Hardcount did not record. ReviewReason says why. The operator records
 	// it with a credit note or dismisses it.
 	StripeRefundNeedsReview StripeRefundOutcome = "needs_review"
 	// StripeRefundNotRefunded: first seen already failed or canceled. No
@@ -99,47 +101,54 @@ const (
 type StripeRefundReviewReason string
 
 const (
-	// The invoice was not paid in Hardcount when the refund was first seen,
-	// and the refund was older than the race window.
+	// StripeRefundReviewInvoiceNotPaid: the invoice was not paid in Hardcount
+	// when the refund was first seen, and the refund was older than the race
+	// window.
 	StripeRefundReviewInvoiceNotPaid StripeRefundReviewReason = "invoice_not_paid"
-	// The refund's currency is not the invoice's.
+	// StripeRefundReviewCurrencyMismatch: the refund's currency is not the
+	// invoice's.
 	StripeRefundReviewCurrencyMismatch StripeRefundReviewReason = "currency_mismatch"
-	// The invoice bought prepaid credit: an ordinary credit note is refused
-	// there (ADR-078 D4), and the credit stays spendable until commit relief
-	// retires it.
+	// StripeRefundReviewPrepaidCommit: the invoice bought prepaid credit. An
+	// ordinary credit note is refused there (ADR-078 D4), and the credit
+	// stays spendable until commit relief retires it.
 	StripeRefundReviewPrepaidCommit StripeRefundReviewReason = "prepaid_commit"
-	// Hardcount first saw the refund more than StripeRefundLateAfter after
-	// Stripe made it, so the operator may already have recorded it by hand.
+	// StripeRefundReviewSeenLate: Hardcount first saw the refund more than
+	// StripeRefundLateAfter after Stripe made it, so the operator may already
+	// have recorded it by hand.
 	StripeRefundReviewSeenLate StripeRefundReviewReason = "seen_late"
-	// A credit note on the invoice has a card refund that failed. The refund
-	// made in Stripe may replace it: the operator attaches it to that note
+	// StripeRefundReviewCreditNoteRefundFailed: a credit note on the invoice
+	// has a card refund that failed, and the refund made in Stripe may
+	// replace it. The operator attaches the refund to that note
 	// (POST /v1/credit-notes/{id}/attach-stripe-refund), records it, or
-	// dismisses it. Retry refund on that note is refused meanwhile, so the
+	// dismisses it. Meanwhile Retry refund on that note is refused, so the
 	// customer is never refunded twice.
 	StripeRefundReviewCreditNoteRefundFailed StripeRefundReviewReason = "credit_note_refund_failed"
-	// The refund is more than the card payment has left to refund after the
-	// credit notes already on the invoice.
+	// StripeRefundReviewExceedsCardRefundable: the refund is more than the
+	// card payment has left to refund after the credit notes already on the
+	// invoice.
 	StripeRefundReviewExceedsCardRefundable StripeRefundReviewReason = "exceeds_card_refundable"
-	// The refund is more than the invoice has left to credit: an earlier
-	// credit note already gave part of it back another way.
+	// StripeRefundReviewExceedsCreditable: the refund is more than the
+	// invoice has left to credit, because an earlier credit note already gave
+	// part of it back another way.
 	StripeRefundReviewExceedsCreditable StripeRefundReviewReason = "exceeds_creditable"
 )
 
 // StripeRefundLateAfter is how long after Stripe made a refund Hardcount may
-// first see it and still record it as a credit note (ADR-134). Later, it is
-// flagged instead: after an upgrade Stripe can send refund.updated for a
-// refund made before, which the operator may already have recorded by hand,
-// and a second credit note would count it twice. Both instants are Stripe's
-// (the event's creation time and the refund's).
+// first see it and still record it as a credit note (ADR-134). A refund seen
+// later is flagged instead. After an upgrade, Stripe can send refund.updated
+// for a refund made before the upgrade. The operator may already have
+// recorded that refund by hand, and a second credit note would count it
+// twice. Both instants are Stripe's: the event's creation time and the
+// refund's.
 const StripeRefundLateAfter = 24 * time.Hour
 
 // InvoiceStripeRefund is a refund made in Stripe outside Hardcount on one of
-// the invoice's payments (ADR-134). One row per Stripe refund. Each refund
-// event carries the whole refund as it stood when the event was created; the
-// row keeps the newest one (SupersededBy), so events can arrive in any order.
-// The outcome is decided once, when Hardcount first sees the refund, and only
-// the operator changes it after that (record it as a credit note, or
-// dismiss it).
+// the invoice's payments (ADR-134). There is one row per Stripe refund. Each
+// refund event carries the whole refund as it stood when the event was
+// created. The row keeps the newest one (SupersededBy), so events can arrive
+// in any order. The outcome is decided once, when Hardcount first sees the
+// refund. After that only the operator changes it, by recording it as a
+// credit note or dismissing it.
 type InvoiceStripeRefund struct {
 	ID                    string `json:"id"`
 	InvoiceID             string `json:"invoice_id"`
@@ -186,7 +195,7 @@ type StripeRefundSnapshot struct {
 	StripePaymentIntentID string
 	StripeChargeID        string
 	AmountCents           int64
-	// Currency as Stripe sends it (lower case); the store upper-cases it.
+	// Currency is as Stripe sends it (lower case). The store upper-cases it.
 	Currency      string
 	Status        StripeRefundStatus
 	Reason        string
@@ -194,9 +203,9 @@ type StripeRefundSnapshot struct {
 	// CreatedAt is the refund's own creation time (Refund.created).
 	CreatedAt time.Time
 	// Young is true while the refund is younger than the webhook race window
-	// on the wall clock, or its age is unknown: the invoice's own payment may
-	// not be recorded yet, so an unpaid invoice asks Stripe to deliver the
-	// event again instead of flagging it.
+	// on the wall clock, or while its age is unknown. The invoice's own
+	// payment may not be recorded yet, so for an unpaid invoice Hardcount
+	// asks Stripe to deliver the event again instead of flagging it.
 	Young bool
 }
 
@@ -215,7 +224,7 @@ func StripeRefundSeenLate(created, firstSeen time.Time) bool {
 
 // SupersededBy reports whether snapshot s is newer than what the row holds.
 // Stripe does not deliver events in order, so the event's creation time
-// decides; within one second the later stage of the refund's life wins. The
+// decides. Within one second, the later stage of the refund's life wins. The
 // event the row already holds is never newer than itself, which makes a
 // redelivery a no-op.
 func (r InvoiceStripeRefund) SupersededBy(s StripeRefundSnapshot) bool {
@@ -250,10 +259,11 @@ type StripeRefundFacts struct {
 	ID              string
 	PaymentIntentID string
 	AmountCents     int64
-	// Currency as Stripe sends it (lower case).
+	// Currency is as Stripe sends it (lower case).
 	Currency string
 	Status   StripeRefundStatus
-	// HardcountCreditNoteID is the refund's hardcount_cn_id metadata: set on
-	// every refund Hardcount made since 2026-08-04 (ADR-063 amendment).
+	// HardcountCreditNoteID is the refund's hardcount_cn_id metadata. It is
+	// set on every refund Hardcount made since 2026-08-04 (the ADR-063
+	// amendment).
 	HardcountCreditNoteID string
 }
