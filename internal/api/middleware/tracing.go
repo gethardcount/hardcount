@@ -11,9 +11,10 @@ import (
 	"github.com/gethardcount/hardcount/internal/audit"
 )
 
-// Tracing returns middleware that creates OpenTelemetry spans for each HTTP request.
-// Propagates trace context from incoming headers (W3C Trace Context).
-// When tracing is disabled (noop provider), this adds negligible overhead.
+// Tracing returns middleware that creates an OpenTelemetry span for each HTTP
+// request. It propagates trace context from incoming headers (W3C Trace
+// Context). When tracing is off (the noop provider), it adds negligible
+// overhead.
 //
 // The span starts before routing, so it is named by method alone;
 // TraceRequestAttrs renames it once the route is known.
