@@ -11,7 +11,7 @@ import (
 // base × rate-in-ppm / 10^6 wraps for a base above about 9.2×10^12 cents.
 //
 // Requires a, b >= 0 and d > 0. ok is false when the quotient does not fit
-// int64 (or an argument is out of range); q and r are then 0.
+// int64, or when an argument is out of range. q and r are then 0.
 func MulDivRem(a, b, d int64) (q, r int64, ok bool) {
 	if a < 0 || b < 0 || d <= 0 {
 		return 0, 0, false
@@ -29,7 +29,7 @@ func MulDivRem(a, b, d int64) (q, r int64, ok bool) {
 
 // MulDivRoundHalfToEven returns a×b / d rounded half to even (see
 // RoundHalfToEven), with the product worked out in 128 bits. Requires
-// a, b >= 0 and d > 0; ok is false when the result does not fit int64.
+// a, b >= 0 and d > 0. ok is false when the result does not fit int64.
 func MulDivRoundHalfToEven(a, b, d int64) (int64, bool) {
 	q, r, ok := MulDivRem(a, b, d)
 	if !ok {
@@ -49,9 +49,9 @@ func MulDivRoundHalfToEven(a, b, d int64) (int64, bool) {
 // MulDivRoundHalfToEvenSigned is MulDivRoundHalfToEven for a and b of any
 // sign: |a×b| / d rounded half to even, with the sign of a×b put back, so
 // negatives round symmetrically as RoundHalfToEven's do. Wherever a×b fits
-// int64 and is not MinInt64 the result is RoundHalfToEven(a*b, d). Requires
-// d > 0; ok is false when the result does not fit int64 or is MinInt64 (the
-// range is symmetric).
+// int64 and is not MinInt64, the result is RoundHalfToEven(a*b, d). Requires
+// d > 0. ok is false when the result does not fit int64 or is MinInt64,
+// because the range is symmetric.
 func MulDivRoundHalfToEvenSigned(a, b, d int64) (int64, bool) {
 	if d <= 0 {
 		return 0, false
@@ -78,7 +78,7 @@ func MulDivRoundHalfToEvenSigned(a, b, d int64) (int64, bool) {
 	return int64(uq), true
 }
 
-// Add returns a + b for amounts of any sign; ok is false when the sum does
+// Add returns a + b for amounts of any sign. ok is false when the sum does
 // not fit int64.
 func Add(a, b int64) (int64, bool) {
 	c := a + b
@@ -88,7 +88,7 @@ func Add(a, b int64) (int64, bool) {
 	return c, true
 }
 
-// Mul returns a × b for amounts of any sign; ok is false when the product
+// Mul returns a × b for amounts of any sign. ok is false when the product
 // does not fit int64.
 func Mul(a, b int64) (int64, bool) {
 	if a == 0 || b == 0 {

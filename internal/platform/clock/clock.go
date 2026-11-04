@@ -1,3 +1,6 @@
+// Package clock gives code the current time. A ctx may carry a bound
+// instant, such as a test clock's frozen_time, and Now then returns that
+// instant instead of the system time.
 package clock
 
 import (
@@ -6,30 +9,27 @@ import (
 	"time"
 )
 
-// Clock provides the current time. The ctx parameter lets callers ride
-// a request-scoped effective-now (a test clock's frozen_time) plumbed
-// via WithEffectiveNow at operator entry points; without one, callers
-// get wall-clock.
+// Clock provides the current time. Through ctx, a caller can carry a
+// request-scoped effective-now: the instant the request treats as now, such
+// as a test clock's frozen_time. Operator entry points bind it with
+// WithEffectiveNow. Without one, callers get wall-clock time.
 //
-// Why ctx-aware, not bare Now(): on a clock-pinned billing entity,
-// every business-logic timestamp must be in the test clock's
-// frozen_time domain (Stripe's "no semantic change" guarantee). A
-// bare wall-clock Now() forces every callsite to remember to resolve
-// the pin manually — exactly the leak we hit shipping ADR-029. With
-// a ctx-aware Now(ctx), services bind effective-now once at the
-// operator entry point and every downstream callsite (including
-// stores) inherits automatically.
+// Now takes ctx because, on an entity pinned to a test clock, every
+// business timestamp must be in that clock's frozen_time domain (Stripe's
+// "no semantic change" guarantee). A bare wall-clock Now() would make every
+// call site remember to resolve the pin by hand (see ADR-029). With
+// Now(ctx), a service binds effective-now once at the operator entry point,
+// and every call below it, stores included, inherits it.
 //
-// Callers that legitimately want wall-clock regardless of pinning
-// (cron tick scheduler, webhook delivery timestamps, postgres
-// updated_at columns, audit-log recorded_at) call time.Now().UTC()
-// directly — we don't go through Clock for those, by design.
+// Code that wants wall-clock time whatever the pin calls time.Now().UTC()
+// directly, by design. Examples are the cron tick scheduler, webhook
+// delivery timestamps, postgres updated_at columns and the audit log's
+// recorded_at.
 type Clock interface {
-	// Now returns ctx's effective-now if bound (clock.WithEffectiveNow),
-	// otherwise wall-clock UTC. The ctx-binding shape replaces the
-	// per-callsite ClockResolver pattern shipped in earlier ADR-029
-	// fixes — ctx propagation gives compositional correctness without
-	// every callsite having to remember to resolve.
+	// Now returns ctx's effective-now if one is bound
+	// (clock.WithEffectiveNow), and otherwise wall-clock time in UTC. Passing
+	// the binding down through ctx means no call site has to remember to
+	// resolve the pin.
 	Now(ctx context.Context) time.Time
 }
 
@@ -46,10 +46,9 @@ func (realClock) Now(ctx context.Context) time.Time {
 	return time.Now().UTC()
 }
 
-// Fake is a controllable clock for testing. The bound effective-now
-// from ctx still wins over Fake's `current` field — tests that want to
-// exercise the ctx-binding path can do so without losing Fake's
-// per-test deterministic value.
+// Fake is a controllable clock for testing. An effective-now bound on ctx
+// still wins over Fake's `current` field. A test can then exercise the ctx
+// binding and still keep Fake's fixed value for each test.
 type Fake struct {
 	mu      sync.Mutex
 	current time.Time
@@ -60,6 +59,8 @@ func NewFake(t time.Time) *Fake {
 	return &Fake{current: t.UTC()}
 }
 
+// Now returns ctx's effective-now if one is bound, and otherwise the fake's
+// current time.
 func (c *Fake) Now(ctx context.Context) time.Time {
 	if t, ok := EffectiveNow(ctx); ok {
 		return t
@@ -83,58 +84,57 @@ func (c *Fake) Advance(d time.Duration) {
 	c.current = c.current.Add(d)
 }
 
-// Sim is the SIMULATED-TIME CONTEXT of a code path: which test clock's
-// world it is acting in (TestClockID) and the simulated instant it lands
-// at (At). The halves travel together and are only ever set from one read
-// of the clock — "clock C, at wall-clock now" is a lie, and the audit log
-// it would be stamped into is append-only, so the pairing is enforced by
-// the type rather than by remembering.
+// Sim is the simulated-time context of a code path: the test clock whose
+// world it acts in (TestClockID) and the simulated instant it acts at (At).
+// The two halves travel together and are set only from one read of the
+// clock. A pair like "clock C, at wall-clock now" would be false, and the
+// audit log it would be stamped into is append-only. So the type keeps the
+// pair together, and no caller has to remember to.
 //
-// TestClockID == "" means "not in any simulation": At is wall-clock, or a
-// bare WithEffectiveNow binding whose clock is not known, and nothing is
-// stamped on the sim axis.
+// TestClockID == "" means the path is in no simulation. At is then
+// wall-clock time, or a bare WithEffectiveNow binding whose clock is not
+// known. Nothing is then stamped on the sim axis (the audit_log columns
+// sim_effective_at and test_clock_id).
 type Sim struct {
 	At          time.Time
 	TestClockID string
 }
 
 // Simulated reports whether this context is inside a test clock's world.
-// BOTH halves are required: a clock id without an instant (or an instant
-// without a clock) is a partial binding, and every consumer treats it as
-// absent — a half-stamped audit row would land in the partial clock index
-// and then answer sim-time queries with a wall-clock timestamp.
+// It needs both halves. A clock id without an instant, or an instant
+// without a clock, is a partial binding, and every consumer treats it as
+// absent. Otherwise a half-stamped audit row would land in the partial
+// clock index and answer sim-time queries with a wall-clock timestamp.
 func (s Sim) Simulated() bool {
 	return s.TestClockID != "" && !s.At.IsZero()
 }
 
-// simKey is the ctx key for the bound Sim. Private type so external
-// packages can't poke the binding without going through WithSim /
-// WithEffectiveNow.
+// simKey is the ctx key for the bound Sim. Its type is unexported, so other
+// packages can set the binding only through WithSim or WithEffectiveNow.
 type simKeyType struct{}
 
 var simKey = simKeyType{}
 
-// WithSim binds a full simulated-time context (instant + clock) to ctx.
-// Called where the clock is KNOWN: the ForClock/catchup drivers (which
-// hold the clock id and its frozen_time) and BindEffectiveNow (which
-// resolves an entity's pin). Every downstream Clock.Now(ctx) reads s.At,
-// and every audit emission on this ctx is stamped onto the sim axis
-// (audit_log.sim_effective_at / test_clock_id) by the Logger itself —
-// ADR-090 §5.
+// WithSim binds a full simulated-time context, instant and clock, to ctx.
+// Call it where the clock is known. The callers are the ForClock and
+// catch-up drivers, which hold the clock id and its frozen_time, and
+// BindEffectiveNow, which resolves an entity's pin. (Catch-up is the billing
+// for the time a test clock skipped.) Every Clock.Now(ctx) below reads s.At.
+// The audit Logger itself stamps every audit row on this ctx onto the sim
+// axis (ADR-090 §5).
 //
-// The contract is the one ADR-029 already established for time: "binding
-// at the boundary, inheritance below it." A new emitter does not have to
-// remember to stamp the sim axis — which is exactly why stamping was
-// partial while every emitter had to opt in by hand.
+// The contract is the one ADR-029 set for time: "binding at the boundary,
+// inheritance below it." So a new emitter does not have to remember to stamp
+// the sim axis.
 func WithSim(ctx context.Context, s Sim) context.Context {
 	s.At = s.At.UTC()
 	return context.WithValue(ctx, simKey, s)
 }
 
-// SimOf returns the bound simulated-time context. ok is true ONLY for a
-// complete binding on a real clock (see Sim.Simulated): a bare
-// WithEffectiveNow binding reports false, because its clock is unknown and
-// inventing one would fabricate evidence in an append-only log.
+// SimOf returns the bound simulated-time context. ok is true only for a
+// complete binding on a known test clock (see Sim.Simulated). A bare
+// WithEffectiveNow binding reports false: its clock is unknown, and
+// inventing one would put false evidence in an append-only log.
 func SimOf(ctx context.Context) (Sim, bool) {
 	if ctx == nil {
 		return Sim{}, false
@@ -147,19 +147,19 @@ func SimOf(ctx context.Context) (Sim, bool) {
 }
 
 // WithEffectiveNow binds an effective-now instant whose clock is unknown.
-// Every downstream Clock.Now(ctx) reads this value instead of wall-clock.
+// Every Clock.Now(ctx) below reads this value instead of wall-clock time.
 //
-// It deliberately CLEARS any clock id already bound on ctx: rebinding a
-// bare instant means "this path's time no longer comes from a clock I can
-// name," and carrying the previous clock id forward would stamp rows with
-// a clock the new instant does not belong to. Callers that know the clock
-// call WithSim.
+// It clears any clock id already bound on ctx, on purpose. A bare instant
+// means this path's time no longer comes from a clock it can name. Keeping
+// the old clock id would stamp rows with a clock the new instant does not
+// belong to. Callers that know the clock call WithSim.
 func WithEffectiveNow(ctx context.Context, t time.Time) context.Context {
 	return WithSim(ctx, Sim{At: t})
 }
 
 // EffectiveNow returns the bound instant and true when ctx carries any
-// binding (WithEffectiveNow or WithSim); zero time and false otherwise.
+// binding, from WithEffectiveNow or WithSim. Otherwise it returns the zero
+// time and false.
 func EffectiveNow(ctx context.Context) (time.Time, bool) {
 	if ctx == nil {
 		return time.Time{}, false
@@ -171,16 +171,15 @@ func EffectiveNow(ctx context.Context) (time.Time, bool) {
 	return s.At, true
 }
 
-// Now is the package-level shortcut for "the simulated time if ctx is
-// bound, wall-clock otherwise" — same semantics as Real().Now(ctx) but
-// with zero allocation overhead and no clock-field dep on the caller.
+// Now returns the bound instant if ctx has one, and wall-clock time
+// otherwise. It means the same as Real().Now(ctx), with no allocation and no
+// Clock field on the caller.
 //
-// Used by postgres stores and other infrastructure code that doesn't
-// own a Clock struct field but still needs ctx-aware timestamps.
-// Service-layer code should keep using s.clock.Now(ctx) so tests can
-// pin a Fake clock; stores read directly from ctx because their
-// production behavior is identical to Real() and tests bind ctx
-// directly.
+// Postgres stores and other infrastructure code use it: they own no Clock
+// field but still need timestamps that follow ctx. Service code should keep
+// using s.clock.Now(ctx), so tests can pin a Fake clock. Stores read ctx
+// directly because in production they behave as Real() does, and their
+// tests bind ctx directly.
 func Now(ctx context.Context) time.Time {
 	if t, ok := EffectiveNow(ctx); ok {
 		return t
@@ -188,31 +187,30 @@ func Now(ctx context.Context) time.Time {
 	return time.Now().UTC()
 }
 
-// Resolver maps an entity reference to its simulated-time context — the
-// clock it is pinned to and that clock's frozen_time, or a bare wall-clock
-// Sim (TestClockID "") when the entity is not pinned. Used at operator
-// entry points to bind ctx via BindEffectiveNow, and at boundary code
-// paths (Stripe webhook handlers, async workers) where there's no
-// inherited ctx binding.
+// Resolver maps an entity to its simulated-time context. That is the clock
+// the entity is pinned to and the clock's frozen_time, or a bare wall-clock
+// Sim (TestClockID "") when the entity is not pinned. Operator entry points
+// use it to bind ctx through BindEffectiveNow. So do boundary code paths
+// with no inherited binding, such as Stripe webhook handlers and async
+// workers.
 //
-// It returns the instant and the clock id TOGETHER, from one resolution,
-// because they are two halves of one fact: the audit sim axis stamped from
-// a clock id resolved separately from its instant is how you get a row
-// claiming "clock C at wall-clock now" (ADR-090 §5).
+// It returns the instant and the clock id together, from one resolution,
+// because they are two halves of one fact. A clock id resolved apart from
+// its instant can stamp an audit row that claims "clock C at wall-clock
+// now" (ADR-090 §5).
 //
-// Implemented by *billing.Engine. The platform/clock package owns the
-// interface to avoid an import cycle (every domain that needs binding
-// can depend on clock without depending on billing).
+// *billing.Engine implements it. The clock package owns the interface to
+// avoid an import cycle: every domain that needs a binding can depend on
+// clock without depending on billing.
 type Resolver interface {
 	SimForCustomer(ctx context.Context, tenantID, customerID string) (Sim, error)
 	SimForSubscription(ctx context.Context, tenantID, subscriptionID string) (Sim, error)
 	SimForInvoice(ctx context.Context, tenantID, invoiceID string) (Sim, error)
 }
 
-// Pin describes which entity to resolve effective-now from. Exactly
-// one of CustomerID / SubscriptionID / InvoiceID must be non-empty;
-// callers pick the most specific id available. TenantID is always
-// required.
+// Pin names the entity to resolve effective-now from. Exactly one of
+// CustomerID, SubscriptionID and InvoiceID must be set, and callers pick the
+// most specific id they have. TenantID is always required.
 type Pin struct {
 	TenantID       string
 	CustomerID     string
@@ -220,22 +218,20 @@ type Pin struct {
 	InvoiceID      string
 }
 
-// BindEffectiveNow resolves a Pin via the resolver and returns a ctx
-// carrying that entity's simulated-time context: its effective-now AND,
-// when the entity is clock-pinned, the clock id. On resolver error,
-// returns the original ctx unmodified — failing the operator's action on
-// a dangling pin is worse than stamping the wrong domain on an edge-case
-// row. The caller can log the error if they care; most don't.
+// BindEffectiveNow resolves p through r and returns a ctx carrying that
+// entity's simulated-time context: its effective-now and, when the entity is
+// pinned to a test clock, the clock id. On a resolver error it returns the
+// original ctx unchanged. Failing the operator's action on a dangling pin is
+// worse than stamping the wrong time domain on an edge-case row. The caller
+// can log the error if they care. Most don't.
 //
-// Binding the clock id here (not just the instant) is what makes audit
-// sim-axis stamping TOTAL: every emitter downstream of a pin resolution
-// inherits the clock, so no emitter has to know test clocks exist. The
-// name is unchanged because the call sites' intent is unchanged — "bind
-// this entity's time domain onto ctx"; the clock id is part of that
-// domain, and always was.
+// It binds the clock id as well as the instant, so every audit emitter below
+// a pin resolution inherits the clock, and every audit row is stamped on the
+// sim axis. No emitter has to know that test clocks exist. The name covers
+// both, because the clock id is part of the entity's time domain.
 //
-// The returned bool is true when the ctx now carries effective-now,
-// false when the binding was skipped (no resolver, no ids, or error).
+// The returned bool is true when the ctx now carries effective-now, and
+// false when the binding was skipped: no resolver, no ids, or an error.
 func BindEffectiveNow(ctx context.Context, r Resolver, p Pin) (context.Context, bool) {
 	if r == nil {
 		return ctx, false
@@ -257,25 +253,18 @@ func BindEffectiveNow(ctx context.Context, r Resolver, p Pin) (context.Context, 
 	if err != nil {
 		return ctx, false
 	}
-	// A nested resolution may REFINE the time domain. It may never ERASE one
-	// it was handed.
-	//
-	// Every resolver falls back to `Sim{At: e.clock.Now(ctx)}` — empty clock
-	// id — when it cannot resolve the pin (dangling sub, deleted clock, an
-	// unpinned customer). Those fallbacks return a NIL error, so without this
-	// guard we would bind them. Under an already-bound ctx that is actively
-	// destructive, because `clock.Now(ctx)` READS this binding: the fallback
-	// hands back the SIMULATED instant with no clock attached. Binding it
-	// keeps the in-simulation instant and drops the clock — SimOf() goes
-	// false, and every audit row emitted below this call silently loses its
-	// sim columns for the rest of the service call.
-	//
-	// That is the mirror image of the half-truth Sim exists to prevent. The
-	// resolvers' own comments warn about "clock C at wall-clock now"; this is
-	// "no clock, at simulated now", and it is the one the code could actually
-	// produce. Inside a catchup every entity being touched IS the clock's, so
-	// an unresolvable pin there is a lookup failure, never evidence that the
-	// work left the simulation.
+	// A nested resolution may refine the time domain, but never erase one it
+	// was handed. A resolver that cannot resolve the pin (a dangling
+	// subscription, a deleted clock, an unpinned customer) falls back to
+	// `Sim{At: e.clock.Now(ctx)}`, with no clock id and a nil error. Under a
+	// bound ctx, `clock.Now(ctx)` reads this binding, so the fallback is the
+	// simulated instant with no clock. Binding it would drop the clock:
+	// SimOf() would turn false, and every audit row below this call would
+	// lose its sim columns for the rest of the service call. That is "no
+	// clock, at simulated now", the mirror of the "clock C at wall-clock now"
+	// half-truth that Sim exists to prevent. Inside a catch-up every entity
+	// touched is the clock's, so an unresolved pin there is a failed lookup,
+	// never a sign that the work left the simulation.
 	if sim.TestClockID == "" {
 		if _, inherited := SimOf(ctx); inherited {
 			return ctx, true
@@ -283,14 +272,14 @@ func BindEffectiveNow(ctx context.Context, r Resolver, p Pin) (context.Context, 
 	}
 	// Bind at the boundary, inherit below it (ADR-029). On a test clock the
 	// resolver can only answer the clock's frozen_time, so a nested
-	// resolution of the SAME clock never knows more than the caller did. A
+	// resolution of the same clock never knows more than the caller did. A
 	// caller that bound an earlier instant on that clock did it on purpose:
 	// a cycle close at its boundary, a dunning retry at its slot, a trial
 	// flip at trial_end_at, a pause resume at resumes_at. Replacing that
-	// instant with frozen_time dated every effect below the rebind (an audit
-	// row, a pause start, a write-off) at the advance's target instead of
-	// the contracted instant. An inherited instant AFTER frozen_time is not
-	// one any caller can contract, so the resolution replaces it, and a
+	// instant with frozen_time would date every effect below the rebind (an
+	// audit row, a pause start, a write-off) at the advance's target, not at
+	// the instant the caller set. No caller can set an inherited instant
+	// after frozen_time on purpose, so the resolution replaces it. A
 	// different clock always wins.
 	if inherited, ok := SimOf(ctx); ok && inherited.TestClockID == sim.TestClockID && !inherited.At.After(sim.At) {
 		return ctx, true

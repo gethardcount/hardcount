@@ -1,13 +1,12 @@
-// Package listorder is the one rule for a list's ?sort and ?dir: a closed
-// set of sort keys, each naming the SQL column it orders by, and a direction
-// of asc or desc. An empty sort is the list's default order and an empty dir
-// is desc. Anything else is refused with errs.Invalid naming the allowed
-// values, so it answers 422 with the param set.
+// Package listorder is the one rule for a list's ?sort and ?dir. The sort
+// keys are a closed set, each naming the SQL column it orders by, and the
+// direction is asc or desc. An empty sort is the list's default order, and
+// an empty dir is desc. Anything else is refused with errs.Invalid naming
+// the allowed values, so it answers 422 with the param set.
 //
-// The lists used to map an unknown key to created_at and an unknown dir to
-// desc without a word: a typo or a stale bookmark came back in an order the
-// caller did not ask for, read as the order it did. A closed set is also
-// what keeps raw input out of the ORDER BY.
+// A silent default would return a typo or a stale bookmark in an order the
+// caller did not ask for, and the caller would read it as the order it asked
+// for. The closed set also keeps raw input out of the ORDER BY.
 package listorder
 
 import (

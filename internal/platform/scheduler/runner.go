@@ -1,20 +1,18 @@
-// Package scheduler hosts the standard tick-loop runner used by every
-// ticker-driven singleton worker in Hardcount. There are exactly five, and
-// `grep -rn "scheduler.Run("` is the authoritative list: billing (1h prod /
-// 5m local), dunning (same interval), webhook_outbox (2s), email_outbox (5s),
-// webhook_delivery (30s). The test-clock catchup worker is queue-driven, not
-// ticker-driven, so it does not use this runner.
+// Package scheduler hosts the standard tick-loop runner that every
+// ticker-driven singleton worker in Hardcount uses. The authoritative list
+// is `grep -rn "scheduler.Run("`. There are five: billing (1h in production,
+// 5m in local), dunning (the same interval), webhook_outbox (2s),
+// email_outbox (5s) and webhook_delivery (30s). The test-clock catch-up
+// worker is driven by a queue, not a ticker, so it does not use this runner.
 //
-// Every loop is leader-gated (ADR-114): a tick runs only when this replica
-// leads the role for that tick, on a ctx carrying the lease token the
-// role's claim funnel proves. The gate is a required parameter — a loop
-// cannot forget it — and the runner polls at min(interval, leader.MaxPoll)
+// Every loop is leader-gated (ADR-114). A tick runs only when this replica
+// leads the role for that tick, on a ctx carrying the lease token that the
+// role's claim statements prove. The gate is a required parameter, so a
+// loop cannot forget it. The runner polls at min(interval, leader.MaxPoll),
 // so a dead leader's role runs elsewhere within LeaseTTL + MaxPoll.
 //
-// Before this helper, every worker hand-rolled the same select-on-ticker
-// loop; copies drifted (heartbeat logging, no panic recovery). This package
-// consolidates the shape so each worker is ~3 lines and shares one place
-// for panic recovery, heartbeat logging and the leader gate.
+// The runner keeps each worker to about three lines, with one place for
+// panic recovery, heartbeat logging and the leader gate.
 package scheduler
 
 import (
@@ -26,28 +24,31 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 )
 
-// heartbeatThreshold marks the boundary between "slow" roles (that log at
-// INFO when they lead a tick) and "fast" roles (DEBUG — INFO per tick would
-// be log-volume noise).
+// heartbeatThreshold divides slow roles from fast ones. A slow role logs at
+// info level when it leads a tick. A fast role logs at debug level, because
+// an info line per tick would only be log-volume noise.
 const heartbeatThreshold = 1 * time.Minute
 
-// WorkFunc is the per-tick body. It must be safe to call repeatedly and
-// return cleanly on ctx cancellation — the ctx is cancelled with cause
-// leader.ErrLeaseLost if the lease cannot be kept. Errors are the
-// WorkFunc's to log.
+// WorkFunc is the per-tick body. It must be safe to call repeatedly, and it
+// must return cleanly when ctx is cancelled. The ctx is cancelled with cause
+// leader.ErrLeaseLost if the lease cannot be kept. A WorkFunc logs its own
+// errors.
 type WorkFunc func(ctx context.Context)
 
 // Run drives a leader-gated tick loop for role until ctx is cancelled.
 //
-// Every poll (min(interval, leader.MaxPoll)): onPoll fires if non-nil
-// (used by the billing loop to stamp this replica's liveness for
-// /health/ready — followers stamp too, which is today's contract); then
-// gate.Lead tries to take one tick of the role. Not due / held elsewhere /
-// paused → nothing happens. Led → workFn runs on the led ctx; a panic
-// unwinds through the gate, which releases the lease as NOT completed
-// (so the stall gauge ages), and is then recovered here and logged at
-// ERROR with the stack. A gate error logs at ERROR once per poll — the
-// existing per-tick posture, no rate limiter.
+// Each poll, every min(interval, leader.MaxPoll), does two things:
+//   - onPoll fires if it is not nil. The billing loop uses it to stamp this
+//     replica's liveness for /health/ready. Followers stamp too, which is
+//     the current contract.
+//   - gate.Lead tries to take one tick of the role. If the role is not due,
+//     is held elsewhere, or is paused, nothing happens. If this replica
+//     leads, workFn runs on the led ctx.
+//
+// A panic in workFn unwinds through the gate, which releases the lease as
+// not completed, so the stall gauge ages. Run then recovers the panic and
+// logs it at error level with the stack. A gate error is logged at error
+// level once per poll, with no rate limiter.
 func Run(ctx context.Context, role leader.Role, interval time.Duration, gate leader.Gate, workFn WorkFunc, onPoll func()) {
 	if gate == nil {
 		slog.Error("scheduler: no leader gate wired — refusing to run an ungated singleton loop", "role", role)
@@ -87,17 +88,18 @@ func Run(ctx context.Context, role leader.Role, interval time.Duration, gate lea
 	}
 }
 
-// leadOneTick runs one gate.Lead with the recover() AROUND it, not inside
+// leadOneTick runs one gate.Lead with the recover() around it, not inside
 // the work, so a panic in workFn unwinds through Lead. That is how the gate
-// learns the tick did not complete: a recover inside the work made Lead see
-// a normal return, record a completed tick, and keep the stall gauge fresh
-// while a panicking tick ran nothing every interval. Logs the recovered
-// value + a stack at ERROR (the frames are still on the stack inside a
-// deferred call); the caller's next poll fires normally. A WorkFunc that
-// runs its steps under Panics (billing, dunning) re-raises the first panic
-// itself, so this stack ends at Repanic; the panic's own stack is on the
-// first "step panicked; running the rest" line (each guard it passes on the
-// way up logs one).
+// learns the tick did not complete. A recover inside the work would make
+// Lead see a normal return and record a completed tick. The stall gauge
+// would then stay fresh while a panicking tick did nothing every interval.
+//
+// It logs the recovered value and a stack at error level. Inside a deferred
+// call, the panicking frames are still on the stack. The caller's next poll
+// fires normally. A WorkFunc that runs its steps under Panics (billing,
+// dunning) raises the first panic again itself, so this stack ends at
+// Repanic. The panic's own stack is on the first "step panicked; running the
+// rest" line, because each guard the panic passes on the way up logs one.
 func leadOneTick(ctx context.Context, role leader.Role, interval time.Duration, gate leader.Gate, workFn WorkFunc) (led bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {

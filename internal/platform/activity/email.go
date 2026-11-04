@@ -5,14 +5,15 @@ import (
 	"time"
 )
 
-// The one email vocabulary. Every surface that shows an email (the invoice
-// Activity card, the customer's Sent emails card) builds its line here, from
-// the outbox row, so an email reads the same wherever it appears: its name,
-// one outcome word, why it was not sent, and who sent it.
+// This file is the one email vocabulary. Every surface that shows an email
+// builds its line here, from the outbox row. Those surfaces are the invoice
+// Activity card and the customer's Sent emails card. Building every line here
+// makes an email read the same wherever it appears: its name, one outcome
+// word, why it was not sent, and who sent it.
 
-// Email names. Each is a noun, so a title reads as one event with its
-// outcome word after it: "Failed payment notice delivered", never "Payment
-// failed email failed".
+// emailNames maps an email type to its name. Each name is a noun, so a title
+// reads as one event with its outcome word after it: "Failed payment notice
+// delivered", never "Payment failed email failed".
 var emailNames = map[string]string{
 	"invoice":               "Invoice email",
 	"payment_receipt":       "Receipt email",
@@ -40,17 +41,18 @@ func EmailTypes() []string {
 	return out
 }
 
-// Email send failures the outcome can name in plain words. The email
-// adapter classifies the outbox row's error into one of these.
+// The SendFailure constants are the email send failures that an outcome can
+// name in plain words. The email adapter classifies an outbox row's error
+// into one of them.
 const (
 	SendFailureSMTPNotConfigured   = "smtp_not_configured"
 	SendFailureRecipientSuppressed = "recipient_suppressed"
 	SendFailureInvalidRecipient    = "invalid_recipient"
 )
 
-// skipReasons says why Hardcount did not send an email: the state its invoice
-// reached while the email sat queued, as the outbox row records it
-// (email_outbox.skip_reason).
+// skipReasons says why Hardcount did not send an email. The reason is the
+// state the invoice reached while the email sat queued, as the outbox row
+// records it (email_outbox.skip_reason).
 var skipReasons = map[string]string{
 	"paid":          "The invoice was already paid",
 	"voided":        "The invoice was already voided",
@@ -59,9 +61,9 @@ var skipReasons = map[string]string{
 	"gone": "The invoice no longer exists",
 }
 
-// skippedBeforeTheReason is the reason of a row skipped before the outbox
-// recorded which state the invoice reached: all it can know is that the
-// invoice was in a final state.
+// skippedBeforeTheReason is the reason for a row skipped before the outbox
+// recorded which state the invoice reached. All such a row can say is that
+// the invoice was in a final state.
 const skippedBeforeTheReason = "The invoice was already closed"
 
 // SkipReasonWords returns the words for a recorded skip reason, and false
@@ -89,7 +91,7 @@ type Email struct {
 	Trigger string
 	// To is the recipient.
 	To string
-	// CreatedAt is when the row was queued; DispatchedAt when the mail
+	// CreatedAt is when the row was queued, and DispatchedAt is when the mail
 	// server took it. Both are real-world instants.
 	CreatedAt    time.Time
 	DispatchedAt *time.Time
@@ -153,8 +155,8 @@ func sendFailureProblem(failure string) string {
 	return "The customer did not get this email."
 }
 
-// EmailCause is a payment setup email's cause, from the trigger it was
-// enqueued with; empty for a trigger with no words.
+// EmailCause returns a payment setup email's cause, from the trigger it was
+// queued with. It returns "" for a trigger with no words.
 func EmailCause(trigger string) string {
 	switch trigger {
 	case "finalize_no_pm":
@@ -162,18 +164,18 @@ func EmailCause(trigger string) string {
 	case "auto_charge_retry_no_pm":
 		return "A charge found no payment method"
 	case "operator_resend":
-		// Who resent it is not recorded with the row yet; the actor replaces
-		// this once it is.
+		// The row does not record who resent it yet. Once it does, the actor
+		// replaces this word.
 		return "Resent"
 	}
 	return ""
 }
 
-// emailActor names who sent an email when the email itself proves it:
-// receipts, failed-payment notices and payment-recovery emails are only ever
-// sent by Hardcount, and so is a setup email whose trigger is automatic. An
-// invoice or credit-note email, or a resend, is an operator's act whose actor
-// is not recorded with the row yet.
+// emailActor names who sent an email when the email itself proves it. Only
+// Hardcount sends receipts, failed-payment notices and payment-recovery
+// emails, and a setup email whose trigger is automatic. An invoice or
+// credit-note email, or a resend, is an operator's act, and the row does not
+// record that actor yet.
 func emailActor(emailType, trigger string) *Actor {
 	switch emailType {
 	case "payment_receipt", "payment_failed", "dunning_warning", "dunning_escalation":
@@ -186,11 +188,11 @@ func emailActor(emailType, trigger string) *Actor {
 	return nil
 }
 
-// EmailLine is an email's line: its name and outcome word, then in the meta
-// the reason it was not sent, a setup email's cause, the objects it is about
-// (about: links to the invoice or credit note it names, when those are not
-// the page's own entity), and who it went to. ok is false for an email type
-// no activity surface shows.
+// EmailLine returns an email's line. The title is its name and outcome word.
+// The meta line holds, in order: the reason it was not sent, a setup email's
+// cause, the objects it is about, and who it went to. about holds links to
+// the invoice or credit note the email names, when those are not the page's
+// own entity. ok is false for an email type that no activity surface shows.
 func EmailLine(e Email, about ...Segment) (Line, bool) {
 	name, ok := EmailName(e.Type)
 	if !ok {
@@ -220,9 +222,9 @@ func EmailLine(e Email, about ...Segment) (Line, bool) {
 	return l, true
 }
 
-// EmailClause is an email's one appearance as a clause in another row's meta
-// line, for the payment-recovery emails that fold into the retry and
-// retries-ran-out rows: "Payment reminder email delivered".
+// EmailClause returns an email as a clause in another row's meta line:
+// "Payment reminder email delivered". It is for the payment-recovery emails
+// that fold into the retry and retries-ran-out rows.
 func EmailClause(e Email) string {
 	name, ok := EmailName(e.Type)
 	if !ok {
@@ -232,9 +234,9 @@ func EmailClause(e Email) string {
 }
 
 // EmailInstant places an email on the entity's calendar (ADR-104). The
-// instant is the one on the entity's test clock that caused the send, and
-// the real send time (when the mail server took it, else when it was queued)
-// is its Recorded time. An email not caused on a test clock is dated at its
+// instant is the one on the entity's test clock that caused the send. The
+// real send time is its Recorded time: when the mail server took it, or else
+// when it was queued. An email not caused on a test clock is dated at its
 // real send time and is not pinned.
 func EmailInstant(e Email) (occurred, recorded time.Time, pinned bool) {
 	wall := e.CreatedAt
