@@ -5,37 +5,34 @@ import (
 	"time"
 )
 
-// Exhausting a dunning run settles TWO independent questions, and ADR-112
-// gives each its own column: what happens to the SUBSCRIPTION, and what
-// happens to the unpaid INVOICE.
+// A dunning run is Hardcount's automatic collection of one unpaid invoice:
+// it retries the charge on a schedule. When the retries run out, the run is
+// exhausted, which settles two independent questions. ADR-112 gives each its
+// own column: what happens to the subscription, and what happens to the
+// unpaid invoice.
 //
-// They were one enum until 2026-08-05, which made Stripe's own default
-// outcome — cancel the subscription AND write off the invoice —
-// inexpressible, and left the debt permanently open in the three of four
-// values that were not `mark_uncollectible`. Every peer separates them
-// (ADR-112 carries the verbatim quotes): Stripe derives the invoice
-// write-off from the subscription setting, Recurly pairs an invoice
-// auto-fail flag with an expire-subscription flag, Chargebee configures
-// "the action to be performed on the subscription ... and invoice".
+// A single setting for both cannot express Stripe's own default outcome:
+// cancel the subscription and write off the invoice. Stripe, Recurly and
+// Chargebee all keep the two apart (ADR-112 quotes each).
 //
-// The old `manual_review` value is not missing — it IS
-// (SubActionNone, InvActionNone), matching Chargebee's "remain active"
-// + "not paid".
+// The old `manual_review` value is (SubActionNone, InvActionNone), which
+// matches Chargebee's "remain active" + "not paid".
 
 // DunningSubscriptionAction is what exhaustion does to the subscription
-// behind the unpaid invoice. No-op when the invoice has no subscription
-// (a one-off), which the escalation copy must then not claim.
+// behind the unpaid invoice. It does nothing when the invoice has no
+// subscription (a one-off invoice), and the escalation copy must then not
+// claim it did.
 type DunningSubscriptionAction string
 
 const (
-	// SubActionNone leaves the subscription alone — the operator handles
-	// it. Stripe "leave past_due", Chargebee "remain active".
+	// SubActionNone leaves the subscription alone, for the operator to
+	// handle. It matches Stripe's "leave past_due" and Chargebee's "remain
+	// active".
 	SubActionNone DunningSubscriptionAction = "none"
 	// SubActionPause calls subscription.PauseCollection
-	// (behavior=keep_as_draft): the cycle keeps drafting invoices, but
+	// (behavior=keep_as_draft). The cycle keeps drafting invoices, but
 	// nothing is charged and no dunning starts until an operator resumes.
-	// Matches Stripe's pause_collection — NOT the hard PauseAtomic, which
-	// silently skipped invoice generation and was replaced for parity.
+	// It matches Stripe's pause_collection.
 	SubActionPause DunningSubscriptionAction = "pause"
 	// SubActionCancel cancels the subscription outright.
 	SubActionCancel DunningSubscriptionAction = "cancel"
@@ -46,26 +43,27 @@ const (
 type DunningInvoiceAction string
 
 const (
-	// InvActionNone leaves the invoice finalized and due. Honest, and the
-	// default: nobody has decided this is bad debt yet. It does mean the
-	// receivable stays open until a human closes or collects it, which the
-	// policy form says in as many words.
+	// InvActionNone leaves the invoice finalized and due. It is the default,
+	// because nobody has decided yet that this is bad debt. The receivable
+	// (the money the customer owes) stays open until a person closes or
+	// collects it, and the policy form says so in plain words.
 	InvActionNone DunningInvoiceAction = "none"
 	// InvActionMarkUncollectible writes the invoice off as bad debt. The
-	// receivable closes; the invoice stays on the books for audit and stays
-	// settleable out of band (ADR-110).
+	// receivable closes. The invoice stays on the books for audit, and it
+	// can still be settled out of band (ADR-110).
 	//
-	// Auto-VOID and Chargebee's auto-"Reverse" (mark paid + adjustment
-	// credit note) are deliberately NOT offered — see ADR-112. Void asserts
-	// the sale never happened and reverses tax (ADR-111); a machine making
-	// that assertion about delivered usage is precisely the bad money event
-	// the governing rule refuses to CREATE.
+	// Auto-void and Chargebee's auto-"Reverse" (mark paid plus an adjustment
+	// credit note) are not offered, on purpose (ADR-112). Void asserts that
+	// the sale never happened, and it reverses tax (ADR-111). A machine
+	// making that assertion about delivered usage creates exactly the bad
+	// money event the governing rule refuses to create (see
+	// RecoveryWarnsOnOfflinePayment).
 	InvActionMarkUncollectible DunningInvoiceAction = "mark_uncollectible"
 )
 
 // Valid reports whether the action is a known enum value. UpsertPolicy
-// refuses anything else rather than defaulting — an unrecognized action
-// silently becoming "none" would quietly stop closing receivables the
+// refuses any other value instead of using a default. An unknown action
+// that silently became "none" would stop closing the receivables the
 // operator asked to close.
 func (a DunningSubscriptionAction) Valid() bool {
 	return a == SubActionNone || a == SubActionPause || a == SubActionCancel
@@ -77,27 +75,27 @@ func (a DunningInvoiceAction) Valid() bool {
 	return a == InvActionNone || a == InvActionMarkUncollectible
 }
 
-// DunningEscalationOutcome is what a terminal exhaustion actually did to
-// ONE invoice — which is not the same as what its policy asked for. Each
-// field means "the requested end state holds", so it stays true across a
-// re-attempt that skipped a half already in place, and false when the
-// action could not apply here at all (a one-off invoice has no
-// subscription to cancel; an unwired mover cannot act).
+// DunningEscalationOutcome is what a terminal exhaustion actually did to one
+// invoice, which is not always what its policy asked for. Each field means
+// "the requested end state holds". So a field stays true across a
+// re-attempt that skipped a half already in place. It is false when the
+// action could not apply here at all: a one-off invoice has no subscription
+// to cancel, and an unwired mover cannot act.
 //
-// The escalation email, the escalated timeline row, and the outbound
-// webhook all render THIS rather than the policy. A debtor must never
-// read "your subscription has been canceled" when nothing was.
+// The escalation email, the escalated timeline row and the outbound webhook
+// all show this outcome, not the policy. A debtor must never read "your
+// subscription has been canceled" when nothing was canceled.
 type DunningEscalationOutcome struct {
 	SubscriptionPaused   bool
 	SubscriptionCanceled bool
 	InvoiceWrittenOff    bool
 }
 
-// Reason is the stable machine token stamped on the escalated event and
-// the outbound webhook. It describes OUTCOMES rather than echoing the
-// policy: "" means the run escalated with nothing changed, which is the
-// honest reading of a (none, none) policy and of a one-off invoice under
-// a cancel policy alike.
+// Reason is the stable machine token stamped on the escalated event and the
+// outbound webhook. It describes outcomes and does not echo the policy. An
+// empty string means the run escalated and nothing changed. That is the
+// true reading both of a (none, none) policy and of a one-off invoice under
+// a cancel policy.
 func (o DunningEscalationOutcome) Reason() string {
 	var parts []string
 	if o.SubscriptionPaused {
@@ -117,6 +115,8 @@ func (o DunningEscalationOutcome) Any() bool {
 	return o.SubscriptionPaused || o.SubscriptionCanceled || o.InvoiceWrittenOff
 }
 
+// DunningRunState is where a dunning run stands: active, resolved, or
+// escalated (every retry failed and the final action was taken).
 type DunningRunState string
 
 const (
@@ -125,28 +125,30 @@ const (
 	DunningEscalated DunningRunState = "escalated"
 )
 
-// DunningStartCause is WHY collection needed a dunning run — recorded
-// at write time by the caller that starts the run (each one knows the
-// cause precisely; deriving it later from invoice state re-creates the
-// interpretation-drift class ADR-101 killed for billing). Stamped on
-// the run and its dunning_started event, and rendered on the invoice
-// timeline so the failure story survives after the attention banner
-// clears.
+// DunningStartCause is why collection needed a dunning run. The caller that
+// starts the run records it at write time, because each caller knows the
+// cause exactly. Working it out later from invoice state would bring back
+// the kind of drift between readers that ADR-101 removed for billing. The
+// cause is stamped on the run and its dunning_started event, and the
+// invoice timeline shows it, so the failure story survives after the
+// attention banner clears.
 type DunningStartCause string
 
 const (
-	// A real charge was attempted and failed (interactive decline,
-	// auto-charge decline, or the failed-invoice backfill sweep).
+	// DunningCausePaymentFailed means a real charge was attempted and
+	// failed: an interactive decline, an auto-charge decline, or the
+	// failed-invoice backfill sweep.
 	DunningCausePaymentFailed DunningStartCause = "payment_failed"
-	// No usable payment method existed, so nothing was ever charged —
-	// the card-less "reminder cycle" enrollment. Rendering a "payment
-	// failed" row for these would be a lie: no payment happened.
+	// DunningCauseNoPaymentMethod means no usable payment method existed, so
+	// nothing was ever charged. This is the card-less "reminder cycle"
+	// enrollment. A "payment failed" row for it would be false, because no
+	// payment happened.
 	DunningCauseNoPaymentMethod DunningStartCause = "no_payment_method"
 )
 
 // DunningRetryReasonCardRefused is the reason on a retry_attempted event for
-// a scheduled retry that charged nothing: the bank had refused the
-// customer's default card for good on this invoice (ErrCardNeedsReplacing,
+// a scheduled retry that charged nothing: the bank had permanently refused
+// the customer's default card on this invoice (ErrCardNeedsReplacing,
 // #966). The attempt counts, and the timeline shows it as not charged, the
 // way it shows a retry with no card (DunningCauseNoPaymentMethod).
 const DunningRetryReasonCardRefused = "card_refused"
@@ -170,13 +172,14 @@ const DunningRetryReasonBelowMinimum = BelowMinimumCode
 // carrying the PaymentIntent; this row carries none.
 const DunningRetryReasonPaymentProcessing = "payment_processing"
 
-// Valid reports whether the cause is a known enum value — StartDunning
-// refuses anything else (no-silent-fallbacks: an unlabeled run would
-// re-introduce the hardcoded-reason lie this type exists to end).
+// Valid reports whether the cause is a known enum value. StartDunning
+// refuses any other value instead of using a default. An unlabeled run would
+// bring back the false hardcoded reason that this type exists to end.
 func (c DunningStartCause) Valid() bool {
 	return c == DunningCausePaymentFailed || c == DunningCauseNoPaymentMethod
 }
 
+// DunningEventType names one event in a dunning run's history.
 type DunningEventType string
 
 const (
@@ -186,46 +189,47 @@ const (
 	DunningEventResolved       DunningEventType = "resolved"
 )
 
+// DunningResolution is how a dunning run ended, or why it is held for a
+// re-attempt.
 type DunningResolution string
 
 const (
 	ResolutionPaymentRecovered DunningResolution = "payment_recovered"
-	// ResolutionInvoiceVoided: the run closed because its invoice was
-	// VOIDED — annulled, applied credits reversed, collection stopped at
-	// Stripe. Written by the operator's "Void invoice" resolution, by the
-	// invoice-void handler, and by the engine's terminal floor when it finds
-	// an already-voided invoice. ResolutionInvoiceNotCollectible names a
-	// write-off, so the column always says which of the two happened.
+	// ResolutionInvoiceVoided means the run closed because its invoice was
+	// voided: annulled, with applied credits reversed and collection stopped
+	// at Stripe. The operator's "Void invoice" resolution writes it, and so
+	// do the invoice-void handler and the engine's terminal floor when it
+	// finds an invoice already voided. ResolutionInvoiceNotCollectible names
+	// a write-off, so the column always says which of the two happened.
 	ResolutionInvoiceVoided    DunningResolution = "invoice_voided"
 	ResolutionRetriesExhausted DunningResolution = "retries_exhausted"
-	// ResolutionInvoiceNotCollectible is the operator-driven equivalent
-	// of the automated MarkUncollectible final-action. Picking this in
-	// the resolve-dunning dialog records the run as resolved AND flips
-	// the underlying invoice to status=uncollectible (bad debt). Same
-	// downstream side-effects as the automated path — Stripe-parity
-	// "Mark uncollectible" surfaced on the dunning resolve flow.
+	// ResolutionInvoiceNotCollectible is the operator's version of the
+	// automatic MarkUncollectible final action. Picking it in the
+	// resolve-dunning dialog records the run as resolved, and it also moves
+	// the invoice to status=uncollectible (bad debt). The side effects are
+	// the same as on the automatic path. It is Stripe's "Mark
+	// uncollectible", offered in the dunning resolve flow.
 	ResolutionInvoiceNotCollectible DunningResolution = "invoice_not_collectible"
-	// ResolutionActionFailed marks a run whose terminal action
-	// (pause / cancel / mark-uncollectible) FAILED at exhaustion — a
-	// Stripe blip, a conflicting state, a DB error. The run is left
-	// state=active (NOT escalated) with next_action_at set so the due-run
-	// pickers re-attempt the action, rather than recording a clean
-	// "escalated" beside an invoice/sub that never actually got closed.
+	// ResolutionActionFailed marks a run whose terminal action (pause,
+	// cancel or mark-uncollectible) failed at exhaustion, for example on a
+	// Stripe blip, a conflicting state or a database error. The run stays
+	// state=active, not escalated, with next_action_at set, so the due-run
+	// pickers re-attempt the action. Otherwise the run would record a clean
+	// "escalated" beside an invoice or subscription that was never closed.
 	ResolutionActionFailed DunningResolution = "action_failed"
-	// ResolutionAmountBelowMinimum: a charge on the run's invoice got Stripe's
-	// "below the minimum charge" refusal (ErrBelowMinimumCharge). No retry
-	// can collect that amount by card, so recovery ends here instead of
-	// running out its retries and its final action; the invoice stays open
-	// for the operator.
+	// ResolutionAmountBelowMinimum means a charge on the run's invoice got
+	// Stripe's "below the minimum charge" refusal (ErrBelowMinimumCharge). No
+	// retry can collect that amount by card. So recovery ends here, without
+	// running out its retries and its final action, and the invoice stays
+	// open for the operator.
 	ResolutionAmountBelowMinimum DunningResolution = BelowMinimumCode
 )
 
-// DunningPolicy is a named template that drives the retry state
-// machine for one or more customers (ADR-036, campaigns model). One
-// is_default=true policy per (tenant, livemode); customers without an
-// explicit `dunning_policy_id` assignment inherit the default. Mirrors
-// the Lago / Recurly named-campaigns shape verified during the 2026-
-// 05-16 industry research.
+// DunningPolicy is a named template that drives the retry state machine for
+// one or more customers (ADR-036, campaigns model). There is one
+// is_default=true policy per (tenant, livemode). A customer without an
+// explicit `dunning_policy_id` inherits the default. The shape mirrors the
+// named campaigns of Lago and Recurly.
 type DunningPolicy struct {
 	ID        string `json:"id"`
 	TenantID  string `json:"tenant_id,omitempty"`
@@ -239,11 +243,11 @@ type DunningPolicy struct {
 	// RetryDays is the whole schedule: the days to wait before each retry.
 	// The first wait counts from the failed payment, or, with no card on
 	// file, from the collection that found none (StartDunning's anchor).
-	// Each later one counts from the retry before it, so [3, 4, 7] retries
-	// on day 3, 7 and 14. The
-	// number of retries is its length. A day is 24 hours.
+	// Each later wait counts from the retry before it, so [3, 4, 7] retries
+	// on day 3, 7 and 14. The number of retries is its length. A day is 24
+	// hours.
 	RetryDays []int `json:"retry_days"`
-	// The two terminal decisions (ADR-112). Both are always present; the
+	// The two terminal decisions (ADR-112). Both are always present. The
 	// (none, none) pair is the old `manual_review`.
 	FinalSubscriptionAction DunningSubscriptionAction `json:"final_subscription_action"`
 	FinalInvoiceAction      DunningInvoiceAction      `json:"final_invoice_action"`
@@ -261,10 +265,9 @@ const (
 // Retries is how many retries the policy makes.
 func (p DunningPolicy) Retries() int { return len(p.RetryDays) }
 
-// WaitBeforeRetry is how long retry n (1-based) waits: after the failed
-// payment (or the collection that found no card) for retry 1, after retry
-// n-1 for the others. ok is false when the
-// policy has no retry n.
+// WaitBeforeRetry is how long retry n (1-based) waits. Retry 1 waits after
+// the failed payment (or the collection that found no card), and each other
+// retry waits after retry n-1. ok is false when the policy has no retry n.
 func (p DunningPolicy) WaitBeforeRetry(n int) (wait time.Duration, ok bool) {
 	if n < 1 || n > len(p.RetryDays) {
 		return 0, false
@@ -272,6 +275,8 @@ func (p DunningPolicy) WaitBeforeRetry(n int) (wait time.Duration, ok bool) {
 	return time.Duration(p.RetryDays[n-1]) * 24 * time.Hour, true
 }
 
+// InvoiceDunningRun is one dunning run: the collection of one unpaid invoice
+// under one policy, with its attempts, its next action and its state.
 type InvoiceDunningRun struct {
 	ID            string            `json:"id"`
 	TenantID      string            `json:"tenant_id,omitempty"`
@@ -289,53 +294,53 @@ type InvoiceDunningRun struct {
 	CreatedAt     time.Time         `json:"created_at"`
 	UpdatedAt     time.Time         `json:"updated_at"`
 
-	// Denormalized for list rendering (saves N round-trips for the
-	// /dunning page rendering invoice number / amount due / currency
-	// per row). Populated by the LEFT JOIN in ListRuns; empty/zero
-	// when the joined invoice can't be resolved (deleted, RLS gap).
+	// The invoice number, amount due and currency are copied in for the
+	// /dunning list, which saves one read per row. The LEFT JOIN in ListRuns
+	// fills them. They are empty or zero when the joined invoice cannot be
+	// read (deleted, or hidden by RLS).
 	InvoiceNumber    string `json:"invoice_number,omitempty"`
 	InvoiceAmountDue int64  `json:"invoice_amount_due_cents,omitempty"`
 	InvoiceCurrency  string `json:"invoice_currency,omitempty"`
 
-	// EffectiveNow is the owning customer's test-clock frozen_time when
-	// the run is on a clock-pinned sub. Frontend uses this as the
-	// "now" baseline for relative-time rendering — wall-clock would
-	// surface "overdue" on every row whose next_action_at sits in
-	// frozen-time domain (e.g. 2024-02 while wall-clock is 2026).
-	// Nil for wall-clock runs (the relative-time renderer falls back
-	// to Date.now()). Authoritative; replaces the prior client-side
-	// 24h-divergence heuristic.
+	// EffectiveNow is the owning customer's test-clock frozen_time when the
+	// run is on a clock-pinned subscription (one whose customer is on a test
+	// clock). The frontend uses it as "now" for relative times. Wall-clock
+	// time would show "overdue" on every row whose next_action_at is in the
+	// clock's time (for example 2024-02 while the wall clock is in 2026). It
+	// is nil for wall-clock runs, and the relative-time renderer then uses
+	// Date.now(). The server's value is authoritative.
 	EffectiveNow *time.Time `json:"effective_now,omitempty"`
-	// TestClockID is the owning customer's clock when pinned — drives
-	// the amber test-clock badge server-authoritatively (the prior
-	// client-side subscription-map heuristic lost the badge on
-	// one-off-invoice runs and past page 1).
+	// TestClockID is the owning customer's clock when pinned. The server
+	// sets it, so the amber test-clock badge shows on every run, one-off
+	// invoices and later pages included.
 	TestClockID string `json:"test_clock_id,omitempty"`
 	// MaxRetryAttempts is how many retries the bound policy makes (the
-	// length of its retry_days), read with the run on the list reads
-	// (ListRuns, ListRunsByInvoices); 0 where it was not read. The policy
-	// row is read every tick, so this is the limit the run's next tick
-	// applies.
+	// length of its retry_days). The list reads (ListRuns,
+	// ListRunsByInvoices) read it with the run, and it is 0 where it was not
+	// read. The policy row is read every tick, so this is the limit the
+	// run's next tick applies.
 	MaxRetryAttempts int `json:"max_retry_attempts,omitempty"`
 }
 
-// RetryScheduled reports whether a charge retry is still to come: the run
-// is active, not paused, and has attempts left under its policy. A run with
-// every attempt used only runs its final action next, whether that action
-// waits for the invoice grace, is re-attempted after it failed, or the
-// policy's schedule was shortened after the run started. A run read without its
-// policy (MaxRetryAttempts 0) reports false: no retry is promised.
+// RetryScheduled reports whether a charge retry is still to come: the run is
+// active, not paused, and has attempts left under its policy. A run with
+// every attempt used only runs its final action next. That holds whether
+// the action waits for the invoice grace, is re-attempted after it failed,
+// or the policy's schedule was shortened after the run started. A run read
+// without its policy (MaxRetryAttempts 0) reports false: no retry is
+// promised.
 func (r InvoiceDunningRun) RetryScheduled() bool {
 	return r.State == DunningActive && !r.Paused && r.AttemptCount < r.MaxRetryAttempts
 }
 
-// CustomerDunningOverride was removed in ADR-036. The partial-field
-// override (override the retry count, the first wait and the terminal
-// action but inherit the rest of the schedule) had no industry precedent (Stripe / Lago / Orb /
-// Recurly all use named templates with full assignment, verified
-// 2026-05-16). Per-customer differentiation now flows through
-// `customers.dunning_policy_id` referencing a DunningPolicy row.
+// There is no per-customer dunning override (ADR-036). A partial override
+// (the retry count, the first wait and the terminal action, with the rest
+// of the schedule inherited) has no industry precedent. Stripe, Lago, Orb
+// and Recurly all assign whole named templates. A customer gets its own
+// schedule through `customers.dunning_policy_id`, which names a
+// DunningPolicy row.
 
+// InvoiceDunningEvent is one entry in a dunning run's history.
 type InvoiceDunningEvent struct {
 	ID           string           `json:"id"`
 	RunID        string           `json:"run_id"`
@@ -347,8 +352,10 @@ type InvoiceDunningEvent struct {
 	AttemptCount int              `json:"attempt_count"`
 	Metadata     map[string]any   `json:"metadata,omitempty"`
 	CreatedAt    time.Time        `json:"created_at"`
-	// RecordedAt is the real-world INSERT instant (ADR-104 Invariant A):
-	// CreatedAt follows the entity's calendar (simulated during catchup,
-	// ADR-030), so this is the row's only wall stamp. Nil pre-0164.
+	// RecordedAt is the real-world instant of the INSERT (ADR-104
+	// Invariant A). CreatedAt follows the entity's calendar, which is
+	// simulated during catch-up (ADR-030). Catch-up is the work Hardcount
+	// does after a test clock moves forward. So RecordedAt is the row's only
+	// wall-clock stamp. It is nil on rows written before migration 0164.
 	RecordedAt *time.Time `json:"recorded_at,omitempty"`
 }
