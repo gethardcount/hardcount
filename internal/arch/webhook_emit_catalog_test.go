@@ -44,12 +44,13 @@ import (
 // A site is a call that queues a fixed event type after the commit: a
 // standalone sink call with a constant, or a call of a helper. A helper is a
 // function whose only calls queue a fixed event type, such as
-// billing.Engine.DispatchInvoiceFinalized. Its caller decides to send the
-// event, so the caller holds the site. The test does not see a new call of a
-// function that holds a site and does other work too, such as
-// invoice.Service.finalize or invoice.Service.AfterVoid: the call reaches a
-// site already counted. A PR that moves such a site must list that
-// function's callers in its site-set.
+// billing.Engine.DispatchInvoiceFinalized, so each caller of a helper holds a
+// site too. The test does not see a new call of a function that holds a site
+// and does other work too, such as invoice.Service.finalize or
+// invoice.Service.AfterVoid: the call reaches a site already counted. A PR
+// that moves such a site must list that function's callers in its site-set.
+// The walk follows calls, so a helper passed as a function value is not
+// followed.
 
 // webhookSinkNames are the webhook package's entry points that write an
 // event to the outbox or dispatch it.
@@ -69,10 +70,12 @@ var standaloneSinkNames = map[string]bool{"Dispatch": true, "EnqueueStandalone":
 // type leaves the list, mark it "Always sent" in docs/api/webhook-events.md
 // (TestAlwaysSentMarksMatchTheBacklog checks the two agree).
 var standaloneWebhookBacklog = map[string]int{
+	"billing.Engine.DispatchInvoiceFinalized invoice.finalized":                         1,
 	"billing.Engine.FinalizeOnCreateInvoice invoice.finalized":                          1,
 	"billing.Engine.applyDueScheduledPlanChanges subscription.pending_change.applied":   1,
 	"billing.Engine.billFinalOnImmediateCancelImpl invoice.finalized":                   1,
 	"billing.Engine.billOnePeriod invoice.finalized":                                    1,
+	"billing.Engine.dispatchInvoiceFinalized invoice.finalized":                         1,
 	"billing.Engine.fireThreshold invoice.finalized":                                    1,
 	"billing.Engine.fireThreshold subscription.threshold_crossed":                       1,
 	"customer.Service.MarkEmailBounced customer.email_bounced":                          1,
@@ -94,6 +97,7 @@ var standaloneWebhookBacklog = map[string]int{
 	"subscription.Handler.atomicUpdateItemWithProration invoice.finalized":              1,
 	"subscription.Handler.cancelPendingItemChange subscription.pending_change.canceled": 1,
 	"subscription.Handler.clearScheduledCancel subscription.cancel_cleared":             1,
+	"subscription.Handler.dispatchProrationFinalized invoice.finalized":                 1,
 	"subscription.Handler.extendTrial subscription.trial_extended":                      1,
 	"subscription.Handler.handleItemProration invoice.finalized":                        1,
 	"subscription.Handler.pauseCollection subscription.collection_paused":               1,
@@ -491,7 +495,7 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 	}
 	for _, c := range calls {
 		fn := callee(c)
-		if fn == nil || helpers[fn] == nil || c.encl == nil || helpers[c.encl] != nil {
+		if fn == nil || helpers[fn] == nil || c.encl == nil {
 			continue
 		}
 		pos := c.pkg.Fset.Position(c.expr.Pos())
@@ -519,8 +523,7 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 					if !domain.KnownWebhookEventTypes[v] {
 						problems = append(problems, where+": sends "+v+", which is not in domain.KnownWebhookEventTypes (an endpoint that names it gets 422 unknown event type)")
 					}
-					// A helper's own site is counted at its callers.
-					if standalone[fn][idx] && c.encl != nil && helpers[c.encl] == nil {
+					if standalone[fn][idx] && c.encl != nil {
 						addSite(c, where, v)
 					}
 				}
@@ -586,7 +589,7 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 		helperNames = append(helperNames, fn.Pkg().Name()+"."+funcName(fn))
 	}
 	sort.Strings(helperNames)
-	t.Logf("%d helpers, counted at their callers: %s", len(helperNames), strings.Join(helperNames, ", "))
+	t.Logf("%d helpers, whose callers hold sites too: %s", len(helperNames), strings.Join(helperNames, ", "))
 	var names []string
 	for fn := range sinks {
 		names = append(names, fn.Pkg().Name()+"."+funcName(fn))
