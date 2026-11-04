@@ -138,6 +138,9 @@ func TestE2E_OffSessionCharge_BankNeedsCustomerToConfirm(t *testing.T) {
 	// A configured server queues customer emails, so each one shows up in the
 	// outbox.
 	t.Setenv("SMTP_HOST", "smtp.needs-confirm.invalid")
+	// A setup session with no return_url needs the dashboard address; it has
+	// no default.
+	t.Setenv("CUSTOMER_PORTAL_URL", "https://app.needs-confirm.test")
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
 	defer ts.Close()
 

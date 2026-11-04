@@ -19,12 +19,17 @@ original text.
 
 ## [Unreleased]
 
+**Before upgrading:**
+
+- Set `HOSTED_INVOICE_BASE_URL`, `CUSTOMER_PORTAL_URL` and `PAYMENT_UPDATE_RETURN_URL`, in every environment: none has a default any more. While one is unset, the flow it serves is refused instead of sending the customer to `http://localhost:5173`. The hosted invoice page shows no Pay button, setup links answer 409 `return_address_not_set`, and the "add a payment method" email is not sent. Saved-card charges and retries are unaffected. A quick-start `.env` made earlier lacks two of them: add the `HOSTED_INVOICE_BASE_URL` and `PAYMENT_UPDATE_RETURN_URL` lines `quickstart.sh` now writes ([settings](docs/settings.md)).
+
 ### Changed
 
 - **The user docs read more clearly.** About 170 places across the concept pages, guides, API pages, self-host pages, runbooks and the API reference's descriptions: dense sentences split, terms defined where they are first used, and one name for each thing (the reconciler, the charge hold, a lost result, a spend threshold, a usage-only key, an account). Facts are unchanged. ([#1585](https://github.com/gethardcount/hardcount/pull/1585))
 
 ### Fixed
 
+- **A customer is no longer sent to `http://localhost:5173` after paying or saving a card.** With one of the three return addresses unset, Stripe sent the customer to the local development address in every environment, so in production they landed on "site can't be reached". Each flow now refuses before calling Stripe, and the invoice notices say which setting to set. ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM))
 - **Docs: 37 statements that were wrong are corrected.** The LiteLLM guide no longer has you create the customer on a test clock: the clock's time stands still, so a real proxy's calls were refused as in the future, while LiteLLM read the answer as delivered. "Bill for AI tokens by model" and the LiteLLM guide now save the plan ID their later steps use. The checks after a restore set `app.bypass_rls`, so on managed Postgres they no longer read zero rows and pass. ([#1584](https://github.com/gethardcount/hardcount/pull/1584))
 
 ## [0.9.2] - 2026-11-02

@@ -97,6 +97,7 @@ func TestCreateSetupSessionAudit(t *testing.T) {
 	t.Run("minted session emits one row", func(t *testing.T) {
 		custID := postgres.NewID("hc_cus")
 		svc := NewService(newMemStore(), &sessionStripe{}, nil)
+		svc.SetPortalBaseURL("https://app.example.test")
 		svc.SetAuditLogger(logger)
 
 		url, sessionID, err := svc.CreateSetupSession(ctx, tenantID, custID, "")
@@ -123,6 +124,7 @@ func TestCreateSetupSessionAudit(t *testing.T) {
 	t.Run("second link for the same customer emits again", func(t *testing.T) {
 		custID := postgres.NewID("hc_cus")
 		svc := NewService(newMemStore(), &sessionStripe{}, nil)
+		svc.SetPortalBaseURL("https://app.example.test")
 		svc.SetAuditLogger(logger)
 
 		for i := 0; i < 2; i++ {
@@ -139,6 +141,7 @@ func TestCreateSetupSessionAudit(t *testing.T) {
 		custID := postgres.NewID("hc_cus")
 		failing := &erroringAudit{}
 		svc := NewService(newMemStore(), &sessionStripe{}, nil)
+		svc.SetPortalBaseURL("https://app.example.test")
 		svc.SetAuditLogger(failing)
 
 		url, _, err := svc.CreateSetupSession(ctx, tenantID, custID, "")
@@ -160,6 +163,7 @@ func TestCreateSetupSessionAudit(t *testing.T) {
 		custID := postgres.NewID("hc_cus")
 		stripe := &sessionStripe{sessionErr: errors.New("stripe down")}
 		svc := NewService(newMemStore(), stripe, nil)
+		svc.SetPortalBaseURL("https://app.example.test")
 		svc.SetAuditLogger(logger)
 
 		if _, _, err := svc.CreateSetupSession(ctx, tenantID, custID, ""); err == nil {
