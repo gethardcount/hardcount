@@ -226,8 +226,9 @@ The dashboard is a React + TypeScript + Vite app. See
 [`web-v2/README.md`](web-v2/README.md) for setup, the dev server, and the
 directory's own CI checks. Two things often surprise first-time contributors:
 
-- `npm install` relies on `web-v2/.npmrc`. That file tolerates a
-  peer-dependency mismatch on purpose, so do not "fix" the mismatch.
+- `npm install` relies on `web-v2/.npmrc`. It sets `legacy-peer-deps`,
+  because the lockfile was resolved that way. Without it, npm rewrites the
+  lockfile.
 - Typechecking is `npx tsc -b`. Do not use `tsc --noEmit`: here it checks
   nothing and reports no error.
 
@@ -246,7 +247,7 @@ secrets.
 | `test-pgbouncer` | The same suite through PgBouncer, a connection pooler, in transaction mode | `scripts/pgbouncer-test.sh` (needs Docker) |
 | `golden-path` | Boots a real server, runs `scripts/demo.sh` from prices to a finished invoice, then runs hardcount-doctor over the rows it wrote | Steps 2 to 5 of [Development setup](#development-setup), then `go run ./cmd/hardcount-doctor` |
 | `lint` | golangci-lint (`.golangci.yml`), the Go version in `go.mod` against the `Dockerfile`, the quickstart release against the Compose template, and `govulncheck` | `make lint`, then `govulncheck ./...` |
-| `codegen-drift` | Generated Go and TypeScript match `api/openapi.yaml` | `make gen && git diff --exit-code` |
+| `codegen-drift` | Generated TypeScript matches `api/openapi.yaml` | `make gen && git diff --exit-code` |
 | `frontend` | Dashboard build (`tsc -b` and Vite), unit tests, eslint, and knip (unused files, exports and dependencies) | `cd web-v2 && npm run build && npm test && npm run lint` |
 | `e2e` | Playwright tests against a real API and dashboard. Setup: [`web-v2/e2e/README.md`](web-v2/e2e/README.md) | `cd web-v2 && npm run test:e2e` |
 | `pricing-shapes` | Each common way to price, billed end to end and checked to the cent, plus the expected results of each price shape. The `test` job runs these too; this job gives them a check of their own | The `go test` lines in this job in `.github/workflows/ci.yml` (needs Postgres) |

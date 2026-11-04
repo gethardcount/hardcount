@@ -23,6 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 
+# Copied from ../api/openapi.yaml by `npm run copy-spec` before dev, build
+# and gen. The repo keeps only the source.
+/public/openapi.yaml
+
 # Playwright end-to-end runs
 /e2e/.state/
 /playwright-report/

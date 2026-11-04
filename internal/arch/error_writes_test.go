@@ -85,7 +85,7 @@ func TestResponseWrites_ErrorsGoThroughRespond(t *testing.T) {
 			rel, _ := filepath.Rel(root, p)
 			rel = filepath.ToSlash(rel)
 			if d.IsDir() {
-				if rel == "internal/api/respond" || rel == "internal/api/generated" {
+				if rel == "internal/api/respond" {
 					return filepath.SkipDir
 				}
 				return nil

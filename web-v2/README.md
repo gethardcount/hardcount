@@ -31,9 +31,11 @@ npm run test:e2e   # Playwright browser tests; needs a running API (e2e/README.m
 ## Generated code — do not hand-edit
 
 `src/lib/gen/**` is generated from `api/openapi.yaml` at the repo root.
-Change the spec, then run `make gen` from the root — the npm-level
-generators are not the same thing. CI's codegen-drift job fails any PR
-where the spec and the generated artifacts disagree.
+Change the spec, then run `make gen` from the root (it runs `npm run gen`
+here). CI's codegen-drift job fails any PR where the spec and the generated
+artifacts disagree. `public/openapi.yaml` is a copy of the spec that
+`npm run dev`, `npm run build` and `npm run gen` make first; it is not
+committed.
 
 ## Conventions worth knowing before a first PR
 

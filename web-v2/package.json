@@ -13,7 +13,7 @@
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "copy-spec": "node scripts/copy-openapi-spec.mjs",
-    "gen": "npm run copy-spec && openapi-typescript ./public/openapi.yaml -o ./src/lib/api.gen.ts && node -e \"require('node:fs').rmSync('src/lib/gen', { recursive: true, force: true })\" && orval --config ./orval.config.ts"
+    "gen": "npm run copy-spec && node -e \"require('node:fs').rmSync('src/lib/gen', { recursive: true, force: true })\" && orval --config ./orval.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",
@@ -55,7 +55,6 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
     "knip": "6.39.0",
-    "openapi-typescript": "7.13.0",
     "orval": "8.22.0",
     "shadcn": "^4.22.1",
     "tailwindcss": "^4.2.2",
