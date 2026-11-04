@@ -141,17 +141,14 @@ func TestHandler_UpdateItem_PlanChangeAuditCarriesSimContext(t *testing.T) {
 	if !entry.sim.At.Equal(frozen) {
 		t.Errorf("emission ctx sim instant: got %v, want %v (the clock's frozen_time)", entry.sim.At, frozen)
 	}
-	// This upgrade runs the LEGACY (non-atomic) proration path — h.db is
-	// unwired here. The audit row must STILL carry the proration outcome,
-	// because the audit write was moved to after proration resolves. Pre-
-	// fix the legacy path wrote the row before result.Proration was set, so
-	// the timeline showed "Plan changed" with no amount on cross-interval /
-	// unwired-db changes.
+	// The audit row carries the proration outcome: the handler writes it
+	// after the proration resolves, so the timeline shows the amount the
+	// change billed, not just "Plan changed".
 	if entry.meta["proration_type"] != "invoice" {
-		t.Errorf("meta.proration_type: got %v, want invoice (legacy path must stamp the outcome too)", entry.meta["proration_type"])
+		t.Errorf("meta.proration_type: got %v, want invoice (the row must stamp the outcome)", entry.meta["proration_type"])
 	}
 	if _, ok := entry.meta["proration_amount_cents"]; !ok {
-		t.Errorf("meta.proration_amount_cents missing — the legacy-path proration outcome was dropped from the audit row")
+		t.Errorf("meta.proration_amount_cents missing — the proration outcome was dropped from the audit row")
 	}
 }
 

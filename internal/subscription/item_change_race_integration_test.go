@@ -110,10 +110,6 @@ func (f *raceInvoices) all() []domain.Invoice {
 	return append([]domain.Invoice(nil), f.made...)
 }
 
-func (f *raceInvoices) CreateInvoiceWithLineItemsAudited(_ context.Context, tenantID string, inv domain.Invoice, _ []domain.InvoiceLineItem, _ func(*sql.Tx, domain.Invoice) error) (domain.Invoice, error) {
-	return f.record(tenantID, inv), nil
-}
-
 func (f *raceInvoices) CreateInvoiceWithLineItemsTx(_ context.Context, _ *sql.Tx, tenantID string, inv domain.Invoice, _ []domain.InvoiceLineItem) (domain.Invoice, error) {
 	return f.record(tenantID, inv), nil
 }
@@ -129,10 +125,6 @@ func (f *raceInvoices) nextNumber() string {
 	return fmt.Sprintf("RACE-%04d", f.number)
 }
 
-func (f *raceInvoices) NextInvoiceNumber(context.Context, string) (string, error) {
-	return f.nextNumber(), nil
-}
-
 func (f *raceInvoices) NextInvoiceNumberTx(context.Context, *sql.Tx, string) (string, error) {
 	return f.nextNumber(), nil
 }
@@ -143,10 +135,6 @@ func (f *raceInvoices) FindBaseInvoiceForPeriod(context.Context, string, string,
 
 func (f *raceInvoices) FindFundingInvoicesForPeriod(context.Context, string, string, time.Time, time.Time) ([]domain.Invoice, error) {
 	return []domain.Invoice{f.source}, nil
-}
-
-func (f *raceInvoices) SetAutoChargePending(context.Context, string, string, bool) error {
-	return nil
 }
 
 func (f *raceInvoices) SetAutoChargePendingTx(context.Context, *sql.Tx, string, string, bool) error {
@@ -182,11 +170,6 @@ func (f *raceCredits) CreateAdjustmentDraftTx(_ context.Context, _ *sql.Tx, _, i
 	f.gate.wait()
 	f.record(raceCredit{AmountCents: gross})
 	return domain.CreditNote{ID: "hc_cn_race", InvoiceID: invoiceID, Status: domain.CreditNoteDraft}, nil
-}
-
-func (f *raceCredits) CreateAndIssueAdjustment(_ context.Context, _, invoiceID string, gross int64, _, _ string) (domain.CreditNote, error) {
-	f.record(raceCredit{AmountCents: gross})
-	return domain.CreditNote{ID: "hc_cn_race", InvoiceID: invoiceID}, nil
 }
 
 func (f *raceCredits) LockInvoicesForDraftsTx(context.Context, *sql.Tx, string, []string) error {
@@ -328,7 +311,6 @@ func newItemRaceRig(t *testing.T, db *postgres.DB, name string, qty int64, withK
 	svc.SetPlanReader(reader)
 	svc.SetPlanMeterReader(pricing.NewPostgresStore(db))
 	h := NewHandler(svc)
-	h.SetDB(db)
 	h.SetProrationDeps(reader, invoices)
 	h.SetCreditNoteIssuer(credits)
 	h.SetProrationTaxApplier(&raceTax{gate: gate})

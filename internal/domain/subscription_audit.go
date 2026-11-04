@@ -28,7 +28,9 @@ const (
 	// close.
 	AuditActionSubscriptionThresholdDeferred = "subscription.threshold_deferred"
 	// AuditActionSubscriptionProrationFailed: an item change was made, but
-	// its prorated charge or credit was not.
+	// its prorated charge or credit was not. Nothing writes it now: an item
+	// change and its proration commit together or not at all. Rows that
+	// earlier versions wrote still render.
 	AuditActionSubscriptionProrationFailed = "subscription.proration_failed"
 	// AuditActionSubscriptionNetNegativeUsage: usage below zero after
 	// corrections was billed as zero (#1193).

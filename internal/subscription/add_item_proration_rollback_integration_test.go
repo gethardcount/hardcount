@@ -90,7 +90,6 @@ func TestAddItem_ProrationInvoiceCreateFailure_RollsBackItemAdd(t *testing.T) {
 	}
 
 	h := NewHandler(svcWithStore(store))
-	h.SetDB(db)
 	h.SetProrationDeps(plans, invoices)
 
 	reqCtx := clock.WithEffectiveNow(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), proNow)
@@ -168,7 +167,6 @@ func TestAddItem_EnrollAutoChargeFailure_RollsBackItemAdd(t *testing.T) {
 		setAutoChargeErr: errors.New("simulated in-tx auto-charge enrollment failure"),
 	}
 	h := NewHandler(svcWithStore(store))
-	h.SetDB(db)
 	h.SetProrationDeps(plans, invoices)
 
 	reqCtx := clock.WithEffectiveNow(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), proNow)

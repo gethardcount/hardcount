@@ -56,7 +56,7 @@ func TestUpdateItem_Downgrade_UnpaidSource_AdjustsNotRefundableCredit(t *testing
 	// 6600 > 2200 so the cap doesn't bite.
 	const wantGross = int64(2200)
 	if len(cn.calls) != 1 {
-		t.Fatalf("CreateAndIssueAdjustment calls: got %d, want 1 (adjustment against the unpaid invoice)", len(cn.calls))
+		t.Fatalf("clawback credit notes: got %d, want 1 (adjustment against the unpaid invoice)", len(cn.calls))
 	}
 	if cn.calls[0].invoiceID != "src_inv" || cn.calls[0].gross != wantGross {
 		t.Errorf("CN adjustment: got invoice=%q gross=%d, want src_inv/%d", cn.calls[0].invoiceID, cn.calls[0].gross, wantGross)
@@ -78,7 +78,7 @@ func TestUpdateItem_Downgrade_UnpaidSource_AdjustsNotRefundableCredit(t *testing
 }
 
 // TestUpdateItem_Downgrade_UnpaidSource_CapsAtAmountDue proves the adjustment is
-// clamped to what's still owed — CreateAndIssueAdjustment rejects a gross above
+// clamped to what's still owed — the credit-note service rejects a gross above
 // amount_due, so domain.AllocateUnusedCredit caps an unpaid invoice's share
 // (the same rule as the engine's cancel relief).
 func TestUpdateItem_Downgrade_UnpaidSource_CapsAtAmountDue(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/auth"
@@ -72,8 +71,11 @@ func TestRemoveItem_ProrationGate(t *testing.T) {
 		wireProration(h)
 
 		rr := remove(h, subID, itemID)
-		if rr.Code != http.StatusInternalServerError || !strings.Contains(rr.Body.String(), "proration_failed") {
-			t.Fatalf("got %d %s, want 500 proration_failed — the proration must run and refuse, not skip", rr.Code, rr.Body.String())
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("got %d %s, want 500 — the proration must run and refuse, not skip", rr.Code, rr.Body.String())
+		}
+		if _, err := h.svc.store.GetItem(ctx, tenantID, itemID); err != nil {
+			t.Errorf("item after the refused removal: %v, want it still on the subscription (the removal rolls back)", err)
 		}
 	})
 

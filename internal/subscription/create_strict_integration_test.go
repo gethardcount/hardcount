@@ -87,7 +87,6 @@ func newStrictCreateFixture(t *testing.T, name string) *strictCreateFixture {
 	biller := &createBillerSpy{}
 	svc.SetBiller(biller)
 	h := NewHandler(svc)
-	h.SetDB(db)
 
 	return &strictCreateFixture{
 		t: t, db: db, ctx: ctx, tenant: tenantID, custID: cust.ID, planID: plan.ID,

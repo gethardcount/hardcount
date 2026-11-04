@@ -1182,11 +1182,10 @@ type ProrationDetail struct {
 	// notes AFTER the atomic tx commits: the credit-note service's tax reversal
 	// is an external Stripe call, so it can't ride the DB tx. ClawbackPieces
 	// are the shares domain.AllocateUnusedCredit placed, one per invoice that
-	// charged the item, newest first (ADR-118). On the ATOMIC path each is
-	// CREATED as a draft IN the caller's tx (createClawbackDraftsTx →
-	// ClawbackDraftIDs) so it commits with the item change, then ISSUED
-	// post-commit (issueClawbackDrafts); the non-atomic path create+issues
-	// inline via issueClawbackCreditNote. Internal — not API surface.
+	// charged the item, newest first (ADR-118). Each is CREATED as a draft
+	// IN the caller's tx (createClawbackDraftsTx → ClawbackDraftIDs) so it
+	// commits with the item change, then ISSUED post-commit
+	// (issueClawbackDrafts). Internal — not API surface.
 	ClawbackReason string               `json:"-"`
 	ClawbackMemo   string               `json:"-"`
 	ClawbackPieces []domain.CreditShare `json:"-"`
@@ -1196,14 +1195,15 @@ type ProrationDetail struct {
 	// ClawbackDraftIDs are the draft credit notes createClawbackDraftsTx wrote
 	// IN the atomic tx (atomic with the item change). issueClawbackDrafts issues
 	// them post-commit; RetryPendingClawbackIssue re-issues any whose Issue()
-	// failed. Empty on the non-atomic path (it issues inline). Internal.
+	// failed. Internal.
 	ClawbackDraftIDs []string `json:"-"`
 	// AutoChargeInvoiceID is the freshly-created proration CHARGE invoice to
-	// enroll into the auto-charge sweep AFTER the tx commits (the sweep then
-	// collects it — wall-clock cron for live subs, test-clock catchup on
-	// advance for clock-pinned). Set only on fresh creation of a positive
-	// proration invoice, never on the dedup-replay path (that invoice may
-	// already be paid). Empty for credit/adjustment paths. Internal.
+	// enroll into the auto-charge sweep on the item change's tx
+	// (enrollAutoChargeTx). The sweep then collects it — wall-clock cron for
+	// live subs, test-clock catchup on advance for clock-pinned. Set only on
+	// fresh creation of a positive proration invoice, never on the
+	// dedup-replay path (that invoice may already be paid). Empty for
+	// credit/adjustment paths. Internal.
 	AutoChargeInvoiceID string `json:"-"`
 	// finalizedInvoice is the proration invoice this change created already
 	// finalized, for the invoice.finalized webhook sent after commit

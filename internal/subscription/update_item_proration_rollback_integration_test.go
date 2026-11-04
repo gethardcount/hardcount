@@ -75,7 +75,6 @@ func TestUpdateItem_ProrationInvoiceCreateFailure_RollsBackQuantity(t *testing.T
 	}
 
 	h := NewHandler(svcWithStore(store))
-	h.SetDB(db)
 	h.SetProrationDeps(plans, invoices)
 
 	reqCtx := clock.WithEffectiveNow(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), proNow)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"testing"
 	"time"
@@ -715,8 +716,15 @@ func (m *memStore) LockForItemChangeTx(ctx context.Context, _ *sql.Tx, tenantID,
 func (m *memStore) LockPlansTx(context.Context, *sql.Tx, []string) error { return nil }
 
 // WithTenantTx: no transactions in memory; the *Tx methods ignore the tx.
+// When fn fails, the rows it wrote are restored, as the real store's
+// rollback does, so a test can see that a failed change left nothing behind.
 func (m *memStore) WithTenantTx(_ context.Context, _ string, fn func(tx *sql.Tx) error) error {
-	return fn(nil)
+	subs, items, changes := maps.Clone(m.subs), maps.Clone(m.items), len(m.itemChanges)
+	if err := fn(nil); err != nil {
+		m.subs, m.items, m.itemChanges = subs, items, m.itemChanges[:changes]
+		return err
+	}
+	return nil
 }
 
 func (m *memStore) GetItem(ctx context.Context, tenantID, itemID string) (domain.SubscriptionItem, error) {

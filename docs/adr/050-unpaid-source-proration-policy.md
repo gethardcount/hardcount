@@ -83,6 +83,7 @@ the net proration:
   proration tx, so the error rolls the item change back — nothing half-applies.
   The atomic wrappers pass `ErrInvalidState` through unwrapped so the operator
   sees the clean message; the legacy non-atomic paths map it to the same 409.
+  (Amended 2026-11-05: the non-atomic paths are deleted.)
 
 - **Net credit** (downgrade / removal / quantity-decrease) → **adjust in place**.
   Issue a tax-reversing **adjustment credit note** against the open invoice,

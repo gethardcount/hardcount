@@ -23,7 +23,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/activity"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/money"
-	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/platform/timeline"
 	"github.com/gethardcount/hardcount/internal/tax"
 )
@@ -49,13 +48,7 @@ type PlanMeterReader interface {
 // plan_changed_at) would collide between them. The store's dedup index
 // matches this tuple.
 type ProrationInvoiceCreator interface {
-	// CreateInvoiceWithLineItemsAudited writes the invoice in its own
-	// transaction and runs emit on it before commit (nil emit = none). The
-	// non-atomic path uses it so the finalize audit row commits with the
-	// invoice, as on the atomic path.
-	CreateInvoiceWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error)
 	GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.Invoice, error)
-	NextInvoiceNumber(ctx context.Context, tenantID string) (string, error)
 	// FindBaseInvoiceForPeriod gates immediate in_advance proration on
 	// whether the source invoice was actually paid; a written-off one is
 	// unpaid (ADR-050 amendment 2026-10-23). Mirrors the engine's
@@ -69,24 +62,21 @@ type ProrationInvoiceCreator interface {
 	// fungible qty/item changes) instead of overrunning a single invoice's
 	// credit-note cap. ErrNotFound when nothing funded the period.
 	FindFundingInvoicesForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) ([]domain.Invoice, error)
-	// Tx variants — write the proration invoice + allocate the
-	// invoice-number inside a caller-owned transaction. Used by the
-	// atomic AddItem-with-proration flow so a failed proration insert
-	// rolls back the sub-item insert too. ADR-030 atomic-proration
-	// follow-through (2026-05-29).
+	// CreateInvoiceWithLineItemsTx and NextInvoiceNumberTx write the
+	// proration invoice and allocate its number on the item change's
+	// transaction, so a failed proration insert rolls the item change back
+	// too (ADR-030 atomic-proration follow-through).
 	CreateInvoiceWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error)
 	NextInvoiceNumberTx(ctx context.Context, tx *sql.Tx, tenantID string) (string, error)
-	// SetAutoChargePending enrolls a finalized proration CHARGE invoice into the
-	// auto-charge sweep so it actually collects — wall-clock RetryPendingCharges
-	// for live subs, RetryPendingChargesForClock during catchup for clock-pinned
-	// subs. Without it an upgrade/add/qty-increase invoice is finalized but never
-	// charged (no creation-site enrollment), unlike engine cycle/create invoices.
-	// Idempotent; the sweep's status='finalized' AND payment_status='pending'
-	// filter gates when it fires (so enrolling a still-draft tax-pending invoice
-	// is safe — it stays parked until tax resolves and it finalizes).
-	SetAutoChargePending(ctx context.Context, tenantID, id string, pending bool) error
-	// SetAutoChargePendingTx is the tx-aware variant — enrolls inside the caller's
-	// tx so enrollment commits atomically with the proration item change.
+	// SetAutoChargePendingTx enrolls a proration CHARGE invoice into the
+	// auto-charge sweep on the item change's transaction, so it collects:
+	// wall-clock RetryPendingCharges for live subs, RetryPendingChargesForClock
+	// during catchup for clock-pinned subs. Without it an
+	// upgrade/add/qty-increase invoice is finalized but never charged, unlike
+	// engine cycle/create invoices. Idempotent. The sweep's
+	// status='finalized' AND payment_status='pending' filter gates when it
+	// fires, so enrolling a still-draft tax-pending invoice is safe: it stays
+	// parked until tax resolves and it finalizes.
 	SetAutoChargePendingTx(ctx context.Context, tx *sql.Tx, tenantID, id string, pending bool) error
 }
 
@@ -136,12 +126,11 @@ type ProrationTaxApplier interface {
 // customer paid for the unused slice (net + the proportional tax) to their
 // balance AND reverses the proportional output tax; on an unpaid one it
 // reduces what the invoice asks for. *creditnote.Service satisfies it
-// directly (same method as billing.CreditNoteAdjuster).
+// directly.
 //
 // Required for a credit: production always wires it (SetCreditNoteIssuer).
 // Unwired, a change that owes a credit fails rather than dropping it.
 type CreditNoteIssuer interface {
-	CreateAndIssueAdjustment(ctx context.Context, tenantID, invoiceID string, grossCents int64, reason, description string) (domain.CreditNote, error)
 	// CreateAdjustmentDraftTx creates the clawback adjustment credit note as a
 	// DRAFT inside the caller's tx (coordinator-owned, ADR-056) so it commits
 	// atomically with the item change; the caller issues it post-commit via
@@ -213,14 +202,6 @@ type Handler struct {
 	// for the simulated state. Optional: nil-safe; without it the
 	// proration paths fall back to wall-clock (pre-PR-12 behavior).
 	resolver clock.Resolver
-	// db enables the atomic AddItem-with-proration flow — the handler
-	// opens an outer tx that wraps the sub-item insert + the proration
-	// invoice/credit insert, so a failure on either side rolls back
-	// both. Optional: nil-safe; when unwired (tests, narrow setups)
-	// addItem falls back to the legacy non-atomic flow with explicit
-	// orphan-item warning in the failure path. ADR-030 atomic-proration
-	// follow-through (2026-05-29).
-	db *postgres.DB
 	// invoiceLabels names the invoices activity rows link to (ADR-128).
 	// Optional: unset, rows name no invoice by link.
 	invoiceLabels InvoiceLabeler
@@ -242,14 +223,6 @@ func (h *Handler) SetInvoiceFinalizeRecorder(r InvoiceFinalizeRecorder) { h.fina
 // clock-pinned subs use simulated time. Implemented by *billing.Engine
 // (same resolver the Service uses internally).
 func (h *Handler) SetResolver(r clock.Resolver) { h.resolver = r }
-
-// SetDB wires the database handle so the handler can open the outer
-// transaction wrapping the atomic AddItem-with-proration flow.
-// Without this, addItem falls back to its legacy non-atomic flow
-// (item insert + proration insert in separate txs — a proration
-// failure leaves an orphan item that requires manual reconciliation).
-// Production wires this from router.go; tests can leave it nil.
-func (h *Handler) SetDB(db *postgres.DB) { h.db = db }
 
 // bindForSub returns ctx with effective-now bound from the sub pin
 // when the resolver is wired. Used at proration handler entries so
@@ -1054,14 +1027,13 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read the subscription to decide whether the add prorates. On the
-	// atomic path this read only routes the request: the add is priced from
-	// the subscription AddItemTx reads under the subscription row lock, so an
-	// add that waited on a period close or a plan swap is priced on the
-	// period it lands in (#1270). Only the legacy path with no database
-	// wired prices from this read.
+	// Read the subscription to decide whether the add prorates. This read
+	// only routes the request: the add is priced from the subscription
+	// AddItemTx reads under the subscription row lock, so an add that waited
+	// on a period close or a plan swap is priced on the period it lands in
+	// (#1270).
 	var subBefore domain.Subscription
-	var prorationRemainingDays, prorationTotalDays int64
+	var prorationRemainingDays int64
 	if h.plans != nil && h.invoices != nil {
 		// A read error fails the add: carrying on would add the item with
 		// proration silently off (no in-advance charge for the period).
@@ -1072,7 +1044,7 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		}
 		subBefore = sub
 		var derr error
-		prorationRemainingDays, prorationTotalDays, derr = h.addProrationDays(ctx, tenantID, sub, clock.Now(ctx))
+		prorationRemainingDays, _, derr = h.addProrationDays(ctx, tenantID, sub, clock.Now(ctx))
 		if derr != nil {
 			slog.ErrorContext(ctx, "add item refused: tenant timezone unreadable for proration",
 				"subscription_id", id, "error", derr)
@@ -1081,22 +1053,17 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Atomic AddItem-with-proration path (ADR-030 atomic-proration
-	// follow-through, 2026-05-29): when proration emission is needed
-	// AND the db handle is wired, open one outer tx wrapping the item
-	// insert + the proration write so a failure on either side rolls
-	// back both. Falls back to the legacy non-atomic path when db
-	// isn't wired (test scaffolding) or when no proration emission is
-	// needed (zero remaining / no invoices wired). ADR-042 (2026-05-31)
-	// converted prorationFactor float64 → integer day-ratio for
-	// industry-grade money math precision.
+	// An add that prorates writes the item and its proration on one
+	// transaction, so a failure on either side rolls back both (ADR-030
+	// atomic-proration follow-through). An add that prorates nothing (a
+	// trialing subscription, the last hours of a period) runs in a
+	// transaction of its own.
 	wantProration := prorationRemainingDays > 0 && h.invoices != nil
-	atomic := h.db != nil && wantProration
 
 	var item domain.SubscriptionItem
 	var addErr error
 	var addProration *ProrationDetail
-	if atomic {
+	if wantProration {
 		item, addProration, addErr = h.atomicAddItemWithProration(ctx, tenantID, id, input)
 	} else {
 		item, addErr = h.svc.AddItem(ctx, tenantID, id, input)
@@ -1117,84 +1084,11 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, id), tenantID, domain.AuditActionUpdate, "subscription", id, subBefore.Code, payload)
 	}
 
-	// Re-fetch the subscription so downstream payload/proration paths see the
-	// full post-add Items slice. If the read fails the proration path falls
-	// back to the snapshot from before the add; item.added is not sent.
-	var subAfter domain.Subscription
-	subAfterRead := false
-	if h.events != nil || (wantProration && !atomic) {
-		s, getErr := h.svc.Get(r.Context(), tenantID, id)
-		if getErr != nil {
-			subAfter = subBefore
-			if subAfter.ID == "" {
-				subAfter = domain.Subscription{ID: id}
-			}
-		} else {
-			subAfter, subAfterRead = s, true
-		}
-	}
-
-	// Legacy non-atomic proration path — only when atomic path wasn't
-	// taken (h.db unwired). Keeps the prior behavior intact for tests
-	// and minimal setups so this PR doesn't force every consumer to
-	// thread a db handle through.
-	if wantProration && !atomic {
-		changeAt := item.CreatedAt
-		if changeAt.IsZero() {
-			changeAt = clock.Now(ctx)
-		}
-		spec := itemProrationSpec{
-			changeType:    domain.ItemChangeTypeAdd,
-			changeAt:      changeAt,
-			remainingDays: prorationRemainingDays,
-			totalDays:     prorationTotalDays,
-			itemID:        item.ID,
-			oldPlanID:     "",
-			oldQuantity:   0,
-			newPlanID:     item.PlanID,
-			newQuantity:   item.Quantity,
-		}
-		prorationResult, prorationErr := h.handleItemProration(r.Context(), tenantID, subAfter, spec, nil)
-		if prorationErr != nil {
-			// Deliberate ADR-050 block (add charges against an unpaid source) →
-			// clean 409, not the internal-failure 500 below.
-			if errors.Is(prorationErr, errs.ErrInvalidState) {
-				respond.FromError(w, r, prorationErr, "subscription item")
-				return
-			}
-			slog.ErrorContext(r.Context(), "item proration failed after item add committed",
-				"subscription_id", id,
-				"item_id", item.ID,
-				"tenant_id", tenantID,
-				"plan_id", item.PlanID,
-				"quantity", item.Quantity,
-				"proration_remaining_days", prorationRemainingDays,
-				"proration_total_days", prorationTotalDays,
-				"error", prorationErr,
-			)
-			if h.auditLogger != nil {
-				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, id), tenantID, domain.AuditActionSubscriptionProrationFailed, "subscription", id, "", map[string]any{
-					"item_id":                  item.ID,
-					"change_type":              string(domain.ItemChangeTypeAdd),
-					"plan_id":                  item.PlanID,
-					"quantity":                 item.Quantity,
-					"proration_remaining_days": prorationRemainingDays,
-					"proration_total_days":     prorationTotalDays,
-					"error":                    prorationErr.Error(),
-				})
-			}
-			respond.Error(w, r, http.StatusInternalServerError, "api_error", "proration_failed",
-				"item add succeeded but the prorated charge could not be created — the item is on the subscription and no automatic retry will run (re-sending this request is rejected as a duplicate); issue the prorated amount manually via a one-off invoice, or contact support")
-			return
-		}
-		_ = prorationResult
-	}
-
-	// The re-read above is the subscription with the new item. When it
-	// failed there is no true resource to send, so the event is left out,
-	// loudly.
+	// subscription.item.added carries the subscription read after the add,
+	// with the new item. When the read fails there is no true resource to
+	// send, so the event is left out, loudly.
 	if h.events != nil {
-		if subAfterRead {
+		if subAfter, err := h.svc.Get(r.Context(), tenantID, id); err == nil {
 			h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionItemAdded, subAfter, map[string]any{
 				"item_id": item.ID,
 			})
@@ -1234,14 +1128,12 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read the item and subscription only when the change may prorate. On the
-	// atomic path this read only routes the request (does it prorate, is it a
-	// cross-interval swap); the proration is priced from the state
-	// UpdateItemTx reads under the subscription row lock (#1270). Only the
-	// legacy path with no database wired prices from this read.
+	// Read the item and subscription only when the change may prorate. This
+	// read only routes the request (does it prorate, is it a cross-interval
+	// swap): the proration is priced from the state UpdateItemTx reads under
+	// the subscription row lock (#1270).
 	var oldPlanID string
-	var oldQuantity int64
-	var prorationRemainingDays, prorationTotalDays int64
+	var prorationRemainingDays int64
 	var subBefore domain.Subscription
 	isImmediatePlanChange := input.NewPlanID != "" && input.Immediate
 	isQuantityChange := input.Quantity != nil
@@ -1256,7 +1148,6 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		}
 		if item.SubscriptionID == subID {
 			oldPlanID = item.PlanID
-			oldQuantity = item.Quantity
 		}
 		sub, serr := h.svc.Get(ctx, tenantID, subID)
 		if serr != nil {
@@ -1264,29 +1155,24 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		subBefore = sub
-		prorationRemainingDays, prorationTotalDays = remainingPeriodRatio(sub, clock.Now(ctx))
+		prorationRemainingDays, _ = remainingPeriodRatio(sub, clock.Now(ctx))
 	}
 
-	// Atomic UpdateItem-with-proration path (ADR-030 atomic-proration
-	// follow-through). Tries the atomic flow first when conditions are
-	// met (db wired, proration eligible, scheduled / cross-interval /
-	// cross-axis-orchestrator NOT in play). svc.UpdateItemTx returns
-	// errAtomicNotApplicable for the complex paths (cross-interval
-	// swap, scheduled change); on that signal we fall back to the
-	// legacy non-atomic flow which handles those cases via the
-	// existing multi-write engine orchestration. Quantity changes +
-	// same-interval immediate plan changes are now fully atomic with
-	// their proration writes.
+	// A change that prorates writes the item change and its proration on one
+	// transaction, so a failure on either side rolls back both (ADR-030
+	// atomic-proration follow-through). A change that prorates nothing (a
+	// scheduled plan change, the last hours of a period) runs in a
+	// transaction of its own.
 	wantProration := prorationEligible && prorationRemainingDays > 0 && h.invoices != nil
 
-	// A cross-interval immediate plan swap MUST take the atomic path even at the
-	// period boundary (remainingDays==0, where wantProration is false): the swap
-	// restructures the cycle (plan write + watermark advance + new-period
-	// invoice) and that must be one tx regardless of how much of the OLD period
-	// remained. applyCrossIntervalPlanSwapTx derives the new period from `now`,
-	// not from remainingDays, so the boundary case is sound — otherwise it would
-	// fall to the non-atomic fallback and re-open the silent-revenue-drop window
-	// at the boundary. (ADR-056.)
+	// A cross-interval immediate plan swap must take the atomic path even at
+	// the period boundary (remainingDays==0, where wantProration is false):
+	// the swap restructures the cycle (plan write + watermark advance +
+	// new-period invoice), and that must be one tx however much of the old
+	// period remained. applyCrossIntervalPlanSwapTx derives the new period
+	// from `now`, not from remainingDays, so the boundary case is sound.
+	// Otherwise the swap would go to svc.UpdateItem, which refuses it
+	// (ADR-056).
 	crossIntervalSwap := false
 	if isImmediatePlanChange && h.plans != nil && oldPlanID != "" {
 		oldP, e1 := h.plans.GetPlan(ctx, tenantID, oldPlanID)
@@ -1314,20 +1200,18 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 			crossIntervalSwap = oi != ni
 		}
 	}
-	atomic := h.db != nil && h.invoices != nil && (wantProration || crossIntervalSwap)
-	var (
-		result    ItemChangeResult
-		atomicErr error
-	)
+	atomic := h.invoices != nil && (wantProration || crossIntervalSwap)
+	var result ItemChangeResult
 	if atomic {
-		result, atomicErr = h.atomicUpdateItemWithProration(ctx, tenantID, subID, itemID, input)
-		if errors.Is(atomicErr, errAtomicNotApplicable) {
+		var err error
+		result, err = h.atomicUpdateItemWithProration(ctx, tenantID, subID, itemID, input)
+		if errors.Is(err, errAtomicNotApplicable) {
+			// UpdateItemTx refuses a scheduled change, which
+			// svc.UpdateItem below writes.
 			atomic = false
-			atomicErr = nil
-		}
-		if atomicErr == nil && result.pricedFrom.item.ID != "" {
-			// The plan the change moved from, read under the lock (#1270).
-			oldPlanID = result.pricedFrom.item.PlanID
+		} else if err != nil {
+			respond.FromError(w, r, err, "subscription item")
+			return
 		}
 	}
 	if !atomic {
@@ -1337,118 +1221,11 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 			respond.FromError(w, r, err, "subscription item")
 			return
 		}
-	} else if atomicErr != nil {
-		respond.FromError(w, r, atomicErr, "subscription item")
-		return
 	}
 
-	// Skip the legacy delta-proration emission when the service used
-	// the cross-axis orchestrator. The orchestrator already issued
-	// the refund credit (for OLD in_advance unused) and — when NEW is
-	// in_advance — billed the new in_advance period, with the old period's
-	// usage up to the swap, synchronously via BillOnPlanSwapTx. Firing handleItemProration on top would emit a
-	// second credit against the same OLD period; the gates inside
-	// handleItemProration aren't tight enough (a freshly auto-charged
-	// new in_advance invoice would pass the paid-check), so an
-	// explicit skip here is the only safe guard.
-	if !atomic && prorationEligible && prorationRemainingDays > 0 && h.invoices != nil && !result.OrchestratedCrossAxis {
-		// Re-hydrate the subscription post-change so the Items slice reflects
-		// the swapped plan/quantity — handleProration walks it to price the
-		// change (currency/naming). Fall back to subBefore on error so the
-		// handler still responds, but use the fresh Items when available.
-		subAfter, getErr := h.svc.Get(ctx, tenantID, subID)
-		if getErr != nil {
-			subAfter = subBefore
-		}
-		var spec itemProrationSpec
-		if isImmediatePlanChange {
-			var changeAt time.Time
-			if result.Item.PlanChangedAt != nil {
-				changeAt = *result.Item.PlanChangedAt
-			} else {
-				changeAt = clock.Now(ctx)
-			}
-			spec = itemProrationSpec{
-				changeType:    domain.ItemChangeTypePlan,
-				changeAt:      changeAt,
-				remainingDays: prorationRemainingDays,
-				totalDays:     prorationTotalDays,
-				itemID:        result.Item.ID,
-				oldPlanID:     oldPlanID,
-				oldQuantity:   result.Item.Quantity,
-				newPlanID:     result.Item.PlanID,
-				newQuantity:   result.Item.Quantity,
-			}
-		} else {
-			// Quantity-only change. Plan is unchanged; store doesn't stamp a
-			// dedicated timestamp so we use UpdatedAt (the store bumps it on
-			// every item write) — stable across retries of the same in-flight
-			// UpdateItemQuantity call.
-			changeAt := result.Item.UpdatedAt
-			if changeAt.IsZero() {
-				changeAt = clock.Now(ctx)
-			}
-			spec = itemProrationSpec{
-				changeType:    domain.ItemChangeTypeQuantity,
-				changeAt:      changeAt,
-				remainingDays: prorationRemainingDays,
-				totalDays:     prorationTotalDays,
-				itemID:        result.Item.ID,
-				oldPlanID:     oldPlanID,
-				oldQuantity:   oldQuantity,
-				newPlanID:     result.Item.PlanID,
-				newQuantity:   result.Item.Quantity,
-			}
-		}
-		prorationResult, prorationErr := h.handleItemProration(r.Context(), tenantID, subAfter, spec, nil)
-		if prorationErr != nil {
-			// Deliberate ADR-050 block (upgrade charges against an unpaid
-			// source) → clean 409, not the internal-failure 500 below.
-			if errors.Is(prorationErr, errs.ErrInvalidState) {
-				respond.FromError(w, r, prorationErr, "subscription item")
-				return
-			}
-			slog.ErrorContext(r.Context(), "item proration failed after item change committed",
-				"subscription_id", subID,
-				"item_id", result.Item.ID,
-				"tenant_id", tenantID,
-				"change_type", spec.changeType,
-				"old_plan_id", oldPlanID,
-				"new_plan_id", input.NewPlanID,
-				"old_quantity", oldQuantity,
-				"new_quantity", spec.newQuantity,
-				"proration_remaining_days", prorationRemainingDays,
-				"proration_total_days", prorationTotalDays,
-				"error", prorationErr,
-			)
-			if h.auditLogger != nil {
-				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, subID), tenantID, domain.AuditActionSubscriptionProrationFailed, "subscription", subID, "", map[string]any{
-					"item_id":                  result.Item.ID,
-					"change_type":              string(spec.changeType),
-					"old_plan_id":              oldPlanID,
-					"new_plan_id":              input.NewPlanID,
-					"old_quantity":             oldQuantity,
-					"new_quantity":             spec.newQuantity,
-					"proration_remaining_days": prorationRemainingDays,
-					"proration_total_days":     prorationTotalDays,
-					"error":                    prorationErr.Error(),
-				})
-			}
-			respond.Error(w, r, http.StatusInternalServerError, "api_error", "proration_failed",
-				"item change succeeded but the prorated adjustment could not be created — the item is on the new state and no automatic retry will run (re-sending this request is rejected as a no-op change); issue the prorated charge or credit manually, or contact support")
-			return
-		}
-		if prorationResult != nil {
-			result.Proration = prorationResult
-		}
-	}
-
-	// Audit the item change AFTER proration resolves, so the outcome
-	// (proration invoice / credit / adjustment) is on the row for EVERY
-	// path — the atomic wrapper sets result.Proration before returning,
-	// the legacy/cross-interval path sets it just above. Written only on
-	// success; a proration failure already returned a proration_failed
-	// row + 500 above.
+	// Audit the item change after its proration, so the outcome (proration
+	// invoice, credit or adjustment) is on the row: the atomic wrapper sets
+	// result.Proration before it returns. Written only on success.
 	if h.auditLogger != nil {
 		payload := map[string]any{
 			"item_id":   result.Item.ID,
@@ -1463,8 +1240,8 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		// The item as the change found it under the subscription row lock
 		// (#1270): the plan and quantity it moved from. Every path sets it,
 		// a scheduled change included, which keeps the item on this plan
-		// until the boundary; oldPlanID and oldQuantity are read only for
-		// changes that prorate.
+		// until the boundary; oldPlanID is read only for changes that
+		// prorate.
 		was := result.pricedFrom.item
 		if input.Quantity != nil {
 			payload["action"] = domain.SubAuditItemQuantityChanged
@@ -1558,14 +1335,12 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Read the item and subscription to decide whether the removal credits
-	// the unused portion of what the customer already paid for this item. On
-	// the atomic path the credit is priced from the state RemoveItemTx reads
-	// under the subscription row lock (#1270); only the legacy path with no
-	// database wired prices from this read.
+	// the unused portion of what the customer already paid for this item.
+	// The credit is priced from the state RemoveItemTx reads under the
+	// subscription row lock (#1270).
 	var removedPlanID string
-	var removedQuantity int64
 	var subBefore domain.Subscription
-	var prorationRemainingDays, prorationTotalDays int64
+	var prorationRemainingDays int64
 	if h.plans != nil && h.invoices != nil {
 		// Read errors fail the remove: it is a hard delete, so carrying on
 		// would lose the unused-portion credit and the data to compute it.
@@ -1576,7 +1351,6 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 		}
 		if item.SubscriptionID == subID {
 			removedPlanID = item.PlanID
-			removedQuantity = item.Quantity
 		}
 		sub, serr := h.svc.Get(ctx, tenantID, subID)
 		if serr != nil {
@@ -1585,18 +1359,16 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 		}
 		subBefore = sub
 		if sub.Status == domain.SubscriptionActive {
-			prorationRemainingDays, prorationTotalDays = remainingPeriodRatio(sub, clock.Now(ctx))
+			prorationRemainingDays, _ = remainingPeriodRatio(sub, clock.Now(ctx))
 		}
 	}
 
-	// Atomic RemoveItem-with-proration: delete + credit-note draft in one
-	// tx so a failed draft rolls back the delete. Falls back to
-	// the legacy non-atomic flow when db isn't wired or no proration
-	// emission is needed.
+	// A removal that credits deletes the item and drafts the credit note on
+	// one transaction, so a failed draft rolls back the delete. A removal
+	// that credits nothing runs in a transaction of its own.
 	wantProration := prorationRemainingDays > 0 && removedPlanID != "" && h.invoices != nil
-	atomic := h.db != nil && wantProration
 	var removeProration *ProrationDetail
-	if atomic {
+	if wantProration {
 		removed, detail, err := h.atomicRemoveItemWithProration(ctx, tenantID, subID, itemID)
 		if err != nil {
 			respond.FromError(w, r, err, "subscription item")
@@ -1622,54 +1394,6 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 		}
 		addProrationMeta(payload, removeProration, h.planCurrency(ctx, tenantID, removedPlanID))
 		_ = h.auditLogger.Log(h.auditCtx(ctx, tenantID, subID), tenantID, domain.AuditActionUpdate, "subscription", subID, subBefore.Code, payload)
-	}
-
-	// Legacy non-atomic proration emission path — only when atomic wasn't taken.
-	if !atomic && prorationRemainingDays > 0 && removedPlanID != "" {
-		// Re-fetch to price the proration over the remaining items.
-		subAfter, getErr := h.svc.Get(ctx, tenantID, subID)
-		if getErr != nil {
-			subAfter = subBefore
-		}
-		spec := itemProrationSpec{
-			changeType:    domain.ItemChangeTypeRemove,
-			changeAt:      clock.Now(ctx),
-			remainingDays: prorationRemainingDays,
-			totalDays:     prorationTotalDays,
-			itemID:        itemID,
-			oldPlanID:     removedPlanID,
-			oldQuantity:   removedQuantity,
-			newPlanID:     "",
-			newQuantity:   0,
-		}
-		prorationResult, prorationErr := h.handleItemProration(ctx, tenantID, subAfter, spec, nil)
-		if prorationErr != nil {
-			slog.ErrorContext(r.Context(), "item proration failed after item remove committed",
-				"subscription_id", subID,
-				"item_id", itemID,
-				"tenant_id", tenantID,
-				"plan_id", removedPlanID,
-				"quantity", removedQuantity,
-				"proration_remaining_days", prorationRemainingDays,
-				"proration_total_days", prorationTotalDays,
-				"error", prorationErr,
-			)
-			if h.auditLogger != nil {
-				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, subID), tenantID, domain.AuditActionSubscriptionProrationFailed, "subscription", subID, "", map[string]any{
-					"item_id":                  itemID,
-					"change_type":              string(domain.ItemChangeTypeRemove),
-					"plan_id":                  removedPlanID,
-					"quantity":                 removedQuantity,
-					"proration_remaining_days": prorationRemainingDays,
-					"proration_total_days":     prorationTotalDays,
-					"error":                    prorationErr.Error(),
-				})
-			}
-			respond.Error(w, r, http.StatusInternalServerError, "api_error", "proration_failed",
-				"item remove succeeded but the prorated credit could not be created — the item is removed and no automatic retry will run (re-sending this request returns not-found); grant the credit manually, or contact support")
-			return
-		}
-		_ = prorationResult
 	}
 
 	if h.events != nil {
@@ -1707,13 +1431,12 @@ type itemProrationSpec struct {
 	newQuantity   int64
 }
 
-// atomicAddItemWithProration opens one outer transaction that wraps
-// the subscription-item insert + the proration invoice/credit insert.
-// A failure on either side rolls back BOTH via the deferred Rollback —
-// so the API never returns success with the item committed but no
-// proration recorded. Pre-2026-05-29 the two writes were independent
-// txs and a proration failure left an orphan item (the bug surfaced
-// during EX3 manual test).
+// atomicAddItemWithProration adds the item and writes its proration on one
+// tenant transaction (Store.WithTenantTx). A failure on either side rolls
+// back both, so the API never returns success with the item committed but
+// no proration recorded. The steps outside the database (the
+// invoice.finalized webhook, the tax commit, issuing credit notes) run after
+// the commit.
 //
 // Returns the new item on success; on any error, the entire operation
 // is rolled back and the caller sees a failure (no half-committed
@@ -1728,65 +1451,67 @@ func (h *Handler) atomicAddItemWithProration(
 	tenantID, subID string,
 	input AddItemInput,
 ) (domain.SubscriptionItem, *ProrationDetail, error) {
-	tx, err := h.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.SubscriptionItem{}, nil, fmt.Errorf("begin atomic addItem tx: %w", err)
-	}
-	defer postgres.Rollback(tx)
+	var (
+		item   domain.SubscriptionItem
+		detail *ProrationDetail
+	)
+	err := h.svc.store.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		result, err := h.svc.AddItemTx(ctx, tx, tenantID, subID, input)
+		if err != nil {
+			return err
+		}
+		item = result.Item
+		locked := result.pricedFrom.sub
+		remainingDays, totalDays, err := h.addProrationDays(ctx, tenantID, locked, result.EffectiveAt)
+		if err != nil {
+			return fmt.Errorf("proration days in atomic addItem tx: %w", err)
+		}
 
-	result, err := h.svc.AddItemTx(ctx, tx, tenantID, subID, input)
+		changeAt := item.CreatedAt
+		if changeAt.IsZero() {
+			changeAt = clock.Now(ctx)
+		}
+		spec := itemProrationSpec{
+			changeType:    domain.ItemChangeTypeAdd,
+			changeAt:      changeAt,
+			remainingDays: remainingDays,
+			totalDays:     totalDays,
+			itemID:        item.ID,
+			oldPlanID:     "",
+			oldQuantity:   0,
+			newPlanID:     item.PlanID,
+			newQuantity:   item.Quantity,
+		}
+		detail, err = h.handleItemProration(ctx, tenantID, locked, spec, tx)
+		if err != nil {
+			// A deliberate ADR-050 block (charge against an unpaid source) is an
+			// operator-facing 409, not an internal failure — pass it through
+			// unwrapped so the message stays clean; the rollback undoes the
+			// item add so nothing half-applies.
+			if errors.Is(err, errs.ErrInvalidState) {
+				return err
+			}
+			return fmt.Errorf("proration in atomic addItem tx: %w", err)
+		}
+
+		// Create the clawback credit-note DRAFT(s) IN this tx so they commit
+		// atomically with the item change (ADR-056) — a create failure rolls the
+		// change back rather than leaving the customer un-credited. No-op for the
+		// add path (upgrades charge, never claw back). Issued post-commit below.
+		if err := h.createClawbackDraftsTx(ctx, tx, tenantID, detail); err != nil {
+			return fmt.Errorf("create clawback draft in atomic addItem tx: %w", err)
+		}
+		// Enroll the proration CHARGE invoice for the auto-charge sweep IN this tx, so
+		// enrollment commits atomically with the item change — closes the window where
+		// a failed post-commit enrollment left a committed charge invoice unenrolled
+		// and unpaid (no sweep scans auto_charge_pending=false). No-op for credit paths.
+		if err := h.enrollAutoChargeTx(ctx, tx, tenantID, detail); err != nil {
+			return fmt.Errorf("enroll proration charge in atomic addItem tx: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
 		return domain.SubscriptionItem{}, nil, err
-	}
-	item, locked := result.Item, result.pricedFrom.sub
-	remainingDays, totalDays, err := h.addProrationDays(ctx, tenantID, locked, result.EffectiveAt)
-	if err != nil {
-		return domain.SubscriptionItem{}, nil, fmt.Errorf("proration days in atomic addItem tx: %w", err)
-	}
-
-	changeAt := item.CreatedAt
-	if changeAt.IsZero() {
-		changeAt = clock.Now(ctx)
-	}
-	spec := itemProrationSpec{
-		changeType:    domain.ItemChangeTypeAdd,
-		changeAt:      changeAt,
-		remainingDays: remainingDays,
-		totalDays:     totalDays,
-		itemID:        item.ID,
-		oldPlanID:     "",
-		oldQuantity:   0,
-		newPlanID:     item.PlanID,
-		newQuantity:   item.Quantity,
-	}
-	detail, err := h.handleItemProration(ctx, tenantID, locked, spec, tx)
-	if err != nil {
-		// A deliberate ADR-050 block (charge against an unpaid source) is an
-		// operator-facing 409, not an internal failure — pass it through
-		// unwrapped so the message stays clean; the deferred Rollback undoes
-		// the item add so nothing half-applies.
-		if errors.Is(err, errs.ErrInvalidState) {
-			return domain.SubscriptionItem{}, nil, err
-		}
-		return domain.SubscriptionItem{}, nil, fmt.Errorf("proration in atomic addItem tx: %w", err)
-	}
-
-	// Create the clawback credit-note DRAFT(s) IN this tx so they commit
-	// atomically with the item change (ADR-056) — a create failure rolls the
-	// change back rather than leaving the customer un-credited. No-op for the
-	// add path (upgrades charge, never claw back). Issued post-commit below.
-	if err := h.createClawbackDraftsTx(ctx, tx, tenantID, detail); err != nil {
-		return domain.SubscriptionItem{}, nil, fmt.Errorf("create clawback draft in atomic addItem tx: %w", err)
-	}
-	// Enroll the proration CHARGE invoice for the auto-charge sweep IN this tx, so
-	// enrollment commits atomically with the item change — closes the window where
-	// a failed post-commit enrollment left a committed charge invoice unenrolled
-	// and unpaid (no sweep scans auto_charge_pending=false). No-op for credit paths.
-	if err := h.enrollAutoChargeTx(ctx, tx, tenantID, detail); err != nil {
-		return domain.SubscriptionItem{}, nil, fmt.Errorf("enroll proration charge in atomic addItem tx: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.SubscriptionItem{}, nil, fmt.Errorf("commit atomic addItem tx: %w", err)
 	}
 	// invoice.finalized for the charge invoice, now that it is durable (its
 	// finalize audit row committed in the tx above).
@@ -1799,7 +1524,6 @@ func (h *Handler) atomicAddItemWithProration(
 	// reversal is external). On failure the draft persists + RetryPendingClawback
 	// Issue re-issues it. No-op for the add path (no clawback).
 	h.issueClawbackDrafts(ctx, tenantID, detail)
-	// (Auto-charge enrollment now happens IN the tx above — see enrollAutoChargeTx.)
 	// Return the proration detail so addItem's audit row can show the
 	// charge the add produced (see atomicUpdateItemWithProration).
 	return item, detail, nil
@@ -1834,10 +1558,10 @@ func (h *Handler) addProrationDays(ctx context.Context, tenantID string, sub dom
 }
 
 // atomicUpdateItemWithProration mirrors atomicAddItemWithProration for
-// the UpdateItem path: open one outer tx, write the item update + the
-// proration in the same tx, commit on success. Returns
-// errAtomicNotApplicable if the input routes to the cross-interval or
-// scheduled path (caller falls back to legacy non-atomic flow).
+// the UpdateItem path: write the item change and its proration on one
+// tenant transaction, then run the steps outside the database after the
+// commit. Returns errAtomicNotApplicable for a scheduled change, which the
+// caller writes with svc.UpdateItem.
 //
 // The proration is priced from result.pricedFrom: the subscription and the
 // item as UpdateItemTx read them under the subscription row lock (#1270).
@@ -1849,95 +1573,98 @@ func (h *Handler) atomicUpdateItemWithProration(
 	tenantID, subID, itemID string,
 	input UpdateItemInput,
 ) (ItemChangeResult, error) {
-	tx, err := h.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return ItemChangeResult{}, fmt.Errorf("begin atomic updateItem tx: %w", err)
-	}
-	defer postgres.Rollback(tx)
+	var (
+		result ItemChangeResult
+		detail *ProrationDetail
+	)
+	err := h.svc.store.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		var err error
+		result, err = h.svc.UpdateItemTx(ctx, tx, tenantID, subID, itemID, input)
+		if err != nil {
+			return err
+		}
+		// Cross-interval swap: UpdateItemTx restructured the cycle atomically
+		// on this tx (plan write + watermark + new in_advance invoice). It did
+		// its own proration, so handleItemProration must not run: that would
+		// emit a second credit against the old period. Commit the swap; its
+		// external steps run after the commit, below. A failed in-tx bill
+		// already rolled the whole swap back.
+		if result.OrchestratedCrossAxis {
+			return nil
+		}
+		base := result.pricedFrom
 
-	result, err := h.svc.UpdateItemTx(ctx, tx, tenantID, subID, itemID, input)
+		remainingDays, totalDays := remainingPeriodRatio(base.sub, result.EffectiveAt)
+		var spec itemProrationSpec
+		if input.NewPlanID != "" && input.Immediate {
+			var changeAt time.Time
+			if result.Item.PlanChangedAt != nil {
+				changeAt = *result.Item.PlanChangedAt
+			} else {
+				changeAt = clock.Now(ctx)
+			}
+			spec = itemProrationSpec{
+				changeType:    domain.ItemChangeTypePlan,
+				changeAt:      changeAt,
+				remainingDays: remainingDays,
+				totalDays:     totalDays,
+				itemID:        result.Item.ID,
+				oldPlanID:     base.item.PlanID,
+				oldQuantity:   result.Item.Quantity,
+				newPlanID:     result.Item.PlanID,
+				newQuantity:   result.Item.Quantity,
+			}
+		} else {
+			changeAt := result.Item.UpdatedAt
+			if changeAt.IsZero() {
+				changeAt = clock.Now(ctx)
+			}
+			spec = itemProrationSpec{
+				changeType:    domain.ItemChangeTypeQuantity,
+				changeAt:      changeAt,
+				remainingDays: remainingDays,
+				totalDays:     totalDays,
+				itemID:        result.Item.ID,
+				oldPlanID:     base.item.PlanID,
+				oldQuantity:   base.item.Quantity,
+				newPlanID:     result.Item.PlanID,
+				newQuantity:   result.Item.Quantity,
+			}
+		}
+		detail, err = h.handleItemProration(ctx, tenantID, base.sub, spec, tx)
+		if err != nil {
+			// A deliberate ADR-050 block (charge against an unpaid source) is an
+			// operator-facing 409, not an internal failure — pass it through
+			// unwrapped so the message stays clean; the rollback undoes the
+			// item change so nothing half-applies.
+			if errors.Is(err, errs.ErrInvalidState) {
+				return err
+			}
+			return fmt.Errorf("proration in atomic updateItem tx: %w", err)
+		}
+
+		// Create the clawback credit-note DRAFT(s) IN this tx so a plan-downgrade /
+		// qty-decrease's credit commits atomically with the item change (ADR-056) —
+		// a create failure rolls the change back. No-op on upgrades / qty-increases.
+		// Issued post-commit below.
+		if err := h.createClawbackDraftsTx(ctx, tx, tenantID, detail); err != nil {
+			return fmt.Errorf("create clawback draft in atomic updateItem tx: %w", err)
+		}
+		// Enroll the proration CHARGE invoice for the auto-charge sweep IN this tx, so
+		// enrollment commits atomically with the item change (see atomicAddItem).
+		if err := h.enrollAutoChargeTx(ctx, tx, tenantID, detail); err != nil {
+			return fmt.Errorf("enroll proration charge in atomic updateItem tx: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
 		return ItemChangeResult{}, err
 	}
-	base := result.pricedFrom
-
-	// Cross-interval swap: UpdateItemTx restructured the cycle atomically on
-	// this tx (plan write + watermark + new in_advance invoice). It did its OWN
-	// proration, so handleItemProration MUST NOT run — that would emit a second
-	// credit against the OLD period. Commit the swap, then run the OLD-period
-	// refund + the new invoice's external steps POST-commit (Stripe must not
-	// ride the tx). A failed in-tx bill already rolled the whole swap back above.
 	if result.OrchestratedCrossAxis {
-		if err := tx.Commit(); err != nil {
-			return ItemChangeResult{}, fmt.Errorf("commit atomic cross-interval swap tx: %w", err)
-		}
-		h.svc.FinalizeCrossIntervalSwap(ctx, tenantID, base.sub, result)
+		// The old-period refund and the new invoice's external steps run
+		// after the commit: Stripe calls must not ride the tx.
+		h.svc.FinalizeCrossIntervalSwap(ctx, tenantID, result.pricedFrom.sub, result)
 		return result, nil
-	}
-
-	remainingDays, totalDays := remainingPeriodRatio(base.sub, result.EffectiveAt)
-	var spec itemProrationSpec
-	if input.NewPlanID != "" && input.Immediate {
-		var changeAt time.Time
-		if result.Item.PlanChangedAt != nil {
-			changeAt = *result.Item.PlanChangedAt
-		} else {
-			changeAt = clock.Now(ctx)
-		}
-		spec = itemProrationSpec{
-			changeType:    domain.ItemChangeTypePlan,
-			changeAt:      changeAt,
-			remainingDays: remainingDays,
-			totalDays:     totalDays,
-			itemID:        result.Item.ID,
-			oldPlanID:     base.item.PlanID,
-			oldQuantity:   result.Item.Quantity,
-			newPlanID:     result.Item.PlanID,
-			newQuantity:   result.Item.Quantity,
-		}
-	} else {
-		changeAt := result.Item.UpdatedAt
-		if changeAt.IsZero() {
-			changeAt = clock.Now(ctx)
-		}
-		spec = itemProrationSpec{
-			changeType:    domain.ItemChangeTypeQuantity,
-			changeAt:      changeAt,
-			remainingDays: remainingDays,
-			totalDays:     totalDays,
-			itemID:        result.Item.ID,
-			oldPlanID:     base.item.PlanID,
-			oldQuantity:   base.item.Quantity,
-			newPlanID:     result.Item.PlanID,
-			newQuantity:   result.Item.Quantity,
-		}
-	}
-	detail, err := h.handleItemProration(ctx, tenantID, base.sub, spec, tx)
-	if err != nil {
-		// A deliberate ADR-050 block (charge against an unpaid source) is an
-		// operator-facing 409, not an internal failure — pass it through
-		// unwrapped so the message stays clean; the deferred Rollback undoes
-		// the item change so nothing half-applies.
-		if errors.Is(err, errs.ErrInvalidState) {
-			return ItemChangeResult{}, err
-		}
-		return ItemChangeResult{}, fmt.Errorf("proration in atomic updateItem tx: %w", err)
-	}
-
-	// Create the clawback credit-note DRAFT(s) IN this tx so a plan-downgrade /
-	// qty-decrease's credit commits atomically with the item change (ADR-056) —
-	// a create failure rolls the change back. No-op on upgrades / qty-increases.
-	// Issued post-commit below.
-	if err := h.createClawbackDraftsTx(ctx, tx, tenantID, detail); err != nil {
-		return ItemChangeResult{}, fmt.Errorf("create clawback draft in atomic updateItem tx: %w", err)
-	}
-	// Enroll the proration CHARGE invoice for the auto-charge sweep IN this tx, so
-	// enrollment commits atomically with the item change (see atomicAddItem).
-	if err := h.enrollAutoChargeTx(ctx, tx, tenantID, detail); err != nil {
-		return ItemChangeResult{}, fmt.Errorf("enroll proration charge in atomic updateItem tx: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return ItemChangeResult{}, fmt.Errorf("commit atomic updateItem tx: %w", err)
 	}
 	// invoice.finalized for an upgrade or seat-increase invoice, now that it
 	// is durable (see atomicAddItemWithProration).
@@ -1949,20 +1676,17 @@ func (h *Handler) atomicUpdateItemWithProration(
 	// failure the draft persists + RetryPendingClawbackIssue re-issues it. No-op
 	// on upgrades / qty-increases (those bill via the invoice path).
 	h.issueClawbackDrafts(ctx, tenantID, detail)
-	// (Auto-charge enrollment now happens IN the tx above — see enrollAutoChargeTx.)
 	// Surface the proration outcome so the caller's audit row (and the
-	// activity timeline built from it) can show WHAT the change billed —
-	// not just that a change happened. Pre-fix this detail was dropped
-	// here and result.Proration stayed nil at audit-write time.
+	// activity timeline built from it) can show what the change billed,
+	// not just that a change happened.
 	result.Proration = detail
 	return result, nil
 }
 
-// atomicRemoveItemWithProration opens one outer tx wrapping the item
-// delete + the remove-proration credit grant. A failure on the credit
-// side rolls back the item delete — customer keeps the item (and its
-// future cycle billing) but at least there's no orphan-credit gap.
-// ADR-030 atomic-proration follow-through (2026-05-29).
+// atomicRemoveItemWithProration removes the item and drafts its credit on
+// one tenant transaction. A failure on the credit side rolls back the item
+// delete: the customer keeps the item (and its future cycle billing), and no
+// credit is lost. ADR-030 atomic-proration follow-through.
 //
 // The credit is priced from the item and subscription RemoveItemTx read
 // under the subscription row lock (#1270), so a quantity change that
@@ -1972,49 +1696,51 @@ func (h *Handler) atomicRemoveItemWithProration(
 	ctx context.Context,
 	tenantID, subID, itemID string,
 ) (domain.SubscriptionItem, *ProrationDetail, error) {
-	tx, err := h.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.SubscriptionItem{}, nil, fmt.Errorf("begin atomic removeItem tx: %w", err)
-	}
-	defer postgres.Rollback(tx)
+	var (
+		removed domain.SubscriptionItem
+		detail  *ProrationDetail
+	)
+	err := h.svc.store.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		result, err := h.svc.RemoveItemTx(ctx, tx, tenantID, subID, itemID)
+		if err != nil {
+			return err
+		}
+		base := result.pricedFrom
+		removed = base.item
 
-	result, err := h.svc.RemoveItemTx(ctx, tx, tenantID, subID, itemID)
+		// Only an active subscription's unused prebill is credited.
+		var remainingDays, totalDays int64
+		if base.sub.Status == domain.SubscriptionActive {
+			remainingDays, totalDays = remainingPeriodRatio(base.sub, result.EffectiveAt)
+		}
+		spec := itemProrationSpec{
+			changeType:    domain.ItemChangeTypeRemove,
+			changeAt:      result.EffectiveAt,
+			remainingDays: remainingDays,
+			totalDays:     totalDays,
+			itemID:        itemID,
+			oldPlanID:     base.item.PlanID,
+			oldQuantity:   base.item.Quantity,
+			newPlanID:     "",
+			newQuantity:   0,
+		}
+		detail, err = h.handleItemProration(ctx, tenantID, base.sub, spec, tx)
+		if err != nil {
+			return fmt.Errorf("proration in atomic removeItem tx: %w", err)
+		}
+
+		// Create the item-removal clawback credit-note DRAFT(s) IN this tx so the
+		// clawback obligation commits atomically with the item delete (ADR-056) — a
+		// create failure rolls the delete back (this is what makes the function's
+		// "a credit failure rolls back the delete" contract actually hold). Issued
+		// post-commit below.
+		if err := h.createClawbackDraftsTx(ctx, tx, tenantID, detail); err != nil {
+			return fmt.Errorf("create clawback draft in atomic removeItem tx: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
 		return domain.SubscriptionItem{}, nil, err
-	}
-	base := result.pricedFrom
-
-	// Only an active subscription's unused prebill is credited.
-	var remainingDays, totalDays int64
-	if base.sub.Status == domain.SubscriptionActive {
-		remainingDays, totalDays = remainingPeriodRatio(base.sub, result.EffectiveAt)
-	}
-	spec := itemProrationSpec{
-		changeType:    domain.ItemChangeTypeRemove,
-		changeAt:      result.EffectiveAt,
-		remainingDays: remainingDays,
-		totalDays:     totalDays,
-		itemID:        itemID,
-		oldPlanID:     base.item.PlanID,
-		oldQuantity:   base.item.Quantity,
-		newPlanID:     "",
-		newQuantity:   0,
-	}
-	detail, err := h.handleItemProration(ctx, tenantID, base.sub, spec, tx)
-	if err != nil {
-		return domain.SubscriptionItem{}, nil, fmt.Errorf("proration in atomic removeItem tx: %w", err)
-	}
-
-	// Create the item-removal clawback credit-note DRAFT(s) IN this tx so the
-	// clawback obligation commits atomically with the item delete (ADR-056) — a
-	// create failure rolls the delete back (this is what makes the function's
-	// "a credit failure rolls back the delete" contract actually hold). Issued
-	// post-commit below.
-	if err := h.createClawbackDraftsTx(ctx, tx, tenantID, detail); err != nil {
-		return domain.SubscriptionItem{}, nil, fmt.Errorf("create clawback draft in atomic removeItem tx: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.SubscriptionItem{}, nil, fmt.Errorf("commit atomic removeItem tx: %w", err)
 	}
 	// Remove proration is a credit (no invoice/tax) so commitProrationTax
 	// no-ops, but keep the post-tx commit uniform across the atomic wrappers.
@@ -2026,7 +1752,7 @@ func (h *Handler) atomicRemoveItemWithProration(
 	h.issueClawbackDrafts(ctx, tenantID, detail)
 	// Return the credit detail so removeItem's audit row can show the
 	// clawback amount (see atomicUpdateItemWithProration).
-	return base.item, detail, nil
+	return removed, detail, nil
 }
 
 // finalizeAuditEmit returns the emission that writes the finalize audit row
@@ -2073,27 +1799,9 @@ func (h *Handler) commitProrationTax(ctx context.Context, tenantID string, detai
 	}
 }
 
-// enrollAutoCharge flags a freshly-created proration CHARGE invoice for the
-// auto-charge sweep so it actually collects (parity with engine cycle/create
-// invoices, which enroll at finalize). Called AFTER the atomic tx commits — a
-// flag UPDATE on a not-yet-durable row would be lost — and inline on the
-// non-atomic path, mirroring commitProrationTax. No-op unless the charge branch
-// recorded a fresh invoice id. On error the invoice is durable but unenrolled;
-// log at error level (the operator can Collect Payment manually) — same
-// reconcilable risk profile as the post-commit tax commit.
-func (h *Handler) enrollAutoCharge(ctx context.Context, tenantID string, detail *ProrationDetail) {
-	if detail == nil || detail.AutoChargeInvoiceID == "" {
-		return
-	}
-	if err := h.invoices.SetAutoChargePending(ctx, tenantID, detail.AutoChargeInvoiceID, true); err != nil {
-		slog.ErrorContext(ctx, "proration charge invoice: re-queue for auto-charge failed (its create already queued it if finalized)",
-			"error", err, "tenant_id", tenantID, "invoice_id", detail.AutoChargeInvoiceID)
-	}
-}
-
-// enrollAutoChargeTx is the atomic-path variant of enrollAutoCharge: it enrolls the
-// proration CHARGE invoice INSIDE the caller's tx, so enrollment commits atomically
-// with the item change. A failure here rolls the whole change back (the operator
+// enrollAutoChargeTx enrolls the proration CHARGE invoice for the auto-charge
+// sweep inside the caller's tx, so enrollment commits atomically with the
+// item change. A failure here rolls the whole change back (the operator
 // retries) instead of leaving a committed-but-unenrolled charge invoice to sit
 // unpaid with no reconciler. No-op for credit/adjustment paths.
 func (h *Handler) enrollAutoChargeTx(ctx context.Context, tx *sql.Tx, tenantID string, detail *ProrationDetail) error {
@@ -2101,39 +1809,6 @@ func (h *Handler) enrollAutoChargeTx(ctx context.Context, tx *sql.Tx, tenantID s
 		return nil
 	}
 	return h.invoices.SetAutoChargePendingTx(ctx, tx, tenantID, detail.AutoChargeInvoiceID, true)
-}
-
-// issueClawbackCreditNote issues the tax-reversing adjustment credit note for a
-// downgrade clawback recorded on the detail (ADR-048). Issued AFTER the atomic
-// tx is durable — the credit-note service is not tx-aware and its tax reversal
-// is an external Stripe call, so it must not ride the DB tx (a rollback would
-// orphan a committed CN + balance grant). The downgrade branch calls it inline
-// on the non-atomic path. No-op unless that branch recorded credit shares.
-//
-// On error the item change is already durable but the customer was not
-// credited — log at error level so it surfaces for reconciliation. The
-// operation still reports success: the downgrade itself committed, and a client
-// retry is rejected at Service.UpdateItem's no-op gate (so we never double-
-// issue), so returning an error here would be misleading and unrecoverable by
-// retry anyway. The source invoice's over-credit cap bounds any aggregate
-// over-credit.
-func (h *Handler) issueClawbackCreditNote(ctx context.Context, tenantID string, detail *ProrationDetail) {
-	if h.creditNotes == nil || detail == nil {
-		return
-	}
-	pieces := detail.ClawbackPieces
-	for i, p := range pieces {
-		if _, err := h.creditNotes.CreateAndIssueAdjustment(ctx, tenantID, p.InvoiceID, p.GrossCents, detail.ClawbackReason, detail.ClawbackMemo); err != nil {
-			slog.ErrorContext(ctx, "downgrade clawback credit note failed after item change committed; customer not yet credited, reconcile manually",
-				"error", err,
-				"tenant_id", tenantID,
-				"source_invoice_id", p.InvoiceID,
-				"gross_cents", p.GrossCents,
-				"piece_index", i,
-				"piece_count", len(pieces),
-				"reason", detail.ClawbackReason)
-		}
-	}
 }
 
 // createClawbackDraftsTx creates the downgrade/removal clawback credit note(s)
@@ -2195,9 +1870,9 @@ func (h *Handler) issueClawbackDrafts(ctx context.Context, tenantID string, deta
 }
 
 // handleItemProration generates the invoice or credit for a single item
-// mutation. Dedup key is (tenant, subscription, item, change_type, change_at)
-// — retries of the same mutation converge on the existing artifact via the
-// proration dedup index.
+// mutation, writing on tx, the item change's transaction. Dedup key is
+// (tenant, subscription, item, change_type, change_at) — retries of the same
+// mutation converge on the existing artifact via the proration dedup index.
 func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub domain.Subscription, spec itemProrationSpec, tx *sql.Tx) (*ProrationDetail, error) {
 	// Resolve plans needed for pricing and naming. The "effective" plan drives
 	// currency and pricing — for a remove it's the old plan; for
@@ -2321,7 +1996,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	// that charged the unused time, whatever their payment state: one rule
 	// for every change (ADR-118 amendment 2026-10-22).
 	if proratedCents < 0 {
-		return h.creditUnusedTime(ctx, tenantID, sub, spec, detail, -proratedCents, memo, tx)
+		return h.creditUnusedTime(ctx, tenantID, sub, spec, detail, -proratedCents, memo)
 	}
 
 	// A net charge needs the period's base invoice: none yet (a fresh
@@ -2577,39 +2252,22 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			SourceChangeType:         spec.changeType,
 		}
 
-		// Tx-aware allocation + insert. When called inside the atomic
-		// AddItem-with-proration flow (tx != nil), both operations share
-		// the caller's tx so a rollback frees the invoice number and
-		// rolls back the item add. When called via the legacy non-atomic
-		// path (tx == nil), the underlying methods open their own txs.
-		var (
-			invoiceNumber string
-			err           error
-		)
-		if tx != nil {
-			invoiceNumber, err = h.invoices.NextInvoiceNumberTx(ctx, tx, tenantID)
-		} else {
-			invoiceNumber, err = h.invoices.NextInvoiceNumber(ctx, tenantID)
-		}
+		// Allocate the number and insert the invoice on the caller's tx, so
+		// a rollback frees the invoice number and rolls back the item change.
+		invoiceNumber, err := h.invoices.NextInvoiceNumberTx(ctx, tx, tenantID)
 		if err != nil {
 			return nil, fmt.Errorf("allocate proration invoice number: %w", err)
 		}
 		invoice.InvoiceNumber = invoiceNumber
 
-		// The finalize audit row commits with the invoice (ADR-090 shared
-		// fate): on the caller's tx, or inside the store's own tx on the
-		// non-atomic path. Its failure rolls the item change back.
+		// The finalize audit row commits with the invoice on the caller's tx
+		// (ADR-090 shared fate). Its failure rolls the item change back.
 		emit := h.finalizeAuditEmit(ctx, tenantID, sub.ID)
-		var inv domain.Invoice
-		if tx != nil {
-			inv, err = h.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, tenantID, invoice, lineItems)
-			if err == nil && emit != nil {
-				if aerr := emit(tx, inv); aerr != nil {
-					return nil, fmt.Errorf("finalize audit for proration invoice: %w", aerr)
-				}
+		inv, err := h.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, tenantID, invoice, lineItems)
+		if err == nil && emit != nil {
+			if aerr := emit(tx, inv); aerr != nil {
+				return nil, fmt.Errorf("finalize audit for proration invoice: %w", aerr)
 			}
-		} else {
-			inv, err = h.invoices.CreateInvoiceWithLineItemsAudited(ctx, tenantID, invoice, lineItems, emit)
 		}
 		if err != nil {
 			// Only the proration-dedup constraint maps to an idempotent
@@ -2666,31 +2324,24 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		// for clock-pinned — so we deliberately do NOT charge inline here (that
 		// would duplicate the charge path and wall-clock-charge a simulated
 		// invoice). Set only on this fresh-creation path, never the dedup-replay
-		// above (that invoice may already be paid). Issued post-commit like the
-		// tax commit (a flag UPDATE on a not-yet-durable row would be lost).
+		// above (that invoice may already be paid). The caller enrolls it on
+		// the item change's tx (enrollAutoChargeTx).
 		detail.AutoChargeInvoiceID = inv.ID
 		// Carry the provider provenance so tax can be committed once the
-		// invoice row is durable. On the non-atomic path (tx == nil) the
-		// row is already committed by CreateInvoiceWithLineItems, so commit
-		// here; on the atomic path (tx != nil) the row isn't durable until
-		// the caller's tx.Commit, so the atomic wrapper commits afterward
+		// invoice row is durable. The row isn't durable until the caller's
+		// tx commits, so the atomic wrapper commits the tax afterward
 		// (committing a Stripe Tax transaction for a row that might roll
 		// back would orphan it). Mirrors the engine's post-finalize commit.
 		detail.TaxProvider = inv.TaxProvider
 		detail.TaxCalculationID = inv.TaxCalculationID
-		// invoice.finalized goes out once the row is durable: here on the
-		// non-atomic path, after the caller's commit on the atomic one. Only
-		// this fresh creation sets it. The dedup replay above sends nothing:
-		// the attempt that created the invoice sent it, unless the process
-		// died between that commit and the send (#974, as for the engine).
+		// invoice.finalized goes out once the row is durable, after the
+		// caller's commit. Only this fresh creation sets it. The dedup replay
+		// above sends nothing: the attempt that created the invoice sent it,
+		// unless the process died between that commit and the send (#974, as
+		// for the engine).
 		if inv.Status == domain.InvoiceFinalized {
 			created := inv
 			detail.finalizedInvoice = &created
-		}
-		if tx == nil {
-			h.dispatchProrationFinalized(ctx, tenantID, detail)
-			h.commitProrationTax(ctx, tenantID, detail)
-			h.enrollAutoCharge(ctx, tenantID, detail)
 		}
 
 		slog.InfoContext(ctx, "proration invoice created",
@@ -2741,13 +2392,12 @@ func unpaidSourceBlocksCharge(ctx context.Context, sub domain.Subscription, spec
 //
 // Read-only: it records the shares on the detail. The atomic caller writes
 // them as drafts on its tx (createClawbackDraftsTx) and issues them after
-// commit; the non-atomic path (tx == nil, tests and the legacy UpdateItem)
-// issues inline. A returned error rolls the change back before it commits.
+// commit. A returned error rolls the change back before it commits.
 //
 // What does not fit is not owed (every invoice is credited up to its total,
 // or relieved of all it asks for), so the change goes ahead and records it on
 // the detail (UncreditedCents → the audit row's uncredited_cents).
-func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub domain.Subscription, spec itemProrationSpec, detail *ProrationDetail, netCredit int64, memo string, tx *sql.Tx) (*ProrationDetail, error) {
+func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub domain.Subscription, spec itemProrationSpec, detail *ProrationDetail, netCredit int64, memo string) (*ProrationDetail, error) {
 	if h.creditNotes == nil || h.invoices == nil {
 		return nil, fmt.Errorf("credit for unused time: the credit-note issuer is not wired")
 	}
@@ -2810,9 +2460,6 @@ func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub dom
 	detail.ClawbackPieces = shares
 	detail.ClawbackReason = clawbackReason(spec.changeType)
 	detail.ClawbackMemo = memo
-	if tx == nil {
-		h.issueClawbackCreditNote(ctx, tenantID, detail)
-	}
 	slog.InfoContext(ctx, "item proration: unused time credited to the invoices that charged it",
 		"subscription_id", sub.ID,
 		"item_id", spec.itemID,
