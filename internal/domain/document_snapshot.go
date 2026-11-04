@@ -92,9 +92,9 @@ func NewDocumentSupplier(ts TenantSettings) DocumentSupplier {
 // the two blocks copy. $1 is the customer id. It runs on the caller's
 // RLS-scoped transaction, so it sees the same tenant and mode as the document
 // row being issued. A missing billing profile or settings row reads as empty
-// strings; a missing customer returns no row, and the stamp fails instead of
+// strings. A missing customer returns no row, and the stamp fails instead of
 // writing an empty copy. Scan with DocumentPartiesScanDest. The bill-to PII
-// columns come back as stored (encrypted when a key is set): call
+// columns come back as stored (encrypted when a key is set), so call
 // DocumentBillTo.Open before using them.
 const DocumentPartiesSQL = `
 	SELECT c.display_name, COALESCE(c.email,''),
@@ -129,8 +129,8 @@ func DocumentPartiesScanDest(b *DocumentBillTo, s *DocumentSupplier) []any {
 
 // SnapshotScanner scans a nullable JSONB snapshot column into *T. SQL NULL
 // leaves the destination nil, which is what tells a renderer to fall back to
-// live data. The column must be selected bare: a COALESCE would turn NULL
-// into a value and the fallback could never fire (ADR-109 trap).
+// live data. The column must be selected bare. A COALESCE would turn NULL
+// into a value, and the fallback could never fire (a trap ADR-109 names).
 //
 // Open, when set, runs on the decoded value before it is stored, so a store
 // can decrypt the bill-to PII fields on the way out (DocumentBillTo.Open).
@@ -169,7 +169,7 @@ func (s SnapshotScanner[T]) Scan(src any) error {
 }
 
 // FieldCipher encrypts and decrypts one stored string. *crypto.Encryptor
-// satisfies it; with no key it passes plaintext through.
+// satisfies it. With no key, it passes plaintext through.
 type FieldCipher interface {
 	Encrypt(plaintext string) (string, error)
 	Decrypt(stored string) (string, error)

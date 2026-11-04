@@ -12,18 +12,21 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// PricingMode is a price's shape: how it turns a quantity into an amount.
 type PricingMode string
 
-// The price shapes (ADR-130 §3). per_unit bills quantity × unit_amount_cents;
-// graduated bills each tier's part of the quantity at the tier's rate;
-// package bills ceil(quantity / package_size) × package_amount_cents, so a
-// part package bills as a whole one.
+// The price shapes (ADR-130 §3):
+//   - per_unit bills quantity × unit_amount_cents.
+//   - graduated bills each tier's part of the quantity at the tier's rate.
+//   - package bills ceil(quantity / package_size) × package_amount_cents, so
+//     a part package bills as a whole one.
 const (
 	PricingPerUnit   PricingMode = "per_unit"
 	PricingGraduated PricingMode = "graduated"
 	PricingPackage   PricingMode = "package"
 )
 
+// RatingTier is one tier of a graduated price.
 type RatingTier struct {
 	// UpTo is the tier's upper bound in whole meter units: the tier prices
 	// the quantity above the previous tier's bound up to this one. Nil is
@@ -31,11 +34,12 @@ type RatingTier struct {
 	// the previous bound. Only the last tier is open, and it must be.
 	UpTo *int64 `json:"up_to"`
 	// UnitAmountCents is the per-unit price in cents, carried as a decimal
-	// (RateLimits: at most 12 places on write) so sub-cent unit prices (e.g. $3.00 per
-	// 1,000,000 tokens = 0.0003 cents/token) bill linearly and exactly. This
-	// is the Stripe `unit_amount_decimal` model. Marshals to/from JSON as a
-	// string (shopspring/decimal). Invoice line amounts and totals stay whole
-	// int64 cents — only the per-unit RATE gains precision.
+	// (RateLimits: at most 12 places on write). So sub-cent unit prices bill
+	// linearly and exactly, for example $3.00 per 1,000,000 tokens = 0.0003
+	// cents/token. This is Stripe's `unit_amount_decimal` model. It marshals
+	// to and from JSON as a string (shopspring/decimal). Invoice line amounts
+	// and totals stay whole int64 cents. Only the per-unit rate gains
+	// precision.
 	UnitAmountCents decimal.Decimal `json:"unit_amount_cents"`
 }
 
@@ -44,6 +48,7 @@ type RatingTier struct {
 // null, and strict clients type the field as an array.
 type RatingTiers []RatingTier
 
+// MarshalJSON writes nil tiers as [] and other tiers as a plain array.
 func (t RatingTiers) MarshalJSON() ([]byte, error) {
 	if t == nil {
 		return []byte("[]"), nil
@@ -168,6 +173,8 @@ func (o CustomerPriceOverride) ApplyTo(p PlanPrice) PlanPrice {
 	return p
 }
 
+// Meter is a stream of usage events with one event_name, and how its events
+// roll up into a period's quantity.
 type Meter struct {
 	ID       string `json:"id"`
 	TenantID string `json:"tenant_id,omitempty"`
@@ -212,15 +219,17 @@ func AdditiveAggregation(agg string) bool {
 	return agg == AggregationSum || agg == AggregationCount
 }
 
-// MeterUnitDisplayScale is the display-scale convention for a meter unit:
-// token rates are quoted per 1M tokens (how every AI provider and rate
-// card lists them — Anthropic, OpenAI, Metronome); everything else quotes
-// per single unit. Returns the decimal shift to apply to a per-unit rate
-// and the "per" label. The FE twin is web-v2/src/lib/priceDisplay.ts
-// unitScale — the two mappings are deliberately tiny; change them
-// together. Only the Go side is test-pinned (TestMeterUnitDisplayScale);
-// the TS twin has NO test, so a one-sided edit there fails nothing —
-// re-read this before touching either mapping.
+// MeterUnitDisplayScale is the display-scale convention for a meter unit.
+// Token rates are quoted per 1M tokens, which is how every AI provider and
+// rate card lists them (Anthropic, OpenAI, Metronome). Everything else is
+// quoted per single unit. It returns the decimal shift to apply to a
+// per-unit rate, and the "per" label.
+//
+// The frontend twin is unitScale in web-v2/src/lib/priceDisplay.ts. Both
+// mappings are kept tiny on purpose, and they must change together. Only
+// the Go side has a test (TestMeterUnitDisplayScale). The TS twin has none,
+// so a one-sided edit there fails nothing. Re-read this before touching
+// either mapping.
 func MeterUnitDisplayScale(unit string) (shift int32, per string) {
 	switch u := strings.ToLower(strings.TrimSpace(unit)); u {
 	case "tokens", "token":
@@ -230,6 +239,7 @@ func MeterUnitDisplayScale(unit string) (shift int32, per string) {
 	}
 }
 
+// BillingInterval is how often a plan bills: monthly or yearly.
 type BillingInterval string
 
 const (
@@ -237,6 +247,7 @@ const (
 	BillingYearly  BillingInterval = "yearly"
 )
 
+// PlanStatus says whether a plan is active or archived.
 type PlanStatus string
 
 const (
@@ -244,10 +255,10 @@ const (
 	PlanArchived PlanStatus = "archived"
 )
 
-// BillTiming controls when the recurring base fee is invoiced relative
-// to the period it covers. Usage lines are structurally arrears-only
-// (future-period quantities are unknown) so this flag only governs
-// the base. See ADR-031.
+// BillTiming controls when the recurring base fee is invoiced, relative to
+// the period it covers. Usage lines can only be billed in arrears, because
+// a future period's quantities are unknown. So this flag governs only the
+// base fee. See ADR-031.
 type BillTiming string
 
 const (
@@ -260,6 +271,8 @@ func (t BillTiming) IsValid() bool {
 	return t == BillInArrears || t == BillInAdvance
 }
 
+// Plan is what a subscription is billed on: a base fee per billing interval,
+// in one currency, plus the plan's usage prices (PlanPrice).
 type Plan struct {
 	ID              string          `json:"id"`
 	TenantID        string          `json:"tenant_id,omitempty"`
@@ -313,23 +326,26 @@ type ClaimedUsage struct {
 	Quantity decimal.Decimal `json:"quantity"`
 }
 
+// ErrInvalidPricingConfig is returned when a price cannot bill a quantity:
+// an unknown mode, a negative quantity or amount, a bad tier table, or a
+// package size that is not above 0.
 var ErrInvalidPricingConfig = errors.New("invalid pricing config")
 
 // ErrAmountOverflow is returned when a pricing computation would exceed
-// int64. Callers must treat this as a hard failure — a silent wrap would
-// emit a negative invoice line in production.
+// int64. Callers must treat it as a hard failure, because a silent wrap
+// would emit a negative invoice line in production.
 var ErrAmountOverflow = errors.New("amount overflow: exceeds int64 range")
 
 // maxInt64Decimal caches a decimal copy of math.MaxInt64 for the overflow
 // guard at the int64-cents conversion boundary.
 var maxInt64Decimal = decimal.NewFromInt(math.MaxInt64)
 
-// NominalUnitAmountDecimal is the configured per-unit rate to DISPLAY for a
-// price, in DECIMAL CENTS: the unit rate for per_unit, nil for graduated and
-// package (which have no single unit rate — callers fall back to the
-// effective amount÷quantity). This is the SINGLE source the invoice line stamp
-// (billing.nominalRate) and the usage / cost-dashboard price rows both use, so
-// every surface renders the same unit price (ADR-054).
+// NominalUnitAmountDecimal is the configured per-unit rate to display for a
+// price, in decimal cents. It is the unit rate for per_unit, and nil for
+// graduated and package, which have no single unit rate. Callers then fall
+// back to the effective amount÷quantity. It is the one source that both the
+// invoice line stamp (billing.nominalRate) and the usage and cost-dashboard
+// price rows use, so every surface shows the same unit price (ADR-054).
 func NominalUnitAmountDecimal(rule PriceShape) *decimal.Decimal {
 	if rule.Mode != PricingPerUnit {
 		return nil
@@ -339,16 +355,16 @@ func NominalUnitAmountDecimal(rule PriceShape) *decimal.Decimal {
 }
 
 // ComputeAmountCents prices a decimal quantity through the given price shape
-// and returns the result rounded to whole cents. Quantity is decimal so that
-// fractional usage primitives (GPU-hours, cached-token ratios) round-trip
-// without precision loss. Tier boundaries (`up_to`, `package_size`) stay
-// integer because pricing config is authored that way; the math walks tiers
-// in decimal space and converts to int64 cents only at the final round, so
-// a line is rounded once.
+// and returns the result rounded to whole cents. The quantity is a decimal,
+// so fractional usage (GPU-hours, cached-token ratios) keeps its precision.
+// Tier boundaries (`up_to`, `package_size`) stay integers, because pricing
+// config is written that way. The math walks the tiers in decimals and
+// converts to int64 cents only at the final round, so a line is rounded
+// once.
 //
-// Rounding: half-to-even (banker's rounding) at the cent boundary. This is
-// the same convention used elsewhere in the engine (money.RoundHalfToEven)
-// and the IEEE 754 default — minimizes systematic bias on bulk invoices.
+// Rounding is half-to-even (banker's rounding) at the cent. The engine uses
+// the same convention elsewhere (money.RoundHalfToEven), and it is the IEEE
+// 754 default. It keeps systematic bias low on bulk invoices.
 func ComputeAmountCents(rule PriceShape, quantity decimal.Decimal) (int64, error) {
 	if quantity.IsNegative() {
 		return 0, ErrInvalidPricingConfig
@@ -415,6 +431,7 @@ type PriceFieldError struct {
 	Reason string
 }
 
+// Error returns the field and the reason, as "field: reason".
 func (e *PriceFieldError) Error() string { return e.Field + ": " + e.Reason }
 
 // CheckPriceShape checks that a price has its mode's fields and only those.
@@ -464,6 +481,7 @@ type TierShapeError struct {
 	Reason string
 }
 
+// Error returns the reason.
 func (e *TierShapeError) Error() string { return e.Reason }
 
 // CheckTiers checks a graduated tier table's shape: at least one tier, each
@@ -497,17 +515,18 @@ func CheckTiers(tiers []RatingTier) error {
 	return nil
 }
 
-// decimalToCents rounds a decimal cents value (potentially fractional after
-// quantity multiplication) to int64 using banker's rounding. Returns
-// ErrAmountOverflow if the rounded value would exceed int64 — silent wrap
-// would emit a negative invoice line in production, so this is fail-loud.
+// decimalToCents rounds a decimal cents value (possibly fractional after the
+// quantity multiplication) to int64 with banker's rounding. It returns
+// ErrAmountOverflow if the rounded value would exceed int64. A silent wrap
+// would emit a negative invoice line in production, so it fails loudly.
 func decimalToCents(d decimal.Decimal) (int64, error) {
 	rounded := d.RoundBank(0)
-	// A negative value is < MaxInt64 so it slips past the overflow guard and
-	// IntPart() would silently emit a negative invoice line — the exact
-	// fail-open this function exists to prevent. Callers only ever reach here
-	// with non-negative amounts (quantity and rates are validated >= 0), so a
-	// negative here is a logic error: fail loud rather than bill a negative.
+	// A negative value is < MaxInt64, so it passes the overflow guard, and
+	// IntPart() would silently emit a negative invoice line. That is the
+	// exact fail-open this function exists to prevent. Callers only reach
+	// here with non-negative amounts (quantity and rates are validated
+	// >= 0), so a negative here is a logic error. Fail loudly instead of
+	// billing a negative.
 	if rounded.IsNegative() {
 		return 0, ErrInvalidPricingConfig
 	}

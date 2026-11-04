@@ -13,8 +13,8 @@ import (
 
 // Every decimal a request sends (a usage quantity, a rate, a provider cost, a
 // usage threshold) is read with ParseDecimal or ParseDecimalString and checked
-// with CheckDecimal, so each field's limits are stated once and hold at every
-// door.
+// with CheckDecimal. So each field's limits are stated once, and they hold at
+// every entry point.
 
 // DecimalLimits is the range a request decimal must fall in.
 type DecimalLimits struct {
@@ -31,8 +31,8 @@ var (
 	// RateLimits bound a price amount in cents: a per-unit rate, a tier
 	// rate or a package amount. A rate under 10^18 cents prices one unit
 	// (or one package) inside int64 cents, the type every invoice amount
-	// is held in; 12 places is Stripe's unit_amount_decimal precision.
-	// The limit does not bound what a rate bills: rate × quantity, the
+	// is held in. The 12 places are Stripe's unit_amount_decimal precision.
+	// The limit does not bound what a rate bills. Rate × quantity, the
 	// invoice's sum and its total with tax are each refused with
 	// ErrAmountOverflow when they do not fit int64 (ComputeAmountCents,
 	// billing.ApplyTaxToLineItems).
@@ -44,15 +44,15 @@ var (
 
 // MaxDecimalChars is the longest text a request decimal may be written in.
 // Any value inside the limits above, written plainly, is under 45
-// characters; only padding with zeros reaches 100.
+// characters. Only padding with zeros reaches 100.
 const MaxDecimalChars = 100
 
 // CheckDecimal refuses a value outside lim and returns the value to store.
 //
-// The value is coefficient × 10^exponent, and both limits are decided from
-// the coefficient's digit count and the exponent before any comparison or
-// rounding. A zero passes
-// both limits whatever its exponent, so it is returned as plain 0.
+// The value is coefficient × 10^exponent. Both limits are decided from the
+// coefficient's digit count and the exponent, before any comparison or
+// rounding. A zero passes both limits whatever its exponent, so it is
+// returned as plain 0.
 func CheckDecimal(field string, d decimal.Decimal, lim DecimalLimits) (decimal.Decimal, error) {
 	if d.IsZero() {
 		return decimal.New(0, 0), nil
@@ -75,8 +75,8 @@ func CheckDecimal(field string, d decimal.Decimal, lim DecimalLimits) (decimal.D
 // CheckRate checks a price amount in cents (a plan price's or a price
 // override's unit_amount_cents, tier unit_amount_cents and
 // package_amount_cents): inside RateLimits and 0 or more. A negative
-// rate is a discount misspelled; credits are the discount primitive
-// (ADR-039).
+// rate is a discount written the wrong way. Credits are the discount
+// primitive (ADR-039).
 func CheckRate(field string, d decimal.Decimal) (decimal.Decimal, error) {
 	d, err := CheckDecimal(field, d, RateLimits)
 	if err != nil {
@@ -108,7 +108,7 @@ func coefficientDigits(d decimal.Decimal) int64 {
 }
 
 // ParseDecimal reads a request decimal sent as a JSON number or a string
-// holding one. ok is false when the field is absent or null; the caller
+// holding one. ok is false when the field is absent or null. The caller
 // decides whether that is a zero or a missing required field. The limits are
 // CheckDecimal's.
 func ParseDecimal(field string, raw json.RawMessage) (d decimal.Decimal, ok bool, err error) {
@@ -143,7 +143,7 @@ func parseDecimalText(field, text string, notNumber error) (decimal.Decimal, err
 	}
 	d, err := decimal.NewFromString(text)
 	if err != nil {
-		// shopspring parses any digits; on a well-formed number it fails
+		// shopspring parses any digits. On a well-formed number it fails
 		// only when the exponent does not fit an int32.
 		if jsonNumber.MatchString(text) {
 			return decimal.Decimal{}, errs.Invalid(field, field+" cannot be read: its exponent is out of range")

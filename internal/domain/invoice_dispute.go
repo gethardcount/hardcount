@@ -7,9 +7,9 @@ import "time"
 // warning_* values are an inquiry: the card network asks about the payment
 // before any chargeback. The other values are a chargeback.
 //
-// The column's CHECK lists the same eight values (migration 00185). A status
-// Stripe adds later is refused by the webhook handler, loudly, until both are
-// extended together.
+// The column's CHECK lists the same eight values (migration 00185). The
+// webhook handler refuses, loudly, a status that Stripe adds later, until both
+// lists are extended together.
 type DisputeStatus string
 
 const (
@@ -29,7 +29,7 @@ func (s DisputeStatus) Valid() bool {
 }
 
 // Closed reports whether the dispute has ended. Stripe sends
-// charge.dispute.closed for won, lost and warning_closed; prevented (stopped
+// charge.dispute.closed for won, lost and warning_closed. Prevented (stopped
 // before it became a chargeback) is an end state too.
 func (s DisputeStatus) Closed() bool {
 	return s.stage() == disputeStageClosed
@@ -59,14 +59,14 @@ func (s DisputeStatus) stage() int {
 }
 
 // InvoiceDispute is a card dispute (chargeback) Stripe reported against one
-// of the invoice's payments (#979). Hardcount records it and reports it; it never
-// changes the invoice's payment status and never moves money because of it.
-// The operator answers the dispute in Stripe, and decides what a lost one
-// means for the invoice.
+// of the invoice's payments (#979). Hardcount records and reports it, but
+// never changes the invoice's payment status and never moves money because
+// of it. The operator answers the dispute in Stripe, and decides what a lost
+// one means for the invoice.
 //
-// One row per Stripe dispute. Each charge.dispute.* event carries the whole
-// dispute as it stood when the event was created; the row keeps the newest
-// one (see SupersededBy), so events can arrive in any order.
+// There is one row per Stripe dispute. Each charge.dispute.* event carries
+// the whole dispute as it stood when the event was created. The row keeps the
+// newest one (see SupersededBy), so events can arrive in any order.
 type InvoiceDispute struct {
 	ID                    string        `json:"id"`
 	InvoiceID             string        `json:"invoice_id"`
@@ -78,8 +78,8 @@ type InvoiceDispute struct {
 	// example fraudulent or product_not_received).
 	Reason string `json:"reason,omitempty"`
 	// AmountCents is the disputed amount in Currency's minor units. Stripe
-	// notes it can differ from the payment (a partial dispute, a currency
-	// conversion).
+	// notes that it can differ from the payment (a partial dispute, a
+	// currency conversion).
 	AmountCents int64  `json:"amount_cents"`
 	Currency    string `json:"currency"`
 	// EvidenceDueBy is the deadline to answer the dispute in Stripe. Nil when
@@ -120,7 +120,7 @@ type DisputeSnapshot struct {
 // SupersededBy reports whether snapshot s is newer than what the row holds,
 // so it should replace it. Stripe does not deliver events in order, so the
 // event's creation time decides, not the arrival order. Its precision is one
-// second; within one second the later stage of the dispute's life wins. The
+// second. Within one second, the later stage of the dispute's life wins. The
 // event the row already holds is never newer than itself, which makes a
 // redelivery a no-op.
 func (d InvoiceDispute) SupersededBy(s DisputeSnapshot) bool {

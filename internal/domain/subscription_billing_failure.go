@@ -13,7 +13,7 @@ const MaxBillingAttempts = 8
 
 // BillingFailure is the saved record of a subscription whose billing keeps
 // failing (ADR-119). It is present on a read only while it describes the work
-// that is due right now; see SubscriptionBillingFailingSQL.
+// that is due right now (see SubscriptionBillingFailingSQL).
 type BillingFailure struct {
 	// Attempts counts the failed attempts on the current due work. A record
 	// that exists always has at least 1.
@@ -78,7 +78,8 @@ func SubscriptionDueInstantSQL(alias string) string {
 // the due instant the row has now. The five billing_* columns are not cleared
 // when the due instant moves, so reading them without this predicate reads
 // stale data. Every reader goes through it: the due scans, the list filter,
-// both writers, and the gauges (a hand copy, pinned by a test).
+// both writers, and the gauges (a hand copy, which a test checks against
+// this predicate).
 //
 // Every term is two-valued (never NULL), so the predicate is safe under NOT.
 func SubscriptionBillingFailingSQL(alias string) string {
@@ -89,7 +90,8 @@ func SubscriptionBillingFailingSQL(alias string) string {
 
 // SubscriptionBillingGateSQL is the clause the wall-clock due scans add: skip
 // a row whose live record is parked (no next attempt) or still waiting.
-// nowParam is the placeholder of the run's anchored instant, e.g. "$2".
+// nowParam is the placeholder of the run's anchored instant, for example
+// "$2".
 func SubscriptionBillingGateSQL(alias, nowParam string) string {
 	return "NOT (" + SubscriptionBillingFailingSQL(alias) +
 		" AND (" + alias + ".billing_next_attempt_at IS NULL OR " + alias + ".billing_next_attempt_at > " + nowParam + "))"
