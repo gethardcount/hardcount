@@ -227,7 +227,9 @@ func (s *Sender) SetSuppressionChecker(c RecipientSuppressionChecker) { s.suppre
 func (s *Sender) SetStripeReadiness(r StripeReadiness) { s.stripeReady = r }
 
 // canPayOnline reports whether the customer can pay tenantID's invoice on the
-// hosted page: Stripe is connected for the mode on ctx. The dispatcher pins
+// hosted page: Stripe is connected for the mode on ctx. Callers ask only when
+// the email has a hosted link, so HOSTED_INVOICE_BASE_URL, the page's other
+// condition, is already set. The dispatcher pins
 // the outbox row's mode on ctx, which is the invoice's. It is read when the
 // email is rendered, the moment closest to the customer's click. A missing
 // check, a ctx with no mode, or a failed read is an error: the send fails and

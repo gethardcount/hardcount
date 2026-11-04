@@ -2607,8 +2607,8 @@ export const getCreatePublicPaymentUpdateCheckoutUrl = (token: string,) => {
  * fails to create the session, the token works again.
  *
  * Stripe sends the customer to the server's `PAYMENT_UPDATE_RETURN_URL`
- * (`http://localhost:5173/payment-method-added` when that is unset) with
- * `?status=success` or `?status=cancel` added. The card is saved when
+ * with `?status=success` or `?status=cancel` added. Without that
+ * setting the call answers 409 and the token is not used up. The card is saved when
  * Stripe reports the setup succeeded. Writes an audit row. Send no body.
  * @summary Start adding a card in Stripe Checkout
  */

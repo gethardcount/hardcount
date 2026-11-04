@@ -198,7 +198,8 @@ type Service struct {
 	collectionStopper PaymentCanceler
 	dunningResolver   DunningResolver
 	// setupLinkEmailOff is true when this server cannot email a setup link
-	// (SMTP_HOST or PAYMENT_UPDATE_URL unset). Read only by the
+	// (SMTP_HOST, PAYMENT_UPDATE_URL or PAYMENT_UPDATE_RETURN_URL unset). Read
+	// only by the
 	// no-payment-method and recovery-ended notices, which must not say a
 	// setup link is emailed when nothing can be sent. Zero value: sending
 	// works, which is what every production boot wires explicitly.
@@ -208,12 +209,20 @@ type Service struct {
 	// with no card and no Stripe is refused. Read only by the no-payment-
 	// method notice's no-Stripe copy. Zero value: sending works.
 	invoiceEmailOff bool
+	// hostedPayOff is true when this server has no HOSTED_INVOICE_BASE_URL,
+	// so the hosted invoice page takes no payment. Read only by the
+	// payment-failure notices. Zero value: the page takes payment.
+	hostedPayOff bool
+	// setupLinkCopyOff is true when this server has no CUSTOMER_PORTAL_URL,
+	// so the customer page can't make a setup link to copy. Read only by the
+	// no-payment-method notice. Zero value: it can.
+	setupLinkCopyOff bool
 }
 
 // SetSetupLinkEmailConfigured records whether this server can email a setup
 // link, so the no-payment-method notice says "a setup link is emailed" only
-// when one can be. Wired at boot from both things the sender needs: SMTP and
-// PAYMENT_UPDATE_URL.
+// when one can be. Wired at boot from what the sender needs: SMTP,
+// PAYMENT_UPDATE_URL and PAYMENT_UPDATE_RETURN_URL.
 func (s *Service) SetSetupLinkEmailConfigured(configured bool) { s.setupLinkEmailOff = !configured }
 
 // SetInvoiceEmailConfigured records whether this server can send email
@@ -221,6 +230,16 @@ func (s *Service) SetSetupLinkEmailConfigured(configured bool) { s.setupLinkEmai
 // customer once" without Stripe only when it can be (ADR-060 amendment
 // 2026-10-30).
 func (s *Service) SetInvoiceEmailConfigured(configured bool) { s.invoiceEmailOff = !configured }
+
+// SetHostedPayConfigured records whether the hosted invoice page can take
+// payment (HOSTED_INVOICE_BASE_URL is set), so the payment-failure notices
+// send the operator to that page only when it works.
+func (s *Service) SetHostedPayConfigured(configured bool) { s.hostedPayOff = !configured }
+
+// SetSetupLinkCopyConfigured records whether the customer page can make a
+// setup link to copy (CUSTOMER_PORTAL_URL is set), so the no-payment-method
+// notice offers that only when it works.
+func (s *Service) SetSetupLinkCopyConfigured(configured bool) { s.setupLinkCopyOff = !configured }
 
 // SetCollectionStopper wires the Stripe leg every committed void runs
 // (AfterVoid): expire the invoice's live Checkout sessions, then cancel its
@@ -1533,6 +1552,8 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	atc.StripeConnected = f.stripeConnected
 	atc.SetupLinkEmailOff = s.setupLinkEmailOff
 	atc.InvoiceEmailOff = s.invoiceEmailOff
+	atc.HostedPayOff = s.hostedPayOff
+	atc.SetupLinkCopyOff = s.setupLinkCopyOff
 	inv.Attention = domain.ClassifyInvoiceAttention(inv, atc)
 
 	// What an operator must know BEFORE recording a wire against a
