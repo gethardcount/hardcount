@@ -47,10 +47,10 @@ invoice is then collected like any other. Once email is set up, a customer
 with no card gets an email:
 
 - with a link to add a card, when Stripe is connected and
-  `PAYMENT_UPDATE_URL` is set;
+  `PAYMENT_UPDATE_URL` and `PAYMENT_UPDATE_RETURN_URL` are set;
 - with the invoice itself, when Stripe is not connected.
 
-With Stripe connected and `PAYMENT_UPDATE_URL` unset, the first email is
+With Stripe connected and either address unset, the first email is
 the reminder of the first payment retry, which asks the customer to pay
 the invoice.
 

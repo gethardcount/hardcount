@@ -244,14 +244,13 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// paymentMethodsSvc gets auditLogger later, once auditLogger exists (see
 	// the SetAuditLogger call below).
 	//
-	// CUSTOMER_PORTAL_URL is the base of the setup session's return URL: the
-	// SPA host where the customer lands after Stripe Checkout. Local
-	// development falls back to http://localhost:5173, the Vite dev server.
-	// Unset, a deployment on another host sends customers back to localhost,
-	// which is broken in production.
+	// CUSTOMER_PORTAL_URL is the dashboard address a setup session returns
+	// the customer to when the caller passes no return_url. It has no
+	// default: an address that is wrong for this install would strand the
+	// customer, so without it those setup sessions are refused.
 	customerPortalURL := strings.TrimSpace(os.Getenv("CUSTOMER_PORTAL_URL"))
 	if customerPortalURL == "" {
-		slog.Warn("CUSTOMER_PORTAL_URL NOT SET — after a customer saves a card on Stripe's page, Stripe sends them to http://localhost:5173/payment-method-added, which only exists in local development. The card is still saved. Set this to your dashboard's address, e.g. https://app.example.com")
+		slog.Warn("CUSTOMER_PORTAL_URL NOT SET — setup links (Send setup link, and setup sessions with no return_url) are refused with return_address_not_set, because Stripe would have no page to send the customer back to. Set this to your dashboard's address, e.g. https://app.example.com")
 	}
 	paymentMethodsSvc.SetPortalBaseURL(customerPortalURL)
 	// compositePaymentSetupStore serves the customer_payment_setups shape
@@ -609,12 +608,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// find every clock.Resolver hookup in the router.
 	//
 	// PAYMENT_UPDATE_RETURN_URL is where Stripe returns a customer who added a
-	// card from the "add a payment method" email. Unset, the handler falls
-	// back to the Vite dev server, like CUSTOMER_PORTAL_URL above, so boot
-	// warns as it does for that one.
+	// card from the "add a payment method" email. It has no default. Without
+	// it the page refuses to add the card, so the email is not sent either.
 	paymentUpdateReturnURL := strings.TrimSpace(os.Getenv("PAYMENT_UPDATE_RETURN_URL"))
 	if paymentUpdateReturnURL == "" {
-		slog.Warn("PAYMENT_UPDATE_RETURN_URL NOT SET — after a customer adds a card from the \"add a payment method\" email, Stripe sends them to http://localhost:5173/payment-method-added, which only exists in local development. The card is still saved. Set this to your dashboard's /payment-method-added page, e.g. https://app.example.com/payment-method-added")
+		slog.Warn("PAYMENT_UPDATE_RETURN_URL NOT SET — \"add a payment method\" emails are not sent, and an existing link's page refuses to add the card, because Stripe would have no page to send the customer back to. Set this to your dashboard's /payment-method-added page, e.g. https://app.example.com/payment-method-added")
 	}
 	publicPaymentH := payment.NewPublicPaymentHandler(tokenSvc, db, stripeClients, customerSvc, paymentMethodsStripe,
 		paymentUpdateReturnURL)
@@ -637,12 +635,13 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// hosted_invoice_url. Its public routes take a token, and the partner's
 	// end customer opens them from an email. The Stripe adapter picks live or
 	// test keys from the invoice row's livemode. HOSTED_INVOICE_BASE_URL is
-	// the public SPA origin that the Checkout success and cancel URLs return
-	// to. In development, leave it empty: the handler falls back to
-	// http://localhost:5173, so `make dev` works without extra config.
+	// the page's origin: the email links point there, and Stripe Checkout
+	// returns the customer there. It has no default. Without it the emails
+	// carry no link and the page offers no Pay button.
 	//
 	// The adapter is a named variable, not an inline literal, so the ADR-090
 	// boot gate below can check that its audit emitter is wired.
+	hostedInvoiceBaseURL := strings.TrimSpace(os.Getenv("HOSTED_INVOICE_BASE_URL"))
 	hostedInvoiceStripe := &hostedInvoiceStripeAdapter{clients: stripeClients, ensurer: paymentMethodsStripe, sessions: checkoutSessionStore, audit: auditLogger, belowMinimum: stripeAdapter}
 
 	hostedInvoiceH := hostedinvoice.New(hostedinvoice.Deps{
@@ -652,7 +651,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		CreditNotes: &creditNoteListerAdapter{svc: creditNoteSvc},
 		Stripe:      hostedInvoiceStripe,
 		StripeReady: stripeClients,
-		BaseURL:     strings.TrimSpace(os.Getenv("HOSTED_INVOICE_BASE_URL")),
+		BaseURL:     hostedInvoiceBaseURL,
 	})
 
 	// Email goes through the outbox. Producers always queue into email_outbox
@@ -680,15 +679,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	} else {
 		slog.Info("SMTP configured", "host", emailSender.SMTPHost())
 	}
-	// HOSTED_INVOICE_BASE_URL is the public origin that the email buttons
-	// "View & pay invoice" and "View receipt" link to, at the /invoice/<token>
-	// hosted page. Unset, the templates render no link in the button, and the
-	// email looks broken to the customer. Warn at boot, as for SMTP,
-	// CUSTOMER_PORTAL_URL and PAYMENT_UPDATE_*, so the gap cannot quietly reach
-	// production.
-	hostedInvoiceBaseURL := strings.TrimSpace(os.Getenv("HOSTED_INVOICE_BASE_URL"))
+	// One warning covers both effects of an unset HOSTED_INVOICE_BASE_URL.
+	// The email sender reads the same setting itself (email.NewSender).
 	if hostedInvoiceBaseURL == "" {
-		slog.Warn("HOSTED_INVOICE_BASE_URL NOT SET — invoice / receipt / dunning / payment-failed emails will render with NO payment link in the CTA. Set this to your hosted-invoice page origin (e.g. https://billing.example.com).")
+		slog.Warn("HOSTED_INVOICE_BASE_URL NOT SET — invoice, receipt, dunning and payment-failed emails carry no payment link, and the hosted invoice page offers no Pay button. Set this to your hosted invoice page's address (e.g. https://billing.example.com).")
 	}
 	// bounceReporterAdapter passes the Sender's SMTP 5xx errors to
 	// customer.MarkEmailBounced. It needs the email blinder, set up further
@@ -753,9 +747,14 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	}
 	// The no-payment-method notice says a setup link is emailed, and offers
 	// Resend, only when this server can send one. The setup-link sender
-	// refuses without PAYMENT_UPDATE_URL, even when SMTP works.
-	setupLinksEmailable := canEmailSetupLinks(emailSender.IsConfigured(), paymentUpdateURL)
+	// refuses without PAYMENT_UPDATE_URL or PAYMENT_UPDATE_RETURN_URL, even
+	// when SMTP works.
+	setupLinksEmailable := canEmailSetupLinks(emailSender.IsConfigured(), paymentUpdateURL, paymentUpdateReturnURL)
 	invoiceSvc.SetSetupLinkEmailConfigured(setupLinksEmailable)
+	// The payment-failure and no-payment-method notices offer the hosted
+	// invoice page and a copied setup link only when those pages can work.
+	invoiceSvc.SetHostedPayConfigured(hostedInvoiceBaseURL != "")
+	invoiceSvc.SetSetupLinkCopyConfigured(customerPortalURL != "")
 	// Without Stripe the customer is emailed the invoice instead, which needs
 	// SMTP only (ADR-060 amendment 2026-10-30).
 	invoiceSvc.SetInvoiceEmailConfigured(emailSender.IsConfigured())
@@ -1076,15 +1075,16 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// email when a charge fails. Hardcount does the same at finalize, so the
 	// customer gets the same experience in both cases.
 	//
-	// It is always wired. If paymentUpdateURL is empty, the adapter reports
-	// the misconfiguration at send time, as the boot warning above says.
-	// There is one send path and no silent skip.
+	// It is always wired. If PAYMENT_UPDATE_URL or PAYMENT_UPDATE_RETURN_URL
+	// is empty, the adapter refuses at send time, as the boot warnings above
+	// say. There is one send path and no silent skip.
 	noPMNotifier := &noPaymentMethodNotifierAdapter{
-		email:            paymentSetupEmail,
-		customerEmail:    customerEmailAdapter,
-		paymentUpdateURL: paymentUpdateURL,
-		tokenSvc:         tokenSvc,
-		auditLogger:      auditLogger,
+		email:                  paymentSetupEmail,
+		customerEmail:          customerEmailAdapter,
+		paymentUpdateURL:       paymentUpdateURL,
+		paymentUpdateReturnURL: paymentUpdateReturnURL,
+		tokenSvc:               tokenSvc,
+		auditLogger:            auditLogger,
 	}
 	// The adapter's emitter is set in a struct literal, which the
 	// SetAuditLogger pin test does not see, so check it here. The adapter

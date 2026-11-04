@@ -167,6 +167,13 @@ func TestCheckedMath_PreviewBaseFee(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			lf := newLiveFixture(t, "Checked Preview "+tc.name, 0)
 			setBase(t, lf, tc.base, tc.qty)
+			// A 20-day period is shorter than any month, so the preview
+			// prorates the base on every date. The fixture's own 30-day
+			// period is a full month when it starts in a 30-day month, and
+			// then nothing is prorated.
+			const previewDays = 20
+			lf.exec(t, `UPDATE subscriptions SET current_billing_period_end = $1, next_billing_at = $1 WHERE id = $2`,
+				lf.cycleStart.Add(previewDays*24*time.Hour), lf.subID)
 			svc := billing.NewPreviewService(lf.engine, customer.NewPostgresStore(lf.db), lf.subStore)
 			got, err := svc.CreatePreview(lf.ctx, lf.tenantID, billing.CreatePreviewRequest{CustomerID: lf.customerID, SubscriptionID: lf.subID})
 			if tc.refused {
@@ -190,6 +197,9 @@ func TestCheckedMath_PreviewBaseFee(t *testing.T) {
 				var num, den int
 				if _, err := fmt.Sscanf(base.Description, "Threshold Plan - base fee (qty %d, prorated %d/%d days)", &qty, &num, &den); err != nil {
 					t.Fatalf("preview base line %q is not prorated: %v", base.Description, err)
+				}
+				if num != previewDays {
+					t.Fatalf("preview prorated %d/%d days, want %d days", num, den, previewDays)
 				}
 				if want := prorated(tc.base*tc.qty, num, den); base.AmountCents != want || len(got.Totals) != 1 || got.Totals[0].AmountCents != want {
 					t.Errorf("preview base %d, totals %+v; want %d", base.AmountCents, got.Totals, want)

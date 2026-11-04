@@ -155,6 +155,10 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	// A configured server queues customer emails, so an email Hardcount wrongly
 	// sends shows up in the outbox.
 	t.Setenv("SMTP_HOST", "smtp.min-charge.invalid")
+	// The hosted page takes payment, and setup sessions return the customer,
+	// only with these addresses set; they have no default.
+	t.Setenv("HOSTED_INVOICE_BASE_URL", "https://billing.min-charge.test")
+	t.Setenv("CUSTOMER_PORTAL_URL", "https://app.min-charge.test")
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
 	defer ts.Close()
 
