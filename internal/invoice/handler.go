@@ -306,19 +306,20 @@ type HandlerDeps struct {
 	RefundIssuer      RefundIssuer
 }
 
-func NewHandler(svc *Service, customers CustomerGetter, settings SettingsGetter, deps ...HandlerDeps) *Handler {
-	h := &Handler{svc: svc, customers: customers, settings: settings}
-	if len(deps) > 0 {
-		h.creditNotes = deps[0].CreditNotes
-		h.pdfCreditNotes = deps[0].IssuedCreditNotes
-		h.charger = deps[0].Charger
-		h.paymentSetups = deps[0].PaymentSetups
-		h.dunning = deps[0].Dunning
-		h.emailEvents = deps[0].EmailEvents
-		h.dunningTimeline = deps[0].DunningTimeline
-		h.refundIssuer = deps[0].RefundIssuer
+func NewHandler(svc *Service, customers CustomerGetter, settings SettingsGetter, deps HandlerDeps) *Handler {
+	return &Handler{
+		svc:             svc,
+		customers:       customers,
+		settings:        settings,
+		creditNotes:     deps.CreditNotes,
+		pdfCreditNotes:  deps.IssuedCreditNotes,
+		charger:         deps.Charger,
+		paymentSetups:   deps.PaymentSetups,
+		dunning:         deps.Dunning,
+		emailEvents:     deps.EmailEvents,
+		dunningTimeline: deps.DunningTimeline,
+		refundIssuer:    deps.RefundIssuer,
 	}
-	return h
 }
 
 // SetEmailSender configures email sending for invoice notifications.
@@ -703,8 +704,13 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 		// toast for a send that never happened (the notifier's no-email
 		// skip was a silent nil). The typed outcome makes the endpoint
 		// honest: nothing was sent, tell the operator what works instead.
-		respond.ConflictCoded(w, r, "", "no_email_on_file",
-			"customer has no email on file — add one on the customer record, or copy the setup link from the customer page and share it directly")
+		msg := "customer has no email on file — add one on the customer record, or copy the setup link from the customer page and share it directly"
+		if h.svc.setupLinkCopyOff {
+			// The customer page can't make a link to copy without
+			// CUSTOMER_PORTAL_URL, so don't offer it.
+			msg = "customer has no email on file — add one on the customer record, then resend"
+		}
+		respond.ConflictCoded(w, r, "", "no_email_on_file", msg)
 		return
 	}
 

@@ -84,7 +84,7 @@ Without `SMTP_HOST`, Hardcount sends no email: every send fails with "SMTP not c
 | `SMTP_TLS` | `starttls` (port 587), `implicit` (port 465) or `none`. | `starttls`. Any other value stops start-up. In production, `none` makes every send fail. |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | Login for the email server. | Unset: Hardcount sends without logging in. |
 | `SMTP_FROM` | The sender address on every email. | `billing@hardcount.local` |
-| `HOSTED_INVOICE_BASE_URL` | Address of the hosted invoice page: the "View & pay invoice" link in emails, and where Stripe Checkout returns a customer who paid there. | Unset: emails have no invoice link, with a warning. Checkout returns to `http://localhost:5173`. |
+| `HOSTED_INVOICE_BASE_URL` | Address of the hosted invoice page: the "View & pay invoice" link in emails, and where Stripe Checkout returns a customer who paid there. | Unset: emails have no invoice link, and the page shows no **Pay** button, with a warning. |
 | `PAYMENT_UPDATE_URL` | The "add a payment method" link in emails. Hardcount adds `?token=…`. | Unset: those emails are not sent, with a warning. |
 | `DASHBOARD_BASE_URL` | The dashboard's address, for password-reset and team-invite links. | Unset: password-reset emails are not sent and invites are refused, with a warning. |
 | `POSTMARK_WEBHOOK_USER`, `POSTMARK_WEBHOOK_PASS` | User name and password Postmark must send with bounce reports to `POST /v1/webhooks/postmark`. Postmark only. | Unset (either one): that route answers 401 to every post, with a warning. |
@@ -93,8 +93,8 @@ Without `SMTP_HOST`, Hardcount sends no email: every send fails with "SMTP not c
 
 | Setting | What it does | Default |
 |---|---|---|
-| `CUSTOMER_PORTAL_URL` | The dashboard's address, with no path. Stripe returns a customer here after they save a card from a setup link you send or make on the customer's page (`send-setup-email`, `setup-session`). Hardcount adds `/payment-method-added`. | Unset: Stripe returns them to `http://localhost:5173/payment-method-added`, with a warning. The card is still saved. |
-| `PAYMENT_UPDATE_RETURN_URL` | Where a customer lands after adding a card from the "add a payment method" email. Hardcount adds `?status=success` or `?status=cancel`. | Unset: `http://localhost:5173/payment-method-added`, with a warning. The card is still saved. |
+| `CUSTOMER_PORTAL_URL` | The dashboard's address, with no path. Stripe returns a customer here after they save a card from a setup link you send or make on the customer's page (`send-setup-email`, `setup-session`). Hardcount adds `/payment-method-added`. | Unset: those setup links are refused with `return_address_not_set`, with a warning. A `setup-session` call that sends its own `return_url` still works. |
+| `PAYMENT_UPDATE_RETURN_URL` | Where a customer lands after adding a card from the "add a payment method" email. Hardcount adds `?status=success` or `?status=cancel`. | Unset: that email is not sent, and an earlier link's page refuses to add the card, with a warning. The link keeps working once the setting is set. |
 
 ## Background jobs
 

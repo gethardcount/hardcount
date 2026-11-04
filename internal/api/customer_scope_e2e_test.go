@@ -164,6 +164,9 @@ func (r scopeRefs) ids() []string {
 // with this test are marked "fixed".
 func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 	db := testutil.SetupTestDB(t)
+	// The own-customer setup session (no return_url) needs the dashboard
+	// address; it has no default.
+	t.Setenv("CUSTOMER_PORTAL_URL", "https://app.scope.test")
 	srv := NewServer(db, clock.NewFake(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)), nil)
 	ts := httptest.NewServer(srv)
 	defer ts.Close()

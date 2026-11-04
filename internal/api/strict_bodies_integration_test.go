@@ -36,6 +36,9 @@ func newStrictRig(t *testing.T) *strictRig {
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "strict-bodies-bootstrap")
 	t.Setenv("DASHBOARD_BASE_URL", "http://dash.strict-bodies.test")
 	t.Setenv("SMTP_HOST", "smtp.strict-bodies.invalid")
+	// Setup links need the dashboard address before they can reach Stripe;
+	// TestSetupSession_StripeNotConnected checks the Stripe refusal after it.
+	t.Setenv("CUSTOMER_PORTAL_URL", "http://dash.strict-bodies.test")
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
 	t.Cleanup(ts.Close)
 

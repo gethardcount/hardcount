@@ -146,6 +146,9 @@ func newInFlightRig(t *testing.T, name string, retryDays []int, script map[strin
 	// A configured server queues customer emails, so each one shows up in
 	// the outbox.
 	t.Setenv("SMTP_HOST", "smtp.retry-in-flight.invalid")
+	// A setup session with no return_url needs the dashboard address; it has
+	// no default.
+	t.Setenv("CUSTOMER_PORTAL_URL", "https://app.retry-in-flight.test")
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
 	t.Cleanup(ts.Close)
 	r := &inFlightRig{t: t, db: db, ts: ts, secret: "whsec_retry_in_flight",

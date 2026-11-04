@@ -20,9 +20,9 @@ export type GetWhoami200 = {
   livemode: boolean;
   /**
      * Whether this server can email a customer a link to add
-     * a payment method. False when email sending (SMTP) or
-     * PAYMENT_UPDATE_URL is not set up; resending a setup
-     * link then fails.
+     * a payment method. False when email sending (SMTP),
+     * PAYMENT_UPDATE_URL or PAYMENT_UPDATE_RETURN_URL is not
+     * set up; resending a setup link then fails.
      */
   can_email_setup_links: boolean;
   /**

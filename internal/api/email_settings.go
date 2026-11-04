@@ -70,7 +70,7 @@ func emailLinkEnvs(getenv func(string) string) []emailLinkEnv {
 	set := func(k string) bool { return strings.TrimSpace(getenv(k)) != "" }
 	return []emailLinkEnv{
 		{Env: "HOSTED_INVOICE_BASE_URL", Set: set("HOSTED_INVOICE_BASE_URL"),
-			Effect: "Invoice, receipt and reminder emails go out without a link to view and pay the invoice."},
+			Effect: "Invoice, receipt and reminder emails go out without a link to view and pay the invoice, and the invoice page has no Pay button."},
 		{Env: "PAYMENT_UPDATE_URL", Set: set("PAYMENT_UPDATE_URL"),
 			Effect: "Emails asking a customer to add a payment method can't be sent."},
 		{Env: "DASHBOARD_BASE_URL", Set: set("DASHBOARD_BASE_URL"),
