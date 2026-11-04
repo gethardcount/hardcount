@@ -1,6 +1,7 @@
 // Hardcount is the billing server. With no arguments it serves the API and
-// runs the background workers. "hardcount migrate" applies the database
-// migrations, and "hardcount help" lists every command and setting.
+// runs the background workers. "hardcount migrate" applies the pending
+// database migrations, and "hardcount help" lists the commands and the main
+// settings. docs/settings.md lists every setting.
 package main
 
 import (
@@ -36,11 +37,13 @@ import (
 
 func main() {
 	// Pin the process to UTC (ADR-075). pgx decodes timestamptz with
-	// time.Unix, which uses time.Local, so on a host in another zone the API
-	// would show database timestamps with that zone's offset ("+05:30")
-	// instead of "Z". The app already creates instants in UTC
-	// (clock.Now().UTC()); this makes the database read path agree. It must
-	// be the first statement, before any connection or goroutine, so nothing
+	// time.Unix, which uses time.Local. On a host whose zone is not UTC, the
+	// database read path then returns timestamps in that zone, and
+	// time.Time.MarshalJSON writes its offset (for example "+05:30") to the
+	// API instead of "Z". The app already creates instants in UTC
+	// (clock.Now().UTC()). This assignment makes the read path agree, so
+	// every serialized timestamp is UTC whatever the host's zone. It must be
+	// the first statement, before any connection or goroutine, so nothing
 	// reads time.Local while it changes. Billing date math uses explicit
 	// zones, never time.Local, so it is not affected (ADR-058, ADR-074).
 	time.Local = time.UTC
@@ -95,7 +98,8 @@ func serve() {
 		os.Exit(1)
 	}
 
-	// Tracing is a no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set.
+	// OpenTelemetry tracing is a no-op unless OTEL_EXPORTER_OTLP_ENDPOINT
+	// is set.
 	tracingShutdown, err := telemetry.Init(context.Background())
 	if err != nil {
 		slog.Error("init tracing", "error", err)
@@ -124,8 +128,9 @@ func serve() {
 		}
 	}
 
-	// Refuse to start if the schema is behind this binary: a missed migration
-	// job, a race during a rolling deploy, or a dirty migration.
+	// Refuse to start if the schema is behind what this binary expects. The
+	// check catches a missed migration Job, a race during a rolling deploy,
+	// and a dirty migration.
 	if err := migrate.CheckSchemaReady(pool); err != nil {
 		slog.Error("schema check failed", "error", err)
 		os.Exit(1)
@@ -136,7 +141,7 @@ func serve() {
 
 	db := postgres.NewDB(appPool, cfg.DB.QueryTimeout)
 
-	// Leader gate (ADR-114). Each background loop (billing, dunning, the two
+	// Leader gate (ADR-114). Each singleton loop (billing, dunning, the two
 	// outbox dispatchers and webhook delivery retry) runs one tick at a time
 	// under a lease in leader_leases. Each role's claim statement re-checks
 	// the lease token in SQL. Every statement stands alone, so the gate is
@@ -204,10 +209,11 @@ func serve() {
 	scheduler.SetIdempotencyCleaner(mw.NewIdempotencyCleaner(db))
 	scheduler.SetLoginThrottleCleaner(server.LoginThrottle)
 	scheduler.SetTaxRetrier(server.InvoiceSvc)
-	// Retry clawback credit notes whose Issue() failed after commit. A
+	// Retry clawback credit-note drafts whose Issue() failed after commit. A
 	// subscription downgrade or item removal writes the draft in the same
-	// transaction as the change (ADR-056) and issues it after the commit, so
-	// this retry is what issues a draft whose first attempt failed.
+	// transaction as the change, and issues it after the commit. This retry
+	// issues a draft whose first attempt failed. The retry is a follow-up to
+	// ADR-056.
 	scheduler.SetClawbackRetrier(server.CreditNoteSvc)
 	// Trial expiry on the real clock, for subscriptions not on a test clock.
 	// Each tick moves trialing subscriptions to active at trial_end_at.
@@ -216,10 +222,10 @@ func serve() {
 	scheduler.SetTrialExpirer(server.SubscriptionSvc)
 	// Pause resume on the real clock: clear pause_collection on subscriptions
 	// whose resumes_at has passed. It runs after the billing run, and it skips
-	// a subscription that still owes a period close before resumes_at, so that
-	// close reads the pause as it stood at the period's end. Without it, a
-	// paused subscription whose next_billing_at is in the future stays paused
-	// for good.
+	// a subscription that still owes a period close before resumes_at, so the
+	// period close reads the pause as it stood at the period's end. Without
+	// this step, a paused subscription whose next_billing_at is in the future
+	// stays paused indefinitely.
 	scheduler.SetPauseResumer(server.SubscriptionSvc)
 	scheduler.SetPaymentReconciler(server.PaymentReconciler)
 	scheduler.SetGate(gate)
@@ -231,9 +237,9 @@ func serve() {
 
 	// Test-clock catch-up runs off the request (ADR-015). Catch-up is the
 	// billing for the time a test clock skipped. The Advance handler sets the
-	// clock to 'advancing' and queues a job, and this worker runs it. A buffer
-	// of 100 is plenty: operators rarely have more than a few advances in
-	// flight.
+	// clock to status='advancing' and queues a job, and this worker runs it.
+	// A buffer of 100 is plenty: at expected operator volumes, there are never
+	// more than a few advances in flight.
 	catchupQueue := testclock.NewCatchupQueue(100)
 	server.TestClockSvc.SetCatchupQueue(catchupQueue)
 	catchupWorker := testclock.NewCatchupWorker(catchupQueue, func(ctx context.Context, job testclock.CatchupJob) error {
@@ -244,10 +250,11 @@ func serve() {
 		Addr:    fmt.Sprintf(":%s", cfg.Port),
 		Handler: server,
 		// ReadHeaderTimeout bounds header parsing (a slowloris guard).
-		// ReadTimeout gives the body enough time for a batch of up to 1,000
-		// events over a slow link. WriteTimeout must be longer than the 30s
-		// request Timeout middleware, so the server writes its JSON 504 before
-		// the socket closes. Equal values race and reset the connection.
+		// ReadTimeout gives the body a generous window, so a batch ingest of up
+		// to 1,000 events over a slow link is not cut off. WriteTimeout must be
+		// longer than the 30s request Timeout middleware, so the server writes
+		// its JSON 504 before the socket closes. Equal values race and reset
+		// the connection.
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      35 * time.Second,
@@ -255,7 +262,7 @@ func serve() {
 		MaxHeaderBytes:    1 << 13, // 8 KB
 	}
 
-	// Shutdown runs in three stages with a published budget: at most 90s after
+	// Shutdown has a published time budget in three stages: at most 90s after
 	// the SHUTDOWN_DRAIN_DELAY readiness drain, and usually under two seconds.
 	// Each stage's limit abandons only work that is built to be resumed. Set
 	// the orchestrator's grace period above the drain delay plus 90s: 120s
@@ -268,9 +275,9 @@ func serve() {
 		shutdownWorkerDrain = 30 * time.Second // stage 3: scheduler + dispatcher ticks
 	)
 
-	// Stage 0: when Shutdown is called, close every SSE subscriber, so the
-	// dashboard's live tail does not hold the HTTP drain open for its full 30s
-	// (see EventBus.CloseAll).
+	// Stage 0: as soon as Shutdown is called, close every SSE subscriber, so
+	// the dashboard's live tail does not hold the HTTP drain open for its full
+	// 30s (see EventBus.CloseAll).
 	srv.RegisterOnShutdown(server.WebhookOutSvc.EventBus().CloseAll)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -296,7 +303,8 @@ func serve() {
 	// clock recovered at boot has a queue to land in. Recovery is best-effort:
 	// clocks left 'advancing' by an earlier process are queued again and run
 	// like any other job. If recovery fails, log an error and keep booting.
-	// New clocks still work, and a stuck old clock can be deleted by hand.
+	// New clocks still work. Only the stuck old clocks are not recovered, and
+	// they can be deleted by hand.
 	catchupWorker.Start()
 	recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	if err := server.TestClockSvc.RecoverInFlight(recoveryCtx); err != nil {
@@ -343,9 +351,9 @@ func serve() {
 	// checks stops sending traffic here before the listener closes. Otherwise
 	// every rolling deploy ends with connection resets on this copy. Keep
 	// listening for the configured delay, so the balancer's probes see the
-	// 503. An orchestrator that removes the copy itself (Kubernetes
-	// endpoints) does so at once; the delay covers the health-check path. The
-	// delay is 0 in local.
+	// 503. Removal driven by an orchestrator, such as Kubernetes endpoints,
+	// happens at once. The delay is only for the health-check path. The delay
+	// is 0 in local.
 	api.SetDraining()
 	if cfg.ShutdownDrainDelay > 0 {
 		time.Sleep(cfg.ShutdownDrainDelay)
@@ -361,8 +369,8 @@ func serve() {
 	}
 
 	// Stage 2 (at most 30s): the test-clock catch-up worker. Catch-up runs on
-	// context.Background(), because an advance must not stop mid-write, so
-	// cancelling ctx does not reach it. Stop waits up to shutdownCatchupWait
+	// context.Background(), so cancelling ctx does not reach it. An advance in
+	// flight must not stop mid-write. Stop waits up to shutdownCatchupWait
 	// for the advance in flight (most finish in seconds), then abandons it.
 	// An abandoned advance leaves the clock 'advancing', and RecoverInFlight
 	// runs only when a copy boots. So in a rolling deploy, where the new copy
@@ -382,8 +390,8 @@ func serve() {
 	// row for its lease to expire. Each Stripe attempt has a 30s client
 	// timeout, but stripe-go retries a timeout up to twice, so this stage's
 	// own limit caps the wait. The tax_commit sweep re-commits a CommitTax
-	// that this limit cuts off. The limit also means a hung worker cannot
-	// block the exit.
+	// that this limit cuts off. The limit exists so a hung worker cannot block
+	// the exit.
 	done := make(chan struct{})
 	go func() {
 		workers.Wait()
@@ -467,7 +475,7 @@ func runMigrateRollback() {
 // newLogger returns the server's JSON logger at LOG_LEVEL
 // (config.ParseLogLevel), so production can change verbosity without a
 // rebuild. An unknown level is an error and the server does not start.
-// Falling back to info would let a typo such as LOG_LEVEL=verbose, meant as
+// Falling back to info without a word would let LOG_LEVEL=verbose, meant as
 // debug, hide every debug line it was set to show.
 func newLogger(w io.Writer) (*slog.Logger, error) {
 	level, err := config.ParseLogLevel(os.Getenv("LOG_LEVEL"))
@@ -523,8 +531,11 @@ func deriveAppURL(adminURL string) string {
 
 // resolveAppURL picks the database URL for the runtime pool, where RLS is
 // enforced, by ADR-073's fail-closed rules. It returns one of three results:
-// the URL to open; a non-empty fallbackWarn, meaning "use the admin pool and
-// log this" (local development only); or an error that must stop the boot.
+//   - url: the URL to open.
+//   - fallbackWarn, when not empty: use the admin pool and log this text.
+//     Only local development gets this result.
+//   - err: an error that must stop the boot.
+//
 // It has no side effects, so the rules can be unit-tested.
 func resolveAppURL(env, adminURL, appURL string) (url, fallbackWarn string, err error) {
 	local := env == "local"
@@ -575,10 +586,11 @@ func checkRLSCapability(pool *sql.DB) (role string, canBypass bool, err error) {
 // openAppPool returns the connection for request-time queries, where RLS must
 // be enforced (ADR-073). APP_DATABASE_URL is used as given when set.
 // Staging and production refuse to start without it, with an empty or
-// default password, or with a role that can bypass RLS. The role check
-// catches the easy mistake of copying DATABASE_URL into APP_DATABASE_URL,
-// which no check on the URL text can see. Local development still derives
-// hardcount_app:hardcount_app, and falls back to the admin pool with a
+// default password, or with a role that can bypass RLS. The RLS capability
+// check (checkRLSCapability) catches the easy mistake of copying
+// DATABASE_URL into APP_DATABASE_URL, which no check on the URL text can
+// see. Local development still derives hardcount_app:hardcount_app. When
+// that URL cannot be used, openAppPool falls back to the admin pool with a
 // warning. The returned cleanup does nothing after a fallback.
 func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 	noop := func() {}
@@ -599,8 +611,8 @@ func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 	if err != nil {
 		// An APP_DATABASE_URL that is set but does not work stops the boot
 		// in every environment: a setting someone chose never falls back
-		// quietly. Only the URL derived in local development falls back,
-		// for when the role has not been created.
+		// quietly. Only the URL derived in local development falls back with
+		// a warning, for when the role has not been created.
 		if cfg.DB.AppURL != "" || cfg.Env != "local" {
 			slog.Error("refusing to start: could not open the app database connection, so RLS would not be enforced and tenants would not be isolated. Check APP_DATABASE_URL and that the role exists with LOGIN — see docs/ops/postgres-requirements.md#the-two-database-users.", "error", err, "env", cfg.Env)
 			os.Exit(1)
@@ -624,8 +636,9 @@ func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 
 	// The role must also be able to read and write the tables the app uses.
 	// Without the default privileges that the schema setup grants, requests
-	// would fail later with 500s (#1317). This refuses to start in every
-	// environment, and the log names the missing grants.
+	// would fail later with 500s (#1317). When a grant is missing, the server
+	// refuses to start in every environment, and the log names the missing
+	// grants.
 	if _, missing, err := missingAppGrants(appPool); err != nil {
 		slog.Error("refusing to start: could not read the app role's table privileges", "role", role, "error", err)
 		os.Exit(1)
@@ -639,8 +652,8 @@ func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 	return appPool, func() { _ = appPool.Close() }
 }
 
-// redisBootFatal decides whether a Redis error stops the boot. An error
-// opening or pinging Redis is fatal in production only.
+// redisBootFatal is the one place that decides whether a Redis error stops
+// the boot. An error opening or pinging Redis is fatal in production only.
 func redisBootFatal(env string, err error) bool {
 	return err != nil && env == "production"
 }

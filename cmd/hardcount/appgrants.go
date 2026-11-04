@@ -20,12 +20,12 @@ var fullTableNeeds = []string{"SELECT", "INSERT", "UPDATE", "DELETE"}
 
 // missingAppGrants lists what the pool's role lacks on the tables and
 // sequences in the public schema, as GRANT statements an admin can run
-// ("GRANT INSERT ON public.webhook_outbox TO hardcount_app"). Without it, a
-// database created without the default privileges from docker/init.sql or
-// deploy/compose/postgres-init.sh would boot, then fail requests with 500s
-// and log "permission denied" from the outbox workers (#1317). Partitions
-// are read through their parent, and goose's own table belongs to the
-// migrator, so neither is checked.
+// ("GRANT INSERT ON public.webhook_outbox TO hardcount_app"). Without this
+// check, a database that lacks the default privileges from docker/init.sql
+// or deploy/compose/postgres-init.sh would boot, then fail requests with
+// 500s and log "permission denied" from the outbox workers (#1317).
+// Partitions are read through their parent, and goose's own table belongs
+// to the migrator, so neither is checked.
 func missingAppGrants(pool *sql.DB) (role string, missing []string, err error) {
 	if err := pool.QueryRow(`SELECT current_user`).Scan(&role); err != nil {
 		return "", nil, err
