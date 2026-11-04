@@ -1,3 +1,6 @@
+// Package postgres opens database transactions with the settings that
+// row-level security (RLS) reads. It also holds small helpers for IDs,
+// Postgres errors and nullable values.
 package postgres
 
 import (
@@ -16,16 +19,20 @@ import (
 )
 
 const (
+	// DefaultQueryTimeout is the QueryTimeout that NewDB uses when it is
+	// given zero or less.
 	DefaultQueryTimeout     = 5 * time.Second
 	DefaultMigrationTimeout = 60 * time.Second
 )
 
-// DB wraps *sql.DB with query timeout and RLS-aware transactions.
+// DB wraps *sql.DB with a query timeout and RLS-aware transactions.
 type DB struct {
 	Pool         *sql.DB
 	QueryTimeout time.Duration
 }
 
+// NewDB returns a DB on pool. A queryTimeout of zero or less means
+// DefaultQueryTimeout.
 func NewDB(pool *sql.DB, queryTimeout time.Duration) *DB {
 	if queryTimeout <= 0 {
 		queryTimeout = DefaultQueryTimeout
@@ -41,11 +48,10 @@ const (
 	TxBypass               // Sets app.bypass_rls = on, skips RLS
 )
 
-// Context key for livemode propagation. Owned by the postgres package because
-// BeginTx is the single choke point that needs to read it — having the key
-// live here avoids circular imports between auth and postgres.
-// The value is stored as *bool so an explicit false can be told apart from
-// "never set".
+// livemodeCtxKey is the ctx key that carries livemode. The postgres package
+// owns it because BeginTx is the one place that must read it. Keeping the
+// key here also avoids an import cycle between auth and postgres. The value
+// is a *bool, so an explicit false can be told apart from "never set".
 type livemodeCtxKey struct{}
 
 // WithLivemode returns a derived context carrying the mode flag. Every entry
@@ -76,6 +82,13 @@ func Livemode(ctx context.Context) (bool, error) {
 	return *p, nil
 }
 
+// BeginTx opens a transaction and sets the RLS settings for mode, local to
+// the transaction. TxTenant sets app.tenant_id from tenantID and
+// app.livemode from ctx (WithLivemode). A blank tenantID returns
+// ErrTenantUnset, and a ctx with no livemode returns ErrLivemodeUnset, before
+// anything opens. TxBypass turns
+// app.bypass_rls on, so RLS does not apply and the caller must filter by
+// tenant itself.
 func (db *DB) BeginTx(ctx context.Context, mode TxMode, tenantID string) (*sql.Tx, error) {
 	var tid, lm string
 	if mode == TxTenant {
@@ -122,19 +135,20 @@ func (db *DB) BeginTx(ctx context.Context, mode TxMode, tenantID string) (*sql.T
 	return tx, nil
 }
 
+// Rollback rolls tx back and ignores the error. A nil tx does nothing.
 func Rollback(tx *sql.Tx) {
 	if tx != nil {
 		_ = tx.Rollback()
 	}
 }
 
-// WithTenantTx runs fn inside one tenant-scoped (TxTenant) transaction:
-// commit when fn returns nil, rollback otherwise. It exists as the seam for
-// cross-store coordinator transactions — a caller that must commit writes in
-// two domain stores atomically (e.g. the billing engine's threshold
-// fire + cycle re-anchor) passes the same *sql.Tx to each store's Tx
-// variant. Unit tests fake the interface this satisfies with a runner that
-// calls fn(nil); the store mocks ignore the tx handle.
+// WithTenantTx runs fn inside one tenant-scoped (TxTenant) transaction. It
+// commits when fn returns nil and rolls back otherwise. It is the seam for
+// coordinator transactions that span stores. A caller that must commit
+// writes in two domain stores atomically passes the same *sql.Tx to each
+// store's Tx variant, as the billing engine's threshold fire and cycle
+// re-anchor do. Unit tests fake the interface this satisfies with a runner
+// that calls fn(nil), and the store mocks ignore the tx handle.
 func (db *DB) WithTenantTx(ctx context.Context, tenantID string, fn func(tx *sql.Tx) error) error {
 	tx, err := db.BeginTx(ctx, TxTenant, tenantID)
 	if err != nil {
@@ -147,12 +161,15 @@ func (db *DB) WithTenantTx(ctx context.Context, tenantID string, fn func(tx *sql
 	return tx.Commit()
 }
 
-// NewID generates a prefixed, time-sortable ID (e.g., hc_cus_cv2q6ktjml6ng3v2q0tg).
-// Uses xid: globally unique, 20-char, URL-safe, naturally ordered by creation time.
+// NewID generates a prefixed, time-sortable ID such as
+// hc_cus_cv2q6ktjml6ng3v2q0tg. It uses xid, which is globally unique, 20
+// characters long, URL-safe and naturally ordered by creation time.
 func NewID(prefix string) string {
 	return fmt.Sprintf("%s_%s", prefix, xid.New().String())
 }
 
+// IsUniqueViolation reports whether err is a Postgres unique violation
+// (SQLSTATE 23505).
 func IsUniqueViolation(err error) bool {
 	if err == nil {
 		return false
@@ -173,10 +190,11 @@ func IsDeadlock(err error) bool {
 }
 
 // UniqueViolationConstraint returns the constraint name if err is a Postgres
-// unique-violation (SQLSTATE 23505), otherwise "". Use this to disambiguate
-// multiple unique constraints on the same table — e.g. subscriptions has
-// both (tenant_id, code) and a partial-unique (tenant_id, customer_id, plan_id)
-// for live statuses, and the callers need to surface distinct errors.
+// unique violation (SQLSTATE 23505), and "" otherwise. Use it to tell apart
+// several unique constraints on one table. For example, subscriptions has
+// both (tenant_id, code) and a partial unique (tenant_id, customer_id,
+// plan_id) for live statuses, and the callers need to return distinct
+// errors.
 func UniqueViolationConstraint(err error) string {
 	if err == nil {
 		return ""
@@ -188,6 +206,8 @@ func UniqueViolationConstraint(err error) string {
 	return ""
 }
 
+// IsForeignKeyViolation reports whether err is a Postgres foreign-key
+// violation (SQLSTATE 23503).
 func IsForeignKeyViolation(err error) bool {
 	if err == nil {
 		return false
@@ -200,9 +220,10 @@ func IsForeignKeyViolation(err error) bool {
 }
 
 // IsCheckViolation reports whether err is a Postgres check-constraint
-// violation (SQLSTATE 23514). Used to translate DB-level invariant failures
-// (e.g. the test_clocks livemode CHECK, or subscriptions_test_clock_requires_testmode)
-// into user-facing 400s instead of leaking raw SQL error text.
+// violation (SQLSTATE 23514). Callers use it to turn a database invariant
+// failure into a 400 for the user, instead of leaking raw SQL error text.
+// Examples are the test_clocks livemode CHECK and
+// subscriptions_test_clock_requires_testmode.
 func IsCheckViolation(err error) bool {
 	if err == nil {
 		return false
@@ -214,22 +235,23 @@ func IsCheckViolation(err error) bool {
 	return false
 }
 
-// IsTransient reports whether err means the statement never reached a verdict
-// because the connection or the transaction was taken away: the connection
-// was lost, the server is shutting down, or the server aborted the transaction
-// to resolve a serialization conflict or a deadlock. The row a statement was
-// working on cannot cause any of these, so a caller that counts failures
-// against a row (the billing run, ADR-119) does not count one.
+// IsTransient reports whether err means the statement never reached a
+// verdict because the connection or the transaction was taken away. That
+// covers a lost connection, a server shutting down, and a transaction the
+// server aborted to resolve a serialization conflict or a deadlock. The row
+// a statement was working on cannot cause any of these. So a caller that
+// counts failures against a row (the billing run, ADR-119) does not count
+// one.
 //
-// A timeout the server or the caller decided is deliberately NOT transient:
-// not a statement timeout (57014), not a lock timeout (55P03), and not a Go
+// A timeout that the server or the caller decided is not transient, on
+// purpose: a statement timeout (57014), a lock timeout (55P03) or a Go
 // deadline. Such a timeout is the only way a query that is too slow for its
-// own data ever shows up, and it recurs. Resource exhaustion (class 53) is not
-// transient either.
+// own data ever shows up, and it recurs. Resource exhaustion (class 53) is
+// not transient either.
 //
-// A network timeout with no ctx error behind it IS transient: the kernel gave
-// up on a connection to a dead or partitioned server (ETIMEDOUT), or a dial
-// timed out. That is a lost connection that never got a reset. The driver
+// A network timeout with no ctx error behind it is transient. The kernel
+// gave up on a connection to a dead or partitioned server (ETIMEDOUT), or a
+// dial timed out: a lost connection that never got a reset. The driver
 // reports a Go deadline as a wrapped context error, which the first check
 // below has already turned away, so the two cannot be confused by type.
 func IsTransient(err error) bool {
@@ -259,6 +281,8 @@ func IsTransient(err error) bool {
 	return errors.As(err, &netErr)
 }
 
+// NullableString returns nil, which becomes SQL NULL, when v is empty or
+// only white space, and v otherwise.
 func NullableString(v string) any {
 	if strings.TrimSpace(v) == "" {
 		return nil
@@ -266,9 +290,9 @@ func NullableString(v string) any {
 	return v
 }
 
-// NullableStringPtr converts a *string into a sql-friendly value: nil
-// (becomes SQL NULL) when the pointer is nil or points at an empty
-// string, otherwise the dereferenced value. Saves callers from juggling
+// NullableStringPtr converts a *string into a value for a SQL argument. It
+// is nil, which becomes SQL NULL, when the pointer is nil or points at an
+// empty string, and the dereferenced value otherwise. Callers then need no
 // sql.NullString for optional reference columns.
 func NullableStringPtr(v *string) any {
 	if v == nil {
@@ -280,6 +304,8 @@ func NullableStringPtr(v *string) any {
 	return *v
 }
 
+// NullableTime returns nil, which becomes SQL NULL, for a nil pointer, and
+// the time otherwise.
 func NullableTime(v *time.Time) any {
 	if v == nil {
 		return nil

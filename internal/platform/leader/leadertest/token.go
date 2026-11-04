@@ -1,6 +1,6 @@
 // Package leadertest lets store tests call leader-only methods with a real,
-// live lease token without running a heartbeat: one admin statement takes the
-// role for an hour and the token rides the returned ctx.
+// live lease token and no heartbeat. One admin statement takes the role for
+// an hour, and the returned ctx carries the token.
 package leadertest
 
 import (
@@ -11,11 +11,12 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 )
 
-// Token acquires each role for one hour on admin (bypassing cadence and
-// pause) and returns base with the tokens attached — one ctx can drive
-// several roles' funnels (an end-to-end test that bills and then duns).
-// t.Cleanup releases the rows. Tests using it must not run in parallel
-// with another test holding the same role: the row is cluster state.
+// Token acquires each role for one hour on admin, bypassing cadence and
+// pause, and returns base with the tokens attached. One ctx can then drive
+// several roles' leader-only store methods, as an end-to-end test that bills
+// and then runs dunning does. t.Cleanup releases the rows. A test using it
+// must not run in parallel with another test that holds the same role,
+// because the row is cluster state.
 func Token(t *testing.T, admin *sql.DB, base context.Context, roles ...leader.Role) context.Context {
 	t.Helper()
 	ctx := base

@@ -19,7 +19,7 @@ import (
 //
 // http.ErrAbortHandler is re-panicked, as net/http expects: it aborts the
 // response on purpose. A panic after the handler has started its answer
-// cannot change it; the log still records the panic.
+// cannot change that answer, but the log still records the panic.
 func Recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
