@@ -84,12 +84,14 @@ func RecordSchedulerRun() {
 	schedulerLastRun = time.Now()
 	schedulerMu.Unlock()
 	// Export the same fact as a metric. The runbook's scheduler-liveness
-	// alert reads it on /metrics, not only inside /health/ready.
+	// alert reads /metrics, so the fact cannot live only inside
+	// /health/ready.
 	mw.RecordSchedulerTick()
 }
 
 // SetSchedulerInterval stores the configured scheduler interval. The health
-// check flags the scheduler as degraded after two intervals with no run.
+// check flags the scheduler as degraded when more than two intervals pass
+// after its last run.
 func SetSchedulerInterval(d time.Duration) {
 	schedulerMu.Lock()
 	schedulerInterval = d
@@ -109,9 +111,10 @@ type Server struct {
 	OutboxStore      *webhook.OutboxStore
 	EmailOutboxStore *email.OutboxStore
 	EmailSender      *email.Sender
-	// EmailSettledChecker feeds the email dispatcher's staleness gate, which
-	// cmd/hardcount wires with SetSettledChecker. The dispatcher skips an
-	// action-required email whose invoice was settled while it was queued.
+	// EmailSettledChecker feeds the email dispatcher's staleness gate.
+	// cmd/hardcount passes it to the dispatcher with SetSettledChecker. The
+	// dispatcher skips an action-required email whose invoice was settled
+	// while it was queued.
 	EmailSettledChecker email.InvoiceSettledChecker
 	CreditSvc           *credit.Service
 	InvoiceSvc          *invoice.Service
@@ -125,9 +128,11 @@ type Server struct {
 
 	// TestClockSvc lets main.go wire the catch-up queue and worker, and run
 	// boot recovery for clocks that an earlier process left 'advancing'.
-	// Catch-up is the billing for the time a test clock skipped. It runs off
-	// the request, as Stripe's test-clock advance does (ADR-015). The service
-	// is built here, and main.go runs it with the other background workers.
+	// Catch-up runs everything that fell due in the time a test clock
+	// skipped, such as trial ends, billing, tax retries, dunning and credit
+	// expiries. It runs off the request, as Stripe's test-clock advance does
+	// (ADR-015). The service is built here, and main.go runs it with the
+	// other background workers.
 	TestClockSvc *testclock.Service
 }
 
@@ -236,7 +241,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	paymentMethodsStripe := paymentmethods.NewStripeAdapter(stripeClients, customerStore)
 	paymentMethodsStore := paymentmethods.NewPostgresStore(db)
 	paymentMethodsSvc := paymentmethods.NewService(paymentMethodsStore, paymentMethodsStripe, customerStore)
-	// paymentMethodsSvc gets auditLogger later, once it exists (see below).
+	// paymentMethodsSvc gets auditLogger later, once auditLogger exists (see
+	// the SetAuditLogger call below).
 	//
 	// CUSTOMER_PORTAL_URL is the base of the setup session's return URL: the
 	// SPA host where the customer lands after Stripe Checkout. Local
@@ -362,9 +368,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// subscription.created, .activated, .canceled and .trial_ended are queued
 	// in the transaction of their transition. The store's transition writers
 	// are the one place that emits them, which covers the operator API, the
-	// engine's schedule paths and the trial sweeps. So a crash after commit
-	// cannot drop a lifecycle event that a provisioning webhook consumer
-	// depends on.
+	// engine's schedule paths and the trial sweeps. Because the event commits
+	// with its transition, a crash after commit cannot drop a lifecycle event
+	// that a provisioning webhook consumer depends on.
 	subStore.SetOutboxEnqueuer(outboxStore)
 	// Prepaid commits are funded at finalize (ADR-078 D2). FinalizeWithDates
 	// grants the commit block through credit.Service, in the finalize
@@ -377,10 +383,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	auditLogger := audit.NewLogger(db)
 	// The audit logger decrypts actor names. actor_name comes from a LEFT
 	// JOIN at read time, and customers.display_name is encrypted at rest.
-	// Without the key, every row with a customer actor (a hosted-invoice Pay
-	// click, a payment-update link) would show ciphertext as its actor, on the
-	// dashboard and in the CSV handed to an auditor. It accepts nil, and does
-	// nothing when HARDCOUNT_ENCRYPTION_KEY is unset.
+	// Without this call, every row with a customer actor (a hosted-invoice
+	// Pay click, a payment-update link) would show ciphertext as its actor in
+	// production, on the dashboard and in the CSV handed to an auditor.
+	// SetEncryptor accepts nil and does nothing when HARDCOUNT_ENCRYPTION_KEY
+	// is unset.
 	auditLogger.SetEncryptor(sharedEnc)
 	auditH := audit.NewHandler(auditLogger)
 	// The customer handler's audit logger is currently used to record
@@ -432,11 +439,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	recipeSvc := recipe.NewService(db, recipeStore, recipeRegistry, pricingSvc)
 	recipeH := recipe.NewHandler(recipeSvc)
 
-	// One circuit breaker guards every Stripe call. When Stripe is unhealthy
-	// (5xx, timeout, network error), every caller backs off together, so
-	// retries do not pile onto a struggling dependency. It opens after 5
-	// consecutive Unknown failures and probes after 30s. It reports each state
-	// change on the hardcount_stripe_breaker_state gauge, for operator alerts.
+	// One shared circuit breaker guards Stripe calls, for every caller and
+	// tenant. When Stripe is unhealthy (5xx, timeout, network error), every
+	// caller backs off together, so retries do not pile onto a struggling
+	// dependency. It opens after 5 consecutive Unknown failures and probes
+	// after 30s. It reports each state change on the
+	// hardcount_stripe_breaker_state gauge, for operator alerts.
 	stripeBreaker := breaker.New(breaker.Config{
 		FailureThreshold: 5,
 		Cooldown:         30 * time.Second,
@@ -456,8 +464,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Critical, even on an invoice in a terminal state, where it otherwise
 	// returns early.
 	stripeAdapter.SetAnomalyRecorder(invoiceStore)
-	// The checkout-session store keeps the claim ledger in step with
-	// checkout.session.completed. At settle time the adapter also tries to
+	// The checkout-session store is the claim ledger. The adapter keeps it in
+	// step with checkout.session.completed, and at settle time tries to
 	// expire, at Stripe, any session still open (ADR-068).
 	checkoutSessionStore := payment.NewCheckoutSessionStore(db)
 	stripeAdapter.SetCheckoutSessionStore(checkoutSessionStore, stripeClients)
@@ -526,8 +534,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	invoiceSvc := invoice.NewService(invoiceStore, clk, settingsStore)
 	// Every committed void stops collection at Stripe and closes the invoice's
 	// dunning run (invoice.Service.AfterVoid), whichever path voided it: the
-	// operator, a dunning resolve, or the cancel or plan-swap relief. Relief
-	// is the credit note or void for the unused part of an in_advance period.
+	// operator, a dunning resolve, or the cancel or plan-swap relief. Cancel
+	// or plan-swap relief is the credit note or void for the unused part of
+	// an in_advance period.
 	invoiceSvc.SetCollectionStopper(stripeAdapter)
 	invoiceSvc.SetDunningResolver(dunningSvc)
 	// Finalize issues any relief held on a draft before the invoice can be
@@ -565,10 +574,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		DunningTimeline:   &dunningTimelineAdapter{store: dunningStore},
 		RefundIssuer:      &refundIssuerAdapter{svc: creditNoteSvc},
 	})
-	// tokenSvc mints the tokens in public payment-update links. Two things use
-	// it: the email sent when an invoice is finalized with no payment method
-	// (noPaymentMethodNotifierAdapter), and the public payment-update SPA flow
-	// that the token authenticates. The post-decline path
+	// tokenSvc mints the tokens in public payment-update links. It is used by
+	// the email sent when an invoice is finalized with no payment method
+	// (noPaymentMethodNotifierAdapter) and by the public payment-update SPA
+	// flow that the token authenticates. The post-decline path
 	// (Stripe.handlePaymentFailed) mints no single-use token. Like the dunning
 	// email, it points the customer at the long-lived hosted invoice URL,
 	// where they can update the payment method and retry (ADR-023).
@@ -612,9 +621,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 
 	// paymentmethods.StripeAdapter is built early so the hosted-invoice Pay
 	// flow can use it. Before it creates the Checkout session, the flow makes
-	// sure a Stripe customer exists for the Hardcount customer. Stripe needs
-	// `customer` and `setup_future_usage=off_session` to save the payment
-	// method to the customer's Stripe record. Otherwise it is a guest
+	// sure a Stripe customer exists for the Hardcount customer. Stripe saves
+	// the payment method to the customer's Stripe record only when the
+	// session has `customer` and `setup_future_usage=off_session`, and
+	// `customer` needs that Stripe customer to exist. Otherwise it is a guest
 	// checkout, and "save card" does nothing. The store and service are built
 	// later (line ~657), with the rest of the customer-portal stack.
 	//
@@ -681,14 +691,17 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		slog.Warn("HOSTED_INVOICE_BASE_URL NOT SET — invoice / receipt / dunning / payment-failed emails will render with NO payment link in the CTA. Set this to your hosted-invoice page origin (e.g. https://billing.example.com).")
 	}
 	// bounceReporterAdapter passes the Sender's SMTP 5xx errors to
-	// customer.MarkEmailBounced. It needs an email blinder, set up later from
-	// HARDCOUNT_EMAIL_BIDX_KEY. Without the blinder the adapter does nothing:
-	// bounces are logged and customer.email_status stays 'unknown'. It is
+	// customer.MarkEmailBounced. It needs the email blinder, set up further
+	// down from HARDCOUNT_EMAIL_BIDX_KEY. The blinder computes the email blind
+	// index, a keyed hash that finds a customer by email without decrypting.
+	// Without the blinder the adapter returns early. Bounces are still
+	// logged, and customer.email_status stays 'unknown'. The adapter is
 	// attached inside the blinder branch below, once the blinder exists.
 	emailOutboxStore := email.NewOutboxStore(db)
 	// The invoice timeline shows the emails sent to the customer. Without
-	// them it still renders, but operators cannot see that the customer was
-	// told about no_payment_method, payment_failed or dunning events.
+	// this wiring, the timeline still renders, but operators cannot see that
+	// the customer was told about no_payment_method, payment_failed or
+	// dunning events.
 	invoiceH.SetEmailEvents(&invoiceEmailEventsAdapter{store: emailOutboxStore})
 	// customerSentEmailsAdapter lists the "Sent emails" section on the
 	// customer detail page. This follows Stripe, which shows an email log with
@@ -760,7 +773,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// payment: the payment-method change from checkout.session.completed,
 	// which a webhook drives, and the public payment-update token's consume
 	// and restore pair. The hosted-invoice checkout claim gets its emitter
-	// when it is built (the hostedInvoiceStripeAdapter literal above).
+	// when its adapter is built (the hostedInvoiceStripeAdapter literal
+	// above).
 	stripeAdapter.SetAuditLogger(auditLogger)
 	if publicPaymentH != nil {
 		publicPaymentH.SetAuditLogger(auditLogger)
@@ -809,9 +823,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// money-path action, so its audit row goes in the ingest transaction.
 	usageSvc.SetAuditLogger(auditLogger)
 	webhookOutH.SetAuditLogger(auditLogger)
-	// The subscription service audits its own state changes. They are
-	// reachable from several entry points (the operator handler, the dunning
-	// adapter, any future caller), and each change still gets one audit row.
+	// The subscription service audits its own state changes. Because the row
+	// is written in the service, a change gets one audit row whichever entry
+	// point it comes from (the operator handler, the dunning adapter, any
+	// future caller).
 	subSvc.SetAuditLogger(auditLogger)
 	// The invoice service audits and dispatches events itself.
 	// MarkUncollectible is reachable from the operator dashboard, from
@@ -962,7 +977,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// The db handle lets addItem (and updateItem and removeItem, when they
 	// move to the same pattern) open one outer transaction around the item
 	// insert and the proration writes. So a failed proration cannot leave a
-	// half-committed orphan item (ADR-030).
+	// half-committed orphan item.
 	subH.SetDB(db)
 	// With the engine wired, subscription.Service.Create emits the day-1
 	// invoice for an in_advance plan (ADR-031). It does nothing for
@@ -1074,8 +1089,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// The adapter's emitter is set in a struct literal, which the
 	// SetAuditLogger pin test does not see, so check it here. The adapter
 	// writes the engine-driven setup_link_sent row at finalize. The
-	// operator-driven row comes from paymentmethods.Handler. Its emitter is
-	// nil-guarded, so a dropped wiring would lose that row in silence.
+	// operator-driven row comes from paymentmethods.Handler. The adapter's
+	// emitter is nil-guarded, so a dropped wiring would lose the
+	// engine-driven row in silence.
 	audit.MustWired(noPMNotifier)
 	engine.SetNoPaymentMethodNotifier(noPMNotifier)
 	// Same adapter backs the operator's "resend payment setup link" action.
@@ -1377,10 +1393,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// interface (auth.AuditWriter, subscription.auditRecorder,
 	// invoice.auditWriter, …), so a nil emitter type-checks. Every handler
 	// skips emission when its emitter is nil, including the two that hold a
-	// concrete *audit.Logger (customerH, creditNoteH). So a forgotten
-	// SetAuditLogger line here compiles, passes every test and stops auditing
-	// a whole domain in silence, while the route registry still declares
-	// those routes `explicit`.
+	// concrete *audit.Logger (customerH, creditNoteH). So without this check,
+	// a forgotten SetAuditLogger line here would compile, pass every test and
+	// every other gate, and stop auditing a whole domain in silence, while
+	// the route registry still declares those routes `explicit`.
 	//
 	// MustWired finds the audit field of any struct by reflection, so it
 	// takes handlers as well as services. This is the second call because
@@ -1416,11 +1432,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 
 	// Redis is for distributed rate limiting. cmd/hardcount/main.go opens and
 	// checks the client (mw.OpenRedis). Production refuses to start without a
-	// reachable Redis: config.validateFatal catches an unset one, and main.go
-	// an unreachable or invalid one. Without Redis the general and
-	// hosted-invoice limiters fail closed, so a replica would pass its health
-	// check and still answer 429 to its share of traffic. rdb is nil only
-	// outside production, where every limiter but /v1/auth's fails open.
+	// reachable Redis, because without it the general and hosted-invoice
+	// limiters fail closed. A replica would otherwise pass its health check
+	// and still answer 429 to its share of traffic. config.validateFatal
+	// catches an unset Redis, and main.go an unreachable or invalid one. rdb
+	// is nil only outside production, where every limiter but /v1/auth's
+	// fails open.
 	//
 	// The limiters below differ in what they do when Redis fails after boot:
 	//   - general and hosted-invoice fail closed in production, against DDoS;
@@ -1447,7 +1464,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	rateLimiter := mw.NewRateLimiter(rdb, "general", o.rateLimits.GeneralPerMinute, time.Minute)
 	// In production, refuse requests when Redis is unreachable instead of
 	// silently turning rate limiting off, which would open a DDoS vector.
-	// Outside production the general per-IP limiter fails open on purpose.
+	// Outside production the general limiter fails open on purpose.
 	// OWASP ASVS and common practice say that generic API rate limiting
 	// should fail open when its store blips. The sign-in throttle does not
 	// depend on Redis.
@@ -1490,17 +1507,18 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// (docs/dev/records/ha-readiness-2026-07-06.md). So every 429 is a
 	// silently dropped event that is never billed. For comparison, Stripe
 	// meter events allow 1,000 calls/s live, and Orb's test mode alone allows
-	// 2,000 events/min. The default is 1000 req/s per key, set by
-	// HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC.
+	// 2,000 events/min. The default is 1000 req/s per key.
+	// HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC overrides it.
 	//
-	// It never fails closed, even in production. The routes are authenticated
-	// (a secret key is required), and failing closed would turn a Redis blip
-	// into lost revenue data. For ingest, the risk of lost events outweighs
-	// the DoS argument that closes the general bucket.
+	// It never fails closed, on purpose, even in production. The routes are
+	// authenticated (a secret key is required), and failing closed would turn
+	// a Redis blip into lost revenue data. For ingest, the risk of lost
+	// events outweighs the DoS argument that closes the general bucket.
 	ingestLimiter := mw.NewRateLimiter(rdb, "ingest", o.rateLimits.IngestPerSecond, time.Second)
 
-	// The public hosted-invoice routes get a tighter bucket. Stripe and Paddle
-	// limit payment pages harder than the general API, for three reasons:
+	// The public hosted-invoice routes get a tighter bucket than the general
+	// API, following industry practice for payment pages (Stripe, Paddle).
+	// The reasons are:
 	//   - the URL can be shared publicly, so it is easier to abuse;
 	//   - each Pay click creates a Stripe Checkout Session, which has its own
 	//     rate limit at Stripe;
