@@ -62,11 +62,12 @@ const (
 	// MaxPoll caps the time between a follower's polls for a role, so a dead
 	// leader's role runs elsewhere within LeaseTTL + MaxPoll.
 	MaxPoll = 5 * time.Second
-	// interruptedCooldown caps how long a tick whose lease was lost (taken
-	// over, or its heartbeat timed out) waits to be due again. The wait keeps
-	// a slow database from turning an hourly tick into a partial tick every
-	// few seconds. A SIGTERM leaves the cadence alone, even if the work then
-	// panicked. A panicked tick waits one full interval (sqlRelease).
+	// interruptedCooldown is how long a tick whose lease was lost (taken over,
+	// or its heartbeat timed out) waits before it is due again, or its
+	// interval if that is shorter (sqlRelease). The wait keeps a slow database
+	// from turning an hourly tick into a partial tick every few seconds. A
+	// SIGTERM leaves the cadence alone, even if the work then panicked. A
+	// panicked tick waits one full interval (sqlRelease).
 	interruptedCooldown = 60 * time.Second
 )
 
@@ -88,11 +89,11 @@ var (
 type Gate interface {
 	// Lead returns (false, nil) when the role is not due, is held elsewhere,
 	// or is paused, and the caller polls again. When it leads, work runs on a
-	// ctx that carries (role, token), cancelled with cause ErrLeaseLost if
-	// the heartbeat cannot keep the lease. Lead releases the lease after work
-	// returns, on a background ctx, so a cancelled parent cannot skip it. If
-	// work panics, Lead releases the tick as not completed and lets the panic
-	// continue to the caller, which owns the recover.
+	// ctx that carries (role, token) and is cancelled with cause ErrLeaseLost
+	// if the heartbeat cannot keep the lease. Lead releases the lease after
+	// work returns, on a background ctx, so a cancelled parent cannot skip it.
+	// If work panics, Lead releases the tick as not completed and lets the
+	// panic continue to the caller, which owns the recover.
 	Lead(ctx context.Context, role Role, interval time.Duration, work func(ctx context.Context)) (led bool, err error)
 }
 

@@ -83,9 +83,10 @@ func Livemode(ctx context.Context) (bool, error) {
 }
 
 // BeginTx opens a transaction and sets the RLS settings for mode, local to
-// the transaction. TxTenant sets app.tenant_id and app.livemode, so it needs
-// a tenant ID and a livemode on ctx. Without them it returns ErrTenantUnset
-// or ErrLivemodeUnset before it opens anything. TxBypass turns
+// the transaction. TxTenant sets app.tenant_id from tenantID and
+// app.livemode from ctx (WithLivemode). A blank tenantID returns
+// ErrTenantUnset, and a ctx with no livemode returns ErrLivemodeUnset, before
+// anything opens. TxBypass turns
 // app.bypass_rls on, so RLS does not apply and the caller must filter by
 // tenant itself.
 func (db *DB) BeginTx(ctx context.Context, mode TxMode, tenantID string) (*sql.Tx, error) {
@@ -281,7 +282,7 @@ func IsTransient(err error) bool {
 }
 
 // NullableString returns nil, which becomes SQL NULL, when v is empty or
-// only spaces, and v otherwise.
+// only white space, and v otherwise.
 func NullableString(v string) any {
 	if strings.TrimSpace(v) == "" {
 		return nil

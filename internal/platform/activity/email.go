@@ -222,9 +222,9 @@ func EmailLine(e Email, about ...Segment) (Line, bool) {
 	return l, true
 }
 
-// EmailClause returns an email as a clause in another row's meta line:
-// "Payment reminder email delivered". It is for the payment-recovery emails
-// that fold into the retry and retries-ran-out rows.
+// EmailClause returns an email's one appearance, as a clause in another row's
+// meta line: "Payment reminder email delivered". It is for the
+// payment-recovery emails that fold into the retry and retries-ran-out rows.
 func EmailClause(e Email) string {
 	name, ok := EmailName(e.Type)
 	if !ok {

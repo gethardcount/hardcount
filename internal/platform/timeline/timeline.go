@@ -32,7 +32,8 @@ import (
 
 // SortStable orders events ascending by their displayed instant `at`, at
 // full precision. It consults `tieLess` only when two instants are exactly
-// equal. The sort is stable, so rows equal under both keep insertion order.
+// equal. The sort is stable, so rows equal under both `at` and `tieLess` keep
+// insertion order.
 //
 // `at` must return the instant the surface displays for the row. If the two
 // differ, the rendered order contradicts the rendered timestamps, which is

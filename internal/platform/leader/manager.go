@@ -218,7 +218,8 @@ func (h *heartbeat) stop() {
 // cancelling at T_send + AbandonAfter (< LeaseTTL - StatementTimeout) means
 // no statement of ours starts after a successor could exist. No app
 // timestamp is compared with a database timestamp. RETURNING now() is used
-// only to observe drift, as a duration against a duration.
+// only to observe drift between the database clock and the app's clock, as
+// a duration against a duration.
 func (m *Manager) startHeartbeat(role Role, token int64, dbNowAtAcquire time.Time, cancel context.CancelCauseFunc) *heartbeat {
 	h := &heartbeat{done: make(chan struct{})}
 	h.wg.Add(1)

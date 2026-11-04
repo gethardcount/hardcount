@@ -1,5 +1,6 @@
-// Package crypto encrypts PII fields with AES-256-GCM and computes blind
-// indexes: keyed hashes that let an encrypted field be found by exact match.
+// Package crypto encrypts stored values, such as PII fields and API secrets,
+// with AES-256-GCM. It also computes blind indexes: keyed hashes that let an
+// encrypted field be found by exact match.
 package crypto
 
 import (

@@ -3,7 +3,8 @@
 // is `grep -rn "scheduler.Run("`. There are five: billing (1h in production,
 // 5m in local), dunning (the same interval), webhook_outbox (2s),
 // email_outbox (5s) and webhook_delivery (30s). The test-clock catch-up
-// worker is driven by a queue, not a ticker, so it does not use this runner.
+// worker (it runs everything that fell due in the time a test clock skipped)
+// is driven by a queue, not a ticker, so it does not use this runner.
 //
 // Every loop is leader-gated (ADR-114). A tick runs only when this replica
 // leads the role for that tick, on a ctx carrying the lease token that the

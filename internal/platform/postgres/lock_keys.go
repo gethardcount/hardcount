@@ -11,10 +11,11 @@ package postgres
 // dedicated one-connection pool. That key is goose's, so it is not listed
 // here.
 //
-// Do not reuse the numbers of retired keys. An old binary in a mixed fleet
-// still takes the per-role session keys 76540001-76540005 and the
-// topology-probe key 76540008 for the duration of its tick. v0.8.x migration
-// runs take the hybrid migration loop key 76540007.
+// The retired keys are the per-role session keys 76540001-76540005, the
+// topology-probe key 76540008 and the hybrid migration loop key 76540007.
+// Do not reuse their numbers. An old binary in a mixed fleet still takes the
+// session and topology-probe keys for the duration of its tick, and v0.8.x
+// migration runs take 76540007.
 const (
 	LockKeyBootstrap int64 = 76540006
 )

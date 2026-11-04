@@ -17,14 +17,14 @@ import (
 // Now takes ctx because, on an entity pinned to a test clock, every
 // business timestamp must be in that clock's frozen_time domain (Stripe's
 // "no semantic change" guarantee). A bare wall-clock Now() would make every
-// call site remember to resolve the pin by hand (see ADR-029). With
-// Now(ctx), a service binds effective-now once at the operator entry point,
-// and every call below it, stores included, inherits it.
+// call site remember to resolve the pin by hand: the leak ADR-030 records.
+// With Now(ctx), a service binds effective-now once at the operator entry
+// point, and every call below it, stores included, inherits it.
 //
-// Code that wants wall-clock time whatever the pin calls time.Now().UTC()
-// directly, by design. Examples are the cron tick scheduler, webhook
-// delivery timestamps, postgres updated_at columns and the audit log's
-// recorded_at.
+// Code that wants wall-clock time even on a pinned entity calls
+// time.Now().UTC() directly, by design. Examples are the cron tick
+// scheduler, webhook delivery timestamps, postgres updated_at columns and the
+// audit log's recorded_at.
 type Clock interface {
 	// Now returns ctx's effective-now if one is bound
 	// (clock.WithEffectiveNow), and otherwise wall-clock time in UTC. Passing
@@ -116,10 +116,11 @@ type simKeyType struct{}
 var simKey = simKeyType{}
 
 // WithSim binds a full simulated-time context, instant and clock, to ctx.
-// Call it where the clock is known. The callers are the ForClock and
-// catch-up drivers, which hold the clock id and its frozen_time, and
-// BindEffectiveNow, which resolves an entity's pin. (Catch-up is the billing
-// for the time a test clock skipped.) Every Clock.Now(ctx) below reads s.At.
+// It is called where the clock is known: by the ForClock and catch-up
+// drivers, which hold the clock id and its frozen_time, and by
+// BindEffectiveNow, which resolves an entity's pin. (Catch-up is the work
+// that runs everything that fell due in the time a test clock skipped.)
+// Every Clock.Now(ctx) below reads s.At.
 // The audit Logger itself stamps every audit row on this ctx onto the sim
 // axis (ADR-090 §5).
 //
@@ -226,9 +227,10 @@ type Pin struct {
 // can log the error if they care. Most don't.
 //
 // It binds the clock id as well as the instant, so every audit emitter below
-// a pin resolution inherits the clock, and every audit row is stamped on the
-// sim axis. No emitter has to know that test clocks exist. The name covers
-// both, because the clock id is part of the entity's time domain.
+// a pin resolution inherits the clock, and no audit row written below it
+// misses the sim axis. No emitter has to know that test clocks exist. The
+// name still fits: the call binds the entity's time domain onto ctx, and the
+// clock id is part of that domain.
 //
 // The returned bool is true when the ctx now carries effective-now, and
 // false when the binding was skipped: no resolver, no ids, or an error.
@@ -254,17 +256,19 @@ func BindEffectiveNow(ctx context.Context, r Resolver, p Pin) (context.Context, 
 		return ctx, false
 	}
 	// A nested resolution may refine the time domain, but never erase one it
-	// was handed. A resolver that cannot resolve the pin (a dangling
+	// was handed. Every resolver that cannot resolve the pin (a dangling
 	// subscription, a deleted clock, an unpinned customer) falls back to
-	// `Sim{At: e.clock.Now(ctx)}`, with no clock id and a nil error. Under a
-	// bound ctx, `clock.Now(ctx)` reads this binding, so the fallback is the
-	// simulated instant with no clock. Binding it would drop the clock:
+	// `Sim{At: e.clock.Now(ctx)}`, with no clock id and a nil error. The error
+	// check above lets that fallback through, so this guard is what stops it.
+	// Under a bound ctx, `clock.Now(ctx)` reads this binding, so the fallback
+	// is the simulated instant with no clock. Binding it would drop the clock:
 	// SimOf() would turn false, and every audit row below this call would
-	// lose its sim columns for the rest of the service call. That is "no
-	// clock, at simulated now", the mirror of the "clock C at wall-clock now"
-	// half-truth that Sim exists to prevent. Inside a catch-up every entity
-	// touched is the clock's, so an unresolved pin there is a failed lookup,
-	// never a sign that the work left the simulation.
+	// silently lose its sim columns for the rest of the service call. That is
+	// "no clock, at simulated now": the mirror of the "clock C at wall-clock
+	// now" half-truth that the resolvers' own comments warn about and that
+	// Sim exists to prevent. Inside a catch-up every entity touched is the
+	// clock's, so an unresolved pin there is a failed lookup, never a sign
+	// that the work left the simulation.
 	if sim.TestClockID == "" {
 		if _, inherited := SimOf(ctx); inherited {
 			return ctx, true

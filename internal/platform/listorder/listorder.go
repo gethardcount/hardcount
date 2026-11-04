@@ -4,7 +4,7 @@
 // an empty dir is desc. Anything else is refused with errs.Invalid naming
 // the allowed values, so it answers 422 with the param set.
 //
-// A silent default would return a typo or a stale bookmark in an order the
+// A silent default would answer a typo or a stale bookmark with an order the
 // caller did not ask for, and the caller would read it as the order it asked
 // for. The closed set also keeps raw input out of the ORDER BY.
 package listorder

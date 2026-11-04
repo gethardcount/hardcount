@@ -6,8 +6,8 @@ import (
 )
 
 // currencySymbols is the dashboard's symbol table (CURRENCY_SYMBOLS in
-// web-v2/src/lib/money.ts). An amount the backend writes into plain text then
-// reads exactly as the dashboard's own formatter prints it.
+// web-v2/src/lib/money.ts). The copy makes an amount that the backend writes
+// into plain text read exactly as the dashboard's own formatter prints it.
 // TestCurrencySymbolsMatchDashboard keeps the two lists equal.
 var currencySymbols = map[string]string{
 	"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "CNY": "¥",
