@@ -494,9 +494,9 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	respond.List(w, r, invoices, total)
 }
 
-// GetInvoice answers `GET /v1/invoices/{id}`: the invoice and its line items.
-func (h *Handler) GetInvoice(w http.ResponseWriter, r *http.Request, id string) {
+func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
+	id := chi.URLParam(r, "id")
 
 	inv, items, err := h.svc.GetWithLineItems(r.Context(), tenantID, id)
 	if errors.Is(err, errs.ErrNotFound) {
@@ -516,10 +516,6 @@ func (h *Handler) GetInvoice(w http.ResponseWriter, r *http.Request, id string) 
 		"invoice":    inv,
 		"line_items": items,
 	})
-}
-
-func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
-	h.GetInvoice(w, r, chi.URLParam(r, "id"))
 }
 
 func (h *Handler) finalize(w http.ResponseWriter, r *http.Request) {
