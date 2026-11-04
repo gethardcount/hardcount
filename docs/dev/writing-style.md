@@ -364,7 +364,9 @@ sites and the design of a superseded ADR. A caller needs these 16:
 
 - **One package per PR, comments only.** No code changes, so the tests and
   lint show that no behaviour changed. Small PRs keep conflicts with other
-  work cheap.
+  work cheap. Small sibling packages, under about 300 comment lines each,
+  can share a PR, and a file with over about 1,000 comment lines gets its
+  own.
 - **Prove it.** This prints every changed line that is not a comment or blank,
   and must print nothing:
 
