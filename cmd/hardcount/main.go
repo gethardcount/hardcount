@@ -1,3 +1,6 @@
+// Hardcount is the billing server. With no arguments it serves the API and
+// runs the background workers. "hardcount migrate" applies the database
+// migrations, and "hardcount help" lists every command and setting.
 package main
 
 import (
@@ -32,15 +35,14 @@ import (
 )
 
 func main() {
-	// Pin the process to UTC (ADR-075). pgx decodes timestamptz via time.Unix,
-	// which lands in time.Local — so on a non-UTC host the DB read path returns
-	// timestamps in the host zone, and time.Time.MarshalJSON then emits a
-	// host-dependent offset (e.g. "+05:30") on the API wire instead of canonical
-	// "…Z". The app already MINTS instants in UTC (clock.Now().UTC()); this makes
-	// the DB READ path agree, so every serialized timestamp is host-independent
-	// UTC. Must be the first statement — before any DB connection or goroutine —
-	// so the assignment can't race a concurrent time.Local read. Billing date-math
-	// is unaffected: it anchors in explicit zones (ADR-058/074), never time.Local.
+	// Pin the process to UTC (ADR-075). pgx decodes timestamptz with
+	// time.Unix, which uses time.Local, so on a host in another zone the API
+	// would show database timestamps with that zone's offset ("+05:30")
+	// instead of "Z". The app already creates instants in UTC
+	// (clock.Now().UTC()); this makes the database read path agree. It must
+	// be the first statement, before any connection or goroutine, so nothing
+	// reads time.Local while it changes. Billing date math uses explicit
+	// zones, never time.Local, so it is not affected (ADR-058, ADR-074).
 	time.Local = time.UTC
 
 	cmd := "serve"
@@ -93,7 +95,7 @@ func serve() {
 		os.Exit(1)
 	}
 
-	// Initialize OpenTelemetry tracing (noop if OTEL_EXPORTER_OTLP_ENDPOINT not set)
+	// Tracing is a no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set.
 	tracingShutdown, err := telemetry.Init(context.Background())
 	if err != nil {
 		slog.Error("init tracing", "error", err)
@@ -111,10 +113,10 @@ func serve() {
 	defer func() { _ = pool.Close() }()
 
 	if cfg.Migrate {
-		// Not a warning: the one-VM guide upgrades this way, and with several
-		// copies the migration lock makes it safe (docs/upgrades.md). A
-		// warning operators are told to ignore teaches them to ignore
-		// warnings (#1245).
+		// Logged as info, not a warning. The one-VM guide upgrades this way,
+		// and with several copies the migration lock makes it safe
+		// (docs/upgrades.md). A warning that operators are told to ignore
+		// teaches them to ignore warnings (#1245).
 		slog.Info("running migrations on start (RUN_MIGRATIONS_ON_BOOT=true)")
 		if err := migrate.Up(cfg.DB.URL); err != nil {
 			slog.Error("run migrations", "error", err)
@@ -122,8 +124,8 @@ func serve() {
 		}
 	}
 
-	// Refuse to start if schema is behind what this binary expects — catches
-	// missed migration Jobs, races during rolling deploys, and dirty migrations.
+	// Refuse to start if the schema is behind this binary: a missed migration
+	// job, a race during a rolling deploy, or a dirty migration.
 	if err := migrate.CheckSchemaReady(pool); err != nil {
 		slog.Error("schema check failed", "error", err)
 		os.Exit(1)
@@ -134,12 +136,11 @@ func serve() {
 
 	db := postgres.NewDB(appPool, cfg.DB.QueryTimeout)
 
-	// Leader gate (ADR-114): every singleton loop — billing, dunning, the
-	// two outbox dispatchers, webhook delivery retry — takes one tick at a
-	// time through leader_leases, on a token the role's claim funnel
-	// re-checks in SQL. Every statement is self-contained, so the gate is
-	// safe behind a transaction-mode pooler (the old session advisory
-	// locks were not, which is why boot used to probe the topology).
+	// Leader gate (ADR-114). Each background loop (billing, dunning, the two
+	// outbox dispatchers and webhook delivery retry) runs one tick at a time
+	// under a lease in leader_leases. Each role's claim statement re-checks
+	// the lease token in SQL. Every statement stands alone, so the gate is
+	// safe behind a transaction-mode pooler.
 	gate := leader.New(appPool, func(role leader.Role, reason string) {
 		mw.RecordLeaderLeaseLost(string(role), reason)
 	})
@@ -160,13 +161,13 @@ func serve() {
 		return out, nil
 	})
 
-	// Redis: production refuses to boot without a reachable one (the
-	// general and hosted-invoice rate limiters fail CLOSED without Redis,
-	// so a Redis-less replica would boot green and answer 429 to 1/N of
-	// traffic — including hosted-invoice pay pages — while /health/ready
-	// stays ok). config.validateFatal already rejects an UNSET REDIS_URL
-	// in production; this catches invalid/unreachable. Other environments
-	// warn and run fail-open, except /v1/auth, whose limiter counts in the
+	// Production refuses to start without a reachable Redis. Without Redis
+	// the general and hosted-invoice rate limiters fail closed, so a copy
+	// with no Redis would pass /health/ready and still answer 429 to its
+	// share of traffic, hosted invoice pay pages included.
+	// config.validateFatal already rejects an unset REDIS_URL in production;
+	// this check catches an invalid or unreachable one. Other environments
+	// warn and fail open, except /v1/auth, whose limiter counts in this
 	// process.
 	pingCtx, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
 	rdb, err := mw.OpenRedis(pingCtx, cfg.RedisURL)
@@ -190,50 +191,49 @@ func serve() {
 	if cfg.Env == "local" {
 		billingInterval = 5 * time.Minute
 	}
-	// A period is closed on the first billing tick after its end plus the
-	// grace, so the operator sees when invoices will actually be built.
+	// Log the grace and the billing interval together. A period closes on
+	// the first billing tick after its end plus the grace, so an operator
+	// needs both to know when invoices are built.
 	slog.Info("invoice grace period", "invoice_grace_period", cfg.InvoiceGracePeriod, "billing_interval", billingInterval)
 	scheduler := billing.NewScheduler(server.BillingEngine, billingInterval, 50, server.DunningSvc, server.SettingsStore, nil, server.CreditSvc)
-	// Every service below is constructed unconditionally by api.NewServer —
-	// a nil can only mean a broken refactor. Wire unconditionally: the
-	// scheduler's own tick-time nil-guards are a seam for TEST
-	// configurations, and hiding a wiring bug behind them would skip a
-	// money-path worker silently, forever. (Seven dead nil-guards here did
-	// exactly that in theory until the 2026-08-11 module audit.)
+	// api.NewServer always builds these services, so wire them without nil
+	// checks. The scheduler skips a worker whose service is nil, which tests
+	// rely on. A nil check here would hide a wiring bug by turning off a
+	// money-path worker without a word.
 	scheduler.SetTokenCleaner(server.TokenSvc)
 	scheduler.SetIdempotencyCleaner(mw.NewIdempotencyCleaner(db))
 	scheduler.SetLoginThrottleCleaner(server.LoginThrottle)
 	scheduler.SetTaxRetrier(server.InvoiceSvc)
-	// Re-issue clawback credit-note drafts whose post-commit Issue() failed
-	// (created atomically with a subscription downgrade/removal). ADR-056
-	// follow-up — closes the post-commit fire-and-forget clawback gap.
+	// Retry clawback credit notes whose Issue() failed after commit. A
+	// subscription downgrade or item removal writes the draft in the same
+	// transaction as the change (ADR-056) and issues it after the commit, so
+	// this retry is what issues a draft whose first attempt failed.
 	scheduler.SetClawbackRetrier(server.CreditNoteSvc)
-	// Wall-clock trial expiry (Bug #8 — non-clock-pinned subs):
-	// each tick, flip trialing subs to active at trial_end_at so
-	// the dashboard doesn't lie about lifecycle state for up to
-	// ~30 days past actual trial-end.
+	// Trial expiry on the real clock, for subscriptions not on a test clock.
+	// Each tick moves trialing subscriptions to active at trial_end_at.
+	// Otherwise the dashboard could show an ended trial as trialing for up
+	// to about 30 days.
 	scheduler.SetTrialExpirer(server.SubscriptionSvc)
-	// Wall-clock pause-resume — clear pause_collection on subs
-	// whose resumes_at has elapsed. Runs AFTER the billing run and
-	// skips a sub that still owes a close before resumes_at, so that
-	// close reads the pause as it stood at the period's end. Without
-	// this, a paused sub whose next_billing_at is in the future stays
-	// paused indefinitely.
+	// Pause resume on the real clock: clear pause_collection on subscriptions
+	// whose resumes_at has passed. It runs after the billing run, and it skips
+	// a subscription that still owes a period close before resumes_at, so that
+	// close reads the pause as it stood at the period's end. Without it, a
+	// paused subscription whose next_billing_at is in the future stays paused
+	// for good.
 	scheduler.SetPauseResumer(server.SubscriptionSvc)
 	scheduler.SetPaymentReconciler(server.PaymentReconciler)
 	scheduler.SetGate(gate)
 
-	// Wire scheduler health tracking so /health/ready can report a stalled
-	// scheduler in its body (it does not change the status code)
+	// Track scheduler runs so /health/ready can report a stalled scheduler in
+	// its body. It does not change the status code.
 	api.SetSchedulerInterval(billingInterval)
 	scheduler.SetOnRun(api.RecordSchedulerRun)
 
-	// Test-clock async catchup (ADR-015). The Advance HTTP handler
-	// flips the clock to status='advancing' and enqueues a job; this
-	// worker drains the queue and runs the billing catchup
-	// off-request. Buffer of 100 is generous — at expected operator
-	// volumes there's never more than a handful of in-flight
-	// advances.
+	// Test-clock catch-up runs off the request (ADR-015). Catch-up is the
+	// billing for the time a test clock skipped. The Advance handler sets the
+	// clock to 'advancing' and queues a job, and this worker runs it. A buffer
+	// of 100 is plenty: operators rarely have more than a few advances in
+	// flight.
 	catchupQueue := testclock.NewCatchupQueue(100)
 	server.TestClockSvc.SetCatchupQueue(catchupQueue)
 	catchupWorker := testclock.NewCatchupWorker(catchupQueue, func(ctx context.Context, job testclock.CatchupJob) error {
@@ -243,11 +243,11 @@ func serve() {
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%s", cfg.Port),
 		Handler: server,
-		// ReadHeaderTimeout bounds header parsing (slowloris guard); ReadTimeout
-		// gives the body a generous window so batch ingest (up to 1000 events)
-		// over a slow link isn't truncated. WriteTimeout MUST exceed the 30s
-		// request Timeout middleware so the server writes its JSON 504 before
-		// the server closes the socket (equal values race → connection reset).
+		// ReadHeaderTimeout bounds header parsing (a slowloris guard).
+		// ReadTimeout gives the body enough time for a batch of up to 1,000
+		// events over a slow link. WriteTimeout must be longer than the 30s
+		// request Timeout middleware, so the server writes its JSON 504 before
+		// the socket closes. Equal values race and reset the connection.
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      35 * time.Second,
@@ -255,31 +255,31 @@ func serve() {
 		MaxHeaderBytes:    1 << 13, // 8 KB
 	}
 
-	// Shutdown is a published three-stage budget — 90s worst case after the
-	// SHUTDOWN_DRAIN_DELAY readiness drain, typically under two seconds — and
-	// every stage's bound abandons only work that is designed to be resumed.
-	// Set the orchestrator's grace period above the drain delay plus 90s:
-	// 120s with the 5s default (docs/ops/high-availability.md 'What happens
-	// when a copy stops'; compose sets stop_grace_period). Docker's 10s
-	// default SIGKILLs mid-drain.
+	// Shutdown runs in three stages with a published budget: at most 90s after
+	// the SHUTDOWN_DRAIN_DELAY readiness drain, and usually under two seconds.
+	// Each stage's limit abandons only work that is built to be resumed. Set
+	// the orchestrator's grace period above the drain delay plus 90s: 120s
+	// with the 5s default (docs/ops/high-availability.md, "What happens when a
+	// copy stops"; compose sets stop_grace_period). Docker's 10s default sends
+	// SIGKILL mid-drain.
 	const (
 		shutdownHTTPDrain   = 30 * time.Second // stage 1: in-flight requests
 		shutdownCatchupWait = 30 * time.Second // stage 2: an in-flight test-clock advance
 		shutdownWorkerDrain = 30 * time.Second // stage 3: scheduler + dispatcher ticks
 	)
 
-	// Stage 0: the moment Shutdown is called, close every SSE subscriber so
-	// the dashboard's live tail does not hold the HTTP drain open for its
-	// full 30s bound (see EventBus.CloseAll).
+	// Stage 0: when Shutdown is called, close every SSE subscriber, so the
+	// dashboard's live tail does not hold the HTTP drain open for its full 30s
+	// (see EventBus.CloseAll).
 	srv.RegisterOnShutdown(server.WebhookOutSvc.EventBus().CloseAll)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Track background workers so shutdown can wait for them to finish their
-	// current tick before the process exits. Without this, a SIGTERM during a
-	// billing run could leave partial work — half-generated invoices, ledger
-	// entries without matching invoice updates, in-flight webhook deliveries.
+	// Track the background workers, so shutdown can wait for each to finish
+	// its current tick before the process exits. Otherwise a SIGTERM during a
+	// billing run could leave partial work: half-built invoices, ledger
+	// entries without their invoice update, or webhook deliveries in flight.
 	var workers sync.WaitGroup
 
 	workers.Add(2)
@@ -292,13 +292,11 @@ func serve() {
 		server.WebhookOutSvc.StartRetryWorker(ctx, 30*time.Second, gate)
 	}()
 
-	// Test-clock catchup worker. Started AFTER the queue is wired
-	// onto the service so any boot-recovered clock has somewhere to
-	// land. Recovery is best-effort: stuck clocks from a prior
-	// process get re-enqueued; the worker drains them like any other
-	// job. If recovery itself errors, log loudly but don't block
-	// boot — operators can still create new clocks; only legacy
-	// stuck ones miss out, and they can be deleted manually.
+	// Start the catch-up worker after the queue is set on the service, so a
+	// clock recovered at boot has a queue to land in. Recovery is best-effort:
+	// clocks left 'advancing' by an earlier process are queued again and run
+	// like any other job. If recovery fails, log an error and keep booting.
+	// New clocks still work, and a stuck old clock can be deleted by hand.
 	catchupWorker.Start()
 	recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	if err := server.TestClockSvc.RecoverInFlight(recoveryCtx); err != nil {
@@ -306,12 +304,13 @@ func serve() {
 	}
 	recoveryCancel()
 
-	// Outbox dispatchers (always-on per ADR-040). Webhook outbox drains
-	// webhook_outbox → Service.Dispatch; email outbox drains email_outbox
-	// → *email.Sender. Each tick is one leader lease (ADR-114) so multi-
-	// replica deploys drain from one replica at a time. Operators pause a
-	// role with `SELECT leader_pause('webhook_outbox', 'oncall', 'why')` (docs/ops/
-	// runbook/background-job-stuck.md); restart isn't required.
+	// The outbox dispatchers always run (ADR-040). The webhook dispatcher
+	// drains webhook_outbox into Service.Dispatch, and the email dispatcher
+	// drains email_outbox into *email.Sender. Each tick takes a leader lease
+	// (ADR-114), so with several copies only one drains at a time. An
+	// operator pauses a role, with no restart, by running
+	// `SELECT leader_pause('webhook_outbox', 'oncall', 'why')`
+	// (docs/ops/runbook/background-job-stuck.md).
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
@@ -339,52 +338,52 @@ func serve() {
 	slog.Info("shutting down — announcing drain, then draining workers and in-flight requests",
 		"drain_delay", cfg.ShutdownDrainDelay)
 
-	// Readiness-first: /health/ready answers 503 'draining' from now on
-	// while /health (liveness) stays 200, so a health-check-driven load
-	// balancer stops routing to this replica BEFORE the listener closes —
-	// otherwise every rolling deploy ends with connection resets on the
-	// draining replica. Keep listening for the configured delay so the
-	// balancer's probes observe the 503 (orchestrator-driven removal, e.g.
-	// Kubernetes endpoints, is immediate — the delay just covers the
-	// health-check path). 0 in local.
+	// Readiness first. From now on /health/ready answers 503 'draining' while
+	// /health (liveness) stays 200, so a load balancer that follows health
+	// checks stops sending traffic here before the listener closes. Otherwise
+	// every rolling deploy ends with connection resets on this copy. Keep
+	// listening for the configured delay, so the balancer's probes see the
+	// 503. An orchestrator that removes the copy itself (Kubernetes
+	// endpoints) does so at once; the delay covers the health-check path. The
+	// delay is 0 in local.
 	api.SetDraining()
 	if cfg.ShutdownDrainDelay > 0 {
 		time.Sleep(cfg.ShutdownDrainDelay)
 	}
 
-	// Stage 1 (≤ 30s): stop accepting new HTTP requests, drain in-flight
-	// ones. RegisterOnShutdown above closes the SSE subscribers first, so
-	// an open live tail no longer pins this stage to its bound.
+	// Stage 1 (at most 30s): stop accepting HTTP requests and finish the ones
+	// in flight. RegisterOnShutdown above closes the SSE subscribers first,
+	// so an open live tail does not hold this stage to its limit.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownHTTPDrain)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("http shutdown error", "error", err)
 	}
 
-	// Stage 2 (≤ 30s): the test-clock catch-up worker. Catch-up runs on
-	// context.Background() (an in-flight advance must not be cut short
-	// mid-write), so cancellation does not reach it; Stop waits up to
-	// shutdownCatchupWait for the in-flight advance — typical advances
-	// finish in seconds — then abandons it. An abandoned advance leaves the
-	// clock 'advancing'; RecoverInFlight runs once per replica BOOT, so in
-	// a rolling deploy (new replica already up) nothing resumes it until
-	// some replica restarts — hazard 7 in the HA register, fix = program
-	// ha-9. (Was CatchupTimeout = 10 min, which blew every orchestrator
-	// grace period.)
+	// Stage 2 (at most 30s): the test-clock catch-up worker. Catch-up runs on
+	// context.Background(), because an advance must not stop mid-write, so
+	// cancelling ctx does not reach it. Stop waits up to shutdownCatchupWait
+	// for the advance in flight (most finish in seconds), then abandons it.
+	// An abandoned advance leaves the clock 'advancing', and RecoverInFlight
+	// runs only when a copy boots. So in a rolling deploy, where the new copy
+	// is already up, nothing resumes the advance until some copy restarts:
+	// hazard 7, with its planned fix ha-9, in
+	// docs/dev/records/ha-readiness-2026-07-06.md.
 	if !catchupWorker.Stop(shutdownCatchupWait) {
 		slog.Warn("test-clock catchup worker still busy — abandoning the in-flight advance; the clock stays 'advancing' until a replica restarts (docs/ops/runbook/test-clock-advance-hung.md)")
 	}
 
-	// Stage 3 (≤ 30s): scheduler + dispatchers. Their ticks run on ctx
-	// (cancelled above) and abort atomically at their next DB call; this
-	// wait exists for the WithoutCancel completions — a Stripe charge, a
-	// tax retry's finalize and its CommitTax, an outbox row's detached
-	// mark — so a mid-tick run lands its result instead of leaving a
-	// claimed row for the lease to expire. Each Stripe attempt is bounded
-	// by the 30s client timeout, but stripe-go retries a timeout up to
-	// twice, so this stage's own bound caps the wait; the tax_commit sweep
-	// re-commits a CommitTax it cuts. Bounded so a hung worker cannot
-	// prevent exit.
+	// Stage 3 (at most 30s): the scheduler and the dispatchers. Their ticks
+	// run on ctx, which is now cancelled, and abort atomically at their next
+	// database call. This wait is for the work that runs with
+	// context.WithoutCancel: a Stripe charge, a tax retry's finalize and its
+	// CommitTax, and an outbox row's detached mark. Waiting lets a tick that
+	// is part-way through record its result, instead of leaving a claimed
+	// row for its lease to expire. Each Stripe attempt has a 30s client
+	// timeout, but stripe-go retries a timeout up to twice, so this stage's
+	// own limit caps the wait. The tax_commit sweep re-commits a CommitTax
+	// that this limit cuts off. The limit also means a hung worker cannot
+	// block the exit.
 	done := make(chan struct{})
 	go func() {
 		workers.Wait()
@@ -398,8 +397,8 @@ func serve() {
 	}
 }
 
-// loadDSN loads just the database URL for migrate subcommands. Skips
-// Stripe/Redis/encryption validation that's irrelevant for migrate work.
+// loadDSN loads only the database URL, for the migrate subcommands. It skips
+// the Stripe, Redis and encryption checks, which migrations do not need.
 func loadDSN() string {
 	cfg, err := config.LoadDBOnly()
 	if err != nil {
@@ -418,8 +417,8 @@ func runMigrate() {
 	fmt.Println(migrateSummaryLine(sum))
 }
 
-// migrateSummaryLine says what `hardcount migrate` did. It printed
-// "migrations applied successfully" when nothing ran (#1245).
+// migrateSummaryLine says what `hardcount migrate` did, including when no
+// migration ran (#1245).
 func migrateSummaryLine(sum migrate.UpSummary) string {
 	switch sum.Applied {
 	case 0:
@@ -450,8 +449,8 @@ const rollbackRefused = `hardcount migrate rollback runs only with APP_ENV=local
 Rolling back in staging or production loses data the newer release wrote. To go back, restore the backup taken before the upgrade: docs/upgrades.md#going-back`
 
 // runMigrateRollback undoes the latest migration, one step, on a local
-// database: the loop for writing a new migration. Migration 180, the
-// baseline, never rolls back.
+// database. It is for the edit-and-retry loop while writing a new migration.
+// Migration 180, the baseline, never rolls back.
 func runMigrateRollback() {
 	if config.AppEnv() != "local" {
 		fmt.Fprintln(os.Stderr, rollbackRefused)
@@ -465,10 +464,11 @@ func runMigrateRollback() {
 	fmt.Printf("rolled back to version %d\n", v)
 }
 
-// newLogger is the server's JSON logger at LOG_LEVEL (config.ParseLogLevel),
-// so production tunes verbosity without a rebuild. An unknown level is an
-// error and the server does not start: it used to mean info without a word,
-// so LOG_LEVEL=verbose, meant as debug, hid every debug line it was set for.
+// newLogger returns the server's JSON logger at LOG_LEVEL
+// (config.ParseLogLevel), so production can change verbosity without a
+// rebuild. An unknown level is an error and the server does not start.
+// Falling back to info would let a typo such as LOG_LEVEL=verbose, meant as
+// debug, hide every debug line it was set to show.
 func newLogger(w io.Writer) (*slog.Logger, error) {
 	level, err := config.ParseLogLevel(os.Getenv("LOG_LEVEL"))
 	if err != nil {
@@ -508,9 +508,10 @@ Environment:
   REDIS_URL                  Redis URL for distributed rate limiting`)
 }
 
-// deriveAppURL replaces the user:password in a DATABASE_URL with hardcount_app:hardcount_app.
-// Returns "" if the URL can't be parsed. LOCAL DEV ONLY (ADR-073) —
-// staging/production require an explicit APP_DATABASE_URL.
+// deriveAppURL replaces the user:password in a DATABASE_URL with
+// hardcount_app:hardcount_app. It returns "" if the URL cannot be parsed. It
+// is for local development only (ADR-073): staging and production require an
+// explicit APP_DATABASE_URL.
 func deriveAppURL(adminURL string) string {
 	u, err := neturl.Parse(adminURL)
 	if err != nil {
@@ -520,10 +521,11 @@ func deriveAppURL(adminURL string) string {
 	return u.String()
 }
 
-// resolveAppURL applies ADR-073's fail-closed matrix for the runtime
-// (RLS-enforced) pool. Returns the URL to open, or fallbackWarn != ""
-// meaning "use the admin pool and log this" (local dev only), or an
-// error that must abort boot. Pure so the matrix is unit-testable.
+// resolveAppURL picks the database URL for the runtime pool, where RLS is
+// enforced, by ADR-073's fail-closed rules. It returns one of three results:
+// the URL to open; a non-empty fallbackWarn, meaning "use the admin pool and
+// log this" (local development only); or an error that must stop the boot.
+// It has no side effects, so the rules can be unit-tested.
 func resolveAppURL(env, adminURL, appURL string) (url, fallbackWarn string, err error) {
 	local := env == "local"
 
@@ -535,10 +537,10 @@ func resolveAppURL(env, adminURL, appURL string) (url, fallbackWarn string, err 
 		username := u.User.Username()
 		password, _ := u.User.Password()
 		if !local {
-			// The publicly documented default and the no-credential
-			// trust-auth shape both hand cross-tenant read/write to
-			// anyone with TCP reach — the exact exposure HIGH #9
-			// flagged. Refuse outside local dev.
+			// Outside local development, refuse the documented default
+			// password and the no-password (trust-auth) shape. Either one
+			// gives anyone who can reach the database read and write
+			// access across every tenant.
 			switch password {
 			case "":
 				return "", "", fmt.Errorf("APP_DATABASE_URL has no password (trust-auth shape) — forbidden in %s; set a real password for the app role (ALTER ROLE %s PASSWORD ...)", env, username)
@@ -570,14 +572,14 @@ func checkRLSCapability(pool *sql.DB) (role string, canBypass bool, err error) {
 	return role, canBypass, err
 }
 
-// openAppPool returns the connection used for request-time queries,
-// where RLS must be enforced (ADR-073). APP_DATABASE_URL is honored
-// verbatim when set; staging/production refuse to boot without it, with
-// a default/empty password, or with a role that can bypass RLS — the
-// capability check is what catches the path of least resistance
-// (copying DATABASE_URL into APP_DATABASE_URL), which no string check
-// can see. Local dev keeps the hardcount_app:hardcount_app derivation and
-// warn-and-fallback. The returned cleanup is a noop when falling back.
+// openAppPool returns the connection for request-time queries, where RLS must
+// be enforced (ADR-073). APP_DATABASE_URL is used as given when set.
+// Staging and production refuse to start without it, with an empty or
+// default password, or with a role that can bypass RLS. The role check
+// catches the easy mistake of copying DATABASE_URL into APP_DATABASE_URL,
+// which no check on the URL text can see. Local development still derives
+// hardcount_app:hardcount_app, and falls back to the admin pool with a
+// warning. The returned cleanup does nothing after a fallback.
 func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 	noop := func() {}
 
@@ -595,9 +597,10 @@ func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 	appCfg.URL = appURL
 	appPool, err := config.OpenPostgres(appCfg)
 	if err != nil {
-		// An EXPLICIT APP_DATABASE_URL that doesn't work is fatal in
-		// every env — explicit config never silently degrades. Only the
-		// local derived URL keeps warn-and-fallback (role not created).
+		// An APP_DATABASE_URL that is set but does not work stops the boot
+		// in every environment: a setting someone chose never falls back
+		// quietly. Only the URL derived in local development falls back,
+		// for when the role has not been created.
 		if cfg.DB.AppURL != "" || cfg.Env != "local" {
 			slog.Error("refusing to start: could not open the app database connection, so RLS would not be enforced and tenants would not be isolated. Check APP_DATABASE_URL and that the role exists with LOGIN — see docs/ops/postgres-requirements.md#the-two-database-users.", "error", err, "env", cfg.Env)
 			os.Exit(1)
@@ -619,9 +622,10 @@ func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 		slog.Warn("app database role can bypass RLS — acceptable in local dev only", "role", role)
 	}
 
-	// The role must also be able to read and write the tables the app uses:
-	// without the default privileges the schema setup grants, requests failed
-	// later with 500s (#1317). Refused in every environment, naming the grants.
+	// The role must also be able to read and write the tables the app uses.
+	// Without the default privileges that the schema setup grants, requests
+	// would fail later with 500s (#1317). This refuses to start in every
+	// environment, and the log names the missing grants.
 	if _, missing, err := missingAppGrants(appPool); err != nil {
 		slog.Error("refusing to start: could not read the app role's table privileges", "role", role, "error", err)
 		os.Exit(1)
@@ -635,8 +639,8 @@ func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 	return appPool, func() { _ = appPool.Close() }
 }
 
-// redisBootFatal is the one place the Redis boot verdict lives: an error
-// opening/pinging Redis is fatal in production only.
+// redisBootFatal decides whether a Redis error stops the boot. An error
+// opening or pinging Redis is fatal in production only.
 func redisBootFatal(env string, err error) bool {
 	return err != nil && env == "production"
 }
