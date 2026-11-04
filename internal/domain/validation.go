@@ -46,7 +46,7 @@ var zeroDecimalCurrencies = map[string]bool{
 // ValidateCurrency checks a currency code. Its errors are errs.Invalid or
 // errs.Required, tied to the "currency" field. When the caller's form uses a
 // different field name (for example "default_currency"), call errs.Invalid
-// yourself with the right field instead.
+// yourself with the right field and the returned message instead.
 func ValidateCurrency(currency string) error {
 	upper := strings.ToUpper(strings.TrimSpace(currency))
 	if upper == "" {

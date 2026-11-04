@@ -78,7 +78,8 @@ func SubscriptionDueInstantSQL(alias string) string {
 // the due instant the row has now. The five billing_* columns are not cleared
 // when the due instant moves, so reading them without this predicate reads
 // stale data. Every reader goes through it: the due scans, the list filter,
-// both writers, and the gauges (a hand copy, which a test keeps equal).
+// both writers, and the gauges (a hand copy, which a test checks against
+// this predicate).
 //
 // Every term is two-valued (never NULL), so the predicate is safe under NOT.
 func SubscriptionBillingFailingSQL(alias string) string {

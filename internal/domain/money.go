@@ -10,10 +10,10 @@ import (
 
 // MulCents multiplies two non-negative minor-unit amounts, checked for
 // overflow. MulCents and AddCents return ErrAmountOverflow where int64
-// multiplication and addition would wrap silently, and the caller refuses the
-// request. A wrapped result is dangerous: a credit-note line of 3e9 × 4e9
-// cents wraps to a negative total, which then passes the "not more than the
-// invoice" cap.
+// multiplication and addition would wrap silently, for the caller to refuse
+// the request. With unchecked int64 math, a credit-note line of 3e9 × 4e9
+// cents would wrap to a negative total, which would then pass the "not more
+// than the invoice" cap.
 func MulCents(a, b int64) (int64, error) {
 	if a < 0 || b < 0 {
 		return 0, ErrAmountOverflow

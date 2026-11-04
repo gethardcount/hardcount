@@ -12,8 +12,8 @@ import (
 //   - Set, in the future: its owner is working (a charge, or dunning's final
 //     action).
 //   - Set, in the past (stale): a charge may have been sent and its result
-//     was not saved. A crash, a caller's deadline or a lost answer leaves it
-//     so.
+//     was not saved. The cause can be a crash, a caller's deadline or a lost
+//     answer.
 //
 // While the hold is set, nothing but its owner takes the hold, charges, or
 // does anything irreversible. Only the owner clears its own hold, by
@@ -22,10 +22,10 @@ import (
 // Write-off is the one action allowed on a stale hold: it moves no money, and
 // a payment found later still settles the invoice.
 //
-// A stale hold does not count as free. An interrupted charge leaves the
-// invoice looking exactly like one never charged. If the hold were free, the
-// next initiator (another charge kind, a changed card, a key Stripe had
-// pruned, the hosted page) could take a second payment (#976).
+// A stale hold does not count as free. If it did, an interrupted charge
+// would leave the invoice looking exactly like one never charged. The next
+// initiator (another charge kind, a changed card, a key Stripe had pruned,
+// the hosted page) could then take a second payment (#976).
 
 // ChargeHold is one owner's hold on an invoice: the exact
 // auto_charge_claimed_until value its claim wrote. It is the owner's token.
@@ -123,9 +123,9 @@ type chargeHoldOwner struct {
 }
 
 // WithChargeHoldOwner marks ctx as running under the hold h on invoiceID.
-// Dunning's final action takes the hold for the subscription cancel, and the
-// cancel can void this same invoice: a wholly unused prebill, that is, an
-// invoice billed in advance for time not used at all (ADR-118). The void
+// Dunning's final action takes the hold for the subscription cancel. The
+// cancel can void this same invoice when it is a wholly unused prebill (an
+// invoice billed in advance for time not used at all, ADR-118). The void
 // refuses while a hold is set. Without this mark, the cancel would refuse its
 // own owner's hold and fail on every attempt.
 func WithChargeHoldOwner(ctx context.Context, invoiceID string, h ChargeHold) context.Context {

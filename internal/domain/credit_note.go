@@ -77,9 +77,9 @@ type CreditNote struct {
 	// TaxTransactionID is the id of the reversal transaction that the tax
 	// provider returns when Issue succeeds (for Stripe, tx_xxx for the
 	// negative tax_transaction). It is empty while the credit note is a
-	// draft, or when the invoice has no upstream tax state to reverse: the
-	// provider is manual or none, or the invoice is a legacy one from before
-	// invoice.tax_transaction_id.
+	// draft. It is also empty when the invoice has no upstream tax state to
+	// reverse: the provider is manual or none, or the invoice is a legacy one
+	// from before invoice.tax_transaction_id.
 	TaxTransactionID string `json:"tax_transaction_id,omitempty"`
 	// IsSimulated marks a credit note whose issued_at is in simulated
 	// (test-clock) time. It is the source invoice's flag, whoever issues the

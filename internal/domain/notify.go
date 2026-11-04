@@ -10,10 +10,10 @@ import (
 // skip (for example, "the customer has no email, so there is nothing to
 // send") from a successful send. The rule: returning nil for a skipped effect
 // is forbidden, because no surface may claim an effect whose outcome it
-// cannot read. New effect interfaces follow it, and so does
-// NotifyNoPaymentMethod. A silent skip there would let two surfaces claim a
-// send that never happened: the "has been emailed" banner (#403), and a
-// resend endpoint answering 200 {"status":"sent"}.
+// cannot read. The rule applies to new effect interfaces, and of the older
+// ones only to NotifyNoPaymentMethod. A silent skip there would let two
+// surfaces claim a send that never happened: the "has been emailed" banner
+// (#403), and a resend endpoint answering 200 {"status":"sent"}.
 type NotifyOutcome string
 
 const (

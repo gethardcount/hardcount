@@ -55,8 +55,8 @@ type Customer struct {
 	// (invoice, receipt, dunning, payment failed, credit note). They are never
 	// CC'd on emails that carry a credential (setup links, resets, invites).
 	// They are stored encrypted next to email, as a JSON array under the same
-	// encryptor. The service validates them and normalizes them to lowercase
-	// addr-specs, at most 10 (ADR-082).
+	// encryptor. The service validates them, allows at most 10, and
+	// normalizes them to lowercase addr-specs (ADR-082).
 	AdditionalEmails []string       `json:"additional_emails,omitempty"`
 	Status           CustomerStatus `json:"status"`
 	// EmailStatus is the deliverability signal that bounce-capture hooks set.
@@ -75,7 +75,7 @@ type Customer struct {
 	// a tag. Resolve a presented token with
 	// customer.Store.GetByCostDashboardToken, which hashes before it
 	// compares.
-	//
+
 	// TestClockID pins this customer to a test clock, as in Stripe (ADR-027).
 	// It is set at create time, and then every subscription and invoice of
 	// this customer runs on that clock's simulated time. It is empty for
@@ -131,6 +131,7 @@ type CustomerBillingProfile struct {
 	// when a customer_email_contacts table (per-contact names, routing per
 	// email type, per-contact deliverability) would be added: when a design
 	// partner asks for per-recipient preferences.
+
 	Phone        string `json:"phone,omitempty"`
 	AddressLine1 string `json:"address_line1,omitempty"`
 	AddressLine2 string `json:"address_line2,omitempty"`

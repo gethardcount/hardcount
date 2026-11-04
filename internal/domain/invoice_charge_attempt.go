@@ -61,10 +61,10 @@ func ChargeAttemptTriggers() []ChargeAttemptTrigger {
 
 // InvoiceChargeAttempt is one charge attempt on an invoice, a billing fact of
 // its own (ADR-102). It is written when the PaymentIntent is created, and
-// upserted by PaymentIntent as settle paths learn the outcome. So the
-// billing-axis timeline (on the invoice's own calendar, simulated under a
-// test clock) can show every attempt exactly once, without borrowing the
-// dunning subsystem's events or the webhook stream's wall-clock rows.
+// settle paths upsert it, keyed by PaymentIntent, as they learn the outcome.
+// So the billing-axis timeline (on the invoice's own calendar, simulated
+// under a test clock) can show every attempt exactly once, without borrowing
+// the dunning subsystem's events or the webhook stream's wall-clock rows.
 type InvoiceChargeAttempt struct {
 	ID                    string
 	TenantID              string
@@ -137,8 +137,8 @@ type PaymentFailureResult struct {
 // own attempt history (invoice_charge_attempts), among the attempts Hardcount
 // made itself (auto_charge, charge_now, dunning_retry). Hardcount writes that
 // row when its charge call returns, before it reports the outcome. The
-// charge lease runs its charges one at a time, so the row order is the
-// attempt order.
+// charge lease makes Hardcount's charges run one at a time, so the row order
+// is the attempt order.
 type AttemptStanding int
 
 const (

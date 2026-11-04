@@ -136,9 +136,10 @@ const (
 // StripeRefundLateAfter is how long after Stripe made a refund Hardcount may
 // first see it and still record it as a credit note (ADR-134). A refund seen
 // later is flagged instead. After an upgrade, Stripe can send refund.updated
-// for a refund made before it, which the operator may already have recorded
-// by hand, and a second credit note would count it twice. Both instants are
-// Stripe's: the event's creation time and the refund's.
+// for a refund made before the upgrade. The operator may already have
+// recorded that refund by hand, and a second credit note would count it
+// twice. Both instants are Stripe's: the event's creation time and the
+// refund's.
 const StripeRefundLateAfter = 24 * time.Hour
 
 // InvoiceStripeRefund is a refund made in Stripe outside Hardcount on one of

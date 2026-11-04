@@ -53,7 +53,7 @@ type TestClock struct {
 	// polls back to status='ready'. So the operator sees what an advance did
 	// without searching the Invoices, Audit and Dunning pages. It is nil
 	// until the clock has been advanced with billing wired. Each advance
-	// overwrites it, whether it succeeded or partly failed.
+	// overwrites it, whether the advance succeeded or partly failed.
 	LastAdvanceSummary *AdvanceSummary `json:"last_advance_summary,omitempty"`
 }
 

@@ -63,8 +63,8 @@ type CreditLedgerEntry struct {
 	SourceChangeType         ItemChangeType `json:"source_change_type,omitempty"`
 
 	// SourceCreditNoteID deduplicates the grants that credit-note Issue()
-	// creates. Every grant that the credit note's refund-routing path appends
-	// sets it. The partial unique index idx_credit_ledger_credit_note_dedup
+	// creates. The credit-note refund-routing path sets it on every grant it
+	// appends. The partial unique index idx_credit_ledger_credit_note_dedup
 	// allows one grant per (tenant, credit note). A second grant for the same
 	// note hits the index, and the store returns ErrAlreadyExists.
 	SourceCreditNoteID string `json:"source_credit_note_id,omitempty"`
@@ -136,7 +136,7 @@ type CreditReturn struct {
 	UnattributedCents int64
 }
 
-// CreditBalance is a customer's settled credit totals in one currency.
+// CreditBalance holds a customer's settled credit totals in one currency.
 type CreditBalance struct {
 	CustomerID string `json:"customer_id"`
 	// Currency is the stored currency of the ledger rows this balance sums

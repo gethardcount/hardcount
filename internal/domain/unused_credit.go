@@ -11,12 +11,12 @@ import (
 // GrossCents is the credit note's amount, tax included. ToBalance says the
 // note is a balance credit: the invoice is paid, or its charge is in flight.
 // For an in-flight charge, Issue holds the note until the charge settles,
-// which it normally does by succeeding. Otherwise the note lowers what the
+// and the charge normally succeeds. Otherwise the note lowers what the
 // invoice asks for.
 //
 // BalanceCents, DueCents and HeldCents say where the share's money goes, as
-// creditnote.Service.Issue applies it to the invoice that allocation read.
-// They add up to GrossCents:
+// creditnote.Service.Issue applies it to the invoice in the state that
+// allocation read. They add up to GrossCents:
 //
 //   - BalanceCents: to the customer's balance. It is all of a ToBalance
 //     share, and on an open invoice the part above what it still asks for.
