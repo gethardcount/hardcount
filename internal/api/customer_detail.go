@@ -15,19 +15,15 @@ import (
 	"github.com/gethardcount/hardcount/internal/subscription"
 )
 
-// customerDetailHandler provides the operator dashboard's per-customer
-// overview on the Customer Detail page. The page lists a customer's invoices
-// and subscriptions through GET /v1/invoices?customer_id= and
-// GET /v1/subscriptions?customer_id=. Lives in the API package because it crosses domain
-// boundaries — domain packages stay independent.
+// customerDetailHandler serves the per-customer overview on the operator
+// dashboard's Customer Detail page. The page lists a customer's invoices and
+// subscriptions through GET /v1/invoices?customer_id= and
+// GET /v1/subscriptions?customer_id=. The handler crosses domain
+// boundaries, so it lives in the API package. That keeps the domain packages
+// independent.
 //
-// History: born as "customerPortalHandler" at /v1/customer-portal — a
-// name that collided with the ADR-051 customer SELF-SERVE portal
-// (magic-link login, /v1/me/*), which was removed 2026-06-09. This
-// handler was never that feature: it has been operator-auth
-// (PermCustomerRead), dashboard-serving from birth. Renamed and moved
-// under /v1/customers/{id}/* so "customer portal" means exactly one
-// thing in this repo's history — the feature ADR-051 removed.
+// It is an operator route (PermCustomerRead) under /v1/customers/{id}/*. It
+// is not the customer self-serve portal, which ADR-051 removed.
 type customerDetailHandler struct {
 	customers *customer.PostgresStore
 	subs      *subscription.PostgresStore
@@ -38,13 +34,14 @@ func newCustomerDetailHandler(customers *customer.PostgresStore, subs *subscript
 	return &customerDetailHandler{customers: customers, subs: subs, invoices: invoices}
 }
 
-// requireCustomer resolves the path's customer id to an existing row and
-// writes the 404 itself when there is none. The overview composes
-// tenant-scoped sub-queries that all legally return empty for an unknown
-// id — so without this lookup a typo'd or cross-tenant id read as "this
-// customer has nothing" (200, empty shell) instead of "no such customer".
-// Not a leak and not an existence oracle (a cross-tenant id and a made-up
-// one behave identically), but an honest 404 is what a caller can act on.
+// requireCustomer resolves the path's customer id to an existing row, and
+// writes the 404 itself when there is none. The overview runs tenant-scoped
+// sub-queries that all rightly return empty for an unknown id. Without this
+// lookup, a mistyped or cross-tenant id would read as "this customer has
+// nothing" (200, an empty shell) instead of "no such customer". The empty
+// shell is not a leak, and it does not reveal whether an id exists: a
+// cross-tenant id and a made-up one behave the same. But a 404 is an answer
+// a caller can act on.
 func (h *customerDetailHandler) requireCustomer(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	tenantID := auth.TenantID(r.Context())
 	customerID := chi.URLParam(r, "customer_id")
@@ -59,11 +56,10 @@ func (h *customerDetailHandler) requireCustomer(w http.ResponseWriter, r *http.R
 	return tenantID, customerID, true
 }
 
-// overview returns a consolidated view of a customer: active subscriptions,
-// the 5 most-recent invoices, and outstanding balance. It does NOT return a
-// usage summary — the comment said so for a while and the response never
-// carried one. requireCustomer closes the walked "200 empty shell for an
-// unknown id" gap (post-billing closeout, open item 2).
+// overview returns one view of a customer: active subscriptions, the 5 most
+// recent invoices and the outstanding balance. It does not return a usage
+// summary. requireCustomer answers 404 for an unknown id, instead of a 200
+// with an empty shell.
 func (h *customerDetailHandler) overview(w http.ResponseWriter, r *http.Request) {
 	tenantID, customerID, ok := h.requireCustomer(w, r)
 	if !ok {
@@ -89,13 +85,12 @@ func (h *customerDetailHandler) overview(w http.ResponseWriter, r *http.Request)
 		invoices = []domain.Invoice{}
 	}
 
-	// Outstanding balance — accounts-receivable exposure for this
-	// customer. Aggregate over ALL their unpaid invoices, not just
-	// the 5 most-recent in the recent_invoices slice. Industry parity:
-	// Stripe / Lago / Chargebee / Recurly all surface this on the
-	// customer page so operators see total AR at a glance instead of
-	// summing it manually. Read failure surfaces as zero (best-effort);
-	// the rest of the overview still renders.
+	// The outstanding balance is what this customer owes (accounts
+	// receivable, AR). Sum all their unpaid invoices, not only the 5 most
+	// recent in the recent_invoices slice. Stripe, Lago, Chargebee and
+	// Recurly all show it on the customer page, so operators see the total
+	// AR at a glance instead of adding it up by hand. A read failure shows
+	// as zero (best-effort), and the rest of the overview still renders.
 	outstanding, _ := h.invoices.GetOutstandingBalance(r.Context(), tenantID, customerID)
 	if outstanding.ByCurrency == nil {
 		outstanding.ByCurrency = []invoice.CurrencyAmount{}

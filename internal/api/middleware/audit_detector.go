@@ -13,16 +13,19 @@ import (
 	"github.com/gethardcount/hardcount/internal/audit"
 )
 
-// auditUncoveredMutations counts mutating requests that succeeded (2xx) but left
-// NO audit evidence and are not declared exempt. Labeled by ROUTE PATTERN — never
-// the raw path, which carries ids (and, on the public surfaces, live payment
-// tokens) and would blow up cardinality.
+// auditUncoveredMutations counts mutating requests that succeeded (2xx), left
+// no audit evidence and are not declared exempt. Its label is the route
+// pattern, never the raw path. The raw path carries ids, and on the public
+// routes it carries live payment tokens, so it would make the number of
+// series grow without limit.
 //
-// A non-zero value means a state change committed with no compliance record: the
-// route is missing its audit emission, or a new route shipped without one. Alert
-// on any sustained rate. (The route-audit registry's arch test is the BUILD-time
-// gate; this is the runtime backstop for the case the static gate cannot see —
-// a declared-explicit route whose emission silently stopped firing.)
+// A value above zero means a state change committed with no compliance
+// record. Either the route is missing its audit emission, or a new route
+// shipped without one. Alert on any sustained rate. The route-audit
+// registry's arch test is the check at build time. This counter is the check
+// at run time, for the case the static test cannot see: a route declared
+// "explicit" (it writes its own row) whose emission stopped firing without a
+// word.
 var auditUncoveredMutations = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "hardcount_audit_uncovered_mutation_total",
@@ -31,48 +34,45 @@ var auditUncoveredMutations = promauto.NewCounterVec(
 	[]string{"route"},
 )
 
-// AuditCoverage returns a middleware that DETECTS uncovered mutations. It is a
-// PURE OBSERVER.
+// AuditCoverage returns a middleware that detects uncovered mutations:
+// mutating requests that succeeded, left no audit evidence (a row or a
+// MarkSkip) and are not declared exempt. It only observes.
 //
-// It replaces the AuditLog catch-all, which "guaranteed" coverage by writing a
-// row for any mutating /v1 request no handler had claimed — inferring the action
-// and resource from the URL and sniffing the response body for a label. That
-// invented false permanent records in an append-only compliance log (a pricing
-// rule deleted from a meter was recorded as "deleted meter X"), and it covered
-// only the /v1 block, so /v1/auth, /v1/tenants (since removed), /v1/public/*,
-// /v1/webhooks and /v1/bootstrap got nothing at all (ADR-090, RC1 + RC2). Coverage is now
-// DECLARED (the route-audit registry) and EMITTED in the business transaction
-// (audit.Logger.LogInTx). This middleware only reports when reality diverges.
+// Coverage is declared in the route-audit registry, and each row is written
+// in the business transaction (audit.Logger.LogInTx). This middleware only
+// reports when the two disagree. It replaces the AuditLog catch-all, and
+// ADR-090 (RC1 and RC2) records why.
 //
-// Two invariants, both load-bearing:
+// Two rules hold, and both matter:
 //
-//  1. It NEVER MUTATES THE RESPONSE. No status swap, no body rewrite, no error
-//     injection. The catch-all's response-swapping ancestor (the per-tenant
-//     fail-closed 503) is what caused the idempotency-poisoning bug in ADR-089:
-//     the business tx had ALREADY committed, so the 503 was a lie — and the
-//     Idempotency layer cached that lie for 24h, stranding the real response and
-//     inviting a fresh-key double-mutation. Telemetry does not get to overwrite a
-//     committed money mutation's answer. Ever.
+//  1. It never changes the response: no status swap, no body rewrite, no
+//     injected error. The business transaction has already committed, so a
+//     changed answer would be false. A client told that a committed change
+//     failed may retry with a fresh key and make the change twice. A layer
+//     mounted inside Idempotency would also get the false answer cached for
+//     24h, which strands the real response (ADR-089). Telemetry never
+//     overwrites the answer of a committed money mutation.
 //
-//  2. It NEVER BUFFERS THE BODY. chi's WrapResponseWriter captures the status
-//     with a pass-through Write (only Tee() buffers — we never call it) and
-//     preserves http.Flusher / http.Hijacker / io.ReaderFrom through typed
-//     wrappers. The catch-all buffered every response to sniff a label out of it,
-//     and its buffer implemented none of those interfaces — which is why the CSV
-//     exports, on a route given a 5-minute timeout precisely BECAUSE it streams,
-//     silently accumulated in memory instead of streaming.
+//  2. It never buffers the body. chi's WrapResponseWriter records the status
+//     with a pass-through Write. Only Tee() buffers, and this code never
+//     calls it. WrapResponseWriter's typed wrappers keep http.Flusher,
+//     http.Hijacker and io.ReaderFrom. A buffer without those interfaces
+//     would make a streaming route collect its response in memory instead.
+//     The CSV exports are such a route: they get a 5-minute timeout because
+//     they stream.
 //
-// isExempt resolves (method, canonical route pattern) against the registry; it is
-// injected because the registry lives in package api (which imports this package).
+// isExempt looks up (method, canonical route pattern) in the registry. It is
+// passed in because the registry lives in package api, which imports this
+// package.
 func AuditCoverage(isExempt func(method, routePattern string) bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Seed the request-scoped audit bookkeeping for the WHOLE tree. This
-			// middleware mounts at the ROOT, so — unlike the /v1-only catch-all it
-			// replaced — every emission path gets its client IP and its
-			// accounted-for cell, including the public/auth/tenant/webhook blocks.
-			// WithRequestState is idempotent by contract: a middleware below this
-			// one that re-seeds would otherwise SHADOW this cell, and every covered
+			// Seed the per-request audit state for the whole route tree. This
+			// middleware is mounted at the root, so every emission path gets
+			// its client IP and its accounted-for cell, including the public,
+			// auth, tenant and webhook blocks. WithRequestState keeps an
+			// existing cell, by contract. Otherwise a middleware below this
+			// one that seeds again would hide this cell, and every covered
 			// route would read as uncovered.
 			ctx := audit.WithRequestState(r.Context())
 			ctx = audit.WithClientIP(ctx, audit.ExtractClientIP(r))
@@ -84,24 +84,26 @@ func AuditCoverage(isExempt func(method, routePattern string) bool) func(http.Ha
 			if !isMutating(r.Method) {
 				return
 			}
-			// Only successful mutations are evidence-bearing. Any 2xx counts —
-			// several routes answer 204 (deletes) or 202 (async advance), and the
-			// billing run answers 206 on a partial cycle.
+			// Only a successful mutation must leave evidence. Any 2xx counts:
+			// several routes answer 204 (deletes) or 202 (async advance), and
+			// the billing run answers 206 on a partial cycle.
 			if status := ww.Status(); status < 200 || status >= 300 {
 				return
 			}
-			// The request produced an audit row (Log / LogInTx self-mark), or a
-			// handler declared it mutated nothing (MarkSkip).
+			// Covered: the request wrote an audit row (Log and LogInTx mark
+			// it themselves), or a handler declared that it changed nothing
+			// (MarkSkip).
 			if audit.WasHandled(r.Context()) {
 				return
 			}
 
-			// Read the matched pattern SYNCHRONOUSLY, in this frame: mounted
-			// subrouters share the root's *chi.Context, which the root returns to a
-			// pool once we return — reading it from a goroutine that outlives the
-			// request is a use-after-free. An unmatched path (404 inside a mounted
-			// subtree) yields e.g. "/v1/customers/*", which deliberately matches no
-			// registry key.
+			// Read the matched pattern here, synchronously. Mounted
+			// subrouters share the root's *chi.Context, and the root returns
+			// it to a pool once this handler returns. Reading it from a
+			// goroutine that outlives the request is a use-after-free. An
+			// unmatched path (a 404 inside a mounted subtree) gives a pattern
+			// such as "/v1/customers/*", which matches no registry key on
+			// purpose.
 			route := "unmatched"
 			if rctx := chi.RouteContext(r.Context()); rctx != nil {
 				if pat := rctx.RoutePattern(); pat != "" {
@@ -132,17 +134,16 @@ func isMutating(method string) bool {
 	return false
 }
 
-// AuditUncoveredMutationsByRoute snapshots the uncovered-mutation counter, keyed
-// by route pattern.
+// AuditUncoveredMutationsByRoute returns a snapshot of the uncovered-mutation
+// counter, keyed by route pattern.
 //
-// It exists so a sibling package's end-to-end suite can assert ZERO uncovered
-// mutations across every route it drives (internal/api's TestMain) — the runtime
-// half of ADR-090's coverage model, complementing the registry's build-time
-// two-way diff. Operators read this signal from Prometheus; this accessor is the
-// in-process equivalent, and it is deliberately narrow: it collects THIS counter
-// only. Gathering the default registry instead would execute every registered
-// collector, including the queue-depth GaugeFuncs, which open a database
-// transaction per scrape.
+// A sibling package's end-to-end suite (internal/api's TestMain) uses it to
+// assert zero uncovered mutations across every route it drives. That is the
+// run-time half of ADR-090's coverage model. The registry's two-way diff at
+// build time is the other half. Operators read the same signal from
+// Prometheus. This accessor collects only this counter, on purpose. Gathering
+// the default registry would run every registered collector, including the
+// queue-depth GaugeFuncs, which open a database transaction per scrape.
 func AuditUncoveredMutationsByRoute() map[string]float64 {
 	ch := make(chan prometheus.Metric)
 	go func() {

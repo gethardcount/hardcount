@@ -36,15 +36,14 @@ import (
 	"github.com/gethardcount/hardcount/internal/user"
 )
 
-// compositePaymentSetupStore implements payment.PaymentSetupStore on
-// top of the canonical sources — customers.stripe_customer_id +
-// payment_methods. Lets payment/stripe.go keep its existing
-// PaymentSetupStore-shaped wiring while the
-// deprecated customer_payment_setups table is read-only on its way
-// out. Compose the CustomerPaymentSetup wire shape from canonical
-// state on read; write only the parts the new architecture owns
-// (stripe_customer_id) and drop the rest (card details flow through
-// paymentmethods.Service via the webhook attach path).
+// compositePaymentSetupStore implements payment.PaymentSetupStore on the
+// canonical sources: customers.stripe_customer_id and payment_methods. It
+// lets payment/stripe.go keep its PaymentSetupStore wiring while the
+// deprecated customer_payment_setups table is read-only on its way out. A
+// read builds the CustomerPaymentSetup shape from the canonical state. A
+// write keeps only stripe_customer_id, the one part the new design owns, and
+// drops the rest. Card details reach paymentmethods.Service through the
+// webhook attach path.
 type compositePaymentSetupStore struct {
 	customers *customer.PostgresStore
 	pms       *paymentmethods.Service
@@ -66,8 +65,8 @@ func (a *compositePaymentSetupStore) GetPaymentSetup(ctx context.Context, tenant
 		UpdatedAt:        cust.UpdatedAt,
 		CreatedAt:        cust.CreatedAt,
 	}
-	// Find the default active PM. List returns active rows only
-	// (detached_at IS NULL) and orders is_default DESC.
+	// Find the default active payment method. List returns only active rows
+	// (detached_at IS NULL), with the is_default row first.
 	for _, pm := range pms {
 		if pm.IsDefault {
 			ps.SetupStatus = domain.PaymentSetupReady
@@ -81,8 +80,8 @@ func (a *compositePaymentSetupStore) GetPaymentSetup(ctx context.Context, tenant
 			return ps, nil
 		}
 	}
-	// Stripe Customer exists but no default PM yet → pending.
-	// No Stripe Customer at all → missing.
+	// A Stripe customer with no default payment method yet is pending. No
+	// Stripe customer at all is missing.
 	if cust.StripeCustomerID != "" {
 		ps.SetupStatus = domain.PaymentSetupPending
 	} else {
@@ -91,10 +90,11 @@ func (a *compositePaymentSetupStore) GetPaymentSetup(ctx context.Context, tenant
 	return ps, nil
 }
 
-// PaymentReadyCustomers is GetPaymentSetup's readiness for many customers in
-// two reads instead of two per customer (issue #1142): ready means an active
-// default payment method (GetPaymentSetup's PaymentSetupReady) and a Stripe
-// customer to charge — the pair the invoice attention classifier asks for.
+// PaymentReadyCustomers answers GetPaymentSetup's readiness question for many
+// customers in two reads, instead of two per customer (#1142). Ready means an
+// active default payment method (GetPaymentSetup's PaymentSetupReady) and a
+// Stripe customer to charge. The invoice attention classifier asks for this
+// pair.
 func (a *compositePaymentSetupStore) PaymentReadyCustomers(ctx context.Context, tenantID string, customerIDs []string) (map[string]bool, error) {
 	out := make(map[string]bool, len(customerIDs))
 	if len(customerIDs) == 0 {
@@ -120,33 +120,32 @@ func (a *compositePaymentSetupStore) UpsertPaymentSetup(ctx context.Context, ten
 	return a.UpsertPaymentSetupAudited(ctx, tenantID, ps, nil)
 }
 
-// UpsertPaymentSetupAudited threads the ADR-090 emission onto the mapping
-// write's tx (the only durable mutation on this path post-0097).
+// UpsertPaymentSetupAudited runs the audit emission (ADR-090) on the
+// transaction of the mapping write, the only lasting change on this path.
 func (a *compositePaymentSetupStore) UpsertPaymentSetupAudited(ctx context.Context, tenantID string, ps domain.CustomerPaymentSetup, emit func(tx *sql.Tx) error) (domain.CustomerPaymentSetup, error) {
-	// Only the stripe_customer_id mapping survives on this code
-	// path. Card details, default-PM flag, and setup_status now
-	// live on payment_methods (written via paymentmethods.Service
-	// from the webhook attach path). The other fields on ps are
-	// ignored — they're either redundant with payment_methods or
-	// state-machine vestiges from the dropped summary table.
+	// Only the stripe_customer_id mapping is written on this path. Card
+	// details, the default flag and setup_status live on payment_methods,
+	// which paymentmethods.Service writes from the webhook attach path. The
+	// other fields on ps are ignored. Each one either repeats
+	// payment_methods, or is left over from the state machine of the
+	// dropped summary table.
 	if ps.StripeCustomerID != "" && ps.CustomerID != "" {
 		if err := a.customers.SetStripeCustomerIDAudited(ctx, tenantID, ps.CustomerID, ps.StripeCustomerID, emit); err != nil {
 			return domain.CustomerPaymentSetup{}, err
 		}
 	}
-	// When no mapping write happened (missing ids), the emission is
-	// intentionally dropped — there is no durable mutation to attach
-	// evidence to.
-	// Return the post-write composed view so callers see their
-	// write reflected.
+	// When no mapping write happened (an id is missing), the emission is
+	// dropped on purpose: there is no lasting change to attach evidence to.
+	// Return the composed view after the write, so callers see their write.
 	return a.GetPaymentSetup(ctx, tenantID, ps.CustomerID)
 }
 
 // stripeCustomerResolverAdapter implements payment.CustomerByStripeIDResolver
-// over the customer store. Lets the setup_intent.succeeded webhook map a
-// SetupIntent's `customer` (a Stripe Customer ID) back to the Hardcount customer
-// without payment/ importing customer/ — same composition-root pattern as the
-// other adapters here.
+// over the customer store. It lets the setup_intent.succeeded webhook map a
+// SetupIntent's `customer` (a Stripe customer ID) back to the Hardcount
+// customer, without payment/ importing customer/. Like the other adapters
+// here, it lives in the composition root: the package that wires the domains
+// together.
 type stripeCustomerResolverAdapter struct {
 	customers *customer.PostgresStore
 }
@@ -159,18 +158,15 @@ func (a *stripeCustomerResolverAdapter) CustomerIDByStripeID(ctx context.Context
 	return c.ID, nil
 }
 
-// paymentReadinessAdapter implements billing.PaymentReadiness by
-// combining customer.PostgresStore (for the Stripe Customer ID
-// mapping) and paymentmethods.Service (for the canonical "has
-// default active PM?" query). Replaces the legacy
-// customer_payment_setups.GetPaymentSetup read path which lumped
-// both facts into a single denorm-cache table. Single source of
-// truth per concern:
-//   - customers.stripe_customer_id is the customer ↔ Stripe Customer
-//     mapping (1:1, lazy creation).
-//   - payment_methods is the canonical multi-PM store; the default
-//     row (is_default=true, detached_at IS NULL) is the chargeable
-//     PM. List filters out detached rows server-side.
+// paymentReadinessAdapter implements billing.PaymentReadiness. It combines
+// customer.PostgresStore, for the Stripe customer ID, with
+// paymentmethods.Service, for the canonical "is there a default active
+// payment method?" query. Each fact has one source:
+//   - customers.stripe_customer_id maps the customer to its Stripe customer
+//     (one to one, created when first needed).
+//   - payment_methods is the canonical store of a customer's payment
+//     methods. The default row (is_default=true, detached_at IS NULL) is
+//     the one to charge. List filters out detached rows in its query.
 type paymentReadinessAdapter struct {
 	customers *customer.PostgresStore
 	pms       *paymentmethods.Service
@@ -182,7 +178,7 @@ func (a *paymentReadinessAdapter) ResolveForCharge(ctx context.Context, tenantID
 		return "", "", err
 	}
 	if cust.StripeCustomerID == "" {
-		// No Stripe Customer object yet — can't auto-charge.
+		// No Stripe customer yet, so nothing to charge automatically.
 		return "", "", nil
 	}
 	pms, err := a.pms.List(ctx, tenantID, customerID)
@@ -191,22 +187,23 @@ func (a *paymentReadinessAdapter) ResolveForCharge(ctx context.Context, tenantID
 	}
 	for _, pm := range pms {
 		if pm.IsDefault {
-			// Return the default card's Stripe PaymentMethod id so the
-			// engine charges this exact card (not whatever Stripe's own
-			// default happens to be). List filters detached rows, so this
-			// is always a chargeable, non-detached PM.
+			// Return the default card's Stripe PaymentMethod id, so the
+			// engine charges this card and not Stripe's own default.
+			// List filters out detached rows, so this one is never
+			// detached and can always be charged.
 			return cust.StripeCustomerID, pm.StripePaymentMethodID, nil
 		}
 	}
-	// Stripe Customer exists but no default PM attached (e.g. customer
-	// created via Stripe but card removed). Empty PM id → engine treats
-	// this as "no PM ready" → queues for retry-on-attach.
+	// A Stripe customer with no default payment method, for example one
+	// created in Stripe whose card was removed. The engine reads the empty id
+	// as "no payment method ready", and queues a retry for when one is
+	// attached.
 	return cust.StripeCustomerID, "", nil
 }
 
-// invoiceWriterAdapter bridges invoice.PostgresStore → billing.InvoiceWriter.
+// invoiceWriterAdapter adapts invoice.PostgresStore to billing.InvoiceWriter.
 // The embedded store supplies every method whose name already matches the
-// engine's; the four below exist only because the engine names them
+// engine's. The four below exist only because the engine names them
 // differently.
 type invoiceWriterAdapter struct {
 	*invoice.PostgresStore
@@ -228,15 +225,16 @@ func (a *invoiceWriterAdapter) CreateInvoiceWithLineItemsTx(ctx context.Context,
 	return a.CreateWithLineItemsTx(ctx, tx, tenantID, inv, items)
 }
 
-// creditGrantAdapter bridges credit.Service → creditnote.CreditGranter.
+// creditGrantAdapter implements creditnote.CreditGranter over credit.Service.
 type creditGrantAdapter struct {
 	svc *credit.Service
 }
 
-// GrantForCreditNoteTx bridges to credit.Service.GrantForCreditNoteTx so the
-// grant rides CN Issue()'s coordinator tx (ADR-061): the credit ledger entry
-// commits atomically with the draft→issued CAS. The credit goes back to the
-// blocks the invoice drew it from (ADR-132).
+// GrantForCreditNoteTx calls credit.Service.GrantForCreditNoteTx on the
+// coordinator transaction of the credit note's Issue() (ADR-061). On that
+// transaction, the credit ledger entry commits atomically with the
+// draft-to-issued compare-and-set (CAS). The credit goes back to the blocks
+// the invoice drew it from (ADR-132).
 func (a *creditGrantAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, input creditnote.CreditGrantInput) error {
 	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, creditNoteID, credit.CreditNoteReturnInput{
 		CustomerID:        input.CustomerID,
@@ -252,8 +250,10 @@ func (a *creditGrantAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.T
 	return err
 }
 
-// LockCommitGrantForReliefTx / RetireCommitSliceForReliefTx bridge the
-// ADR-080 relief pair to credit.Service on the CN coordinator tx.
+// LockCommitGrantForReliefTx and RetireCommitSliceForReliefTx (below) pass
+// the relief pair to credit.Service, on the credit note's coordinator
+// transaction. A relief credit note refunds part or all of a paid prepaid
+// commit by retiring credits the customer has not used (ADR-080).
 func (a *creditGrantAdapter) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (int64, int64, int64, bool, error) {
 	return a.svc.LockCommitGrantForReliefTx(ctx, tx, tenantID, invoiceID)
 }
@@ -266,7 +266,8 @@ func (a *creditGrantAdapter) RetireCommitSliceForReliefTx(ctx context.Context, t
 	return res.RemainingAfterCents, nil
 }
 
-// creditNoteListerAdapter bridges creditnote.Service → invoice.CreditNoteLister.
+// creditNoteListerAdapter implements invoice.CreditNoteLister over
+// creditnote.Service.
 type creditNoteListerAdapter struct {
 	svc *creditnote.Service
 }
@@ -275,8 +276,8 @@ func (a *creditNoteListerAdapter) List(ctx context.Context, tenantID, invoiceID 
 	return a.svc.List(ctx, creditnote.ListFilter{
 		TenantID:  tenantID,
 		InvoiceID: invoiceID,
-		// Unset Limit fell back to the store default (50) with no
-		// disclosure. Request the store's max; the timeline handler
+		// Request the store's maximum. An unset Limit falls back to the
+		// store default (50) without saying so. The timeline handler
 		// reports `truncated` when the response comes back at the cap.
 		Limit: invoice.CreditNoteLaneCap,
 	})
@@ -288,9 +289,9 @@ func (a *creditNoteListerAdapter) ListIssued(ctx context.Context, tenantID, invo
 	return a.svc.ListIssuedForInvoice(ctx, tenantID, invoiceID)
 }
 
-// refundIssuerAdapter bridges creditnote.Service → invoice.RefundIssuer.
-// Translates the handler-facing invoice.RefundInput to the creditnote form;
-// both types are near-identical by design so the handler doesn't have to
+// refundIssuerAdapter adapts creditnote.Service to invoice.RefundIssuer. It
+// translates the handler's invoice.RefundInput to the creditnote form. The
+// two types are nearly the same on purpose, so the handler does not have to
 // import creditnote just to issue a refund.
 type refundIssuerAdapter struct {
 	svc *creditnote.Service
@@ -325,14 +326,16 @@ type stripeReadiness interface {
 	HasFor(ctx context.Context, tenantID string, livemode bool) (bool, error)
 }
 
-// paymentRetrierAdapter bridges Stripe + invoice/customer stores → dunning.PaymentRetrier.
+// paymentRetrierAdapter adapts Stripe and the invoice and customer stores to
+// dunning.PaymentRetrier.
 type paymentRetrierAdapter struct {
 	charger       *payment.Stripe
 	invoiceStore  retryInvoiceStore
 	paymentSetups payment.PaymentSetupStore
 	credits       *credit.Service
-	// stripeReady: without Stripe for the invoice's mode a retry charges
-	// nothing and is a reminder only (ADR-060 amendment 2026-10-30).
+	// stripeReady says whether Stripe is connected for the invoice's mode.
+	// Without Stripe, a retry charges nothing and is only a reminder
+	// (ADR-060, amendment of 2026-10-30).
 	stripeReady stripeReadiness
 }
 
@@ -342,21 +345,26 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 	return classifyDunningRetryResult(ctx, invoiceID, a.retryPayment(ctx, tenantID, invoiceID, customerID))
 }
 
-// classifyDunningRetryResult is the one rule for which retry results use up a
-// dunning attempt: a decline Stripe returned (*payment.PaymentError with
-// Unknown=false), no card to charge (counted so a card-less invoice reaches
-// its dunning terminal, ADR-060), a card the bank refused for good or whose
-// payment it wants the customer to confirm, or an
-// amount below Stripe's minimum charge (domain.ErrBelowMinimumCharge, which
-// ends the run instead of counting toward its final action).
+// classifyDunningRetryResult is the one rule for which retry results use up
+// a dunning attempt. These results count:
+//   - a decline Stripe returned (*payment.PaymentError with Unknown=false);
+//   - no card to charge, counted so a card-less invoice reaches the final
+//     action of its dunning run (ADR-060);
+//   - a card the bank refused for good, or whose payment it wants the
+//     customer to confirm;
+//   - an amount below Stripe's minimum charge (domain.ErrBelowMinimumCharge),
+//     which ends the run instead of counting toward its final action.
+//
 // Everything else becomes dunning.ErrTransientSkip, which dunning does not
 // count: a database error, Stripe unreachable or rate limiting, an outcome
-// Stripe did not confirm, a settle that failed after Stripe took the money.
-// Counting those spent an attempt on a dropped connection, put the error
-// text in the customer's warning email, and on the last attempt ran the
-// final action with no final charge. The rule sits here, at the boundary,
-// because the class was fixed one call site at a time three times (#940,
-// #978, #1302).
+// Stripe did not confirm, or a settle that failed after Stripe took the
+// money. Counting those would spend an attempt on a dropped connection, put
+// the error text in the customer's warning email, and on the last attempt
+// run the final action with no final charge.
+//
+// The rule sits here, at the boundary, so no call site decides it alone.
+// The same class of bug was fixed one call site at a time, three times
+// (#940, #978, #1302).
 func classifyDunningRetryResult(ctx context.Context, invoiceID string, err error) error {
 	// ErrPaymentInFlight passes: Stripe was asked and a PaymentIntent exists,
 	// so the attempt counts and the run waits for its outcome (#1289).
@@ -381,18 +389,20 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 		return fmt.Errorf("get invoice: %w", err)
 	}
 	if inv.AmountDueCents <= 0 {
-		// Nothing to charge. The run closes as recovered only if the invoice
-		// is paid, so settle it first: a credit balance applied by an earlier
-		// pass whose mark-paid failed leaves it open at $0. Before, this
-		// returned nil and the run closed with the invoice still unpaid.
+		// Nothing to charge. The run closes as recovered only if the
+		// invoice is paid, so settle it first. A credit balance applied by
+		// an earlier pass whose mark-paid failed leaves the invoice open at
+		// $0. Returning nil without settling would close the run with the
+		// invoice still unpaid.
 		inv, _, err = a.invoiceStore.SettleZeroDue(ctx, tenantID, invoiceID, clock.Now(ctx))
 		if err != nil {
 			return fmt.Errorf("settle invoice with nothing due: %w", err)
 		}
 		if inv.Status != domain.InvoicePaid {
-			// A charge hold is set (a charge running, or one whose result was
-			// lost), or the invoice is no longer open. The next pass looks
-			// again; the paid pre-check closes a voided or written-off one.
+			// A charge hold is set (a charge is running, or one's result
+			// was lost), or the invoice is no longer open. The next pass
+			// looks again. The paid pre-check closes a voided or
+			// written-off invoice.
 			slog.InfoContext(ctx, "dunning retry: invoice has nothing due but was not marked paid; skipping this attempt",
 				"invoice_id", invoiceID, "status", inv.Status, "payment_status", inv.PaymentStatus)
 			return dunning.ErrTransientSkip
@@ -400,18 +410,21 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 		return nil
 	}
 
-	// Per-invoice charge lease, shared with the auto-charge sweep (HA
-	// hazard #11): the two paths' Stripe idempotency keys differ by
-	// construction (purpose suffix), so this mutual exclusion is the
-	// only double-charge guard between them. Claim-lose = the sweep (or
-	// a rival dunning leader) owns the invoice, or payment_status moved
-	// to a state that must not be re-charged ('unknown' waits for the
-	// reconciler or the stale-hold sweep) — map to ErrTransientSkip so the run
-	// does NOT burn an attempt on a charge that never reached Stripe.
+	// Take the per-invoice charge lease (the hold), which the auto-charge
+	// sweep shares. The two paths' Stripe idempotency keys always differ,
+	// because each has its own purpose suffix. So this lease is the only
+	// guard against a double charge between them (hazard 11 in
+	// docs/dev/records/ha-readiness-2026-07-06.md).
 	//
-	// A lost charge's hold refuses the claim too (ADR-127): the due-run scan
-	// already skips such a run, so this is the race where the hold appeared
-	// after the listing.
+	// A lost claim means the sweep or a rival dunning leader owns the
+	// invoice, or payment_status moved to a state that must not be charged
+	// again. ('unknown' waits for the reconciler or the stale-hold sweep.)
+	// Return ErrTransientSkip, so the run does not use up an attempt on a
+	// charge that never reached Stripe.
+	//
+	// A lost charge's hold refuses the claim too (ADR-127). The due-run scan
+	// already skips such a run, so this case is the race where the hold
+	// appeared after the listing.
 	hold, err := a.invoiceStore.ClaimChargeForDunningRetry(ctx, tenantID, invoiceID)
 	if err != nil {
 		return fmt.Errorf("claim dunning retry charge: %w", err)
@@ -428,18 +441,19 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 		}
 	}
 
-	// Re-apply customer credits before retrying the card — same contract as
-	// the auto-charge sweep (processAutoCharge): credits granted since the
-	// original failure (or whose application failed at cycle close) must
-	// reduce the charge, not sit unconsumed while the card is hit for the
-	// full amount. ApplyToInvoiceAt is idempotent (drains min(due, balance)).
-	// An apply failure never reaches Stripe, so RetryPayment logs it and skips
-	// it uncounted.
+	// Apply customer credits again before retrying the card, as the
+	// auto-charge sweep does (processAutoCharge). Credits granted since the
+	// first failure, or whose apply failed at cycle close, must reduce the
+	// charge. They must not sit unused while the card is charged the full
+	// amount. ApplyToInvoiceAt is idempotent: it drains min(due, balance). An
+	// apply failure never reaches Stripe, so RetryPayment logs it and skips
+	// the attempt uncounted.
 	if a.credits != nil {
 		at := clock.Now(ctx) // sim-aware: catchup binds effective-now on ctx
 		if _, err := a.credits.ApplyToInvoiceAt(ctx, tenantID, customerID, invoiceID, inv.AmountDueCents, at, inv.InvoiceNumber); err != nil {
-			// Provably pre-Stripe: release so the next due tick retries
-			// without waiting for the stale-hold sweep.
+			// This failed before any Stripe call. Release the hold, so the
+			// next due tick retries without waiting for the stale-hold
+			// sweep.
 			release()
 			return fmt.Errorf("apply credits: %w", err)
 		}
@@ -449,10 +463,10 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 			return fmt.Errorf("refresh invoice after credit apply: %w", err)
 		}
 		if inv.AmountDueCents <= 0 {
-			// Fully covered by credits — settle without a card charge. nil
-			// return = recovered, so the dunning run resolves; MarkPaid fires
-			// the transactional invoice.paid event. No charge is sent, so the
-			// hold is released either way.
+			// Credits cover the invoice, so settle it without a card
+			// charge. A nil return means recovered, so the dunning run
+			// resolves. MarkPaid fires the transactional invoice.paid
+			// event. No charge is sent, so the hold is released either way.
 			_, err := a.invoiceStore.MarkPaid(ctx, tenantID, invoiceID, "", at)
 			release()
 			if err != nil {
@@ -462,14 +476,14 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 		}
 	}
 
-	// Stripe not connected for the invoice's mode: no charge is attempted,
-	// whatever card is on file, and none can succeed until Stripe is
-	// connected. The attempt counts (ErrNoOnlinePaymentOnRetry is a kind of
-	// ErrNoPaymentMethodOnRetry), so the run still reaches its final action,
-	// and its reminder asks the customer to pay the invoice (ADR-060
-	// amendment 2026-10-30). A failed read is not "not connected": skip this
-	// tick, uncounted, as for the payment-setup read below. Provably
-	// pre-Stripe either way, so the hold is released.
+	// Without Stripe for the invoice's mode, no charge is attempted, whatever
+	// card is on file, and none can succeed until Stripe is connected. The
+	// attempt counts (ErrNoOnlinePaymentOnRetry is a kind of
+	// ErrNoPaymentMethodOnRetry), so the run still reaches its final action.
+	// Its reminder asks the customer to pay the invoice (ADR-060, amendment
+	// of 2026-10-30). A failed read does not mean "not connected": skip this
+	// tick, uncounted, as for the payment-setup read below. Either way this
+	// is before any Stripe call, so the hold is released.
 	connected, err := a.stripeConnected(ctx, tenantID)
 	if err != nil {
 		release()
@@ -484,35 +498,39 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 
 	ps, err := a.paymentSetups.GetPaymentSetup(ctx, tenantID, customerID)
 	if err != nil && !errors.Is(err, errs.ErrNotFound) {
-		// A read error is not "no card": reporting ErrNoPaymentMethodOnRetry
-		// spent a counted dunning attempt (and could drive the invoice to its
-		// terminal action) on a database blip. Skip this tick, uncounted.
+		// A read error does not mean "no card". Reporting
+		// ErrNoPaymentMethodOnRetry would spend a counted dunning attempt on
+		// a database blip, and could drive the invoice to its final action.
+		// Skip this tick, uncounted.
 		release()
 		slog.WarnContext(ctx, "dunning retry: payment setup read failed; skipping this attempt",
 			"invoice_id", invoiceID, "customer_id", customerID, "error", err)
 		return dunning.ErrTransientSkip
 	}
 	if err != nil || ps.StripeCustomerID == "" || ps.StripePaymentMethodID == "" {
-		// Provably pre-Stripe: release the lease before reporting.
-		// Typed sentinel so the dunning warning email renders clean
-		// customer copy instead of this internal string (P2-3).
+		// This is before any Stripe call, so release the lease before
+		// reporting. The typed sentinel lets the dunning warning email show
+		// plain text for the customer instead of an internal error string.
 		release()
 		return domain.ErrNoPaymentMethodOnRetry
 	}
 
-	// Two answers from the bank stop a retry from charging the card for this
-	// invoice. A card refused for good (lost, stolen and the rest of
-	// domain.IsHardDecline, #966): the retry cannot succeed, and the card
-	// networks charge merchants for trying. And authentication_required: the
-	// bank wants the customer to confirm the payment, which a charge made
-	// without them cannot do; the customer pays on the hosted invoice page,
-	// where Stripe runs the confirmation. Stripe Billing lists both among the
-	// codes it does not retry — its schedule and attempt count carry on, but
-	// a retry charges only once it sees a new payment method. So this attempt
+	// Two answers from the bank stop a retry from charging this card for
+	// this invoice. One is a card refused for good (lost, stolen and the
+	// rest of domain.IsHardDecline, #966): the retry cannot succeed, and the
+	// card networks charge merchants for trying. The other is
+	// authentication_required: the bank wants the customer to confirm the
+	// payment, which a charge made without them cannot do. The customer pays
+	// on the hosted invoice page, where Stripe runs the confirmation.
+	//
+	// Stripe Billing lists both among the codes it does not retry. Its
+	// schedule and attempt count carry on, but a retry charges only once it
+	// sees a new payment method. Hardcount does the same: this attempt
 	// counts and charges nothing until a different card is the customer's
-	// default; then the next scheduled retry charges that card. Provably
-	// pre-Stripe, so the lease is released. A read error is not "no
-	// refusal": skip this tick uncounted, as for the payment-setup read.
+	// default, and the next scheduled retry charges that card. This is
+	// before any Stripe call, so the lease is released. A read error does
+	// not mean "no refusal": skip this tick uncounted, as for the
+	// payment-setup read.
 	blockCode, err := a.invoiceStore.RetryBlockingDecline(ctx, tenantID, invoiceID, ps.StripePaymentMethodID)
 	if err != nil {
 		release()
@@ -527,21 +545,22 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 		return block
 	}
 
-	// 15s bound on the Stripe leg. Scheduler ticks run tens of retries
-	// back-to-back; without this, one tenant with a network-partitioned
-	// Stripe call could hold the goroutine for the full request deadline
-	// (minutes), starving every other tenant's retry this tick.
+	// Give the Stripe call at most 15s. A scheduler tick runs tens of
+	// retries one after another. Without this limit, one tenant's Stripe
+	// call, stuck behind a network partition, could hold the goroutine for
+	// the full request deadline (minutes). That would starve every other
+	// tenant's retry in this tick.
 	chargeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	// Dedicated retry-charge method tags the PI as hardcount_purpose=
-	// dunning_retry so the decline's report — from this call's own
-	// response or from the payment_intent.payment_failed webhook —
-	// skips the generic payment-failed email; dunning fires its own
-	// warning / escalation email inline. Without the tag the customer
-	// receives two emails per failed retry: "Payment failed for invoice
-	// X" plus dunning's "Action required — payment retry for invoice X
-	// (Attempt N of M)".
+	// The dedicated retry-charge method tags the PaymentIntent with
+	// hardcount_purpose=dunning_retry. A report of its decline, from this
+	// call's own response or from the payment_intent.payment_failed
+	// webhook, then skips the generic payment-failed email. Dunning sends
+	// its own warning or escalation email inline. Without the tag, the
+	// customer gets two emails per failed retry: "Payment failed for
+	// invoice X" and dunning's "Action required — payment retry for invoice
+	// X (Attempt N of M)".
 	charged, err := a.charger.ChargeInvoiceForDunningRetry(chargeCtx, tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
 	if re := definiteRetryFailure(err); re != nil {
 		return re
@@ -552,21 +571,22 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 	return a.chargedOutcome(ctx, tenantID, charged, hold, release)
 }
 
-// definiteRetryFailure wraps a charge Stripe definitely refused for dunning
-// (a typed wrapper, so dunning does not import payment); nil for any other
-// result, which RetryPayment classifies.
+// definiteRetryFailure wraps a charge that Stripe definitely refused, for
+// dunning. The wrapper is typed, so dunning does not import payment. It
+// returns nil for any other result, which RetryPayment classifies.
 //
 //   - PaymentIntentID: a decline carries its PaymentIntent, so the failed
 //     retry's timeline row matches its payment_intent.payment_failed twin.
-//   - Ask: a hard decline asks the customer for a different card (#966), and
-//     authentication_required asks for the confirmation; the next retry's
-//     RetryBlockingDecline read is what stops the card being charged again.
-//   - NoReason: the warning email's reason line is Stripe's card message,
-//     the one message Stripe says can be shown to the customer
-//     (payment.PaymentError.CardMessage), as in the payment-failed email. Any
+//   - Ask: a hard decline asks the customer for a different card (#966),
+//     and authentication_required asks for the confirmation. The next
+//     retry's RetryBlockingDecline read is what stops the card being charged
+//     again.
+//   - NoReason: the warning email's reason line is Stripe's card message
+//     (payment.PaymentError.CardMessage), as in the payment-failed email.
+//     It is the one message Stripe says can be shown to the customer. Any
 //     other refusal (an invalid_request_error, which has no PaymentIntent)
-//     is worded for the developer, and its sentence used to reach the
-//     customer as the email's "Reason:".
+//     is worded for the developer, so its text must never become the
+//     email's "Reason:".
 func definiteRetryFailure(err error) *dunning.RetryError {
 	var pe *payment.PaymentError
 	if !errors.As(err, &pe) || pe.Unknown {
@@ -580,26 +600,27 @@ func definiteRetryFailure(err error) *dunning.RetryError {
 	}
 }
 
-// chargedOutcome is what a charge that returned no error did, read from the
-// invoice it left behind (#1289). No error is not "paid": the charge also
-// returns the invoice when its PaymentIntent is still processing, and when its
-// stamp was refused because another outcome was recorded during the call
-// (P13). Dunning closes the run as recovered only on a paid invoice.
+// chargedOutcome reads what a charge that returned no error did, from the
+// invoice it left behind (#1289). No error does not mean "paid". The charge
+// also returns the invoice when its PaymentIntent is still processing, and
+// when its stamp was refused because another outcome was recorded during
+// the call. Dunning closes the run as recovered only on a paid invoice.
 //
-//   - paid: nil, the retry recovered the invoice;
-//   - payment in flight: dunning.ErrPaymentInFlight, naming the
-//     PaymentIntent the run now waits on and carrying the hold the charge
-//     kept, which dunning releases if the payment settles before it records
-//     the wait;
-//   - failed: the payment_intent.payment_failed webhook recorded the failure
-//     first. A definite decline, built from that attempt's own row (its
-//     decline code gives the Ask), so dunning counts it and warns as for any
-//     decline. The invoice's last_payment_error is never the reason. The
-//     round-trip is over, so the hold is released (release, by its token),
-//     as for a decline the charge itself answered; kept, the next retry and
-//     the final action waited for the stale-hold sweep;
-//   - anything else (pending, void, written off): a loud error, which
-//     RetryPayment turns into an uncounted skip; the next tick reads the
+//   - Paid: nil. The retry recovered the invoice.
+//   - Payment in flight: dunning.ErrPaymentInFlight. It names the
+//     PaymentIntent the run now waits on, and carries the hold the charge
+//     kept. Dunning releases that hold if the payment settles before it
+//     records the wait.
+//   - Failed: the payment_intent.payment_failed webhook recorded the failure
+//     first. The result is a definite decline, built from that attempt's own
+//     row (its decline code gives the Ask), so dunning counts it and warns
+//     as for any decline. The invoice's last_payment_error is never the
+//     reason. The round trip is over, so the hold is released (release, by
+//     its token), as for a decline the charge itself answered. If the hold
+//     were kept, the next retry and the final action would wait for the
+//     stale-hold sweep.
+//   - Anything else (pending, void, written off): a loud error, which
+//     RetryPayment turns into an uncounted skip. The next tick reads the
 //     invoice again.
 func (a *paymentRetrierAdapter) chargedOutcome(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, release func()) error {
 	switch {
@@ -621,12 +642,12 @@ func (a *paymentRetrierAdapter) chargedOutcome(ctx context.Context, tenantID str
 	return fmt.Errorf("dunning retry: invoice %s is %s/%s after the charge", inv.ID, inv.Status, inv.PaymentStatus)
 }
 
-// retryFailure is the failure of PaymentIntent pi as a counted decline: a
-// *dunning.RetryError wrapping a definite *payment.PaymentError, with the
+// retryFailure returns the failure of PaymentIntent pi as a counted decline:
+// a *dunning.RetryError that wraps a definite *payment.PaymentError, with the
 // attempt row's decline code as its Ask. The attempt row holds Stripe's
-// decline code but not its card message, so the warning carries no reason
-// line; it never falls back to the invoice's last_payment_error. A failed
-// read leaves the Ask unset (logged): the attempt still counts.
+// decline code but not its card message, so the warning has no reason line.
+// It never falls back to the invoice's last_payment_error. A failed read is
+// logged and leaves the Ask unset, and the attempt still counts.
 func (a *paymentRetrierAdapter) retryFailure(ctx context.Context, tenantID, invoiceID, pi string) error {
 	var code string
 	attempts, err := a.invoiceStore.ListChargeAttemptsByInvoice(ctx, tenantID, invoiceID)
@@ -668,27 +689,28 @@ func (a *paymentRetrierAdapter) stripeConnected(ctx context.Context, tenantID st
 	return a.stripeReady.HasFor(ctx, tenantID, live)
 }
 
-// dunningRunStarter is the minimal slice of dunning.Service the adapter
-// needs — an interface so the disabled-skip branch is unit-testable.
+// dunningRunStarter is the part of dunning.Service the adapter needs. It is
+// an interface so a unit test can reach the disabled-skip branch.
 type dunningRunStarter interface {
 	StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
 }
 
-// dunningStarterAdapter bridges billing.DunningStarter → dunning.Service so
-// the engine's no-payment enrollment sweep can route a card-less,
-// auto_charge_pending invoice into a dunning campaign (closing the limbo
-// where it would otherwise be retried forever with nothing to charge and
-// never reach a terminal).
+// dunningStarterAdapter implements billing.DunningStarter over
+// dunning.Service. The engine's no-payment enrollment sweep uses it to route
+// a card-less, auto_charge_pending invoice into a dunning campaign.
+// Otherwise that invoice would be retried forever with nothing to charge,
+// and never reach a final action.
 //
-// StartDunning returns InvalidState for two deliberate-skip cases, both
-// swallowed here as a no-op: (1) dunning DISABLED, and (2) dunning NOT
-// CONFIGURED — the tenant has no effective/default policy (StartDunning maps
-// that ErrNotFound to InvalidState so an unconfigured optional feature never
-// errors the money-path sweep). A tenant in either state gets no automated
-// retries on the no-card case, exactly as it gets none on the declined-card
-// case — so the per-tick sweep doesn't emit a spurious error for every stalled
-// invoice. A genuine error (DB down, etc.) is NOT InvalidState and still
-// propagates as a sweep error (fail loud).
+// StartDunning returns InvalidState for two skips that are on purpose, and
+// this adapter turns both into a no-op. One is dunning disabled. The other
+// is dunning not configured: the tenant has no effective or default policy.
+// StartDunning maps that ErrNotFound to InvalidState, so an optional feature
+// left unconfigured never fails the money-path sweep. A tenant in either
+// state gets no automatic retries for a missing card, as it gets none for a
+// declined card. Turning both cases into a no-op means the sweep, which runs
+// every tick, does not report a false error for every stalled invoice. A
+// real error (the database is down, for
+// example) is not InvalidState, and still returns as a sweep error.
 type dunningStarterAdapter struct {
 	dunning dunningRunStarter
 }
@@ -703,9 +725,9 @@ func (a *dunningStarterAdapter) StartDunning(ctx context.Context, tenantID, invo
 	return nil
 }
 
-// subscriptionPauserAdapter bridges subscription.Service →
-// dunning.SubscriptionPauser: a keep_as_draft pause marked as dunning's,
-// which paying the invoice it was set for lifts (ADR-036 amendments).
+// subscriptionPauserAdapter implements dunning.SubscriptionPauser over
+// subscription.Service. It sets a keep_as_draft pause marked as dunning's.
+// Paying the invoice the pause was set for lifts it (ADR-036 amendments).
 type subscriptionPauserAdapter struct {
 	svc *subscription.Service
 }
@@ -715,10 +737,11 @@ func (a *subscriptionPauserAdapter) PauseCollection(ctx context.Context, tenantI
 	return applied, dunningGraceWait(err)
 }
 
-// dunningGraceWait maps subscription's "the period is inside its invoice
-// grace" answer to dunning's SubscriptionActionNotYet, so the run waits for
-// the grace instead of counting a failed action (ADR-120 amendment
-// 2026-10-22). Every other error passes through.
+// dunningGraceWait maps subscription's answer "the period is inside its
+// invoice grace" to dunning's SubscriptionActionNotYet. The invoice grace is
+// the wait after a period ends before its invoice is built. With this
+// mapping, the run waits for the grace instead of counting a failed action
+// (ADR-120, amendment of 2026-10-22). Every other error passes through.
 func dunningGraceWait(err error) error {
 	var inGrace *subscription.InsideInvoiceGraceError
 	if errors.As(err, &inGrace) {
@@ -727,18 +750,18 @@ func dunningGraceWait(err error) error {
 	return err
 }
 
-// subscriptionCancelerAdapter bridges subscription.Service →
-// dunning.SubscriptionCanceler. Stripe-default dunning terminal
-// action (ADR-036 amendment).
+// subscriptionCancelerAdapter implements dunning.SubscriptionCanceler over
+// subscription.Service. Cancelling is Stripe's default final action for
+// dunning (ADR-036 amendment).
 type subscriptionCancelerAdapter struct {
 	svc *subscription.Service
 }
 
 func (a *subscriptionCancelerAdapter) Cancel(ctx context.Context, tenantID, id string) error {
-	// Stamp the origin so the cancel's audit row and its outbound
-	// subscription.canceled webhook — both written in the cancel tx — name
-	// dunning as the driver, rather than each guessing from the absence of
-	// a request actor (ADR-090 PR4 review).
+	// Stamp the origin, so the cancel's audit row and its outbound
+	// subscription.canceled webhook name dunning as the driver. Both are
+	// written in the cancel transaction. Without the stamp, each would have
+	// to guess from the missing request actor (ADR-090).
 	ctx = subscription.WithCancelOrigin(ctx, "dunning")
 	// CancelForDunning, not the operator's Cancel: it waits for the invoice
 	// grace rather than closing the ended period now.
@@ -746,10 +769,11 @@ func (a *subscriptionCancelerAdapter) Cancel(ctx context.Context, tenantID, id s
 	return dunningGraceWait(err)
 }
 
-// subscriptionStateAdapter bridges subscription.Service →
-// dunning.SubscriptionStateReader — the skip-if-done read that lets a
-// re-attempted exhaustion converge instead of failing forever on the half
-// that already landed (ADR-112).
+// subscriptionStateAdapter implements dunning.SubscriptionStateReader over
+// subscription.Service. It is the skip-if-done read for exhaustion, the
+// final actions a run takes when its retries run out. With it, a repeated
+// exhaustion skips the half that already happened, instead of failing on
+// that half forever (ADR-112).
 type subscriptionStateAdapter struct {
 	svc *subscription.Service
 }
@@ -759,9 +783,9 @@ func (a *subscriptionStateAdapter) GetTerminalState(ctx context.Context, tenantI
 	if err != nil {
 		return dunning.SubscriptionTerminalState{}, err
 	}
-	// The state in which BOTH movers refuse: cancelSpec() allows only
-	// draft/trialing/active, and SetPauseCollection rejects canceled
-	// outright.
+	// Terminated marks the state in which both actions, cancel and pause,
+	// refuse. cancelSpec() allows only draft, trialing and active, and
+	// SetPauseCollection rejects canceled outright.
 	st := dunning.SubscriptionTerminalState{
 		Terminated: sub.Status == domain.SubscriptionCanceled,
 	}
@@ -771,9 +795,9 @@ func (a *subscriptionStateAdapter) GetTerminalState(ctx context.Context, tenantI
 	return st, nil
 }
 
-// invoiceUncollectibleAdapter bridges invoice.Service →
-// dunning.InvoiceUncollectibleMarker. Stripe-standard dunning
-// terminal action (ADR-036 amendment).
+// invoiceUncollectibleAdapter implements dunning.InvoiceUncollectibleMarker
+// over invoice.Service. Marking the invoice uncollectible is Stripe's
+// standard final action for dunning (ADR-036 amendment).
 type invoiceUncollectibleAdapter struct {
 	svc *invoice.Service
 }
@@ -783,24 +807,25 @@ func (a *invoiceUncollectibleAdapter) MarkUncollectible(ctx context.Context, ten
 	return err
 }
 
-// invoiceAuditStampsAdapter bridges audit.Logger.Query → invoice.AuditStampFetcher
-// (ADR-104: the timeline's read-time wall-stamp enrichment for lifecycle rows;
-// ADR-128: who did it, for lifecycle, credit-note and resolve rows). Narrow on
-// purpose: one resource's entries, capped — an invoice's, a credit note's or a
-// payment-recovery run's audit trail is dozens of rows at most, and the join
-// only consumes the transition actions.
+// invoiceAuditStampsAdapter implements invoice.AuditStampFetcher over
+// audit.Logger.Query. The timeline uses it for the wall-clock stamp it adds
+// to lifecycle rows when they are read (ADR-104), and for who did it on
+// lifecycle, credit-note and resolve rows (ADR-128). It is narrow on
+// purpose: one resource's entries, capped. An invoice's, a credit note's or
+// a payment-recovery run's audit trail is dozens of rows at most, and the
+// join reads only the transition actions.
 type invoiceAuditStampsAdapter struct {
 	logger *audit.Logger
 }
 
 func (a *invoiceAuditStampsAdapter) ListByResource(ctx context.Context, tenantID, resourceType, resourceID string) ([]domain.AuditEntry, error) {
-	// 100 is Query's hard cap (it CLAMPS above that — asking for more
-	// would be a silent fallback). Newest-first: a resource with >100
-	// audit rows would lose its OLDEST entries — exactly the transition
-	// stamps the join wants — so such a row renders bare rather than
-	// wrong. Accepted: reaching 100 audit rows on one invoice means ~90
-	// operator sends/exports; revisit with an Action-filtered query if a
-	// real invoice ever gets there.
+	// 100 is Query's hard cap: it clamps a larger limit, so asking for more
+	// would be a silent fallback. Rows come newest first. A resource with
+	// more than 100 audit rows would lose its oldest entries, which are the
+	// transition stamps the join wants. Such a row then shows bare rather
+	// than wrong. This is accepted: 100 audit rows on one invoice means
+	// about 90 operator sends or exports. If a real invoice ever gets there,
+	// revisit this with a query filtered by Action.
 	entries, _, err := a.logger.Query(ctx, tenantID, audit.QueryFilter{
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
@@ -809,9 +834,9 @@ func (a *invoiceAuditStampsAdapter) ListByResource(ctx context.Context, tenantID
 	return entries, err
 }
 
-// invoiceSubscriptionLabelAdapter bridges subscription.PostgresStore →
-// invoice.SubscriptionLabeler: the name an invoice's activity rows show on
-// their link to its subscription (ADR-128 rule 8).
+// invoiceSubscriptionLabelAdapter implements invoice.SubscriptionLabeler over
+// subscription.PostgresStore. It returns the name an invoice's activity rows
+// show on their link to its subscription (ADR-128 rule 8).
 type invoiceSubscriptionLabelAdapter struct {
 	store *subscription.PostgresStore
 }
@@ -827,8 +852,8 @@ func (a *invoiceSubscriptionLabelAdapter) SubscriptionLabel(ctx context.Context,
 	return sub.Code, nil
 }
 
-// subscriptionInvoiceLabelAdapter bridges invoice.PostgresStore →
-// subscription.InvoiceLabeler: the number a subscription's activity rows
+// subscriptionInvoiceLabelAdapter implements subscription.InvoiceLabeler over
+// invoice.PostgresStore. It returns the number a subscription's activity rows
 // show on their link to an invoice (ADR-128 rule 8). A missing invoice is an
 // error, so its row links nothing.
 type subscriptionInvoiceLabelAdapter struct {
@@ -843,7 +868,8 @@ func (a *subscriptionInvoiceLabelAdapter) InvoiceNumber(ctx context.Context, ten
 	return inv.InvoiceNumber, nil
 }
 
-// dunningTimelineAdapter bridges dunning.Store → invoice.DunningTimelineFetcher.
+// dunningTimelineAdapter implements invoice.DunningTimelineFetcher over
+// dunning.Store.
 type dunningTimelineAdapter struct {
 	store *dunning.PostgresStore
 }
@@ -857,7 +883,8 @@ func (a *dunningTimelineAdapter) ListEvents(ctx context.Context, tenantID, runID
 	return a.store.ListEvents(ctx, tenantID, runID)
 }
 
-// customerEmailFetcherAdapter bridges customer.PostgresStore → dunning.CustomerEmailFetcher + payment.CustomerEmailResolver.
+// customerEmailFetcherAdapter adapts customer.PostgresStore to
+// dunning.CustomerEmailFetcher and payment.CustomerEmailResolver.
 type customerEmailFetcherAdapter struct {
 	store *customer.PostgresStore
 }
@@ -869,28 +896,26 @@ func (a *customerEmailFetcherAdapter) GetCustomerEmail(ctx context.Context, tena
 	}
 	email := cust.Email
 	name := cust.DisplayName
-	// customers.email is the single canonical recipient (Phase 1 of the
-	// dual-email collapse, migration 0100). Billing-profile legal_name
-	// still wins for display because the operator types the document
-	// display name there, but the send target is always cust.Email.
+	// customers.email is the one canonical recipient. The billing profile's
+	// legal_name still wins for display, because the operator types the
+	// document's display name there. The send target is always cust.Email.
 	if bp, err := a.store.GetBillingProfile(ctx, tenantID, customerID); err == nil {
 		if bp.LegalName != "" {
 			name = bp.LegalName
 		}
 	}
-	// AdditionalEmails ride the same row read — zero extra queries. CC'd
-	// on the billing-state emails (dunning, receipt, payment failed) per
-	// the ADR-082 coverage matrix.
+	// AdditionalEmails come from the same row read, with no extra query.
+	// They are CC'd on the billing-state emails (dunning, receipt, payment
+	// failed), as the ADR-082 coverage matrix sets out.
 	return email, name, cust.AdditionalEmails, nil
 }
 
-// passwordResetEmailAdapter bridges email.OutboxSender (or the
-// direct *email.Sender) to user.EmailSender's narrower 2-arg
-// signature. The user package emits password-reset emails before
-// the operator authenticates, so it has no tenant or display-name
-// context — empty values flow through to email.Sender.brandingFor,
-// which falls back to platform defaults. Production wires the
-// outbox-backed sender so reset emails are durable.
+// passwordResetEmailAdapter adapts email.OutboxSender, or the direct
+// *email.Sender, to the narrower 2-arg signature of user.EmailSender. The
+// user package sends password-reset emails before the operator signs in, so
+// it has no tenant or display-name context. Empty values flow through to
+// email.Sender.brandingFor, which falls back to the platform defaults.
+// Production wires the outbox-backed sender, so reset emails are durable.
 type passwordResetEmailAdapter struct {
 	sender interface {
 		SendPasswordReset(ctx context.Context, tenantID, to, displayName, resetURL string) error
@@ -898,19 +923,20 @@ type passwordResetEmailAdapter struct {
 }
 
 func (a *passwordResetEmailAdapter) SendPasswordReset(ctx context.Context, tenantID, email, resetLink string) error {
-	// Email-as-display-name: body shows "Hi alice@example.com"
-	// rather than "Hi Alice". Acceptable trade for not threading
-	// the user's display_name through the password-reset request
-	// flow. tenantID comes from user.Service.IssueResetToken so the
-	// outbox row stamps the right tenant for operator visibility.
+	// The email address is also the display name, so the body says "Hi
+	// alice@example.com" rather than "Hi Alice". That is accepted, in
+	// exchange for not passing the user's display_name through the
+	// password-reset request flow. tenantID comes from
+	// user.Service.IssueResetToken, so the outbox row carries the right
+	// tenant for operators to see.
 	return a.sender.SendPasswordReset(ctx, tenantID, email, email, resetLink)
 }
 
-// invoiceEmailEventsAdapter bridges email.OutboxStore.ListByInvoice
-// → invoice.EmailEventLister so the invoice timeline can surface
-// customer-notification email rows alongside Stripe webhooks and
-// dunning events. Pure shape conversion; the underlying query
-// already filters to invoice-relevant email types.
+// invoiceEmailEventsAdapter implements invoice.EmailEventLister over
+// email.OutboxStore.ListByInvoice. The invoice timeline uses it to show the
+// customer's notification emails beside Stripe webhooks and dunning events.
+// It only converts shapes, because the query already keeps only the email
+// types that concern an invoice.
 type invoiceEmailEventsAdapter struct {
 	store *email.OutboxStore
 }
@@ -923,8 +949,9 @@ func (a *invoiceEmailEventsAdapter) ListByInvoice(ctx context.Context, tenantID,
 	out := make([]invoice.EmailEventRow, 0, len(rows))
 	for _, r := range rows {
 		to, _ := r.Payload["to"].(string)
-		// JSON numbers decode to float64; dunning_warning payloads
-		// stamp attempt_number for pairing with retry rows.
+		// JSON numbers decode to float64. A dunning_warning payload
+		// carries attempt_number, which pairs the email with its retry
+		// row.
 		attempt, _ := r.Payload["attempt_number"].(float64)
 		trigger, _ := r.Payload["trigger"].(string)
 		cnNumber, _ := r.Payload["credit_note_number"].(string)
@@ -948,12 +975,12 @@ func (a *invoiceEmailEventsAdapter) ListByInvoice(ctx context.Context, tenantID,
 	return out, nil
 }
 
-// emailSendFailure classifies a failed outbox row's stored error into a send
-// failure the activity line names in plain words (activity.SendFailure*). The
+// emailSendFailure maps a failed outbox row's stored error to a send failure
+// that the activity line names in plain words (activity.SendFailure*). The
 // stored error is the dispatcher's hErr.Error(), which keeps each sentinel's
-// own message, so matching the sentinel's text is an exact key into this
-// package's own errors. Anything else has no plain-words name and stays in the
-// server's records.
+// own message. So matching a sentinel's text is an exact key into this
+// package's own errors. Any other error has no plain-words name, and stays in
+// the server's records.
 func emailSendFailure(status, lastError string) string {
 	if status != "failed" || lastError == "" {
 		return ""
@@ -969,20 +996,21 @@ func emailSendFailure(status, lastError string) string {
 	return ""
 }
 
-// paymentSetupEmailSender is the narrow interface noPaymentMethodNotifierAdapter
-// needs from email/. Defined here (consumer-side) so the email package
-// doesn't bleed an interface name into the api/payment dep graph.
-// Satisfied by both *email.Sender and *email.OutboxSender.
+// paymentSetupEmailSender is the narrow part of email/ that
+// noPaymentMethodNotifierAdapter needs. It is defined here, by its consumer,
+// so the email package does not leak an interface name into the dependency
+// graph of api and payment. Both *email.Sender and *email.OutboxSender
+// satisfy it.
 type paymentSetupEmailSender interface {
 	SendPaymentSetupRequest(ctx context.Context, tenantID, to, customerName, invoiceNumber string, amountDueCents int64, currency, updateURL string, writtenOff bool, trigger string) error
 }
 
-// customerSentEmailsAdapter bridges email.OutboxStore.ListByCustomer →
-// customer.SentEmailsLister. Pure shape conversion plus payload field
-// extraction (recipient, invoice and credit-note numbers, trigger) and the
-// send-failure classification the invoice timeline uses, so the customer
-// package doesn't import the email package and both cards word an email
-// from the same facts.
+// customerSentEmailsAdapter implements customer.SentEmailsLister over
+// email.OutboxStore.ListByCustomer. It converts shapes, reads fields from the
+// payload (recipient, invoice and credit-note numbers, trigger), and applies
+// the send-failure mapping the invoice timeline uses. So the customer package
+// does not import the email package, and both cards word an email from the
+// same facts.
 type customerSentEmailsAdapter struct {
 	store *email.OutboxStore
 }
@@ -1032,21 +1060,19 @@ func canEmailSetupLinks(smtpConfigured bool, paymentUpdateURL, paymentUpdateRetu
 	return smtpConfigured && paymentUpdateURL != "" && paymentUpdateReturnURL != ""
 }
 
-// noPaymentMethodNotifierAdapter bridges email.SendPaymentSetupRequest
-// into billing.NoPaymentMethodNotifier so the engine can dispatch a
-// "set up your payment method" email at finalize when the customer
-// has no PM ready. Distinct from the post-decline path
-// (Stripe.handlePaymentFailed) which points the customer at the
-// hosted invoice URL — this email mints a single-use token for the
-// /update-payment SPA route. ADR-013, ADR-023.
+// noPaymentMethodNotifierAdapter implements billing.NoPaymentMethodNotifier
+// with email.SendPaymentSetupRequest. The engine uses it at finalize to send
+// a "set up your payment method" email when the customer has no payment
+// method ready. The post-decline path (Stripe.handlePaymentFailed) is
+// different: it sends the customer to the hosted invoice URL. This email
+// instead creates a single-use token for the /update-payment route of the
+// single-page app (SPA). See ADR-013 and ADR-023.
 //
-// The token-then-SPA indirection is retained (vs. embedding the Stripe
-// Checkout URL directly) because the SPA validates the customer-scoped
-// token first, surfaces invoice context to the customer, and only THEN
-// mints a Checkout session. That two-step is the right shape for an
-// email link the customer clicks days after issuance: the operator can
-// invalidate tokens at any time, and the SPA shows "for invoice X, $Y"
-// before sending the customer to Stripe.
+// The link goes to the SPA with a token, not straight to Stripe Checkout.
+// The SPA checks the customer-scoped token, shows "for invoice X, $Y", and
+// only then creates a Checkout session. That suits a link the customer may
+// click days after it is sent: the operator can invalidate tokens at any
+// time, and the customer sees the invoice before reaching Stripe.
 type noPaymentMethodNotifierAdapter struct {
 	email            paymentSetupEmailSender
 	customerEmail    *customerEmailFetcherAdapter
@@ -1058,11 +1084,11 @@ type noPaymentMethodNotifierAdapter struct {
 	auditLogger            *audit.Logger // optional — engine fires this background task; audit row records the send for operator forensics.
 }
 
-// trigger is supplied by the CALLER because only the caller knows why the link is
-// being sent. This adapter used to hardcode "finalize_no_pm" — so an OPERATOR
-// clicking "Resend setup link" produced a permanent row asserting the mail was sent
-// by the finalize path, which never ran. A row that names the wrong cause is the
-// same class of false evidence the URL-guessing catch-all was deleted for.
+// NotifyNoPaymentMethod emails the customer a setup link for inv. The caller
+// supplies trigger, because only the caller knows why the link is being
+// sent. With a fixed trigger, an operator's "Resend setup link" would write a
+// permanent row saying the finalize path sent the mail, when it never ran. A
+// row that names the wrong cause is false evidence (ADR-090).
 func (a *noPaymentMethodNotifierAdapter) NotifyNoPaymentMethod(ctx context.Context, tenantID string, inv domain.Invoice, trigger string) (domain.NotifyOutcome, error) {
 	if a.paymentUpdateURL == "" {
 		return "", errors.New("PAYMENT_UPDATE_URL not configured")
@@ -1071,21 +1097,21 @@ func (a *noPaymentMethodNotifierAdapter) NotifyNoPaymentMethod(ctx context.Conte
 		return "", errors.New("PAYMENT_UPDATE_RETURN_URL not configured")
 	}
 	if a.tokenSvc == nil {
-		// The SPA enforces ?token= and rejects URLs without it
-		// ("Link expired or invalid · No payment update token
-		// provided"). Refusing to send is strictly better than
-		// emailing the customer a permanently-broken link.
+		// The SPA requires ?token= and rejects a URL without it ("Link
+		// expired or invalid · No payment update token provided").
+		// Refusing to send is always better than emailing the customer a
+		// link that can never work.
 		return "", errors.New("payment update TokenService not wired")
 	}
-	// CC list deliberately discarded: payment_setup_request carries a
-	// single-use tokenized payment-credential URL — never-CC by
-	// construction (ADR-082 coverage matrix).
+	// Drop the CC list on purpose. payment_setup_request carries a
+	// single-use URL, with a token, for entering payment details. So it is
+	// never CC'd (ADR-082 coverage matrix).
 	to, name, _, err := a.customerEmail.GetCustomerEmail(ctx, tenantID, inv.CustomerID)
 	if err != nil || to == "" {
-		// Missing email is a delivery gap, not a billing failure — but it
-		// is REPORTED, not swallowed: the typed skip lets the engine log
-		// the real disposition and lets the resend endpoint answer with a
-		// typed 409 instead of a false "sent" (2026-07-10 design review).
+		// A missing email is a delivery gap, not a billing failure. It is
+		// still reported, not hidden. The typed skip lets the engine log
+		// what really happened, and lets the resend endpoint answer with a
+		// typed 409 instead of a false "sent".
 		return domain.NotifySkippedNoEmail, nil
 	}
 	rawToken, err := a.tokenSvc.Create(ctx, tenantID, inv.CustomerID, inv.ID)
@@ -1096,13 +1122,14 @@ func (a *noPaymentMethodNotifierAdapter) NotifyNoPaymentMethod(ctx context.Conte
 	if err := a.email.SendPaymentSetupRequest(ctx, tenantID, to, name, inv.InvoiceNumber, inv.AmountDueCents, inv.Currency, updateURL, inv.Status == domain.InvoiceUncollectible, trigger); err != nil {
 		return "", err
 	}
-	// Audit the engine-fired send so the operator can answer
-	// "did we email the customer at finalize?" from the AuditLog page
-	// without grepping outbox tables. Mirrors the operator-driven
-	// setup_link_sent audit row written by paymentmethods.Handler.
+	// Audit the send the engine made, so the operator can answer "did we
+	// email the customer at finalize?" from the AuditLog page, without
+	// searching the outbox tables. The row matches the setup_link_sent row
+	// that paymentmethods.Handler writes for an operator's send.
 	if a.auditLogger != nil {
-		// No recipient address in the append-only row (GDPR erasure) — the
-		// email outbox holds the delivery record; the row links the customer.
+		// The append-only row holds no recipient address (GDPR erasure).
+		// The email outbox holds the delivery record, and the row links
+		// the customer.
 		_ = a.auditLogger.Log(ctx, tenantID, "update", "customer", inv.CustomerID, name, map[string]any{
 			"action":         "setup_link_sent",
 			"invoice_id":     inv.ID,
@@ -1113,11 +1140,13 @@ func (a *noPaymentMethodNotifierAdapter) NotifyNoPaymentMethod(ctx context.Conte
 	return domain.NotifySent, nil
 }
 
-// prorationInvoiceCreatorAdapter bridges invoice.PostgresStore + tenant.SettingsStore → subscription.ProrationInvoiceCreator.
-// The embedded store supplies the methods whose names already match
-// (GetByProrationSource, FindBaseInvoiceForPeriod, FindFundingInvoicesForPeriod,
-// SetAutoChargePending, SetAutoChargePendingTx); the methods below rename a
-// store method or route to the numberer.
+// prorationInvoiceCreatorAdapter adapts invoice.PostgresStore and
+// tenant.SettingsStore to subscription.ProrationInvoiceCreator. The embedded
+// store supplies the methods whose names already match
+// (GetByProrationSource, FindBaseInvoiceForPeriod,
+// FindFundingInvoicesForPeriod, SetAutoChargePending and
+// SetAutoChargePendingTx). The methods below rename a store method or call
+// the numberer.
 type prorationInvoiceCreatorAdapter struct {
 	*invoice.PostgresStore
 	numberer invoice.InvoiceNumberer
@@ -1131,11 +1160,10 @@ func (a *prorationInvoiceCreatorAdapter) NextInvoiceNumber(ctx context.Context, 
 	return a.numberer.NextInvoiceNumber(ctx, tenantID)
 }
 
-// CreateInvoiceWithLineItemsTx + NextInvoiceNumberTx are the
-// in-transaction variants used by the atomic AddItem-with-proration
-// flow. The caller (subscription.Handler) owns the tx; this adapter
-// just forwards to the underlying store + numberer's Tx methods.
-// ADR-030 atomic-proration follow-through (2026-05-29).
+// CreateInvoiceWithLineItemsTx and NextInvoiceNumberTx are the
+// in-transaction variants for the atomic flow that adds an item with
+// proration. The caller (subscription.Handler) owns the transaction. This
+// adapter only forwards to the Tx methods of the store and the numberer.
 func (a *prorationInvoiceCreatorAdapter) CreateInvoiceWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
 	return a.CreateWithLineItemsTx(ctx, tx, tenantID, inv, items)
 }
@@ -1144,9 +1172,10 @@ func (a *prorationInvoiceCreatorAdapter) NextInvoiceNumberTx(ctx context.Context
 	return a.numberer.NextInvoiceNumberTx(ctx, tx, tenantID)
 }
 
-// prorationTaxApplierAdapter bridges billing.Engine → subscription.ProrationTaxApplier.
-// Narrow translation: same signature, different named return type so the
-// subscription package doesn't import billing.
+// prorationTaxApplierAdapter adapts billing.Engine to
+// subscription.ProrationTaxApplier. It keeps the engine's signature but
+// returns subscription's own named result type, so the subscription package
+// does not import billing.
 type prorationTaxApplierAdapter struct {
 	engine *billing.Engine
 }
@@ -1157,8 +1186,8 @@ func (a *prorationTaxApplierAdapter) ApplyTaxToLineItems(ctx context.Context, te
 		return subscription.ProrationTaxResult{}, err
 	}
 	return subscription.ProrationTaxResult{
-		// ONE assignment carries every tax fact (see domain/tax_facts.go) —
-		// this hand-copy dropped fields three separate times; now impossible.
+		// One assignment carries every tax fact (see domain/tax_facts.go). A
+		// field-by-field copy here could drop a fact. One assignment cannot.
 		TaxFacts:      r.TaxFacts,
 		SubtotalCents: r.SubtotalCents,
 		DiscountCents: r.DiscountCents,
@@ -1166,17 +1195,18 @@ func (a *prorationTaxApplierAdapter) ApplyTaxToLineItems(ctx context.Context, te
 }
 
 // CommitTax commits a provider tax calculation into a reportable tax
-// transaction, delegating to the same engine method the cycle/create paths
-// use. No-op for manual/none providers (no calculation id).
+// transaction. It calls the same engine method the cycle and create paths
+// use. It is a no-op for the manual and none providers, which have no
+// calculation id.
 func (a *prorationTaxApplierAdapter) CommitTax(ctx context.Context, tenantID, invoiceID, calculationID string) error {
 	return a.engine.CommitTax(ctx, tenantID, invoiceID, calculationID)
 }
 
-// pmCustomerLookupAdapter bridges customer.PostgresStore →
-// paymentmethods.CustomerLookup. paymentmethods doesn't import
-// customer (keeps the dep graph one-way); router.go composes the
-// adapter so the operator send-setup-email endpoint can resolve the
-// recipient address + display name from the canonical customer row.
+// pmCustomerLookupAdapter implements paymentmethods.CustomerLookup over
+// customer.PostgresStore. paymentmethods does not import customer, which
+// keeps the dependency graph one-way. router.go wires this adapter, so the
+// operator's send-setup-email endpoint can read the recipient address and
+// display name from the canonical customer row.
 type pmCustomerLookupAdapter struct {
 	store *customer.PostgresStore
 }
@@ -1189,15 +1219,16 @@ func (a *pmCustomerLookupAdapter) GetForSetupLink(ctx context.Context, tenantID,
 	return c.Email, c.DisplayName, nil
 }
 
-// bounceReporterAdapter bridges email.Sender → customer.Service. When
-// SMTP rejects a send with a permanent-failure (5xx), the Sender calls
-// ReportBounce with (tenantID, email, reason). This adapter resolves
-// the email via the blind-index lookup and flips email_status on every
-// matching customer in that tenant. Multiple matches can happen when
-// two customers share an email (rare; we mark all).
+// bounceReporterAdapter connects email.Sender to customer.Service. When SMTP
+// rejects a send with a permanent failure (5xx), the Sender calls
+// ReportBounce with (tenantID, email, reason). This adapter finds the
+// customers with that email through the blind index: a keyed hash of the
+// address, so an encrypted email can still be found by exact match. It then
+// sets email_status on every matching customer in that tenant. Several
+// customers can share an email, which is rare, and then all are marked.
 //
-// Lives in internal/api so email doesn't import customer — keeps the
-// one-way-coupled layering intact.
+// It lives in internal/api so email does not import customer, which keeps
+// the layers coupled one way only.
 type bounceReporterAdapter struct {
 	blinder *crypto.Blinder
 	store   *customer.PostgresStore
@@ -1221,20 +1252,22 @@ func (a *bounceReporterAdapter) ReportBounce(ctx context.Context, tenantID, emai
 			continue
 		}
 		if err := a.svc.MarkEmailBounced(ctx, tenantID, m.CustomerID, reason); err != nil {
-			// Swallow — the sender has already logged the upstream bounce.
-			// Failure here just means the badge won't update, not a
-			// correctness issue.
+			// Ignore the error: the sender has already logged the bounce.
+			// A failure here only means the badge does not update. It is
+			// not a correctness issue.
 			_ = err
 		}
 	}
 }
 
-// SuppressBounced / SuppressComplained satisfy email.RecipientSuppressor
-// for the Postmark webhook (ADR-098). Same blind-index resolution as
-// ReportBounce, but errors RETURN so a transient DB failure can 5xx and
-// ride Postmark's redelivery into the idempotent writes. Zero matches is
-// benign (a never-a-customer CC alias — log-only per ADR-082), as is a
-// store-level ErrNotFound (customer deleted between lookup and write).
+// SuppressBounced and SuppressComplained (below) satisfy
+// email.RecipientSuppressor for the Postmark webhook (ADR-098). They find
+// customers through the blind index, as ReportBounce does, but they return
+// their errors. A transient database failure then makes the webhook answer
+// 5xx, and Postmark's redelivery runs the idempotent writes again. Zero
+// matches is harmless, and is only logged (ADR-082): the address may be a CC
+// alias that was never a customer. A store-level ErrNotFound is harmless
+// too, when the customer was deleted between the lookup and the write.
 func (a *bounceReporterAdapter) SuppressBounced(ctx context.Context, tenantID, email, reason string) error {
 	return a.suppress(ctx, tenantID, email, reason, false)
 }
@@ -1272,16 +1305,16 @@ func (a *bounceReporterAdapter) suppress(ctx context.Context, tenantID, email, r
 	return nil
 }
 
-// suppressionCheckerAdapter is the inverse of bounceReporterAdapter:
-// given (tenant, email), it answers "is this recipient suppressable
-// because we've already seen them bounce or complain?". Both
-// email.Sender and email.OutboxSender consult this before every send
-// so bounced addresses don't get hammered with retry-DLQ noise.
+// suppressionCheckerAdapter is the inverse of bounceReporterAdapter. Given
+// (tenant, email), it answers "should this recipient be suppressed, because
+// they already bounced or complained?". Both email.Sender and
+// email.OutboxSender ask it before every send. So a bounced address does not
+// get retry after retry that ends in the dead-letter queue (DLQ).
 //
-// Returns the first matching customer's email_status; if multiple
-// customers share the same email (rare) and any one is suppressed,
-// the address is treated as suppressed for that tenant. Better to
-// suppress one legitimate send than to keep mailing a dead address.
+// It returns the first matching customer's email_status. When several
+// customers share the email (rare) and any one is suppressed, the address
+// counts as suppressed for that tenant. Suppressing one valid send is better
+// than mailing a dead address again and again.
 type suppressionCheckerAdapter struct {
 	blinder *crypto.Blinder
 	store   *customer.PostgresStore
@@ -1317,49 +1350,48 @@ func (a *suppressionCheckerAdapter) IsSuppressed(ctx context.Context, tenantID, 
 	return false, "", nil
 }
 
-// stripeCustomerEnsurer resolves-or-creates the Stripe customer for a
-// Hardcount customer + persists the mapping. Satisfied by
-// *paymentmethods.StripeAdapter — kept as a one-method interface here
-// so api/adapters.go doesn't need to import paymentmethods directly.
+// stripeCustomerEnsurer finds or creates the Stripe customer for a Hardcount
+// customer, and saves the mapping. *paymentmethods.StripeAdapter satisfies
+// it. It is a one-method interface here, so api/adapters.go does not need to
+// import paymentmethods directly.
 type stripeCustomerEnsurer interface {
 	EnsureStripeCustomer(ctx context.Context, tenantID, customerID string) (string, error)
 }
 
-// hostedInvoiceStripeAdapter bridges *payment.StripeClients →
-// hostedinvoice.CheckoutSessionCreator. The caller is a public
-// unauthenticated request: livemode is read from the request ctx
-// (pinned by hostedinvoice.resolveInvoice from the GetByPublicToken
-// row), then we pick the matching Stripe key and build a Checkout
-// Session in payment mode with a single pre-totaled line item.
-// Hardcount owns the tax computation, so Stripe's automatic_tax is
-// intentionally off — the UnitAmount already includes tax from the
-// invoice row.
+// hostedInvoiceStripeAdapter implements hostedinvoice.CheckoutSessionCreator
+// over *payment.StripeClients. The caller is a public, unauthenticated
+// request. Livemode comes from the request ctx, where
+// hostedinvoice.resolveInvoice pinned it from the GetByPublicToken row. The
+// adapter picks the matching Stripe key and builds a Checkout Session in
+// payment mode, with one line item that holds the whole total. Hardcount
+// computes the tax, so Stripe's automatic_tax is off on purpose: the
+// UnitAmount already includes the tax from the invoice row.
 //
-// Metadata stamps hardcount_purpose=hosted_invoice_pay so the existing
-// payment-intent webhook path can route successful charges to
-// Invoice.RecordPayment via invoice_id lookup, instead of mis-identifying
-// these as subscription-billing charges.
+// The metadata sets hardcount_purpose=hosted_invoice_pay. The payment-intent
+// webhook path then routes a successful charge to Invoice.RecordPayment by
+// its invoice_id, instead of taking it for a subscription-billing charge.
 //
-// `ensurer` resolves or mints the Stripe customer so the Checkout
-// session can attach the saved card to it; without `customer` +
-// `setup_future_usage=off_session` Stripe takes the card but never
-// links it to the Hardcount customer's Stripe customer record, so the
-// "save card" tick on the hosted page would be a no-op.
+// `ensurer` finds or creates the Stripe customer, so the Checkout session
+// can attach the saved card to it. Without `customer` and
+// `setup_future_usage=off_session`, Stripe takes the card but never links it
+// to the Hardcount customer's Stripe customer record. The "save card" tick
+// on the hosted page would then do nothing.
 type hostedInvoiceStripeAdapter struct {
 	clients *payment.StripeClients
 	ensurer stripeCustomerEnsurer
-	// sessions is the checkout-claim ledger (ADR-068): claim-first dedup
-	// with a claim-derived Stripe idempotency key, so one invoice can never
-	// hold two live payable sessions.
+	// sessions is the checkout-claim ledger (ADR-068). The claim is written
+	// first, and the Stripe idempotency key comes from the claim, so one
+	// invoice can never hold two live sessions that take payment.
 	sessions *payment.CheckoutSessionStore
-	// audit is the ADR-090 in-tx emitter: the hosted-checkout claim (the
-	// flow's one durable mutation) carries its evidence atomically. Set at
-	// construction — a public customer-token money path must not silently
-	// run unaudited.
+	// audit emits inside the transaction (ADR-090), so the hosted-checkout
+	// claim, the flow's one lasting change, carries its evidence atomically.
+	// It is set at construction: a public money path reached with a
+	// customer's token must never run unaudited without a word.
 	audit *audit.Logger
 	// belowMinimum records Stripe refusing the session as below its minimum
 	// charge, as a charge's refusal is recorded (payment.Stripe). For a
-	// customer with no card the Pay click is the only place Hardcount learns it.
+	// customer with no card, the Pay click is the only place Hardcount
+	// learns it.
 	belowMinimum checkoutBelowMinimumRecorder
 }
 
@@ -1376,15 +1408,15 @@ func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
 		return "", fmt.Errorf("stripe not configured")
 	}
 	if a.sessions == nil {
-		// Fail loud: minting without the claim ledger recreates the
-		// double-charge bug this adapter exists to prevent (ADR-068).
+		// Fail loudly. Creating a session without the claim ledger allows
+		// the double charge this adapter exists to prevent (ADR-068).
 		return "", fmt.Errorf("hosted invoice: checkout session store not wired")
 	}
-	// Livemode comes from ctx, pinned by resolveInvoice off the
-	// public_token lookup. Previous version did a raw db.Pool query
-	// on `invoices` which has RLS — without app.tenant_id /
-	// app.bypass_rls set on the session, the policy returned zero
-	// rows ("resolve livemode: sql: no rows in result set").
+	// Livemode comes from ctx, where resolveInvoice pinned it from the
+	// public_token lookup. Do not read it with a raw db.Pool query on
+	// `invoices`: that table has RLS, and without app.tenant_id or
+	// app.bypass_rls on the session the policy returns no rows ("resolve
+	// livemode: sql: no rows in result set").
 	livemode, err := postgres.Livemode(ctx)
 	if err != nil {
 		return "", err
@@ -1405,10 +1437,11 @@ func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
 	}
 
 	// ---- Claim protocol (ADR-068) ----
-	// Reuse an existing open claim when its session is still live and its
-	// amount still matches; supersede on time-expiry or amount drift; the
-	// concurrent-double-POST loser converges on the winner's session via the
-	// claim-derived idempotency key.
+	// Reuse an open claim when its session is still live and its amount
+	// still matches. Supersede it when it has expired or the amount changed.
+	// When two POSTs race, the loser gets the winner's session through the
+	// claim's idempotency key. To re-drive a claim is to send its Stripe
+	// create again with that key.
 	claim, err := a.sessions.GetOpenForInvoice(ctx, tenantID, inv.ID)
 	switch {
 	case err == nil:
@@ -1419,54 +1452,61 @@ func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
 		}
 		drifted := claim.AmountCents != inv.AmountDueCents
 		if !expired && !drifted && claim.URL != "" {
-			// Straight reuse: both devices get the SAME session. NOTHING is
-			// mutated — the claim already exists and only its winner emitted.
-			// Declare that to the audit observer, or a customer clicking "Pay"
-			// twice reports as an uncovered mutation forever (ADR-090: a
-			// detector that cries wolf on a normal retry is one nobody keeps).
+			// Plain reuse: both devices get the same session. Nothing
+			// changes, because the claim already exists and only its
+			// winner emitted a row. Tell the audit observer so. Otherwise
+			// a customer who clicks "Pay" twice is reported as an
+			// uncovered change forever. A detector that raises false
+			// alarms on a normal retry is one nobody keeps (ADR-090).
 			audit.MarkSkip(ctx)
 			return claim.URL, nil
 		}
 		if !expired && !drifted && claim.URL == "" {
-			// Pending claim (a crash between insert and create, or a racing
-			// winner mid-create): re-drive the create with the claim's own
-			// idempotency key — Stripe returns the SAME session either way.
-			// No new claim row, so no emission: same declaration as above.
+			// A pending claim: a crash between insert and create, or a
+			// racing winner still creating. Re-drive the create with the
+			// claim's own idempotency key, and Stripe returns the same
+			// session either way. There is no new claim row, so there is
+			// no emission: declare the skip, as above.
 			audit.MarkSkip(ctx)
 			return a.mintForClaim(ctx, sc, claim, stripeCustomerID, inv, successURL, cancelURL)
 		}
 		if (drifted || expired) && claim.StripeSessionID != "" {
-			// Amount drift, or a claim at the end of its life, with a session
-			// that may still be live: the customer may be PAYING it
-			// right now. Branch on the Stripe-side truth before minting a
-			// second charge vehicle (panel: expiring a COMPLETED session
-			// fails — minting anyway double-charges).
+			// The amount changed, or the claim is at the end of its life,
+			// and its session may still be live: the customer may be
+			// paying it right now. Ask Stripe for the session's real state
+			// before creating a second way to pay. Expiring a completed
+			// session fails, and creating a new one anyway would charge
+			// twice.
 			if perr := a.expireStripeSession(ctx, sc, claim.StripeSessionID); perr != nil {
 				if errors.Is(perr, payment.ErrSessionCompleted) {
-					// Payment already happened at the old amount; the webhook
-					// will settle + escalate the amount mismatch. Never mint.
+					// The customer already paid the old amount. The
+					// webhook settles it and escalates the amount
+					// mismatch. Never create a new session here.
 					return "", payment.ErrChargeInFlight
 				}
-				// Neither expired nor confirmed closed: the old page may still
-				// be payable, so minting a second one could take two payments.
-				// Fail; the customer retries (the old page also expires on its
-				// own within the hour).
+				// Neither expired nor confirmed closed: the old page may
+				// still take payment, so a second page could take two
+				// payments. Fail, and the customer retries. The old page
+				// also expires on its own within the hour.
 				return "", fmt.Errorf("expire the previous payment page: %w", perr)
 			}
 		}
-		// Supersede via CAS — exactly one concurrent caller wins the remint.
+		// Supersede with a compare-and-set, so exactly one concurrent
+		// caller wins the right to create the new session.
 		if won, sErr := a.sessions.Supersede(ctx, tenantID, claim.ID); sErr != nil {
 			return "", fmt.Errorf("supersede stale claim: %w", sErr)
 		} else if !won {
-			// Another racer superseded and is reminting; fall through to
-			// ClaimOpen which returns THEIR fresh claim (loser protocol).
+			// Another caller superseded and is creating the session. Fall
+			// through to ClaimOpen, which returns that caller's new claim
+			// (the loser protocol).
 			_ = won
 		}
 	case errors.Is(err, errs.ErrNotFound):
-		// No open claim — claim fresh below, after closing any session a
-		// credit apply superseded: that path flips the row in its own
-		// transaction and never reaches Stripe, so the old session is still
-		// payable and minting beside it leaves the customer two live pages.
+		// No open claim. Claim fresh below, after closing any session that
+		// a credit apply superseded. A credit apply changes the row in its
+		// own transaction and never reaches Stripe. So the old session can
+		// still take payment, and a new one beside it would leave the
+		// customer two live pages.
 		if cerr := a.expireSupersededSessions(ctx, sc, tenantID, inv.ID); cerr != nil {
 			return "", cerr
 		}
@@ -1493,8 +1533,8 @@ func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
 	}
 	freshClaim, _, err := a.sessions.ClaimOpenAudited(ctx, tenantID, inv.ID, inv.AmountDueCents, inv.Currency, livemode, emit)
 	if err != nil {
-		// ErrInvoiceNotPayable / ErrChargeInFlight propagate typed — the
-		// handler maps them to honest 409s.
+		// ErrInvoiceNotPayable and ErrChargeInFlight return typed, and the
+		// handler maps them to accurate 409s.
 		return "", err
 	}
 	if freshClaim.URL != "" {
@@ -1513,27 +1553,27 @@ func hostedInvoiceCheckoutParams(
 ) *stripe.CheckoutSessionCreateParams {
 	currency := strings.ToLower(claim.Currency)
 	productName := "Invoice " + inv.InvoiceNumber
-	// Duplicate the metadata on BOTH the session and the PaymentIntent.
-	// Session-level metadata only lives on the checkout_session object;
-	// Stripe does NOT automatically copy it to the underlying PaymentIntent.
-	// Our webhook path routes payment_intent.succeeded → Invoice.MarkPaid
-	// by reading hardcount_invoice_id off the PI's metadata (payment/handler.go
-	// line 195), so PaymentIntentData.Metadata is the one that actually
-	// matters. The session copy is kept for operator visibility when
-	// inspecting a checkout session directly in Stripe dashboard.
+	// Put the metadata on both the session and the PaymentIntent. Session
+	// metadata lives only on the checkout_session object, and Stripe does
+	// not copy it to the PaymentIntent. The webhook path routes
+	// payment_intent.succeeded to Invoice.MarkPaid by reading
+	// hardcount_invoice_id from the PaymentIntent's metadata
+	// (payment/handler.go line 195). So PaymentIntentData.Metadata is the
+	// copy that matters. The session copy lets an operator see it when
+	// looking at a checkout session in the Stripe dashboard.
 	meta := map[string]string{
 		"hardcount_invoice_id":  inv.ID,
 		"hardcount_tenant_id":   claim.TenantID,
 		"hardcount_customer_id": inv.CustomerID,
 		"hardcount_purpose":     payment.PurposeHostedInvoicePay,
 	}
-	// `customer` + `setup_future_usage=off_session` is the canonical
-	// Stripe pattern for "charge now, save the card for auto-charge of
-	// future invoices" (https://docs.stripe.com/payments/save-during-payment).
-	// Without `customer`, Stripe creates a guest checkout and the
+	// `customer` with `setup_future_usage=off_session` is Stripe's standard
+	// pattern for "charge now, and save the card to charge future invoices
+	// automatically" (https://docs.stripe.com/payments/save-during-payment).
+	// Without `customer`, Stripe makes a guest checkout, and the
 	// PaymentMethod is never attached to anything. Without
-	// `setup_future_usage`, the card is consumed by the one-shot PI and
-	// detached. Both are required for dunning auto-retry to work.
+	// `setup_future_usage`, the one-time PaymentIntent uses up the card and
+	// detaches it. Dunning's automatic retries need both.
 	return &stripe.CheckoutSessionCreateParams{
 		Customer: stripe.String(stripeCustomerID),
 		Mode:     stripe.String(string(stripe.CheckoutSessionModePayment)),
@@ -1557,57 +1597,61 @@ func hostedInvoiceCheckoutParams(
 			Description:      stripe.String(productName),
 			SetupFutureUsage: stripe.String("off_session"),
 		},
-		// 1h Stripe-side expiry (min 30m, default 24h): the DB TTL alone
-		// would leave a ~23h invisible payable session (ADR-068). Anchored on
-		// the claim's creation, not the call: every re-drive reuses the claim
-		// id as the idempotency key, and Stripe rejects a replayed key whose
-		// params changed, so a clock-relative expiry broke every retry.
+		// Expire the session at Stripe after 1h (Stripe allows 30m at
+		// least, and defaults to 24h). With only the database TTL, a session
+		// could take payment for about 23h with no one seeing it (ADR-068).
+		// The expiry counts from the claim's creation, not from this call.
+		// Every re-drive reuses the claim id as the idempotency key, and
+		// Stripe rejects a replayed key whose params changed. So an expiry
+		// counted from the call would break every retry.
 		ExpiresAt: stripe.Int64(checkoutSessionExpiry(claim).Unix()),
-		// Charge in the invoice's own currency. Unset, Stripe applies the account's
-		// Adaptive Pricing setting and may preselect the buyer's local currency with a
-		// 2-4% conversion fee, so the bank statement no longer matches the invoice and
-		// receipt (USD 10.29 charged as INR 1,010.68).
+		// Charge in the invoice's own currency. Unset, Stripe applies the
+		// account's Adaptive Pricing setting, and may preselect the buyer's
+		// local currency with a 2-4% conversion fee. The bank statement
+		// then no longer matches the invoice and receipt (for example,
+		// USD 10.29 charged as INR 1,010.68).
 		AdaptivePricing: &stripe.CheckoutSessionCreateAdaptivePricingParams{
 			Enabled: stripe.Bool(false),
 		},
 		Params: stripe.Params{
 			Metadata: meta,
-			// The claim id: every re-drive for this claim converges on the
-			// SAME Stripe session.
+			// The claim id, so every re-drive for this claim gets the
+			// same Stripe session.
 			IdempotencyKey: stripe.String(claim.ID),
 		},
 	}
 }
 
-// mintForClaim creates (or idempotently re-drives) the Stripe Checkout
-// session for one claim and fills the row. The idempotency key IS the claim
-// id: a crash before the fill, a concurrent loser, or a retry all receive
-// the same session from Stripe — one invoice can never grow two live
-// payable sessions.
+// mintForClaim creates the Stripe Checkout session for one claim, or
+// re-drives it idempotently, and fills the claim row. The idempotency key is
+// the claim id. So a crash before the fill, a concurrent loser and a retry
+// all get the same session from Stripe, and one invoice can never have two
+// live sessions that take payment.
 func (a *hostedInvoiceStripeAdapter) mintForClaim(
 	ctx context.Context, sc *stripe.Client, claim payment.CheckoutClaim,
 	stripeCustomerID string, inv domain.Invoice, successURL, cancelURL string,
 ) (string, error) {
 	sess, err := sc.V1CheckoutSessions.Create(ctx, hostedInvoiceCheckoutParams(claim, stripeCustomerID, inv, successURL, cancelURL))
 	if err != nil {
-		// A definite refusal made no session, so nothing can be paid on this
-		// claim: release it. Left open, an unfilled claim reads as a link
-		// about to reach the customer and holds every charge and dunning
-		// retry on the invoice for 65 minutes (domain.HostedCheckoutLiveSQL;
-		// min-charge check 2026-10-22, finding 4.3). An unclear answer keeps
-		// the claim: its re-drive replays the same idempotency key.
+		// A definite refusal made no session, so nothing can be paid on
+		// this claim: release it. Left open, an unfilled claim reads as a
+		// link about to reach the customer. It then holds every charge and
+		// dunning retry on the invoice for 65 minutes
+		// (domain.HostedCheckoutLiveSQL). An unclear answer keeps the claim,
+		// because its re-drive replays the same idempotency key.
 		if payment.IsDefiniteRefusal(err) {
 			if rerr := a.sessions.ReleaseRefused(ctx, claim.TenantID, claim.ID); rerr != nil {
 				slog.WarnContext(ctx, "checkout: releasing a claim Stripe refused failed; it stops holding charges 65 minutes after it was made",
 					"claim_id", claim.ID, "invoice_id", claim.InvoiceID, "error", rerr)
 			}
 		}
-		// Below the minimum: the customer can't pay this amount online at
-		// all, and the page says so (409 amount_below_minimum). Recorded as
-		// a charge's refusal is: the invoice is stamped, so the page drops
-		// its Pay button and the operator sees the notice, and a payment
-		// recovery on it ends. Left unrecorded, a card-less invoice kept its
-		// Pay button and its no-card recovery ran on to the final action.
+		// Below the minimum, the customer cannot pay this amount online at
+		// all, and the page says so (409 amount_below_minimum). Record it
+		// the way a charge's refusal is recorded. The invoice is stamped, so
+		// the page drops its Pay button, the operator sees the notice, and
+		// a payment recovery on the invoice ends. Unrecorded, a card-less
+		// invoice would keep its Pay button, and its no-card recovery would
+		// run on to the final action.
 		if bm := payment.BelowMinimumOf(err); bm != nil {
 			if a.belowMinimum == nil {
 				slog.ErrorContext(ctx, "checkout: Stripe refused the session as below its minimum, and no recorder is wired to record it",
@@ -1619,23 +1663,25 @@ func (a *hostedInvoiceStripeAdapter) mintForClaim(
 		}
 		return "", fmt.Errorf("checkout session: %w", err)
 	}
-	// Persist Stripe's ACTUAL expiry (it clamps requests) via CAS; losing the
-	// CAS to a concurrent re-drive is fine — same session, same values.
+	// Save Stripe's actual expiry, which Stripe may clamp, with a
+	// compare-and-set. Losing the compare-and-set to a concurrent re-drive is
+	// fine: same session, same values.
 	expiresAt := time.Unix(sess.ExpiresAt, 0).UTC()
 	status, fErr := a.sessions.FillSession(ctx, claim.TenantID, claim.ID, sess.ID, sess.URL, expiresAt)
 	if fErr != nil {
-		// Never hand out a session Hardcount has not recorded: the reconciler and
-		// the expire sweeps find sessions by their recorded id, so an
-		// unrecorded one could be paid with nothing ever looking at it. The
-		// customer retries; the re-drive replays the same session and fills.
+		// Never hand out a session Hardcount has not recorded. The
+		// reconciler and the expire sweeps find sessions by their recorded
+		// id, so an unrecorded one could be paid with nothing ever looking
+		// at it. The customer retries, and the re-drive replays the same
+		// session and fills the row.
 		return "", fmt.Errorf("record checkout session: %w", fErr)
 	}
 	if status != "open" {
-		// The claim was replaced while this create was in flight (a credit
-		// apply, a settle, or the pending-claim supersede): a newer claim owns
-		// the invoice, so handing this URL out would leave two live pages.
-		// Close it; the recorded id lets the sweeps finish the job if this
-		// expire fails.
+		// The claim was replaced while this create was in flight, by a
+		// credit apply, a settle or the pending-claim supersede. A newer
+		// claim owns the invoice, so handing out this URL would leave two
+		// live pages. Close this session. If this expire fails, the
+		// recorded id lets the sweeps finish the job.
 		if perr := a.expireStripeSession(ctx, sc, sess.ID); perr != nil {
 			slog.WarnContext(ctx, "checkout: expire of a replaced claim's session failed",
 				"claim_id", claim.ID, "error", perr)
@@ -1653,10 +1699,11 @@ const checkoutSessionTTL = time.Hour
 
 // checkoutPendingRedriveLimit bounds how long a claim whose Stripe create
 // never landed may be re-driven. Stripe requires expires_at at least 30
-// minutes ahead, and the expiry is fixed at claim creation, so past this age
-// a create that never reached Stripe can no longer succeed. Such a claim's
-// URL was never handed out (mintForClaim returns a URL only once recorded),
-// so superseding it strands nothing payable.
+// minutes ahead, and the expiry is fixed when the claim is created. So past
+// this age, a create that never reached Stripe can no longer succeed. Such a
+// claim's URL was never handed out, because mintForClaim returns a URL only
+// once it is recorded. So superseding the claim leaves nothing payable
+// behind.
 const checkoutPendingRedriveLimit = 25 * time.Minute
 
 func checkoutSessionExpiry(claim payment.CheckoutClaim) time.Time {
@@ -1664,11 +1711,11 @@ func checkoutSessionExpiry(claim payment.CheckoutClaim) time.Time {
 }
 
 // expireSupersededSessions expires, at Stripe, every superseded session of
-// the invoice that may still be live. A COMPLETED one means the customer
-// already paid it: return ErrChargeInFlight so nothing new is minted (the
-// webhook or the reconciler settles it). A session that could be neither
-// expired nor confirmed closed fails the mint: two payable pages for one
-// invoice could take two payments.
+// the invoice that may still be live. A completed one means the customer
+// already paid it. It then returns ErrChargeInFlight, so no new session is
+// created, and the webhook or the reconciler settles the payment. A session
+// that can be neither expired nor confirmed closed fails the create, because
+// two payable pages for one invoice could take two payments.
 func (a *hostedInvoiceStripeAdapter) expireSupersededSessions(ctx context.Context, sc *stripe.Client, tenantID, invoiceID string) error {
 	live, err := a.sessions.ListUnresolvedForInvoice(ctx, tenantID, invoiceID)
 	if err != nil {
@@ -1688,23 +1735,25 @@ func (a *hostedInvoiceStripeAdapter) expireSupersededSessions(ctx context.Contex
 		case errors.Is(perr, payment.ErrSessionCompleted):
 			return payment.ErrChargeInFlight
 		default:
-			// Unknown state: the superseded page may still be payable, so do
-			// not mint another one beside it. Fail; the customer retries.
+			// Unknown state: the superseded page may still take payment,
+			// so do not create another one beside it. Fail, and the
+			// customer retries.
 			return fmt.Errorf("expire superseded payment page %s: %w", c.StripeSessionID, perr)
 		}
 	}
 	return nil
 }
 
-// expireStripeSession best-effort expires a live session, classifying the
-// failure: a COMPLETED session returns payment.ErrSessionCompleted (caller
-// must NOT mint), an already-expired session is success.
+// expireStripeSession tries to expire a live session, and classifies a
+// failure. A completed session returns payment.ErrSessionCompleted, and the
+// caller must not create a new one. An already expired session counts as
+// success.
 func (a *hostedInvoiceStripeAdapter) expireStripeSession(ctx context.Context, sc *stripe.Client, sessionID string) error {
 	_, err := sc.V1CheckoutSessions.Expire(ctx, sessionID, &stripe.CheckoutSessionExpireParams{})
 	if err == nil {
 		return nil
 	}
-	// Classify against the session's live status — the expire error text is
+	// Classify by the session's live status. The text of the expire error is
 	// not a contract.
 	sess, rErr := sc.V1CheckoutSessions.Retrieve(ctx, sessionID, &stripe.CheckoutSessionRetrieveParams{})
 	if rErr != nil {
@@ -1720,9 +1769,10 @@ func (a *hostedInvoiceStripeAdapter) expireStripeSession(ctx context.Context, sc
 }
 
 // subscriptionCheckerAdapter implements customer.SubscriptionChecker over the
-// subscription store + pricing service (ADR-067 archive/currency guards).
-// Non-terminal = active or trialing; an active sub with a scheduled cancel
-// still bills until the boundary and is deliberately included.
+// subscription store and the pricing service, for the archive and currency
+// guards (ADR-067). Non-terminal means active or trialing. An active
+// subscription with a scheduled cancel still bills until the cancel takes
+// effect, so it is included on purpose.
 type subscriptionCheckerAdapter struct {
 	subs  *subscription.PostgresStore
 	plans *pricing.Service
@@ -1754,8 +1804,8 @@ func (a *subscriptionCheckerAdapter) NonTerminalForCustomer(ctx context.Context,
 			for _, it := range sub.Items {
 				plan, perr := a.plans.GetPlan(ctx, tenantID, it.PlanID)
 				if perr != nil {
-					// Fail loud: the currency guard cannot decide safely on a
-					// half-resolved plan set.
+					// Fail loudly: the currency guard cannot decide
+					// safely on a half-resolved set of plans.
 					return nil, fmt.Errorf("resolve plan %s for guard: %w", it.PlanID, perr)
 				}
 				if plan.Currency == "" {
@@ -1773,10 +1823,10 @@ func (a *subscriptionCheckerAdapter) NonTerminalForCustomer(ctx context.Context,
 	return out, nil
 }
 
-// memberUserDirectoryAdapter bridges dashmembers.UserDirectory onto the
-// user package — service for account creation (which validates the
-// password and hashes it), store for lookups/attach. Keeps dashmembers
-// decoupled from internal/user.
+// memberUserDirectoryAdapter implements dashmembers.UserDirectory over the
+// user package. It uses the service to create accounts, which validates and
+// hashes the password, and the store for lookups and attaching a tenant. It
+// keeps dashmembers decoupled from internal/user.
 type memberUserDirectoryAdapter struct {
 	svc   *user.Service
 	store *user.PostgresStore
@@ -1850,12 +1900,12 @@ func (a costDashboardCredits) CreditSummary(ctx context.Context, tenantID, custo
 	return out, nil
 }
 
-// usageOpenPeriods implements usage.OpenPeriodReader: what usage ingest and
-// the held-usage release read to answer an event with its billing_status
-// (ADR-120, ADR-130): the open periods with their plans'
-// prices before the write, the meter's aggregation on the write's
-// transaction after it. The rule itself lives in usage (usage.OpenPeriodOf,
-// usage.BucketsOf); this only reads.
+// usageOpenPeriods implements usage.OpenPeriodReader. Usage ingest and the
+// held-usage release read it to answer an event with its billing_status
+// (ADR-120, ADR-130). Before the write, they read the open periods with
+// their plans' prices. After the write, on its transaction, they read the
+// meter's aggregation. The rule itself lives in usage (usage.OpenPeriodOf,
+// usage.BucketsOf), and this type only reads.
 type usageOpenPeriods struct {
 	subs       usageLiveSubscriptions
 	pricing    usageMeterReader
@@ -1877,18 +1927,25 @@ type usageThresholdReader interface {
 	ThresholdWatermarks(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (billedThrough, paidThrough *time.Time, err error)
 }
 
-// OpenPeriods reads every active and trialing subscription of the customer
-// (one transaction); for each, the threshold watermarks of its current
-// period, how the close bills the period (billing.PeriodPlans: the plan
-// stretches, from its billing intervals when it is active, and each plan's
-// pin), and where the customer's other subscriptions stopped covering a
-// meter in the period; then, in one more transaction, the prices of each
-// plan of the period at its pin of the period, in the subscription's own
-// time domain (ADR-130 §4), each with whether its pin had passed. From the meters the plans price at their pins it builds the
-// period's usage windows, the close's own (billing.PeriodPlan.UsageWindows).
+// OpenPeriods reads, in one transaction, every active and trialing
+// subscription of the customer. For each one it reads:
+//   - the threshold watermarks of its current period: how far the period's
+//     threshold invoices have billed and been paid;
+//   - how the close bills the period (billing.PeriodPlans): the plan
+//     stretches, from its billing intervals when it is active, and each
+//     plan's pin, the instant its prices are read for the period;
+//   - where the customer's other subscriptions stopped covering a meter in
+//     the period.
+//
+// Then, in one more transaction, it reads each plan's prices at the plan's
+// pin of the period, in the subscription's own time domain (ADR-130 §4).
+// Each set of prices records whether its pin had passed. From the meters the
+// plans price at their pins, it builds the period's usage windows, the same
+// ones the close uses (billing.PeriodPlan.UsageWindows).
+//
 // The watermarks are read whether or not the subscription still has
-// thresholds: the close keys them on the period's threshold invoices, not
-// on the setting.
+// thresholds, because the close keys them on the period's threshold
+// invoices, not on the setting.
 func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID string) ([]usage.OpenPeriod, error) {
 	subs, err := a.subs.ListLiveByCustomer(ctx, tenantID, customerID)
 	if err != nil {
@@ -2015,7 +2072,7 @@ func (a customerCurrencyFactsAdapter) CustomerCurrencyFacts(ctx context.Context,
 	return profile, plans, nil
 }
 
-// heldReliefIssuerAdapter bridges creditnote.Service to
+// heldReliefIssuerAdapter adapts creditnote.Service to
 // invoice.HeldReliefIssuer: finalize issues the relief notes held on a draft
 // on its own transaction, and runs their after-commit steps once it commits.
 type heldReliefIssuerAdapter struct {

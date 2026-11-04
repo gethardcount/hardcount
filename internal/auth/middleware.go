@@ -24,7 +24,8 @@ const (
 // TestTenantIDKey returns the context key for tenant ID (for use in tests).
 func TestTenantIDKey() contextKey { return tenantIDKey }
 
-// Middleware validates API key credentials and injects tenant context.
+// Middleware validates the request's API key and puts its tenant context on
+// the request.
 func Middleware(svc *Service) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -37,11 +38,12 @@ func Middleware(svc *Service) func(http.Handler) http.Handler {
 			key, err := svc.ValidateKey(r.Context(), rawKey)
 			if err != nil {
 				if !errors.Is(err, ErrInvalidKey) {
-					// The store never reached a verdict (DB outage, timeout).
-					// A 401 here would tell integrators their key went bad
-					// mid-outage and start a pointless rotation; a fleet-wide
-					// 503 reveals nothing about any individual key, so the
-					// ADR-026 anti-enumeration stance holds (#560).
+					// The store reached no verdict (a database outage or a
+					// timeout). A 401 here would tell integrators their key
+					// went bad mid-outage, and start a pointless rotation. A
+					// 503 for every caller reveals nothing about any one
+					// key, so the ADR-026 rule against key enumeration
+					// holds (#560).
 					slog.ErrorContext(r.Context(), "api key validation unavailable",
 						"error", err)
 					respond.Error(w, r, http.StatusServiceUnavailable, "api_error",
@@ -49,9 +51,10 @@ func Middleware(svc *Service) func(http.Handler) http.Handler {
 						"authentication is temporarily unavailable — retry shortly")
 					return
 				}
-				// Generic message — never reveal whether a key exists, is
-				// expired, or is revoked. Prevents key enumeration. Full
-				// reason logged with request-ID. ADR-026.
+				// Use a generic message that never says whether a key
+				// exists, has expired or was revoked, so keys cannot be
+				// enumerated (ADR-026). The full reason is logged with the
+				// request ID.
 				slog.WarnContext(r.Context(), "api key validation failed",
 					"error", err)
 				respond.Unauthorized(w, r, "invalid or expired API key")
@@ -69,8 +72,8 @@ func Middleware(svc *Service) func(http.Handler) http.Handler {
 	}
 }
 
-// Require returns middleware that checks if the authenticated key has a specific permission.
-// Use this to protect individual route groups.
+// Require returns middleware that checks that the authenticated key has a
+// specific permission. Use it to protect individual route groups.
 func Require(perm Permission) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,11 +106,11 @@ func RequireSession() func(http.Handler) http.Handler {
 }
 
 // RequireMethod returns middleware that picks the permission to enforce
-// based on HTTP method: GET/HEAD/OPTIONS check `read`, POST/PUT/PATCH/
-// DELETE check `write`. Closes the gap where a single Require() in
-// front of a chi.Mount applies one permission to a subrouter that
-// mixes reads and writes — left unguarded, a key with read access
-// could write on every endpoint inside the subtree.
+// from the HTTP method. GET, HEAD and OPTIONS check `read`, and POST, PUT,
+// PATCH and DELETE check `write`. RequireMethod closes a gap: a single
+// Require in front of a chi.Mount applies one permission to a subrouter that
+// mixes reads and writes. Without RequireMethod, a key with read access
+// could write on every endpoint in the subtree.
 //
 // Usage:
 //
@@ -134,28 +137,32 @@ func RequireMethod(read, write Permission) func(http.Handler) http.Handler {
 
 // Context accessors
 
+// TenantID returns the authenticated tenant ID in ctx, or "" when there is
+// none.
 func TenantID(ctx context.Context) string {
 	v, _ := ctx.Value(tenantIDKey).(string)
 	return v
 }
 
-// WithTenantID returns a derived context carrying tenantID. Middleware uses
-// this indirectly via its own WithValue call; background workers (reconciler,
-// billing engine charge loop) use this explicitly to seed the tenant ctx
-// before calling Stripe-resolver-backed clients so per-tenant credentials
-// can be looked up.
+// WithTenantID returns a derived context carrying tenantID. Middleware sets
+// the same key with its own WithValue call. Background workers (the
+// reconciler, the billing engine's charge loop) call WithTenantID to set the
+// tenant before they call clients backed by the Stripe resolver, so the
+// tenant's own credentials can be looked up.
 func WithTenantID(ctx context.Context, tenantID string) context.Context {
 	return context.WithValue(ctx, tenantIDKey, tenantID)
 }
 
+// KeyID returns the ID of the API key that authenticated the request, or ""
+// when no key did.
 func KeyID(ctx context.Context) string {
 	v, _ := ctx.Value(apiKeyIDKey).(string)
 	return v
 }
 
-// WithKeyID is the setter counterpart to KeyID. Used by adapters
-// outside the auth package (currently `internal/session`) that
-// resolve a credential to a key context themselves.
+// WithKeyID is the setter counterpart to KeyID. Adapters outside the auth
+// package that resolve a credential to a key context themselves call it
+// (currently `internal/session`).
 func WithKeyID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, apiKeyIDKey, id)
 }
@@ -175,40 +182,39 @@ func WithUserID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, userIDKey, id)
 }
 
+// GetKeyType returns the principal's key type in ctx, or "" when there is
+// none.
 func GetKeyType(ctx context.Context) KeyType {
 	v, _ := ctx.Value(keyTypeKey).(KeyType)
 	return v
 }
 
-// WithKeyType lets adapters declare the principal type so auth.Require
-// keeps working off a single ctx key. Called by `internal/session`
-// when a session resolves to its parent key's type.
+// WithKeyType lets adapters declare the principal type, so auth.Require
+// keeps working from a single ctx key. `internal/session` calls it when a
+// session resolves to its parent key's type.
 func WithKeyType(ctx context.Context, kt KeyType) context.Context {
 	return context.WithValue(ctx, keyTypeKey, kt)
 }
 
-// CustomerActorID returns the customer ID a portal-session middleware
-// stamped into ctx, or "" when the request isn't customer-authed.
-// audit.Logger consults this to tag rows with actor_type='customer'
-// when the request originated from the customer-portal surface, so
-// the operator Activity feed renders "by customer" instead of the
-// misleading 'system' fallback.
+// CustomerActorID returns the customer ID that a portal-session middleware
+// stamped into ctx, or "" when the request is not customer-authenticated.
+// audit.Logger reads it to tag rows with actor_type='customer' when the
+// request came from the customer-portal surface. The operator Activity feed
+// then shows "by customer" instead of the misleading 'system' fallback.
 func CustomerActorID(ctx context.Context) string {
 	v, _ := ctx.Value(customerActorKey).(string)
 	return v
 }
 
-// WithCustomerActor stamps a customer ID as the request's actor so downstream
-// services (chiefly the audit logger) record who acted.
+// WithCustomerActor stamps a customer ID as the request's actor, so
+// downstream services (chiefly the audit logger) record who acted.
 //
-// It is LIVE, and load-bearing. An earlier version of this comment said it was
-// "currently unused after the customer-portal removal — retained for a future
-// surface", which was false and dangerous in a specific way: it invited a cleanup
-// pass to delete the ONE mechanism that attributes an action to a customer rather
-// than to "system". It is the whole of ADR-090's customer-actor story — the
-// hosted-invoice Pay click (hostedinvoice/handler.go) and the payment-update link
-// (payment/public_handler.go) both stamp it, and audit.ResolveActor reads it to
-// emit actor_type='customer'.
+// It is in use and needed, so do not remove it as unused. It is the one
+// mechanism that attributes an action to a customer rather than to
+// "system", and the whole of ADR-090's customer-actor story. The
+// hosted-invoice Pay click (hostedinvoice/handler.go) and the payment-update
+// link (payment/public_handler.go) both stamp it. audit.ResolveActor reads
+// it to write actor_type='customer'.
 func WithCustomerActor(ctx context.Context, customerID string) context.Context {
 	return context.WithValue(ctx, customerActorKey, customerID)
 }

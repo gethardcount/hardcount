@@ -1,3 +1,7 @@
+// hardcount-bootstrap runs the database migrations, then creates a tenant
+// with its settings, API keys and owner login, and prints the credentials.
+// Run it again with a different owner email to add another tenant to the
+// same deployment.
 package main
 
 import (
@@ -28,7 +32,7 @@ func main() {
 		fatal("load config: %v", err)
 	}
 
-	// Run migrations first — migrate.Up manages its own short-lived pool.
+	// Run the migrations first. migrate.Up manages its own short-lived pool.
 	if err := migrate.Up(cfg.DB.URL); err != nil {
 		fatal("migrations: %v", err)
 	}
@@ -45,36 +49,38 @@ func main() {
 	bootstrapEmail := strings.TrimSpace(os.Getenv("HARDCOUNT_BOOTSTRAP_EMAIL"))
 	bootstrapPassword := strings.TrimSpace(os.Getenv("HARDCOUNT_BOOTSTRAP_PASSWORD"))
 
-	// Tenant name resolution order:
-	//   1. HARDCOUNT_BOOTSTRAP_TENANT env var — works through `make bootstrap`
-	//      (make swallows positional args and re-interprets them as
-	//      separate targets, so `make bootstrap "Tenant B"` would NOT
-	//      forward "Tenant B" to the binary)
-	//   2. Positional arg(s) — works when invoking the binary directly
-	//      (`go run ./cmd/hardcount-bootstrap "Tenant B"`)
-	//   3. RunBootstrap's default: "Demo Tenant"
+	// The tenant name comes from the first of these that is set:
+	//   1. The HARDCOUNT_BOOTSTRAP_TENANT env var. It works through
+	//      `make bootstrap`. Make takes positional arguments as separate
+	//      targets, so `make bootstrap "Tenant B"` would not pass
+	//      "Tenant B" to the binary.
+	//   2. Positional arguments. They work when the binary runs directly
+	//      (`go run ./cmd/hardcount-bootstrap "Tenant B"`).
+	//   3. RunBootstrap's default, "Demo Tenant".
 	tenantName := strings.TrimSpace(os.Getenv("HARDCOUNT_BOOTSTRAP_TENANT"))
 	if tenantName == "" && len(os.Args) > 1 {
 		tenantName = strings.Join(os.Args[1:], " ")
 	}
 
-	// The CLI is a thin caller of the single bootstrap writer
-	// (tenant.RunBootstrap, ADR-073): one all-or-nothing tx creates
-	// tenant + settings + keys + owner user, guards authoritative under
-	// the bootstrap advisory lock. The CLI does NOT block
-	// additional-tenant creation — Hardcount's model is multi-tenant in the
-	// data layer; pass a different email to spin up a second tenant in
-	// the same deployment (useful for cross-tenant tests, FLOW X1 /
-	// A2-disagreeing-identities, and ahead of any "platform admin" UI).
+	// The CLI is a thin caller of the single bootstrap writer,
+	// tenant.RunBootstrap (ADR-073). One all-or-nothing transaction creates
+	// the tenant, its settings, its keys and the owner user. RunBootstrap's
+	// guards run under the bootstrap advisory lock, which makes them the
+	// authoritative check. The CLI does not block creating more tenants,
+	// because Hardcount is multi-tenant in the data layer. Pass a different
+	// email to add a second tenant to the same deployment. That is useful
+	// for cross-tenant tests, and it stands in for a "platform admin" UI
+	// until one exists.
 	userStore := user.NewPostgresStore(db)
 	result, err := tenant.RunBootstrap(ctx, db, tenant.BootstrapDeps{
 		HashPassword: user.HashPassword,
 		CreateUserTx: userStore.CreateInTx,
-		// Same default dunning policies as the HTTP route (ADR-123).
+		// The same default dunning policies as the HTTP route (ADR-123).
 		// Seeding needs only the store, so no retrier or clock is wired.
 		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedDefaultPoliciesTx,
-		// Same provisioning rows as the HTTP bootstrap route (ADR-090): the
-		// CLI path must not be the one that mints a live key unrecorded.
+		// The same provisioning audit rows as the HTTP bootstrap route
+		// (ADR-090). The CLI must not be the path that mints a live key with
+		// no record.
 		Audit: audit.NewLogger(db),
 	}, tenant.BootstrapOpts{
 		TenantName:      tenantName,
@@ -134,9 +140,9 @@ func suggestFreeEmail(taken string) string {
 	return "tenant-c@hardcount.local"
 }
 
-// printEmailExistsGuidance keeps the CLI's actionable re-run options on
-// the owner-email conflict — the one bootstrap failure a dev hits
-// routinely (re-running `make bootstrap` with the default email).
+// printEmailExistsGuidance prints the ways to re-run the CLI after an
+// owner-email conflict. This is the one bootstrap failure a developer hits
+// routinely: re-running `make bootstrap` with the default email.
 func printEmailExistsGuidance(email string) {
 	if email == "" {
 		email = "admin@hardcount.local"
@@ -148,10 +154,8 @@ func printEmailExistsGuidance(email string) {
 	fmt.Fprintln(os.Stderr, "  2. Create an ADDITIONAL tenant in the same deployment — each tenant")
 	fmt.Fprintln(os.Stderr, "     needs its OWN owner email, so pick one you have not used yet:")
 	fmt.Fprintln(os.Stderr, "")
-	// Suggest an address that differs from the one that just failed. The
-	// example used to be a hardcoded tenant-b@local, so whenever THAT was
-	// the conflicting email the remedy told the operator to re-run the
-	// exact command that had just errored.
+	// Suggest an address that differs from the one that just failed, so the
+	// printed command does not repeat the failure.
 	fmt.Fprintf(os.Stderr, "       make bootstrap HARDCOUNT_BOOTSTRAP_EMAIL=%s \\\n", suggestFreeEmail(email))
 	fmt.Fprintln(os.Stderr, `         HARDCOUNT_BOOTSTRAP_PASSWORD='choose-a-password' \`)
 	fmt.Fprintln(os.Stderr, `         HARDCOUNT_BOOTSTRAP_TENANT='Tenant B'`)

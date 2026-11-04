@@ -6,8 +6,9 @@ import (
 	"strconv"
 )
 
-// Every list route pages the same way: `limit` and `offset` in, `{data,
-// total}` out (List). docs/api/pagination.md is the caller's copy.
+// Every list route pages the same way: `limit` and `offset` in, and
+// `{data, total}` out (List). docs/api/pagination.md describes it for
+// callers.
 const (
 	// DefaultLimit is the page size when the request sends no limit.
 	DefaultLimit = 50
@@ -22,12 +23,12 @@ type Page struct {
 }
 
 // ParsePage reads `limit` and `offset` from the query. A missing limit is
-// DefaultLimit and a missing offset is 0. A limit outside 1 to MaxLimit, a
+// DefaultLimit, and a missing offset is 0. A limit outside 1 to MaxLimit, a
 // negative offset, or a value that is not a whole number is refused with a
-// 422 naming the parameter; it is never clamped. The removed `after` cursor
-// is refused too: ignored, it would answer page 1 to a client asking for the
-// page after one it holds. On false the 422 is written and the handler
-// returns.
+// 422 naming the parameter. It is never clamped. The removed `after` cursor
+// is refused too. If it were ignored, a client asking for the page after
+// one it holds would get page 1. On false, the 422 is written and the
+// handler returns.
 func ParsePage(w http.ResponseWriter, r *http.Request) (Page, bool) {
 	q := r.URL.Query()
 	if _, ok := q["after"]; ok {
@@ -54,9 +55,10 @@ func ParsePage(w http.ResponseWriter, r *http.Request) (Page, bool) {
 	return p, true
 }
 
-// Window returns the page's rows of a list read in full. A route whose list
-// is read whole (one parent's rows, or a small tenant setting) pages it here,
-// so it answers the same shape as a list paged in SQL; total is len(all).
+// Window returns the page's rows of a list read in full. A route that reads
+// its whole list (one parent's rows, or a small tenant setting) pages it
+// here, so it answers in the same shape as a list paged in SQL. Such a
+// route's total is len(all).
 func Window[T any](all []T, p Page) []T {
 	if p.Offset >= len(all) {
 		return []T{}

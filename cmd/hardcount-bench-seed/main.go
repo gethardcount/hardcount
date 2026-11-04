@@ -1,11 +1,11 @@
-// hardcount-bench-seed prepares a database for an ingest benchmark and prints the
-// credentials the load generator needs. It does not generate load.
+// hardcount-bench-seed prepares a database for an ingest benchmark and prints
+// the credentials the load generator needs. It does not generate load.
 //
-// Load generation is k6's job (scripts/bench-rig/ingest.js). This binary exists
-// because the two things k6 cannot do are exactly the two things that need
-// Hardcount's own code: creating the bench tenant/customer/meter with the right
-// livemode partition, and minting an API key whose salt-and-hash format is
-// auth's business rather than a hand-rolled copy that silently stops matching.
+// k6 generates the load (scripts/bench-rig/ingest.js). This binary does the
+// two things k6 cannot do, and both need Hardcount's own code. It creates the
+// bench tenant, customers and meter in the right livemode partition. It also
+// mints an API key through auth, which owns the salt-and-hash format. A
+// hand-rolled copy of that format would stop matching without a word.
 //
 // Usage:
 //
@@ -19,18 +19,20 @@
 //	 "external_customer_id_prefix":"bench-customer-",
 //	 "external_customer_id":"bench-customer-000","customer_id":"hc_cus_bench_000"}
 //
-// BENCH_CUSTOMERS (default 200) customers are created, not one. That number is
-// the difference between a benchmark and a pathological case: with a single
-// customer every event lands on one customer_id, so the resolve cache never
-// misses, the btrees append to one hot edge, and — worst — the responsiveness
-// probe's per-customer usage aggregate reads EVERY row in the table for its one customer,
-// which at 1.1M rows already costs ~180ms on a warm laptop and would report the
-// product as DEGRADED on the AWS rig for a reason no real tenant would hit.
-// Customers are numbered NNN so the load generator can pick one arithmetically.
+// It creates BENCH_CUSTOMERS customers (default 200), not one. With a single
+// customer the run is a pathological case, not a benchmark. Every event lands
+// on one customer_id, so the resolve cache never misses and the btrees append
+// to one hot edge. Worst of all, the responsiveness probe's per-customer
+// usage aggregate reads every row in the table for its one customer. At 1.1M
+// rows that already costs ~180ms on a warm laptop. On the AWS rig the probe
+// would then report the product as degraded, for a reason no real tenant
+// would hit. Customers are numbered NNN, so the load generator can pick one
+// arithmetically.
 //
-// Idempotent — safe to re-run. The fixtures are test-mode (livemode=false),
-// so a key minted here authenticates into the same partition the fixtures
-// live in; minting in the other mode yields a key that sees no bench data.
+// It is idempotent, so it is safe to re-run. The fixtures are test-mode
+// (livemode=false), so a key minted here authenticates into the same
+// partition the fixtures live in. A key minted in the other mode sees no
+// bench data.
 package main
 
 import (
@@ -96,16 +98,17 @@ func main() {
 
 	db := postgres.NewDB(pool, 30*time.Second)
 
-	// BENCH_LIVEMODE selects WHICH ingest path the benchmark measures, and the
-	// default is the production one. Test mode is not merely a label: the
-	// service does an extra per-event test-clock lookup in test mode that live
-	// mode skips by design ("the high-volume production ingest path stays at
-	// zero extra queries" — internal/usage/service.go simNow), so every number
-	// measured in test mode includes a query production never makes. The bench
-	// database is throwaway, so nothing about live mode here touches money.
+	// BENCH_LIVEMODE selects which ingest path the benchmark measures, and
+	// the default is the production one. Test mode is more than a label. In
+	// test mode the service does an extra test-clock lookup per event, which
+	// live mode skips by design ("the high-volume production ingest path
+	// stays at zero extra queries", simNow in internal/usage/service.go). So
+	// every number measured in test mode includes a query production never
+	// makes. The bench database is throwaway, so live mode here touches no
+	// money.
 	live := benchLivemode()
-	// WithLivemode is read by the key-minting path (auth opens a TxTenant). It
-	// does NOT reach the fixture INSERTs — see the note in bootstrapFixtures.
+	// The key-minting path reads WithLivemode (auth opens a TxTenant). It
+	// does not reach the fixture INSERTs: see the note in bootstrapFixtures.
 	ctx := postgres.WithLivemode(context.Background(), live)
 
 	n := benchCustomerCount()
@@ -118,8 +121,9 @@ func main() {
 		"customer_count":              strconv.Itoa(n),
 		"customer_id_prefix":          benchCustomerIDPrefix,
 		"external_customer_id_prefix": benchCustomerExternalPrefix,
-		// The first customer, for callers that only need one (bringup's smoke
-		// test). The INTERNAL id is what /v1/usage-events/aggregate?customer_id= takes.
+		// The first customer, for callers that need only one (bringup's
+		// smoke test). /v1/usage-events/aggregate?customer_id= takes the
+		// internal id, not the external one.
 		"external_customer_id": fmt.Sprintf("%s%03d", benchCustomerExternalPrefix, 0),
 		"customer_id":          fmt.Sprintf("%s%03d", benchCustomerIDPrefix, 0),
 	}
@@ -128,9 +132,10 @@ func main() {
 	}
 }
 
-// bootstrapFixtures ensures the benchmark tenant/customer/meter exist.
-// Idempotent. Uses TxBypass because this is a CLI tool with full DB access;
-// the runtime path sets tenant_id per-request via TxTenant as usual.
+// bootstrapFixtures makes sure the benchmark tenant, customers and meter
+// exist. It is idempotent. It uses TxBypass because this is a CLI tool with
+// full database access. The runtime path sets tenant_id per request with
+// TxTenant, as usual.
 func bootstrapFixtures(ctx context.Context, db *postgres.DB, customers int, live bool) {
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -138,20 +143,18 @@ func bootstrapFixtures(ctx context.Context, db *postgres.DB, customers int, live
 	}
 	defer postgres.Rollback(tx)
 
-	// app.livemode MUST be set on this transaction explicitly.
+	// Set app.livemode on this transaction explicitly.
 	//
 	// `customers` and `meters` carry the same BEFORE INSERT set_livemode
-	// trigger as usage_events: it overwrites whatever the INSERT supplied
-	// with the app.livemode GUC, and refuses the insert when the GUC is unset
-	// (migration 00213). BeginTx sets that GUC only for TxTenant — the
-	// TxBypass branch sets app.bypass_rls and nothing else. So
-	// postgres.WithLivemode on the context is INERT here.
+	// trigger as usage_events. The trigger overwrites whatever livemode the
+	// INSERT supplied with the app.livemode setting, and refuses the insert
+	// when the setting is unset (migration 00213). BeginTx sets that setting
+	// only for TxTenant: the TxBypass branch sets app.bypass_rls and nothing
+	// else. So postgres.WithLivemode on the context has no effect here.
 	//
-	// Before 00213 an unset GUC meant LIVE, and this seeder once wrote its
-	// fixtures live next to a test-mode key; every ingest then answered 422
-	// `customer "bench-customer" not found`. The ON CONFLICT DO UPDATE path
-	// below hid it on a reused database: the trigger is INSERT-only, so a
-	// second run wrote livemode=false and looked fine.
+	// The trigger runs only on INSERT. On a re-run, the ON CONFLICT DO
+	// UPDATE paths below set livemode from their own parameter, so a reused
+	// database can hide a wrong app.livemode that a fresh database shows.
 	mode := "off"
 	if live {
 		mode = "on"
@@ -196,12 +199,13 @@ func bootstrapFixtures(ctx context.Context, db *postgres.DB, customers int, live
 }
 
 // mintBenchAPIKey creates a test-mode secret key scoped to the bench tenant
-// and returns the raw value. Uses the real auth service rather than inserting
-// a row by hand: the salt-and-hash format is auth's business, and a
-// hand-rolled copy here would silently stop matching the day that changes.
+// and returns the raw value. It goes through the real auth service instead
+// of inserting a row by hand. The salt-and-hash format belongs to auth, and a
+// hand-rolled copy here would stop matching without a word on the day that
+// format changes.
 func mintBenchAPIKey(ctx context.Context, db *postgres.DB, live bool) string {
 	svc := auth.NewService(auth.NewPostgresStore(db))
-	// The key MUST be minted in the same mode as the fixtures, or it
+	// Mint the key in the same mode as the fixtures. Otherwise it
 	// authenticates into the other partition and sees no bench data.
 	res, err := svc.CreateKey(postgres.WithLivemode(ctx, live), benchTenant, auth.CreateKeyInput{
 		Name: "hardcount-bench", KeyType: auth.KeyTypeSecret,

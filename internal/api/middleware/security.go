@@ -10,9 +10,9 @@ import (
 	"github.com/gethardcount/hardcount/internal/api/respond"
 )
 
-// SecurityHeaders adds standard security headers to all responses.
-// These are defense-in-depth measures that enterprise security audits expect.
-// appEnv is config.Config.Env.
+// SecurityHeaders adds standard security headers to every response. They are
+// defense in depth, which enterprise security audits expect. appEnv is
+// config.Config.Env.
 func SecurityHeaders(appEnv string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +30,7 @@ func SecurityHeaders(appEnv string) func(http.Handler) http.Handler {
 			// Disable client-side caching for API responses (financial data)
 			w.Header().Set("Cache-Control", "no-store")
 
-			// Referrer policy — don't leak URLs to third parties
+			// Referrer policy: do not leak URLs to third parties
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 
 			next.ServeHTTP(w, r)

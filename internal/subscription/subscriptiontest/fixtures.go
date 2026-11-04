@@ -1,6 +1,6 @@
 // Package subscriptiontest holds test-only fixtures for the subscription
-// domain (the platform/leader/leadertest shape). Nothing here is reachable
-// from production code.
+// domain, in the same shape as platform/leader/leadertest. Nothing here is
+// reachable from production code.
 package subscriptiontest
 
 import (
@@ -11,12 +11,13 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// SetBillingCycle re-stamps a freshly-created subscription's period
-// boundaries, next_billing_at and billing anchor day by raw SQL on the app
-// pool (RLS-scoped to tenantID). Test-only on purpose: production has no
-// unguarded period writer — every closer proves a subscription.PeriodSnapshot
-// in its first statement (ADR-115) — and a fixture that rewinds a sub into
-// "due" has no snapshot to prove.
+// SetBillingCycle re-stamps a newly created subscription's period
+// boundaries, next_billing_at and billing anchor day. It uses raw SQL on
+// the app pool, scoped by RLS to tenantID. It is test-only on purpose.
+// Production has no unguarded period writer: every closer (code that bills
+// or moves a subscription's billing period) proves a
+// subscription.PeriodSnapshot in its first statement (ADR-115). A fixture
+// that rewinds a subscription to "due" has no snapshot to prove.
 func SetBillingCycle(t *testing.T, ctx context.Context, db *postgres.DB, tenantID, subID string, start, end, next time.Time, anchorDay int) {
 	t.Helper()
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
