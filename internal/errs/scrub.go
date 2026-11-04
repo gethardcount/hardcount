@@ -2,32 +2,34 @@ package errs
 
 import "regexp"
 
-// Scrub removes PII from free-text error messages before they're persisted
-// (invoices.last_payment_error, stripe_webhook_events.failure_message) or
-// logged. Scrubbing at the ingress means every downstream surface — DB
-// columns, slog fields, HTTP error bodies — is automatically safe without
-// each callsite having to remember.
+// Scrub removes personal data (PII) from free-text error messages before
+// they are stored (invoices.last_payment_error,
+// stripe_webhook_events.failure_message) or logged. Scrubbing where the text
+// comes in makes every later surface safe (database columns, slog fields,
+// HTTP error bodies), without each call site having to remember.
 //
-// What we redact, and why:
+// What it redacts, and why:
 //
-//   - Card last4 embedded in free text ("ending in 4242") → the last4 is
-//     stored structurally on customer_payment_setups; leaving it inline in
-//     error text turns every error row into a second copy outside the
+//   - A card's last 4 digits in free text ("ending in 4242"). The last4 is
+//     stored as a field on customer_payment_setups. Left inline in error
+//     text, it turns every error row into a second copy, outside the
 //     encryption-at-rest path and outside the operator's access-control
 //     model.
-//   - Raw card-number-like digit runs (13–19 contiguous digits) → PCI.
-//     Should never reach us, but a belt-and-braces redaction costs nothing.
-//   - Email addresses → PII. We store emails on customers/billing_profiles
-//     where access is audited; an email in an error string bypasses that.
+//   - Raw runs of 13 to 19 digits that look like a card number, for PCI.
+//     They should never reach Hardcount, and a second safeguard costs
+//     nothing.
+//   - Email addresses, which are PII. Emails are stored on customers and
+//     billing_profiles, where access is audited. An email in an error
+//     string bypasses that.
 //
-// What we intentionally do NOT redact:
+// What it does not redact, on purpose:
 //
-//   - Stripe object IDs (pi_*, cus_*, pm_*, ch_*, seti_*, in_*) — these
-//     are opaque correlation identifiers, not PII. Operators need them to
-//     trace an incident in the Stripe dashboard. Stripe itself logs them
-//     in every webhook and API response.
-//   - Decline codes ("card_declined", "insufficient_funds") — machine-
-//     readable, no PII, and critical for triage.
+//   - Stripe object IDs (pi_*, cus_*, pm_*, ch_*, seti_*, in_*). These are
+//     opaque correlation identifiers, not PII. Operators need them to trace
+//     an incident in the Stripe dashboard, and Stripe itself logs them in
+//     every webhook and API response.
+//   - Decline codes ("card_declined", "insufficient_funds"). They are
+//     machine-readable, carry no PII and are critical for triage.
 //
 // Scrub is idempotent: Scrub(Scrub(s)) == Scrub(s).
 func Scrub(s string) string {
@@ -40,20 +42,20 @@ func Scrub(s string) string {
 	return s
 }
 
-// reCardLast4 matches "ending in 4242" / "ending 4242" / "card 4242" with
-// the digits captured separately so we preserve the surrounding phrase for
-// operator readability. Case-insensitive; the prefix is kept verbatim.
+// reCardLast4 matches "ending in 4242", "ending 4242" or "card 4242". The
+// digits are captured apart from the phrase, so the phrase stays readable
+// for the operator. It is case-insensitive, and the prefix is kept verbatim.
 var reCardLast4 = regexp.MustCompile(`(?i)((?:ending(?:\s+in)?|card)\s+)\d{4}\b`)
 
-// reCardNumber matches a raw 13–19 digit run that isn't part of a longer
-// digit sequence. Bounded by non-digit (or start/end) to avoid chewing up
-// Stripe IDs that happen to contain digits (pi_3M… etc. — the underscore
-// separates the prefix so this regex won't match them anyway, but the
-// word boundary is the belt to the suspenders).
+// reCardNumber matches a raw run of 13 to 19 digits that is not part of a
+// longer digit run. It is bounded by a non-digit (or the start or end), so
+// it does not eat Stripe IDs that happen to contain digits (pi_3M… and so
+// on). The underscore after the prefix already keeps this regex from
+// matching those IDs, and the word boundary is a second safeguard.
 var reCardNumber = regexp.MustCompile(`\b\d{13,19}\b`)
 
-// reEmail matches RFC-5322-ish addresses. Deliberately simple: we're
-// redacting, not parsing for delivery, so we'd rather over-match than
-// leave anything behind. Anchored by non-word boundaries so "x@y.z"
-// inside a sentence still gets caught.
+// reEmail matches addresses shaped roughly like RFC 5322. It is simple on
+// purpose: it redacts and does not parse for delivery, so matching too much
+// is better than leaving anything behind. It is anchored by non-word
+// boundaries, so "x@y.z" inside a sentence is still caught.
 var reEmail = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)

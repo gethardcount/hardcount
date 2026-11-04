@@ -1,6 +1,7 @@
-// hardcount-docs-run runs the commands of a Markdown page, in order, in one bash
-// shell, and checks that each prints what the page says it prints. CI runs
-// docs/first-invoice.md with it, so the tutorial cannot drift from the API.
+// hardcount-docs-run runs the commands of a Markdown page, in order, in one
+// bash shell, and checks that each prints what the page says it prints. CI
+// runs docs/first-invoice.md with it, so the tutorial cannot drift from the
+// API.
 //
 //	go run ./cmd/hardcount-docs-run docs/first-invoice.md
 //	go run ./cmd/hardcount-docs-run -skip 5a -replace acme-1=acme-2 docs/first-invoice.md
