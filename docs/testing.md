@@ -90,7 +90,9 @@ The rest of the code rules are in the [code standard](dev/code-standard.md).
 - **Change environment variables only with `t.Setenv`,** and don't use
   `t.Parallel` in tests that use `SetupTestDB`, because it clears the tables.
   ([testing: T.Setenv](https://pkg.go.dev/testing#T.Setenv))
-- **Concurrency tests run under `-race` in CI.**
+- **Run a concurrency test under `-race`.** The race detector only sees code
+  that runs, and CI's `-race` run covers only the `-short` unit tests, so run
+  `go test -race -short=false` yourself on a Postgres-backed concurrency test.
   ([Go race detector](https://go.dev/doc/articles/race_detector))
 - **Go test style:** helpers call `t.Helper()` first; table tests name each
   row; failure messages read `Total(x) = 3, want 4`; use `t.Context()`, and
