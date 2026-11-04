@@ -24,8 +24,8 @@ const (
 // TestTenantIDKey returns the context key for tenant ID (for use in tests).
 func TestTenantIDKey() contextKey { return tenantIDKey }
 
-// Middleware validates the request's API key and puts its tenant, key id,
-// key type and mode in the context.
+// Middleware validates the request's API key and puts its tenant context on
+// the request.
 func Middleware(svc *Service) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -107,10 +107,10 @@ func RequireSession() func(http.Handler) http.Handler {
 
 // RequireMethod returns middleware that picks the permission to enforce
 // from the HTTP method. GET, HEAD and OPTIONS check `read`, and POST, PUT,
-// PATCH and DELETE check `write`. A single Require in front of a chi.Mount
-// applies one permission to a subrouter that mixes reads and writes. Left
-// unguarded, a key with read access could then write on every endpoint in
-// the subtree.
+// PATCH and DELETE check `write`. RequireMethod closes a gap: a single
+// Require in front of a chi.Mount applies one permission to a subrouter that
+// mixes reads and writes. Without RequireMethod, a key with read access
+// could write on every endpoint in the subtree.
 //
 // Usage:
 //
@@ -211,7 +211,7 @@ func CustomerActorID(ctx context.Context) string {
 //
 // It is in use and needed, so do not remove it as unused. It is the one
 // mechanism that attributes an action to a customer rather than to
-// "system", and the whole of ADR-090's customer-actor design. The
+// "system", and the whole of ADR-090's customer-actor story. The
 // hosted-invoice Pay click (hostedinvoice/handler.go) and the payment-update
 // link (payment/public_handler.go) both stamp it. audit.ResolveActor reads
 // it to write actor_type='customer'.

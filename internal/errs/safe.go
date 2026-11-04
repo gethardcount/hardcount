@@ -11,9 +11,9 @@ import (
 // operator-safe rendering (ADR-026).
 //
 // An error type implements it when it wraps a message that was categorized
-// upstream and is already curated for the operator, such as a Stripe card
-// decline with its decline_code or a classified tax provider failure. The
-// type then bypasses the default generic sanitizing. SanitizeForOperator
+// upstream and is already curated for the operator. Examples are a Stripe
+// card decline with its decline_code and a classified tax provider failure.
+// The type then bypasses the default generic sanitizing. SanitizeForOperator
 // finds it with errors.As and returns OperatorSafeMessage() instead.
 //
 // Never implement it on an error that includes raw provider strings,
@@ -52,8 +52,8 @@ func genericInternalError(requestID string) string {
 //  2. Otherwise, scan the message for internal-only markers: SQLSTATE
 //     codes, Go file:line frames, panic markers and raw stack traces. If
 //     any is present, return the generic "internal error reference:
-//     REQ-XYZ" message. The full diagnostic stays in slog for support to
-//     trace, which is the caller's job.
+//     REQ-XYZ" message. The caller's job is to log the full diagnostic to
+//     slog, for support to trace.
 //  3. Otherwise, treat the message as operator-safe (Stripe text, domain
 //     validation errors with curated copy and so on). Pass it through after
 //     Scrub redacts personal data (PII).

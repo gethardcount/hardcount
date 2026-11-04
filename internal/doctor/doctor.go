@@ -1,11 +1,11 @@
 // Package doctor is the money-invariant sweep: a read-only check of a
 // Hardcount database for states that no legal writer can produce.
 //
-// It exists because no other gate sees the class of defect it catches. Walks
-// prove flows and CI pins behaviours, but a row that breaks an invariant sits
-// in the data and says nothing. ADR-111 records such a defect, found by one
-// ad-hoc query of this kind months after the rows went bad. This package
-// makes that kind of query permanent.
+// It exists because no other gate sees the class of defect it catches.
+// Manual walk-throughs prove flows and CI pins behaviours, but a row that
+// breaks an invariant sits in the data and says nothing. ADR-111 records
+// such a defect, found by one ad-hoc query of this kind months after the
+// rows went bad. This package makes that kind of query permanent.
 //
 // The one rule (docs/dev/records/product-stability-plan.md): a check ships
 // only as an exact predicate, with zero legal false positives, or it does not
@@ -53,9 +53,9 @@ type Result struct {
 	Duration   time.Duration
 	Checks     int
 	Violations []Violation
-	// Errors are the checks that failed to run (schema drift, a lost
-	// connection). A check that cannot run is itself a finding, and it is
-	// never skipped without a word.
+	// Errors are the checks that failed to run (schema drift, a connection
+	// error). A check that cannot run is itself a finding, and it is never
+	// skipped without a word.
 	Errors []error
 }
 

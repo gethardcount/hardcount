@@ -152,8 +152,9 @@ func bootstrapFixtures(ctx context.Context, db *postgres.DB, customers int, live
 	// only for TxTenant: the TxBypass branch sets app.bypass_rls and nothing
 	// else. So postgres.WithLivemode on the context has no effect here.
 	//
-	// The trigger runs only on INSERT. The ON CONFLICT DO UPDATE paths below
-	// write livemode from their own parameter.
+	// The trigger runs only on INSERT. On a re-run, the ON CONFLICT DO
+	// UPDATE paths below set livemode from their own parameter, so a reused
+	// database can hide a wrong app.livemode that a fresh database shows.
 	mode := "off"
 	if live {
 		mode = "on"
@@ -200,7 +201,7 @@ func bootstrapFixtures(ctx context.Context, db *postgres.DB, customers int, live
 // mintBenchAPIKey creates a test-mode secret key scoped to the bench tenant
 // and returns the raw value. It goes through the real auth service instead
 // of inserting a row by hand. The salt-and-hash format belongs to auth, and a
-// hand-rolled copy here would stop matching, without a word, the day that
+// hand-rolled copy here would stop matching without a word on the day that
 // format changes.
 func mintBenchAPIKey(ctx context.Context, db *postgres.DB, live bool) string {
 	svc := auth.NewService(auth.NewPostgresStore(db))

@@ -35,7 +35,7 @@ func NewHandler(svc *Service) *Handler {
 // SetAuditLogger wires the audit logger, so creating, revoking and rotating
 // an API key writes an audit_log row. Without it, these security-critical
 // key changes do not appear on the operator's Audit Log page, which blocks
-// a SOC 2 audit or a forensic investigation.
+// SOC 2 compliance and forensic work.
 func (h *Handler) SetAuditLogger(a AuditWriter) {
 	h.auditLogger = a
 }

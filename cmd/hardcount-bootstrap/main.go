@@ -64,12 +64,13 @@ func main() {
 
 	// The CLI is a thin caller of the single bootstrap writer,
 	// tenant.RunBootstrap (ADR-073). One all-or-nothing transaction creates
-	// the tenant, its settings, its keys and the owner user. Its guards run
-	// under the bootstrap advisory lock, so their answer holds. The CLI does
-	// not block creating more tenants, because Hardcount is multi-tenant in
-	// the data layer. Pass a different email to add a second tenant to the
-	// same deployment. That is useful for cross-tenant tests, and until there
-	// is a "platform admin" UI.
+	// the tenant, its settings, its keys and the owner user. RunBootstrap's
+	// guards run under the bootstrap advisory lock, which makes them the
+	// authoritative check. The CLI does not block creating more tenants,
+	// because Hardcount is multi-tenant in the data layer. Pass a different
+	// email to add a second tenant to the same deployment. That is useful
+	// for cross-tenant tests, and it stands in for a "platform admin" UI
+	// until one exists.
 	userStore := user.NewPostgresStore(db)
 	result, err := tenant.RunBootstrap(ctx, db, tenant.BootstrapDeps{
 		HashPassword: user.HashPassword,
@@ -140,9 +141,8 @@ func suggestFreeEmail(taken string) string {
 }
 
 // printEmailExistsGuidance prints the ways to re-run the CLI after an
-// owner-email conflict, then exits. This is the one bootstrap failure a
-// developer hits routinely: re-running `make bootstrap` with the default
-// email.
+// owner-email conflict. This is the one bootstrap failure a developer hits
+// routinely: re-running `make bootstrap` with the default email.
 func printEmailExistsGuidance(email string) {
 	if email == "" {
 		email = "admin@hardcount.local"

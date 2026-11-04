@@ -25,13 +25,14 @@ type Config struct {
 	DB      DBConfig
 	Migrate bool
 
-	// RedisURL is REDIS_URL, and it is required in production. Without Redis
-	// the general and hosted-invoice rate limiters fail closed, and every
-	// request they cover gets a 429. A replica with no Redis would start
-	// normally and serve its share (1/N) of traffic that way. So production
-	// refuses to start without a reachable Redis (validateFatal and
-	// cmd/hardcount/main.go). Elsewhere Redis is optional: the limiters fail
-	// open, except the one on /v1/auth, which counts in the process.
+	// RedisURL is REDIS_URL, and it is required in production. In
+	// production, the general and hosted-invoice rate limiters fail closed
+	// without Redis, and every request they cover gets a 429. A replica with
+	// no Redis would start normally and serve its share (1/N) of traffic that
+	// way. So production refuses to start without a reachable Redis
+	// (validateFatal and cmd/hardcount/main.go). Elsewhere Redis is optional:
+	// the limiters fail open, except the one on /v1/auth, which counts in the
+	// process.
 	RedisURL string
 	// TrustProxy is the TRUST_PROXY CIDR list. The router honours forwarded
 	// client addresses only from these. It is required in production. Behind
@@ -219,8 +220,9 @@ func (c Config) validateFatal() error {
 	}
 
 	// Refuse an unknown SMTP_TLS, in every environment and with or without
-	// SMTP_HOST. A value meant as implicit or none, such as tls, must not
-	// fail every send for a reason only a warning gives.
+	// SMTP_HOST. If an unknown value fell back to starttls behind a warning,
+	// a value meant as implicit or none, such as tls, would fail every send,
+	// and only that warning would say why.
 	if _, err := ParseSMTPTLS(os.Getenv("SMTP_TLS")); err != nil {
 		return fmt.Errorf("%w (docs/ops/email-setup.md)", err)
 	}
@@ -243,7 +245,8 @@ func (c Config) validateFatal() error {
 
 	// The bootstrap token mints the owner login and the first live key. A
 	// guessable one lets anyone take over the deployment before it is
-	// bootstrapped. It fails closed, as the encryption key does (ADR-073).
+	// bootstrapped. This check fails closed, as the encryption-key check
+	// does (ADR-073).
 	if c.Env != "local" && c.BootstrapToken != "" && len(c.BootstrapToken) < 16 {
 		return fmt.Errorf("HARDCOUNT_BOOTSTRAP_TOKEN is %d chars — require at least 16 outside local dev (it authorizes owner-credential + live-key creation; generate with: openssl rand -hex 32)", len(c.BootstrapToken))
 	}
@@ -267,8 +270,8 @@ var publicAddressSettings = []string{
 	"HARDCOUNT_API_BASE_URL",
 }
 
-// Validate returns a warning for each common misconfiguration it finds.
-// Load logs them.
+// Validate checks the config for common misconfigurations and returns a
+// warning for each one it finds.
 func (c Config) Validate() []string {
 	var warnings []string
 

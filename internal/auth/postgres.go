@@ -30,7 +30,8 @@ func scanKey(row interface{ Scan(...any) error }) (domain.APIKey, error) {
 	return k, err
 }
 
-// Create inserts key in its tenant's transaction and returns the stored row.
+// Create inserts key in its own transaction, scoped to key.TenantID, and
+// returns the stored row.
 func (s *PostgresStore) Create(ctx context.Context, key domain.APIKey) (domain.APIKey, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, key.TenantID)
 	if err != nil {
