@@ -112,10 +112,11 @@ var removedSections = []struct {
 var recipeKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // parseRate converts a recipe's amount in cents, written as a string, into
-// a decimal. Empty means zero, for a mode that does not use the field. A
-// malformed value, or one outside the limits that a rate sent to the
-// prices API takes (domain.CheckRate), fails the recipe load loudly. It
-// does not price at zero without a word, or fail at install.
+// a decimal. An empty value is read as zero. A mode that does not use the
+// field leaves it empty. A malformed value, or one outside the limits that
+// a rate sent to the prices API takes (domain.CheckRate), fails the recipe
+// load loudly, instead of pricing at zero without a word or failing at
+// install.
 func parseRate(where, field, raw string) (decimal.Decimal, error) {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -280,8 +281,8 @@ func parsePrice(where string, rp rawPrice, meters map[string]struct{}) (domain.R
 	// Labels are strings (ADR-130 §1). An empty key or value, or a nested
 	// one, can never match an event's labels, so the price would never
 	// bill. The vocabulary is open, because operators send their own
-	// labels. Tests check that the built-in catalogs agree with the LiteLLM
-	// mapper.
+	// labels. The LiteLLM mapper's tests check that the built-in catalogs
+	// agree with the mapper.
 	match := make(map[string]string, len(rp.DimensionMatch))
 	for k, v := range rp.DimensionMatch {
 		if strings.TrimSpace(k) == "" {

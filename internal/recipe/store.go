@@ -35,6 +35,6 @@ type Store interface {
 	GetByKeyTx(ctx context.Context, tx *sql.Tx, tenantID, recipeKey string) (domain.RecipeInstance, error)
 
 	// CreateTx inserts a new instance row inside the caller's transaction.
-	// The caller commits or rolls back.
+	// The caller must commit or roll back.
 	CreateTx(ctx context.Context, tx *sql.Tx, inst domain.RecipeInstance) (domain.RecipeInstance, error)
 }

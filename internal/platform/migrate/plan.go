@@ -29,8 +29,8 @@ const (
 	// PlanUnrecorded means there are tables, but goose has not recorded
 	// 180. `hardcount migrate` refuses it (ErrNoMigrationRecord).
 	PlanUnrecorded PlanState = "no migration record"
-	// PlanVelox means a build of Velox made the database. `hardcount
-	// migrate` refuses it (ErrVeloxDatabase).
+	// PlanVelox means a build of Velox made the database.
+	// `hardcount migrate` refuses it (ErrVeloxDatabase).
 	PlanVelox PlanState = "made by Velox"
 )
 

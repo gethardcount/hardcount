@@ -57,8 +57,8 @@ func ParsePage(w http.ResponseWriter, r *http.Request) (Page, bool) {
 
 // Window returns the page's rows of a list read in full. A route that reads
 // its whole list (one parent's rows, or a small tenant setting) pages it
-// here, so it answers in the same shape as a list paged in SQL. Its total
-// is len(all).
+// here, so it answers in the same shape as a list paged in SQL. Such a
+// route's total is len(all).
 func Window[T any](all []T, p Page) []T {
 	if p.Offset >= len(all) {
 		return []T{}

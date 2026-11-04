@@ -136,7 +136,7 @@ func (h *Handler) instantiate(w http.ResponseWriter, r *http.Request) {
 	}
 	// An install writes its audit row inside the service's coordinator
 	// transaction (ADR-090), and that row accounts for the request. An
-	// idempotent re-apply installs nothing and writes no row, because a
+	// idempotent re-apply installs nothing and emits nothing, because a
 	// no-op deserves no record. Service.Instantiate declares that itself,
 	// with audit.MarkSkip on the branch where the badge exists.
 	respond.JSON(w, r, http.StatusCreated, inst)

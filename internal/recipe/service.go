@@ -15,11 +15,12 @@ import (
 
 // PricingWriter is the narrow, transaction-aware part of pricing.Service
 // that recipe.Service needs. It is defined here, so the recipe package owns
-// no cross-domain state and unit tests can drive it with fakes.
+// no cross-domain state, and unit tests can exercise the package with
+// fakes.
 type PricingWriter interface {
 	CreateMeterTx(ctx context.Context, tx *sql.Tx, tenantID string, m domain.Meter) (domain.Meter, error)
 	// GetMeterByEventNameTx reads a meter the install would adopt, on the
-	// install's own transaction and FOR KEY SHARE. So an aggregation PATCH
+	// install's own transaction and FOR KEY SHARE, so an aggregation PATCH
 	// cannot land between the conformance check and the prices that use the
 	// meter (ADR-130 §15).
 	GetMeterByEventNameTx(ctx context.Context, tx *sql.Tx, eventName string) (domain.Meter, error)
@@ -184,8 +185,8 @@ func (s *Service) ListInstances(ctx context.Context, tenantID string) ([]domain.
 // PreviewResult is the wire shape of POST /v1/recipes/{key}/preview.
 // `objects` lists what an install creates: the meters, and each plan with
 // its prices. `warnings` is a slot for non-fatal conditions. It is always
-// empty today, and it stays so the contract is stable when a warning is
-// added.
+// empty today. The field stays in the response, so the contract is stable
+// when a warning is added.
 type PreviewResult struct {
 	Key      string         `json:"key"`
 	Version  string         `json:"version"`
@@ -280,8 +281,8 @@ func (s *Service) Instantiate(
 	// badge (the install record) exists, apply is a no-op that returns the
 	// existing instance unchanged. It writes no audit row, on purpose.
 	// Nothing was installed on this call, so a row would record a change
-	// that never happened, the fabricated record ADR-090 rules out. The
-	// first apply's row is the true record.
+	// that never happened. ADR-090 rules out that class of fabricated
+	// record. The first apply's row is the true record.
 	//
 	// Everything the badge recorded is still present. Plans are ON DELETE
 	// RESTRICT with no hard delete, and meters are shared reference data.
@@ -340,8 +341,8 @@ func (s *Service) Instantiate(
 	}
 
 	// Plan: create a fresh plan, and never adopt an existing plan by code
-	// (ADR-085). The plan is created with its prices, so it cannot bill $0
-	// because a price was left unwired. There is also no question of
+	// (ADR-085). The plan is created with its prices, so a silent $0 bill
+	// from an unwired price cannot happen. There is also no question of
 	// whether an existing plan matches. The operator owns the plan once it
 	// exists, and the recipe never changes or reuses one. On a code
 	// collision, with an earlier recipe's plan or another plan, the new plan
@@ -423,8 +424,8 @@ func (s *Service) Instantiate(
 // answer once the operator starts editing the objects. It mirrors the
 // instance row's created-object ids. Those ids include adopted meters
 // (ADR-085), because apply reconnects to an existing meter instead of
-// making a copy. So metadata holds the objects this apply wired, which is
-// the question an auditor asks.
+// making a copy. So metadata holds the objects this apply wired, which
+// answers the question an auditor asks.
 func (s *Service) emitInstantiated(ctx context.Context, tx *sql.Tx, rendered domain.Recipe, inst domain.RecipeInstance) error {
 	if s.auditLogger == nil {
 		return nil

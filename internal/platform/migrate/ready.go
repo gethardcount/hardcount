@@ -11,10 +11,10 @@ import (
 // binary cannot serve. It reads goose's record the way `hardcount migrate`
 // does, read-only, on the caller's pool. It returns an error when a
 // migration this binary ships is not applied, including migration 180 on
-// an empty database. It returns ErrNoMigrationRecord for tables that goose
-// has no record of, and ErrVeloxDatabase for a database that a build of
-// Velox made. Otherwise the app would fail on any query that touches a new
-// column or table.
+// an empty database. Without that migration, the app would fail on any
+// query that touches a new column or table. It also returns
+// ErrNoMigrationRecord for tables that goose has no record of, and
+// ErrVeloxDatabase for a database that a build of Velox made.
 //
 // Call it at start-up, after Up when RUN_MIGRATIONS_ON_BOOT is on, and
 // before serving. Refusing is safer than serving: the orchestrator

@@ -292,12 +292,12 @@ func isNoTxFile(fsys fs.FS, path string) bool {
 
 // gooseAnnotation reads one line of a migration file the way goose v3.27.0
 // does, in internal/sqlparser, which is not importable. A line that starts
-// with "--" and contains "+goose" is an annotation. Its command is the rest
-// of the line, trimmed, with every "--" and the first "+goose" removed. The
-// command is compared without case. goose refuses an indented annotation
-// line, so it never runs such a file at all, and ok is false for one. The
-// migration lints use this function too, so they and the runtime read a
-// file the same way.
+// with "--" and contains "+goose" is an annotation. Its command is what
+// remains after removing every "--" and the first "+goose", then trimming
+// both ends. The command is compared without case. goose refuses an
+// indented annotation line, so it never runs such a file at all, and ok is
+// false for one. The migration lints use this function too, so they and
+// the runtime read a file the same way.
 func gooseAnnotation(line string) (cmd string, ok bool) {
 	line = strings.TrimRight(line, "\r")
 	if !strings.HasPrefix(line, "--") || !strings.Contains(line, "+goose") {

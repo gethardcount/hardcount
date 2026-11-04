@@ -1,7 +1,7 @@
 // Package timefilter parses the ?from and ?to query parameters, and named
 // variants such as ?date_from and ?date_to, for the operator-facing list
 // and export endpoints. Every endpoint shares one contract, so an operator
-// who learns one endpoint is not caught out by the next.
+// who learns one endpoint can use the next one the same way.
 //
 // It accepts two formats:
 //   - RFC3339 instants, such as "2026-01-01T00:00:00Z". The dashboard sends
@@ -52,9 +52,9 @@ import (
 // endpoints are allowed (see below).
 //
 // fromParam and toParam are usually "from" and "to", but the audit log uses
-// the legacy names "date_from" and "date_to". Pass whichever names the
-// endpoint has always exposed. This helper does not normalize the names,
-// because that would change a URL contract that operators see.
+// the legacy names "date_from" and "date_to". Pass the names the endpoint
+// already exposes. This helper does not normalize the names, because that
+// would change a URL contract that operators see.
 func ParseRange(r *http.Request, fromParam, toParam string) (from, to time.Time, err error) {
 	if v := r.URL.Query().Get(fromParam); v != "" {
 		from, err = parseOne(v, false)

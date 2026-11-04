@@ -146,11 +146,12 @@ func cleanDB(t *testing.T, pool *sql.DB) {
 // record (goose_db_version), in one statement. The table list comes from
 // the catalog at call time.
 //
-// The list is derived, so it cannot go stale. There is no EXCEPTION
-// handler, because an error here is a real error and must surface. A
-// handler such as `EXCEPTION WHEN undefined_table THEN NULL` would swallow
-// the whole TRUNCATE when the list named a dropped table. Cleanup would
-// then do nothing for a whole run, without a word.
+// The list is derived, so it cannot go stale the way a hand-maintained
+// list can. There is no EXCEPTION handler, because an error here is a real
+// error and must surface. With a hand-maintained list, a handler such as
+// `EXCEPTION WHEN undefined_table THEN NULL` would swallow the whole
+// TRUNCATE once the list named a dropped table. Cleanup would then do
+// nothing for a whole run, without a word.
 //
 // The migration record is excluded because truncating it leaves the schema
 // in place with no record. The next process's migrate.Up then refuses the
@@ -184,9 +185,8 @@ func cleanDBErr(pool *sql.DB) error {
 	return err
 }
 
-// CreateTestTenant inserts a tenant through the app connection, with no
-// tenant transaction. The tenants table has no RLS, so the insert works
-// directly.
+// CreateTestTenant inserts a tenant through the app connection, bypassing
+// RLS. The tenants table has no RLS, so the insert works directly.
 func CreateTestTenant(t *testing.T, db *postgres.DB, name string) string {
 	t.Helper()
 
@@ -210,22 +210,22 @@ func envOr(key, fallback string) string {
 	return v
 }
 
-// runMigrations applies pending migrations once per test process, which is
-// one package's test binary. Every SetupTestDB after the first reuses the
-// result. It does not open a migration pool, take goose's advisory lock and
-// check the version again, which would cost ~13 round trips per package.
-// On failure, it drops everything and retries from scratch. That is safe
-// because this is a test-only database. migrate.Up manages its own pool,
-// so the DSN is all it needs.
-//
-// migrateRuns is exported for the harness's own test, which checks that
-// migrations run only once.
+// migrateOnce, migrateErr and migrateRuns hold the one migration run of
+// this test process. migrateRuns is exported for the harness's own test,
+// which checks that migrations run only once.
 var (
 	migrateOnce sync.Once
 	migrateErr  error
 	migrateRuns int
 )
 
+// runMigrations applies pending migrations once per test process, which is
+// one package's test binary. Every SetupTestDB after the first reuses the
+// result. Those later calls do not open a migration pool, take goose's
+// advisory lock or check the version again, which would cost ~13 round
+// trips per package. On failure, it drops everything and retries from
+// scratch. That is safe because this is a test-only database. migrate.Up
+// manages its own pool, so the DSN is all it needs.
 func runMigrations(t *testing.T, adminURL string) {
 	t.Helper()
 	migrateOnce.Do(func() {

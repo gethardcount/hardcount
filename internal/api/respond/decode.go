@@ -74,8 +74,8 @@ func (e *BodyError) Error() string {
 func (e *BodyError) Unwrap() error { return e.Err }
 
 // DecodeStrict decodes the request body into v under the rule above. On a
-// refusal it writes the response and returns false, and the handler then
-// returns.
+// refusal it writes the response and returns false. The handler must
+// return on false.
 func DecodeStrict(w http.ResponseWriter, r *http.Request, v any, opts ...DecodeOption) bool {
 	if err := DecodeBody(r, v, opts...); err != nil {
 		WriteBodyError(w, r, err)
@@ -87,8 +87,8 @@ func DecodeStrict(w http.ResponseWriter, r *http.Request, v any, opts ...DecodeO
 // NoBody is the rule for a route that takes no body. It lists no field, so
 // a body with any field is a 422 naming that field. No body, `{}` and
 // `null` are accepted. Call it before the handler does anything else. On a
-// refusal it writes the response and returns false, and the handler then
-// returns.
+// refusal it writes the response and returns false. The handler must
+// return on false.
 func NoBody(w http.ResponseWriter, r *http.Request) bool {
 	return DecodeStrict(w, r, &struct{}{}, EmptyBodyOK)
 }
@@ -139,8 +139,8 @@ func decodeBody(r *http.Request, v any, rule decodeRule) error {
 }
 
 // DecodeValue applies the rule to one JSON value already read from a body,
-// such as one event of the usage batch. A key that v does not declare, with
-// exactly that spelling and case, is a *BodyError naming it.
+// such as one event of the usage batch. A key that v does not declare with
+// exactly that spelling and case is a *BodyError naming it.
 func DecodeValue(raw json.RawMessage, v any, opts ...DecodeOption) error {
 	var rule decodeRule
 	for _, o := range opts {

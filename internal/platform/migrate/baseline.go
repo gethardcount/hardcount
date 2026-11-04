@@ -29,7 +29,7 @@ var errBaselineDown = errors.New("the baseline (migration 180) cannot be rolled 
 
 // newMigration180 builds migration 180 for one provider. goose runs it
 // inside its session lock and its transaction, and writes row 180 in that
-// same transaction. So a failure leaves nothing behind, and two copies
+// same transaction, so a failure leaves nothing behind and two copies
 // cannot both run it.
 func newMigration180() *goose.Migration {
 	return goose.NewGoMigration(baselineVersion,

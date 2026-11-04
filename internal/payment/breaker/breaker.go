@@ -66,8 +66,8 @@ var ErrOpen = errors.New("stripe circuit breaker open")
 type Countable func(err error) bool
 
 // Config tunes the breaker. The defaults target Stripe's published error
-// rates. At 5 consecutive Unknown failures, an incident is almost certain,
-// not bad luck, and rapid retries only widen the damage.
+// rates. At 5 consecutive Unknown failures, the cause is almost certainly
+// an incident, not bad luck, and rapid retries only widen the damage.
 type Config struct {
 	// FailureThreshold is the number of consecutive Unknown failures that
 	// will open the breaker. Defaults to 5.
@@ -124,10 +124,10 @@ func New(cfg Config) *Breaker {
 			return int(c.ConsecutiveFailures) >= threshold
 		},
 		// With the default IsSuccessful, a nil error is a success and a
-		// non-nil error is a failure. IsExcluded keeps card declines, a
-		// customer problem and not a Stripe problem, out of the failure
-		// count. gobreaker checks IsExcluded before IsSuccessful, so an
-		// excluded error is not counted as a success either.
+		// non-nil error is a failure. IsExcluded keeps card declines out of
+		// the failure count, because a decline is the customer's problem,
+		// not Stripe's. gobreaker checks IsExcluded before IsSuccessful, so
+		// an excluded error is not counted as a success either.
 		IsExcluded: func(err error) bool {
 			if err == nil {
 				return false

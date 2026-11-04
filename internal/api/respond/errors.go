@@ -49,8 +49,8 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 	// code is a stable, domain-specific error code, such as
 	// "invoice_number_taken". When it is set, it goes in the envelope's Code
 	// slot instead of the generic category ("validation_error",
-	// "already_exists"). Integrators switch on the domain code to handle each
-	// case in their own UI.
+	// "already_exists"). Integrators switch on the domain code to give each
+	// case its own user experience.
 	code := errs.Code(err)
 
 	switch {
