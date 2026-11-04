@@ -141,6 +141,9 @@ func TestE2E_OffSessionCharge_BankNeedsCustomerToConfirm(t *testing.T) {
 	// A setup session with no return_url needs the dashboard address; it has
 	// no default.
 	t.Setenv("CUSTOMER_PORTAL_URL", "https://app.needs-confirm.test")
+	// The customer confirms on the hosted invoice page, which takes payment,
+	// and the notice offers to email its link, only with this address set.
+	t.Setenv("HOSTED_INVOICE_BASE_URL", "https://billing.needs-confirm.test")
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
 	defer ts.Close()
 
