@@ -104,6 +104,10 @@ const itemCols = `id, tenant_id, subscription_id, plan_id, quantity, NULLIF(meta
 // Subscription CRUD
 // ---------------------------------------------------------------------------
 
+// Create writes a subscription plus its initial items in one transaction:
+// CreateWithBill with no billFn. sub.Items is required and must be
+// non-empty. The returned subscription is hydrated with the inserted items
+// (including their assigned IDs).
 func (s *PostgresStore) Create(ctx context.Context, tenantID string, sub domain.Subscription) (domain.Subscription, error) {
 	return s.CreateWithBill(ctx, tenantID, sub, nil)
 }
@@ -1342,7 +1346,7 @@ func (s *PostgresStore) activateAfterTrialInTx(ctx context.Context, tx *sql.Tx, 
 	// cancel-at-trial-end committing between a scan's snapshot and this
 	// UPDATE must WIN — activating (and billing) a customer who canceled is
 	// the audit bug this arc exists to fix. Callers route the typed
-	// ErrTrialCancelDue to the dedicated cancel transition.
+	// domain.ErrTrialCancelDue to the dedicated cancel transition.
 	err := scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
 		SET status = 'active',
@@ -1384,7 +1388,7 @@ func (s *PostgresStore) activateAfterTrialInTx(ctx context.Context, tx *sql.Tx, 
 
 // classifyActivationConflict names WHY a trialing→active UPDATE matched no
 // row: gone, already non-trialing, or blocked by a pending cancel schedule
-// (ErrTrialCancelDue — the caller routes to CancelAtTrialEnd).
+// (domain.ErrTrialCancelDue — the caller routes to CancelAtTrialEnd).
 func (s *PostgresStore) classifyActivationConflict(ctx context.Context, tx *sql.Tx, id string) error {
 	var currentStatus string
 	var cancelAt sql.NullTime
@@ -1399,7 +1403,7 @@ func (s *PostgresStore) classifyActivationConflict(ctx context.Context, tx *sql.
 		return err
 	}
 	if currentStatus == "trialing" && (cancelAt.Valid || cancelAtPeriodEnd) {
-		return ErrTrialCancelDue
+		return domain.ErrTrialCancelDue
 	}
 	return errs.InvalidState(fmt.Sprintf("Only a trialing subscription's trial can be ended. This one is %s.", currentStatus))
 }
@@ -1464,7 +1468,7 @@ func (s *PostgresStore) endTrialEarlyInTx(ctx context.Context, tx *sql.Tx, id st
 		// service-level 409 alone is a snapshot check that loses the exact
 		// race it exists to prevent (ScheduleCancel committing in the gap →
 		// active + day-1 invoice + a schedule that now means paid-period
-		// cancel). classifyActivationConflict maps it to ErrTrialCancelDue;
+		// cancel). classifyActivationConflict maps it to domain.ErrTrialCancelDue;
 		// EndTrial translates that to the operator 409.
 		return domain.Subscription{}, s.classifyActivationConflict(ctx, tx, id)
 	}
@@ -2150,7 +2154,7 @@ func (s *PostgresStore) ClearBillingFailure(ctx context.Context, tenantID, id st
 }
 
 // ClosePeriod is the own-tx wrapper of ClosePeriodTx for advance-only callers
-// (the trial-active advance, the tests-only non-atomic swap fallback).
+// (the billing engine's trial-active advance).
 func (s *PostgresStore) ClosePeriod(ctx context.Context, tenantID, id string, expected PeriodSnapshot, periodStart, periodEnd, nextBillingAt time.Time, anchorDay int) error {
 	return s.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
 		return s.ClosePeriodTx(ctx, tx, tenantID, id, expected, periodStart, periodEnd, nextBillingAt, anchorDay)
@@ -2343,15 +2347,6 @@ func (s *PostgresStore) LockForItemChangeTx(ctx context.Context, tx *sql.Tx, _ s
 	return sub, nil
 }
 
-func (s *PostgresStore) ListItems(ctx context.Context, tenantID, subscriptionID string) ([]domain.SubscriptionItem, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer postgres.Rollback(tx)
-	return listItemsTx(ctx, tx, subscriptionID)
-}
-
 func (s *PostgresStore) GetItem(ctx context.Context, tenantID, itemID string) (domain.SubscriptionItem, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2371,6 +2366,7 @@ func (s *PostgresStore) GetItem(ctx context.Context, tenantID, itemID string) (d
 	return item, err
 }
 
+// AddItem is AddItemTx in a transaction of its own.
 func (s *PostgresStore) AddItem(ctx context.Context, tenantID string, item domain.SubscriptionItem) (domain.SubscriptionItem, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2436,6 +2432,7 @@ func (s *PostgresStore) addItemInTx(ctx context.Context, tx *sql.Tx, tenantID st
 	return stored, nil
 }
 
+// UpdateItemQuantity is UpdateItemQuantityTx in a transaction of its own.
 func (s *PostgresStore) UpdateItemQuantity(ctx context.Context, tenantID, itemID string, quantity int64) (domain.SubscriptionItem, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2490,6 +2487,8 @@ func (s *PostgresStore) updateItemQuantityInTx(ctx context.Context, tx *sql.Tx, 
 	return stored, nil
 }
 
+// ApplyItemPlanImmediately is ApplyItemPlanImmediatelyTx in a transaction
+// of its own.
 func (s *PostgresStore) ApplyItemPlanImmediately(ctx context.Context, tenantID, itemID, newPlanID string, changedAt time.Time) (domain.SubscriptionItem, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2564,6 +2563,7 @@ func (s *PostgresStore) applyItemPlanImmediatelyInTx(ctx context.Context, tx *sq
 	return stored, nil
 }
 
+// SetItemPendingPlan is SetItemPendingPlanTx in a transaction of its own.
 func (s *PostgresStore) SetItemPendingPlan(ctx context.Context, tenantID, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2659,6 +2659,11 @@ const duePendingItemsWhere = `subscription_id = $2
 		  AND pending_plan_effective_at IS NOT NULL
 		  AND pending_plan_effective_at <= $1`
 
+// ApplyDuePendingItemPlansAtomic swaps plan_id ← pending_plan_id for every
+// item under the given subscription whose pending change has come due
+// (pending_plan_effective_at <= now). All applicable items are updated in
+// one statement. Returns the post-swap items. Called by the billing engine
+// at the cycle boundary.
 func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, subscriptionID string, now time.Time) ([]domain.SubscriptionItem, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2746,6 +2751,7 @@ func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tena
 	return updated, nil
 }
 
+// RemoveItem is RemoveItemTx in a transaction of its own.
 func (s *PostgresStore) RemoveItem(ctx context.Context, tenantID, itemID string) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -3694,14 +3700,6 @@ func (s *PostgresStore) ListItemChangesInPeriod(ctx context.Context, tenantID, s
 	return out, rows.Err()
 }
 
-// ErrTrialCancelDue / ErrTrialCancelConflict live in domain (the billing
-// engine routes on them without a peer import); aliased here for the
-// package's own callers.
-var (
-	ErrTrialCancelDue      = domain.ErrTrialCancelDue
-	ErrTrialCancelConflict = domain.ErrTrialCancelConflict
-)
-
 // CancelAtTrialEnd is the dedicated trialing→canceled transition (ADR-069):
 // trials are free, so it emits NO invoice, stamps canceled_at = trial_end_at
 // (never the observing site's `now` — the engine path fires up to a full
@@ -3734,7 +3732,7 @@ func (s *PostgresStore) CancelAtTrialEnd(ctx context.Context, tenantID, id strin
 		now, id, observedTrialEnd,
 	), &sub)
 	if err == sql.ErrNoRows {
-		return domain.Subscription{}, ErrTrialCancelConflict
+		return domain.Subscription{}, domain.ErrTrialCancelConflict
 	}
 	if err != nil {
 		return domain.Subscription{}, err

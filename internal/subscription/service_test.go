@@ -38,7 +38,7 @@ func newMemStore() *memStore {
 	}
 }
 
-func (m *memStore) Create(ctx context.Context, tenantID string, s domain.Subscription) (domain.Subscription, error) {
+func (m *memStore) create(ctx context.Context, tenantID string, s domain.Subscription) (domain.Subscription, error) {
 	for _, existing := range m.subs {
 		if existing.TenantID == tenantID && existing.Code == s.Code {
 			return domain.Subscription{}, fmt.Errorf("%w: subscription code %q", errs.ErrAlreadyExists, s.Code)
@@ -67,7 +67,7 @@ func (m *memStore) Create(ctx context.Context, tenantID string, s domain.Subscri
 }
 
 func (m *memStore) CreateWithBill(ctx context.Context, tenantID string, s domain.Subscription, billFn func(tx *sql.Tx, created domain.Subscription) error) (domain.Subscription, error) {
-	created, err := m.Create(ctx, tenantID, s)
+	created, err := m.create(ctx, tenantID, s)
 	if err != nil {
 		return domain.Subscription{}, err
 	}
@@ -161,10 +161,6 @@ func (m *memStore) Update(ctx context.Context, tenantID string, s domain.Subscri
 	return s, nil
 }
 
-func (m *memStore) GetDueBilling(ctx context.Context, _, _ time.Time, _ []string, _ int) ([]domain.Subscription, error) {
-	return nil, nil
-}
-
 // ClosePeriodTx mirrors the store's ADR-115 CAS exactly: the row must still
 // match `expected` (status, period start, watermark) or nothing changes.
 func (m *memStore) ClosePeriodTx(_ context.Context, _ *sql.Tx, tenantID, id string, expected PeriodSnapshot, periodStart, periodEnd, nextBillingAt time.Time, anchorDay int) error {
@@ -183,10 +179,6 @@ func (m *memStore) ClosePeriodTx(_ context.Context, _ *sql.Tx, tenantID, id stri
 	return nil
 }
 
-func (m *memStore) ClosePeriod(ctx context.Context, tenantID, id string, expected PeriodSnapshot, periodStart, periodEnd, nextBillingAt time.Time, anchorDay int) error {
-	return m.ClosePeriodTx(ctx, nil, tenantID, id, expected, periodStart, periodEnd, nextBillingAt, anchorDay)
-}
-
 func snapshotMatches(s domain.Subscription, expected PeriodSnapshot) bool {
 	sameTime := func(a, b *time.Time) bool {
 		if a == nil || b == nil {
@@ -197,7 +189,7 @@ func snapshotMatches(s domain.Subscription, expected PeriodSnapshot) bool {
 	return s.Status == expected.Status && sameTime(s.CurrentBillingPeriodStart, expected.Start) && sameTime(s.NextBillingAt, expected.Next)
 }
 
-func (m *memStore) CancelAtomic(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
+func (m *memStore) cancelAtomic(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	s, ok := m.subs[id]
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
@@ -234,7 +226,7 @@ func (m *memStore) retireLiveOnlyState(id string) domain.Subscription {
 
 func (m *memStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
 	prev, existed := m.subs[id]
-	canceled, err := m.CancelAtomic(ctx, tenantID, id)
+	canceled, err := m.cancelAtomic(ctx, tenantID, id)
 	if err != nil {
 		return domain.Subscription{}, err
 	}
@@ -286,23 +278,6 @@ func (m *memStore) ClearScheduledCancellation(ctx context.Context, tenantID, id 
 	m.subs[id] = s
 	s.Items = m.hydrateItems(id)
 	return s, nil
-}
-
-func (m *memStore) FireScheduledCancellationTx(_ context.Context, _ *sql.Tx, tenantID, id string, expected PeriodSnapshot, at time.Time) (domain.Subscription, error) {
-	s, ok := m.subs[id]
-	if !ok || s.TenantID != tenantID {
-		return domain.Subscription{}, errs.ErrNotFound
-	}
-	if s.Status != domain.SubscriptionActive || !snapshotMatches(s, expected) {
-		return domain.Subscription{}, ErrWatermarkMoved
-	}
-	s.Status = domain.SubscriptionCanceled
-	s.CanceledAt = &at
-	s.CancelAt = nil
-	s.CancelAtPeriodEnd = false
-	s.UpdatedAt = at
-	m.subs[id] = s
-	return m.retireLiveOnlyState(id), nil
 }
 
 func (m *memStore) FireScheduledCancellationWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
@@ -463,7 +438,7 @@ func (m *memStore) ClearPauseCollection(ctx context.Context, tenantID, id string
 	return s, nil
 }
 
-func (m *memStore) ActivateAfterTrial(ctx context.Context, tenantID, id string, at time.Time) (domain.Subscription, error) {
+func (m *memStore) activateAfterTrial(ctx context.Context, tenantID, id string, at time.Time) (domain.Subscription, error) {
 	s, ok := m.subs[id]
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
@@ -510,7 +485,7 @@ func (m *memStore) ActivateDraftWithBill(ctx context.Context, tenantID, id strin
 
 func (m *memStore) ActivateAfterTrialWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error) {
 	prev, existed := m.subs[id]
-	activated, err := m.ActivateAfterTrial(ctx, tenantID, id, at)
+	activated, err := m.activateAfterTrial(ctx, tenantID, id, at)
 	if err != nil {
 		return domain.Subscription{}, err
 	}
@@ -525,7 +500,7 @@ func (m *memStore) ActivateAfterTrialWithBill(ctx context.Context, tenantID, id 
 	return activated, nil
 }
 
-func (m *memStore) EndTrialEarly(ctx context.Context, tenantID, id string, at, periodStart, periodEnd, nextBilling time.Time, anchorDay int) (domain.Subscription, error) {
+func (m *memStore) endTrialEarly(ctx context.Context, tenantID, id string, at, periodStart, periodEnd, nextBilling time.Time, anchorDay int) (domain.Subscription, error) {
 	s, ok := m.subs[id]
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
@@ -555,7 +530,7 @@ func (m *memStore) EndTrialEarly(ctx context.Context, tenantID, id string, at, p
 
 func (m *memStore) EndTrialEarlyWithBill(ctx context.Context, tenantID, id string, at, periodStart, periodEnd, nextBilling time.Time, anchorDay int, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error) {
 	prev, existed := m.subs[id]
-	activated, err := m.EndTrialEarly(ctx, tenantID, id, at, periodStart, periodEnd, nextBilling, anchorDay)
+	activated, err := m.endTrialEarly(ctx, tenantID, id, at, periodStart, periodEnd, nextBilling, anchorDay)
 	if err != nil {
 		return domain.Subscription{}, err
 	}
@@ -696,14 +671,6 @@ func (m *memStore) ExtendTrial(ctx context.Context, tenantID, id string, newTria
 	return s, nil
 }
 
-func (m *memStore) ListItems(ctx context.Context, tenantID, subscriptionID string) ([]domain.SubscriptionItem, error) {
-	s, ok := m.subs[subscriptionID]
-	if !ok || s.TenantID != tenantID {
-		return nil, errs.ErrNotFound
-	}
-	return m.hydrateItems(subscriptionID), nil
-}
-
 // LockForItemChangeTx: the in-memory store has no locks or transactions, so
 // it returns the subscription as Get does. The lock is proven against real
 // Postgres in item_change_race_integration_test.go.
@@ -735,7 +702,9 @@ func (m *memStore) GetItem(ctx context.Context, tenantID, itemID string) (domain
 	return it, nil
 }
 
-func (m *memStore) AddItem(ctx context.Context, tenantID string, item domain.SubscriptionItem) (domain.SubscriptionItem, error) {
+// AddItemTx and the other item *Tx methods ignore the tx: the fake is in
+// memory, and WithTenantTx restores what a failed transaction wrote.
+func (m *memStore) AddItemTx(ctx context.Context, _ *sql.Tx, tenantID string, item domain.SubscriptionItem) (domain.SubscriptionItem, error) {
 	for _, existing := range m.items {
 		if existing.SubscriptionID == item.SubscriptionID && existing.PlanID == item.PlanID {
 			return domain.SubscriptionItem{}, errs.ErrAlreadyExists
@@ -751,13 +720,7 @@ func (m *memStore) AddItem(ctx context.Context, tenantID string, item domain.Sub
 	return item, nil
 }
 
-// AddItemTx mirrors AddItem for tx-aware callers. Fake ignores the tx
-// since it's in-memory.
-func (m *memStore) AddItemTx(ctx context.Context, _ *sql.Tx, tenantID string, item domain.SubscriptionItem) (domain.SubscriptionItem, error) {
-	return m.AddItem(ctx, tenantID, item)
-}
-
-func (m *memStore) UpdateItemQuantity(ctx context.Context, tenantID, itemID string, quantity int64) (domain.SubscriptionItem, error) {
+func (m *memStore) UpdateItemQuantityTx(ctx context.Context, _ *sql.Tx, tenantID, itemID string, quantity int64) (domain.SubscriptionItem, error) {
 	it, ok := m.items[itemID]
 	if !ok || it.TenantID != tenantID {
 		return domain.SubscriptionItem{}, errs.ErrNotFound
@@ -770,29 +733,7 @@ func (m *memStore) UpdateItemQuantity(ctx context.Context, tenantID, itemID stri
 	return it, nil
 }
 
-// Tx-variant stubs — forward to the non-Tx implementations. The fake
-// is in-memory; tx parameter is ignored. Atomic behavior is tested via
-// integration tests against a real DB.
-func (m *memStore) UpdateItemQuantityTx(ctx context.Context, _ *sql.Tx, tenantID, itemID string, quantity int64) (domain.SubscriptionItem, error) {
-	return m.UpdateItemQuantity(ctx, tenantID, itemID, quantity)
-}
-
 func (m *memStore) ApplyItemPlanImmediatelyTx(ctx context.Context, _ *sql.Tx, tenantID, itemID, newPlanID string, changedAt time.Time) (domain.SubscriptionItem, error) {
-	return m.ApplyItemPlanImmediately(ctx, tenantID, itemID, newPlanID, changedAt)
-}
-
-func (m *memStore) RemoveItemTx(ctx context.Context, _ *sql.Tx, tenantID, itemID string) error {
-	return m.RemoveItem(ctx, tenantID, itemID)
-}
-
-// FindMeterConflicts: the in-memory fake reports no conflicts — the
-// double-billing guard's SQL (live-sub join + meter_ids unnest) is proven
-// against real Postgres in meter_overlap_guard_integration_test.go.
-func (m *memStore) FindMeterConflicts(context.Context, string, string, string, []string) ([]MeterConflict, error) {
-	return nil, nil
-}
-
-func (m *memStore) ApplyItemPlanImmediately(ctx context.Context, tenantID, itemID, newPlanID string, changedAt time.Time) (domain.SubscriptionItem, error) {
 	it, ok := m.items[itemID]
 	if !ok || it.TenantID != tenantID {
 		return domain.SubscriptionItem{}, errs.ErrNotFound
@@ -808,7 +749,24 @@ func (m *memStore) ApplyItemPlanImmediately(ctx context.Context, tenantID, itemI
 	return it, nil
 }
 
-func (m *memStore) SetItemPendingPlan(ctx context.Context, tenantID, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error) {
+func (m *memStore) RemoveItemTx(ctx context.Context, _ *sql.Tx, tenantID, itemID string) error {
+	it, ok := m.items[itemID]
+	if !ok || it.TenantID != tenantID {
+		return errs.ErrNotFound
+	}
+	delete(m.items, itemID)
+	m.recordChange(it, "remove", it.PlanID, "", it.Quantity, 0, clock.Now(ctx))
+	return nil
+}
+
+// FindMeterConflicts: the in-memory fake reports no conflicts — the
+// double-billing guard's SQL (live-sub join + meter_ids unnest) is proven
+// against real Postgres in meter_overlap_guard_integration_test.go.
+func (m *memStore) FindMeterConflicts(context.Context, string, string, string, []string) ([]MeterConflict, error) {
+	return nil, nil
+}
+
+func (m *memStore) SetItemPendingPlanTx(ctx context.Context, _ *sql.Tx, tenantID, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error) {
 	it, ok := m.items[itemID]
 	if !ok || it.TenantID != tenantID {
 		return domain.SubscriptionItem{}, errs.ErrNotFound
@@ -818,10 +776,6 @@ func (m *memStore) SetItemPendingPlan(ctx context.Context, tenantID, itemID, pen
 	it.UpdatedAt = clock.Now(ctx)
 	m.items[itemID] = it
 	return it, nil
-}
-
-func (m *memStore) SetItemPendingPlanTx(ctx context.Context, _ *sql.Tx, tenantID, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error) {
-	return m.SetItemPendingPlan(ctx, tenantID, itemID, pendingPlanID, effectiveAt)
 }
 
 func (m *memStore) ClearItemPendingPlan(ctx context.Context, tenantID, itemID string) (domain.SubscriptionItem, error) {
@@ -834,38 +788,6 @@ func (m *memStore) ClearItemPendingPlan(ctx context.Context, tenantID, itemID st
 	it.UpdatedAt = clock.Now(ctx)
 	m.items[itemID] = it
 	return it, nil
-}
-
-func (m *memStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, subscriptionID string, now time.Time) ([]domain.SubscriptionItem, error) {
-	var applied []domain.SubscriptionItem
-	for id, it := range m.items {
-		if it.TenantID != tenantID || it.SubscriptionID != subscriptionID {
-			continue
-		}
-		if it.PendingPlanID == "" || it.PendingPlanEffectiveAt == nil || it.PendingPlanEffectiveAt.After(now) {
-			continue
-		}
-		oldPlan := it.PlanID
-		it.PlanID = it.PendingPlanID
-		it.PlanChangedAt = &now
-		it.PendingPlanID = ""
-		it.PendingPlanEffectiveAt = nil
-		it.UpdatedAt = now
-		m.items[id] = it
-		applied = append(applied, it)
-		m.recordChange(it, "plan", oldPlan, it.PlanID, it.Quantity, it.Quantity, now)
-	}
-	return applied, nil
-}
-
-func (m *memStore) RemoveItem(ctx context.Context, tenantID, itemID string) error {
-	it, ok := m.items[itemID]
-	if !ok || it.TenantID != tenantID {
-		return errs.ErrNotFound
-	}
-	delete(m.items, itemID)
-	m.recordChange(it, "remove", it.PlanID, "", it.Quantity, 0, clock.Now(ctx))
-	return nil
 }
 
 // SetBillingThresholds is a minimal in-memory implementation matching the
@@ -898,14 +820,6 @@ func (m *memStore) ClearBillingThresholds(ctx context.Context, tenantID, id stri
 	return s, nil
 }
 
-// ListWithThresholdsForClock — ADR-029 Phase 3 stub. Narrow service
-// tests don't exercise per-clock threshold scans; the per-clock SQL
-// is verified in postgres integration tests. No-op satisfies the
-// interface contract.
-func (m *memStore) ListWithThresholdsForClock(ctx context.Context, _, _, _ string, _ int) ([]domain.Subscription, error) {
-	return nil, nil
-}
-
 func (m *memStore) ListItemChangesInPeriod(_ context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) ([]domain.SubscriptionItemChange, error) {
 	var out []domain.SubscriptionItemChange
 	for _, c := range m.itemChanges {
@@ -923,21 +837,6 @@ func (m *memStore) ListItemChangesInPeriod(_ context.Context, tenantID, subscrip
 		}
 		return out[i].ID < out[j].ID
 	})
-	return out, nil
-}
-
-func (m *memStore) ListWithThresholds(ctx context.Context, _ bool, _ string, _ int) ([]domain.Subscription, error) {
-	var out []domain.Subscription
-	for _, s := range m.subs {
-		if s.BillingThresholds == nil {
-			continue
-		}
-		if s.Status != domain.SubscriptionActive && s.Status != domain.SubscriptionTrialing {
-			continue
-		}
-		s.Items = m.hydrateItems(s.ID)
-		out = append(out, s)
-	}
 	return out, nil
 }
 
@@ -3746,7 +3645,7 @@ func TestSubMutators_StampSimTimeOnClockPinnedSub(t *testing.T) {
 		// Seed a sub directly via the store so we sidestep Create's
 		// own (correctly-bound) path — the goal is to exercise the
 		// post-create mutators in isolation.
-		sub, err := store.Create(context.Background(), "t1", domain.Subscription{
+		sub, err := store.CreateWithBill(context.Background(), "t1", domain.Subscription{
 			Code:        "sub-pinned",
 			DisplayName: "Pinned",
 			CustomerID:  "cus_pinned",
@@ -3755,7 +3654,7 @@ func TestSubMutators_StampSimTimeOnClockPinnedSub(t *testing.T) {
 			Items: []domain.SubscriptionItem{
 				{PlanID: "pln_1", Quantity: 1},
 			},
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("seed sub: %v", err)
 		}
@@ -3810,7 +3709,7 @@ func TestSubMutators_StampSimTimeOnClockPinnedSub(t *testing.T) {
 	t.Run("CancelPendingItemChange", func(t *testing.T) {
 		svc, sub := newPinned(t, domain.SubscriptionActive)
 		// Schedule a plan change so there's something to cancel.
-		_, err := svc.store.SetItemPendingPlan(context.Background(), "t1", sub.Items[0].ID, "pln_2", frozen.Add(72*time.Hour))
+		_, err := svc.store.SetItemPendingPlanTx(context.Background(), nil, "t1", sub.Items[0].ID, "pln_2", frozen.Add(72*time.Hour))
 		if err != nil {
 			t.Fatalf("seed pending plan: %v", err)
 		}
@@ -3991,7 +3890,7 @@ func TestProcessExpiredPauseCollections(t *testing.T) {
 }
 
 // CancelAtTrialEnd mirrors the store's ADR-069 CAS: trialing + observed
-// trial_end + a due schedule, else ErrTrialCancelConflict. No invoice —
+// trial_end + a due schedule, else domain.ErrTrialCancelConflict. No invoice —
 // callers own emissions.
 func (m *memStore) CancelAtTrialEnd(ctx context.Context, tenantID, id string, observedTrialEnd time.Time) (domain.Subscription, error) {
 	s, ok := m.subs[id]
@@ -4000,7 +3899,7 @@ func (m *memStore) CancelAtTrialEnd(ctx context.Context, tenantID, id string, ob
 	}
 	scheduleDue := s.CancelAtPeriodEnd || (s.CancelAt != nil && s.TrialEndAt != nil && !s.CancelAt.After(*s.TrialEndAt))
 	if s.Status != domain.SubscriptionTrialing || s.TrialEndAt == nil || !s.TrialEndAt.Equal(observedTrialEnd) || !scheduleDue {
-		return domain.Subscription{}, ErrTrialCancelConflict
+		return domain.Subscription{}, domain.ErrTrialCancelConflict
 	}
 	s.Status = domain.SubscriptionCanceled
 	canceledAt := *s.TrialEndAt

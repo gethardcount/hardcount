@@ -101,11 +101,6 @@ type Store interface {
 	// distinct plan currencies (incl. pending swaps) across the customer's
 	// non-terminal subs, excluding excludeSubID ("" = none).
 	CustomerSubPlanCurrencies(ctx context.Context, tenantID, customerID, excludeSubID string) ([]SubPlanCurrency, error)
-	// Create writes a subscription plus its initial items in one transaction.
-	// sub.Items is required and must be non-empty. The returned subscription
-	// is hydrated with the inserted items (including their assigned IDs).
-	Create(ctx context.Context, tenantID string, s domain.Subscription) (domain.Subscription, error)
-
 	// CreateWithBill writes the subscription + items AND runs billFn (the day-1
 	// in_advance invoice insert) in the SAME transaction, so a billing failure
 	// rolls the create back rather than silently dropping the first-period base
@@ -113,13 +108,12 @@ type Store interface {
 	// lost day-1 invoice is a permanent revenue leak). billFn may be nil.
 	CreateWithBill(ctx context.Context, tenantID string, s domain.Subscription, billFn func(tx *sql.Tx, created domain.Subscription) error) (domain.Subscription, error)
 
-	// Get, List, and GetDueBilling hydrate the returned subscriptions with
-	// their current items via a second query. Callers that need the items
-	// should rely on sub.Items directly — a subscription without items is
-	// not a valid state and indicates a hydration bug.
+	// Get and List hydrate the returned subscriptions with their current
+	// items via a second query. Callers that need the items should rely on
+	// sub.Items directly — a subscription without items is not a valid state
+	// and indicates a hydration bug.
 	Get(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 	List(ctx context.Context, filter ListFilter) ([]domain.Subscription, int, error)
-	GetDueBilling(ctx context.Context, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error)
 
 	// ClosePeriodTx is THE period writer (ADR-115): one UPDATE that row-locks
 	// the subscription and proves `expected` (status, period start, watermark)
@@ -129,30 +123,25 @@ type Store interface {
 	// statement of its tx, so nothing derived from a stale snapshot can commit.
 	// 0 rows → ErrWatermarkMoved (ErrNotFound if the row is gone).
 	ClosePeriodTx(ctx context.Context, tx *sql.Tx, tenantID, id string, expected PeriodSnapshot, periodStart, periodEnd, nextBillingAt time.Time, anchorDay int) error
-	// ClosePeriod is the own-tx wrapper for advance-only callers (the
-	// trial-active advance, the tests-only non-atomic swap fallback).
-	ClosePeriod(ctx context.Context, tenantID, id string, expected PeriodSnapshot, periodStart, periodEnd, nextBillingAt time.Time, anchorDay int) error
-
-	// CancelAtomic executes a conditional UPDATE that only transitions
-	// when the row is in an allowed source state. Closes the
-	// read-check-write race where two goroutines observing the same
-	// non-terminal status could each apply a different target state
-	// across two transactions. When the source state does not match, a
-	// re-query distinguishes not-found from a stale-status conflict and
-	// surfaces the current status in the error message.
-	//
-	// Every cancel writer (this, CancelAtomicWithBill, CancelAtTrialEnd and
-	// both FireScheduledCancellation methods) stores and returns the canceled
-	// row with no cancel schedule and no pending plan change on its items
-	// (retireLiveOnlyStateTx). The collection pause stays: it still holds the
-	// subscription's unpaid invoices.
-	CancelAtomic(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 
 	// CancelAtomicWithBill cancels the subscription AND runs billFn (the
 	// final-on-cancel partial-period invoice insert) in the SAME transaction, so
 	// a billing failure rolls the cancel back rather than leaving a canceled sub
 	// with an uninvoiced partial period (a revenue leak — no final-on-cancel
 	// reconciler exists). billFn may be nil.
+	//
+	// Its UPDATE transitions only from an allowed source state, which closes
+	// the read-check-write race where two goroutines observing the same
+	// non-terminal status could each apply a different target state across
+	// two transactions. When the source state does not match, a re-query
+	// distinguishes not-found from a stale-status conflict and surfaces the
+	// current status in the error message.
+	//
+	// Every cancel writer (this, CancelAtTrialEnd, the store's CancelAtomic
+	// and both FireScheduledCancellation methods) stores and returns the
+	// canceled row with no cancel schedule and no pending plan change on its
+	// items (retireLiveOnlyStateTx). The collection pause stays: it still
+	// holds the subscription's unpaid invoices.
 	CancelAtomicWithBill(ctx context.Context, tenantID, id string, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error)
 
 	// ScheduleCancellation persists a future cancel intent. cancelAt is a
@@ -169,22 +158,12 @@ type Store interface {
 	// CancelAtTrialEnd is the dedicated free trialing→canceled transition
 	// (ADR-069): NO invoice, canceled_at = trial_end_at, schedule cleared.
 	// CAS on observed trial_end + a due schedule; conflicts return
-	// ErrTrialCancelConflict (caller re-reads and routes).
+	// domain.ErrTrialCancelConflict (caller re-reads and routes).
 	CancelAtTrialEnd(ctx context.Context, tenantID, id string, observedTrialEnd time.Time) (domain.Subscription, error)
 
 	// ClearScheduledCancellation clears cancel_at and cancel_at_period_end.
 	// A row with neither set returns ErrNoScheduledCancel and is not written.
 	ClearScheduledCancellation(ctx context.Context, tenantID, id string) (domain.Subscription, error)
-
-	// FireScheduledCancellationTx is the terminal cycle close (ADR-115): on
-	// the caller's tx it flips an active sub with a due cancel schedule to
-	// canceled, CAS-ing on `expected` (period start + watermark) as well as
-	// status, seals its intervals at `at` and enqueues subscription.canceled
-	// (canceled_by=schedule). The engine inserts the final invoice on the
-	// same tx. 0 rows → ErrWatermarkMoved for BOTH a moved period and an
-	// already-terminated sub (the closer's snapshot is stale either way, and
-	// it wrote nothing); ErrNotFound if the row is gone.
-	FireScheduledCancellationTx(ctx context.Context, tx *sql.Tx, tenantID, id string, expected PeriodSnapshot, at time.Time) (domain.Subscription, error)
 
 	// FireScheduledCancellationWithBill is the ADR-097 mid-period variant:
 	// flip + billFn (final partial invoice + relief drafts) in ONE tx, CAS
@@ -247,18 +226,6 @@ type Store interface {
 	// subscription.
 	ClearBillingThresholds(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 
-	// ListWithThresholds returns subscriptions in the given livemode partition
-	// that have at least one threshold configured (amount or per-item) and are
-	// in active or trialing status. Used by the threshold scan tick. Result is
-	// hydrated with items + thresholds.
-	ListWithThresholds(ctx context.Context, livemode bool, afterID string, limit int) ([]domain.Subscription, error)
-
-	// ListWithThresholdsForClock is the catchup-path counterpart to
-	// ListWithThresholds. ADR-029 Phase 3: clock-pinned threshold
-	// scans fire only on operator Advance, never on the wall-clock
-	// tick.
-	ListWithThresholdsForClock(ctx context.Context, tenantID, clockID, afterID string, limit int) ([]domain.Subscription, error)
-
 	// ListExpiredTrialsForClock returns subs whose trial_end_at has
 	// elapsed in simulated time but whose status is still 'trialing' —
 	// the trial-expiry catchup scan picks these up at Phase 0.5 and
@@ -297,16 +264,6 @@ type Store interface {
 	// the same window once its paused periods are closed.
 	ListExpiredPauseCollectionsForClock(ctx context.Context, tenantID, clockID string, frozen time.Time, limit int) ([]domain.Subscription, error)
 
-	// ActivateAfterTrial atomically transitions a subscription from
-	// 'trialing' to 'active'. Sets activated_at = `at` if the column is
-	// still NULL (preserves the original activation timestamp on
-	// re-runs). Does NOT touch period boundaries — the caller (the
-	// billing engine's cycle-close path) has already advanced them to
-	// the right cycle. For operator-driven early-EndTrial use
-	// EndTrialEarly which resets the period anchor to the activation
-	// instant.
-	ActivateAfterTrial(ctx context.Context, tenantID, id string, at time.Time) (domain.Subscription, error)
-
 	// ActivateAfterTrialWithBill flips trialing→active AND runs billFn (the day-1
 	// in_advance invoice insert) in the SAME transaction, so a billing failure
 	// rolls the activation back rather than leaving an active sub with no
@@ -322,24 +279,6 @@ type Store interface {
 	// (the revenue-leak class ADR-056 fixed for trial→active). A billFn error
 	// rolls the activation back — never an active sub with a lost invoice.
 	ActivateDraftWithBill(ctx context.Context, tenantID, id string, at, periodStart, periodEnd time.Time, anchorDay int, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error)
-
-	// EndTrialEarly is the operator-driven counterpart to
-	// ActivateAfterTrial. In one atomic UPDATE it: flips status to
-	// 'active', stamps activated_at if currently NULL, truncates
-	// trial_end_at to `at` (historical record: the trial ended early),
-	// and replaces the period anchor with (periodStart, periodEnd,
-	// nextBilling) — the caller computes these via firstPeriodForActivate
-	// so the new period reflects "billing starts now."
-	//
-	// Pre-fix, EndTrial called ActivateAfterTrial and left period
-	// boundaries pointing at the original post-trial anchor — a Dec 5
-	// EndTrial on a sub whose period was Dec 13 → Jan 1 produced no
-	// billing until Jan 1 (8 unbilled days during the bridge from
-	// early-end to original-anchor).
-	//
-	// Returns errs.InvalidState if the row's status is not 'trialing'
-	// at UPDATE time.
-	EndTrialEarly(ctx context.Context, tenantID, id string, at, periodStart, periodEnd, nextBilling time.Time, anchorDay int) (domain.Subscription, error)
 
 	// EndTrialEarlyWithBill flips trialing→active (resetting the period anchor)
 	// AND runs billFn (the day-1 in_advance invoice insert) in the SAME
@@ -392,43 +331,31 @@ type Store interface {
 	// it like one that does.
 	WithTenantTx(ctx context.Context, tenantID string, fn func(tx *sql.Tx) error) error
 
-	// ListItems returns all items for a subscription ordered by created_at.
-	ListItems(ctx context.Context, tenantID, subscriptionID string) ([]domain.SubscriptionItem, error)
-
 	// GetItem returns a single item by ID, scoped to its parent subscription
 	// (callers verify the item belongs to the expected subscription before
 	// mutating it).
 	GetItem(ctx context.Context, tenantID, itemID string) (domain.SubscriptionItem, error)
 
-	// AddItem appends a new item to a subscription. UNIQUE (subscription_id,
-	// plan_id) prevents a second item with the same plan; the constraint
-	// violation surfaces as errs.ErrAlreadyExists.
-	AddItem(ctx context.Context, tenantID string, item domain.SubscriptionItem) (domain.SubscriptionItem, error)
-	// AddItemTx is the in-transaction variant used by the handler's
-	// atomic AddItem-with-proration flow — the caller owns the tx and
-	// composes the item insert with downstream proration writes so a
-	// failure on either side rolls back both. ADR-030 atomic-proration
-	// follow-through (2026-05-29).
+	// AddItemTx appends a new item to a subscription on the caller's tx, so
+	// the caller composes the item insert with downstream proration writes
+	// and a failure on either side rolls back both (ADR-030 atomic-proration
+	// follow-through). UNIQUE (subscription_id, plan_id) prevents a second
+	// item with the same plan; the constraint violation surfaces as
+	// errs.ErrAlreadyExists.
 	AddItemTx(ctx context.Context, tx *sql.Tx, tenantID string, item domain.SubscriptionItem) (domain.SubscriptionItem, error)
 
-	// UpdateItemQuantity mutates only the quantity — plan and pending-change
-	// fields are left untouched. Used for quantity-only PATCH. Returns the
+	// UpdateItemQuantityTx changes only the quantity, on the caller's tx;
+	// plan and pending-change fields are left untouched. Returns the
 	// updated item.
-	UpdateItemQuantity(ctx context.Context, tenantID, itemID string, quantity int64) (domain.SubscriptionItem, error)
-	// UpdateItemQuantityTx is the in-transaction variant — same atomicity
-	// rationale as AddItemTx. ADR-030 atomic-proration follow-through.
 	UpdateItemQuantityTx(ctx context.Context, tx *sql.Tx, tenantID, itemID string, quantity int64) (domain.SubscriptionItem, error)
 
-	// ApplyItemPlanImmediately swaps plan_id on the item and stamps
-	// plan_changed_at. Used for immediate plan changes. Clears any pending
-	// change since the caller just superseded it.
-	ApplyItemPlanImmediately(ctx context.Context, tenantID, itemID, newPlanID string, changedAt time.Time) (domain.SubscriptionItem, error)
-	// ApplyItemPlanImmediatelyTx is the in-transaction variant.
+	// ApplyItemPlanImmediatelyTx swaps plan_id on the item and stamps
+	// plan_changed_at, on the caller's tx. It clears any pending change,
+	// which the caller just superseded.
 	ApplyItemPlanImmediatelyTx(ctx context.Context, tx *sql.Tx, tenantID, itemID, newPlanID string, changedAt time.Time) (domain.SubscriptionItem, error)
 
-	// SetItemPendingPlan schedules a plan change on an item.
-	SetItemPendingPlan(ctx context.Context, tenantID, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error)
-	// SetItemPendingPlanTx is SetItemPendingPlan on the caller's tx.
+	// SetItemPendingPlanTx schedules a plan change on an item, on the
+	// caller's tx.
 	SetItemPendingPlanTx(ctx context.Context, tx *sql.Tx, tenantID, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error)
 
 	// ClearItemPendingPlan removes any scheduled plan change on an item.
@@ -436,21 +363,9 @@ type Store interface {
 	// the unchanged item.
 	ClearItemPendingPlan(ctx context.Context, tenantID, itemID string) (domain.SubscriptionItem, error)
 
-	// ApplyDuePendingItemPlansAtomic swaps plan_id ← pending_plan_id for every
-	// item under the given subscription whose pending change has come due
-	// (pending_plan_effective_at <= now). All applicable items are updated in
-	// one statement. Returns the post-swap items. Called by the billing engine
-	// at the cycle boundary, mirroring the old ApplyPendingPlanAtomic semantics
-	// at item granularity.
-	ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, subscriptionID string, now time.Time) ([]domain.SubscriptionItem, error)
-
-	// RemoveItem deletes a single item. The service layer is responsible for
-	// rejecting removal of the last item on an active subscription (deletion
-	// of the last item would leave a subscription with no priced lines,
-	// which is not a valid state).
-	RemoveItem(ctx context.Context, tenantID, itemID string) error
-	// RemoveItemTx is the in-transaction variant — same atomicity
-	// rationale as AddItemTx.
+	// RemoveItemTx deletes a single item on the caller's tx. The service
+	// layer refuses to remove the last item of an active subscription: a
+	// subscription with no priced lines is not a valid state.
 	RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, itemID string) error
 
 	// FindMeterConflicts returns, for each candidate meter, the live

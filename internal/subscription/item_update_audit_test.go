@@ -80,7 +80,7 @@ func TestHandler_UpdateItem_PlanChangeAuditCarriesSimContext(t *testing.T) {
 	now := time.Now().UTC()
 	ps := now.Add(-15 * 24 * time.Hour)
 	pe := now.Add(15 * 24 * time.Hour)
-	sub, err := store.Create(ctx, tenantID, domain.Subscription{
+	sub, err := store.CreateWithBill(ctx, tenantID, domain.Subscription{
 		Code: "sub-clk", DisplayName: "Clock Sub", CustomerID: "cus_1",
 		Status:                    domain.SubscriptionActive,
 		BillingTime:               domain.BillingTimeCalendar,
@@ -88,7 +88,7 @@ func TestHandler_UpdateItem_PlanChangeAuditCarriesSimContext(t *testing.T) {
 		CurrentBillingPeriodEnd:   &pe,
 		TestClockID:               "tclk_1",
 		Items:                     []domain.SubscriptionItem{{PlanID: "plan_old", Quantity: 1}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed clock-pinned sub: %v", err)
 	}

@@ -2854,7 +2854,7 @@ func (s *Service) EndTrial(ctx context.Context, tenantID, id string) (domain.Sub
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, ErrTrialCancelDue) {
+		if errors.Is(err, domain.ErrTrialCancelDue) {
 			// The SQL backstop caught a schedule that raced past the check
 			// above — same operator answer.
 			return domain.Subscription{}, errs.InvalidState("This subscription is scheduled to cancel. Undo the scheduled cancellation first, then end the trial.")
@@ -2897,7 +2897,7 @@ func (s *Service) cancelTrialAtEnd(ctx context.Context, tenantID string, sub dom
 		return false, nil
 	}
 	canceled, err := s.store.CancelAtTrialEnd(ctx, tenantID, sub.ID, *sub.TrialEndAt)
-	if errors.Is(err, ErrTrialCancelConflict) {
+	if errors.Is(err, domain.ErrTrialCancelConflict) {
 		return false, nil
 	}
 	if err != nil {
@@ -2998,7 +2998,7 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 			return nil
 		})
 		if err != nil {
-			if errors.Is(err, ErrTrialCancelDue) {
+			if errors.Is(err, domain.ErrTrialCancelDue) {
 				// A cancel schedule committed between the snapshot and the
 				// flip — the SQL guard blocked the activation. Route it.
 				fresh, gErr := s.store.Get(bound, tenantID, sub.ID)
@@ -3120,7 +3120,7 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 			return nil
 		})
 		if err != nil {
-			if errors.Is(err, ErrTrialCancelDue) {
+			if errors.Is(err, domain.ErrTrialCancelDue) {
 				// Schedule committed after the snapshot — the SQL guard
 				// blocked the activation. Route to the free cancel.
 				fresh, gErr := s.store.Get(ctx, sub.TenantID, sub.ID)

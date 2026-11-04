@@ -147,7 +147,7 @@ func seedSubWithItem(t *testing.T, store *memStore, tenantID, custID, initialPla
 // instant inside [periodStart, periodEnd] via clock.WithEffectiveNow.
 func seedSubWithItemAt(t *testing.T, store *memStore, tenantID, custID, initialPlan string, periodStart, periodEnd time.Time) (string, string) {
 	t.Helper()
-	sub, err := store.Create(context.Background(), tenantID, domain.Subscription{
+	sub, err := store.CreateWithBill(context.Background(), tenantID, domain.Subscription{
 		Code:        fmt.Sprintf("sub-%d", len(store.subs)+1),
 		DisplayName: "Test Sub", CustomerID: custID,
 		Status:                    domain.SubscriptionActive,
@@ -155,7 +155,7 @@ func seedSubWithItemAt(t *testing.T, store *memStore, tenantID, custID, initialP
 		CurrentBillingPeriodStart: &periodStart,
 		CurrentBillingPeriodEnd:   &periodEnd,
 		Items:                     []domain.SubscriptionItem{{PlanID: initialPlan, Quantity: 1}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed subscription: %v", err)
 	}
@@ -1566,7 +1566,7 @@ func TestHandler_EndTrial_FiresEvent(t *testing.T) {
 	trialEnd := now.Add(14 * 24 * time.Hour)
 	periodStart := now
 	periodEnd := trialEnd.Add(30 * 24 * time.Hour)
-	sub, err := store.Create(ctx, tenantID, domain.Subscription{
+	sub, err := store.CreateWithBill(ctx, tenantID, domain.Subscription{
 		Code: "sub-trial", DisplayName: "Trial Sub", CustomerID: "cus_1",
 		Status:                    domain.SubscriptionTrialing,
 		BillingTime:               domain.BillingTimeCalendar,
@@ -1576,7 +1576,7 @@ func TestHandler_EndTrial_FiresEvent(t *testing.T) {
 		CurrentBillingPeriodStart: &periodStart,
 		CurrentBillingPeriodEnd:   &periodEnd,
 		Items:                     []domain.SubscriptionItem{{PlanID: "plan_pro", Quantity: 1}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1654,7 +1654,7 @@ func TestHandler_ExtendTrial_FiresEvent(t *testing.T) {
 	trialEnd := now.Add(14 * 24 * time.Hour)
 	periodStart := now
 	periodEnd := trialEnd.Add(30 * 24 * time.Hour)
-	sub, err := store.Create(ctx, tenantID, domain.Subscription{
+	sub, err := store.CreateWithBill(ctx, tenantID, domain.Subscription{
 		Code: "sub-trial-ext", DisplayName: "Trial Sub", CustomerID: "cus_1",
 		Status:                    domain.SubscriptionTrialing,
 		BillingTime:               domain.BillingTimeCalendar,
@@ -1664,7 +1664,7 @@ func TestHandler_ExtendTrial_FiresEvent(t *testing.T) {
 		CurrentBillingPeriodStart: &periodStart,
 		CurrentBillingPeriodEnd:   &periodEnd,
 		Items:                     []domain.SubscriptionItem{{PlanID: "plan_pro", Quantity: 1}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1722,7 +1722,7 @@ func TestHandler_ExtendTrial_RejectsShorten(t *testing.T) {
 	trialEnd := now.Add(14 * 24 * time.Hour)
 	periodStart := now
 	periodEnd := trialEnd.Add(30 * 24 * time.Hour)
-	sub, err := store.Create(ctx, tenantID, domain.Subscription{
+	sub, err := store.CreateWithBill(ctx, tenantID, domain.Subscription{
 		Code: "sub-shrink", CustomerID: "cus_1",
 		Status:                    domain.SubscriptionTrialing,
 		BillingTime:               domain.BillingTimeCalendar,
@@ -1731,7 +1731,7 @@ func TestHandler_ExtendTrial_RejectsShorten(t *testing.T) {
 		CurrentBillingPeriodStart: &periodStart,
 		CurrentBillingPeriodEnd:   &periodEnd,
 		Items:                     []domain.SubscriptionItem{{PlanID: "plan_pro", Quantity: 1}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
