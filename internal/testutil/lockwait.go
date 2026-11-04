@@ -18,16 +18,16 @@ const lockWaitTimeout = 15 * time.Second
 // that must queue behind a lock the test holds, and before the test lets that
 // lock go.
 //
-// It replaces a fixed sleep. On a slow runner a sleep can end before the
-// goroutine reaches the lock: the two sides then run one after the other and
-// the test passes without the interleaving it says it proves.
+// Use it instead of a fixed sleep. On a slow runner, a sleep can end before
+// the goroutine reaches the lock. The two sides then run one after the
+// other, and the test passes without the interleaving it says it proves.
 //
-// admin must be able to see other sessions' queries: pass AdminPool(t).
+// admin must be able to see other sessions' queries, so pass AdminPool(t).
 // Postgres keeps only the first track_activity_query_size bytes (1 KiB by
-// default) of a statement in pg_stat_activity, so for a long statement match
+// default) of a statement in pg_stat_activity. For a long statement, match
 // text near its start.
 //
-// If no such backend appears within 15 seconds the test fails with "0 of 1
+// If no such backend appears within 15 seconds, the test fails with "0 of 1
 // backends blocked". That usually means the code under test no longer takes
 // the lock the test is about, or takes a different one first.
 func WaitForLockWaiter(t *testing.T, ctx context.Context, admin *sql.DB, queryLike string) {

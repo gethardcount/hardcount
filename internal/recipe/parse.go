@@ -12,15 +12,15 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
-// rawRecipe is the shape recipes/*.yaml deserializes into. It mirrors the
-// YAML field names; parseRecipe converts it to the canonical domain.Recipe.
-// Keeping the wire form separate keeps domain.Recipe free of YAML tags and
-// lets us evolve the YAML schema without leaking transient parse fields
-// into the rest of the codebase.
+// rawRecipe is the shape recipes/*.yaml decodes into. It mirrors the YAML
+// field names, and parseRecipe converts it to the canonical domain.Recipe.
+// Keeping the YAML form separate keeps YAML tags out of domain.Recipe. It
+// also lets the YAML schema change without leaking parse-only fields into
+// the rest of the codebase.
 //
 // A recipe is catalog only (ADR-130 §15): meters, and plans with their
 // prices. The removed sections are decoded only so parseRecipe can refuse
-// them by name with what replaced them.
+// each by name and say what replaced it.
 type rawRecipe struct {
 	Key         string        `yaml:"key"`
 	Version     string        `yaml:"version"`
@@ -89,8 +89,9 @@ type rawPrice struct {
 type rawTier struct {
 	// UpTo is null (or absent) on the open last tier.
 	UpTo *int64 `yaml:"up_to"`
-	// Per-unit rate, read as a string so fractional sub-cent rates
-	// (e.g. 0.0003 = $3.00/1M tokens) parse losslessly into decimal.Decimal.
+	// UnitAmountCents is the per-unit rate. It is read as a string, so a
+	// fractional sub-cent rate (for example 0.0003, which is $3.00 per 1M
+	// tokens) parses into decimal.Decimal without loss.
 	UnitAmountCents string `yaml:"unit_amount_cents"`
 }
 
@@ -106,15 +107,15 @@ var removedSections = []struct {
 	{"webhook", "a recipe no longer creates a webhook endpoint; add one on the Webhooks page", func(r rawRecipe) bool { return r.Webhook != nil }},
 }
 
-// recipeKeyPattern bounds keys to lowercase identifiers so they can ride
-// through URLs (`/v1/recipes/{key}`) without escaping.
+// recipeKeyPattern limits keys to lowercase identifiers, so they can go in
+// URLs (`/v1/recipes/{key}`) without escaping.
 var recipeKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-// parseRate converts a recipe's string-form amount in cents into a decimal.
-// Empty is treated as zero (a mode that doesn't use the field). A malformed
-// value, or one outside the limits a rate sent to the prices API takes
-// (domain.CheckRate), fails recipe load loudly rather than silently pricing
-// at zero or failing at install.
+// parseRate converts a recipe's amount in cents, written as a string, into
+// a decimal. Empty means zero, for a mode that does not use the field. A
+// malformed value, or one outside the limits that a rate sent to the
+// prices API takes (domain.CheckRate), fails the recipe load loudly. It
+// does not price at zero without a word, or fail at install.
 func parseRate(where, field, raw string) (decimal.Decimal, error) {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -130,16 +131,16 @@ func parseRate(where, field, raw string) (decimal.Decimal, error) {
 	return d, nil
 }
 
-// parseRecipe reads YAML bytes, validates the structural invariants we
-// rely on at runtime, and returns the canonical domain.Recipe. Errors are
-// wrapped with the offending field name so a malformed recipe in CI
-// surfaces the exact line at boot.
+// parseRecipe reads YAML bytes, checks the structural invariants that the
+// runtime relies on, and returns the canonical domain.Recipe. Each error is
+// wrapped with the offending field name, so a malformed recipe in CI shows
+// the exact line at boot.
 func parseRecipe(data []byte) (domain.Recipe, error) {
 	var raw rawRecipe
-	// KnownFields rejects any key the raw structs don't declare. Without it a
-	// typo such as `base_bill_timming` is silently dropped and the field
-	// falls back to its zero value, so the recipe installs a policy its
-	// author did not write.
+	// KnownFields refuses any key the raw structs do not declare. Without
+	// it, a typo such as `base_bill_timming` is dropped without a word, and
+	// the field falls back to its zero value. The recipe would then install
+	// a policy its author did not write.
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&raw); err != nil {
@@ -238,8 +239,9 @@ func parseRecipe(data []byte) (domain.Recipe, error) {
 			if err != nil {
 				return domain.Recipe{}, err
 			}
-			// The tie check the price writer runs (ADR-130 §4), so a recipe
-			// whose prices have no winner fails the load, not every install.
+			// Run the price writer's tie check (ADR-130 §4) here, so a
+			// recipe whose prices have no winner fails the load, not every
+			// install.
 			for j, prev := range plan.Prices {
 				if prev.Meter != price.Meter {
 					continue
@@ -276,9 +278,10 @@ func parsePrice(where string, rp rawPrice, meters map[string]struct{}) (domain.R
 		return domain.RecipePrice{}, fmt.Errorf("%s: meter %q is not one of the recipe's meters", where, rp.Meter)
 	}
 	// Labels are strings (ADR-130 §1). An empty key or value, or a nested
-	// one, can never match an event's labels, so the price would never bill.
-	// The vocabulary is open (operators send their own labels); the built-in
-	// catalogs' agreement with the LiteLLM mapper is checked by its tests.
+	// one, can never match an event's labels, so the price would never
+	// bill. The vocabulary is open, because operators send their own
+	// labels. Tests check that the built-in catalogs agree with the LiteLLM
+	// mapper.
 	match := make(map[string]string, len(rp.DimensionMatch))
 	for k, v := range rp.DimensionMatch {
 		if strings.TrimSpace(k) == "" {
@@ -314,8 +317,8 @@ func parsePrice(where string, rp rawPrice, meters map[string]struct{}) (domain.R
 		}
 		shape.Tiers = append(shape.Tiers, domain.RatingTier{UpTo: t.UpTo, UnitAmountCents: ua})
 	}
-	// The shape check the prices API runs: the mode's fields and only
-	// those, and a tier table that rates.
+	// Run the prices API's shape check: the mode's fields and only those,
+	// and a tier table that rates.
 	if err := domain.CheckPriceShape(shape.Mode, shape.UnitAmountCents, shape.Tiers, shape.PackageSize, shape.PackageAmountCents); err != nil {
 		return domain.RecipePrice{}, fmt.Errorf("%s: %w", where, err)
 	}

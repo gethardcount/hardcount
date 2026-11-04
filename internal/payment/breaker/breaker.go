@@ -1,18 +1,19 @@
 // Package breaker provides a global circuit breaker around Stripe API
 // calls, built on sony/gobreaker/v2. Stripe is a single external
-// dependency; when it's unhealthy (5xx, timeout, connection reset), every
-// caller should back off together so we don't pile on during an incident.
+// dependency. When it is unhealthy (5xx, timeout, connection reset), every
+// caller should back off together, so Hardcount does not pile on during an
+// incident.
 //
-// Only "unknown" outcomes (5xx, timeout, connection reset — i.e. the
-// Stripe-side problem category) count as failures. Card declines,
-// validation errors, and breaker-rejected calls are excluded from breaker
-// accounting so a batch of expired cards doesn't trip the breaker.
+// Only "unknown" outcomes count as failures: a 5xx, a timeout or a
+// connection reset, the problems on Stripe's side. Card declines,
+// validation errors and calls the breaker rejected are left out of its
+// counts, so a batch of expired cards does not trip the breaker.
 //
-// Per-tenant isolation is not provided here — if one tenant's Stripe
-// account is consistently 5xx-ing, that's a rare case we can split off
-// later. The operational complexity of per-tenant breakers (state machine
-// per tenant, metric cardinality, admin endpoints) isn't worth paying for
-// a scenario that hasn't shown up in production.
+// The breaker does not isolate tenants. One tenant's Stripe account that
+// keeps answering 5xx is a rare case, which can be split off later if it
+// happens. Per-tenant breakers cost a state machine per tenant, metric
+// cardinality and admin endpoints. That is not worth paying for a case
+// that has not shown up in production.
 package breaker
 
 import (
@@ -24,7 +25,7 @@ import (
 	gb "github.com/sony/gobreaker/v2"
 )
 
-// State is a human-readable breaker state; emitted as a metric label.
+// State is a human-readable breaker state. It is emitted as a metric label.
 type State string
 
 const (
@@ -45,29 +46,28 @@ func fromGB(s gb.State) State {
 	return StateClosed
 }
 
-// ErrOpen is returned when the breaker is open (or half-open and at its
-// probe limit). Callers should treat this as a transient, retryable
-// failure — the Stripe call never happened, so don't mark the invoice
-// failed and don't tick the dunning attempt count.
+// ErrOpen is returned when the breaker is open, or half-open and at its
+// probe limit. Callers should treat it as a transient, retryable failure.
+// The Stripe call never happened, so do not mark the invoice failed, and do
+// not count it as a dunning attempt (a payment retry).
 //
-// A single sentinel unifies gobreaker's ErrOpenState and ErrTooManyRequests
-// for our callers, since the two conditions are operationally identical:
-// "breaker is protecting Stripe right now, try later."
+// One sentinel stands for both of gobreaker's ErrOpenState and
+// ErrTooManyRequests, because in practice the two mean the same thing: "the
+// breaker is protecting Stripe right now, try later."
 var ErrOpen = errors.New("stripe circuit breaker open")
 
 // Countable reports whether an error returned from a Stripe call should
 // count as a breaker failure. The canonical implementation in package
-// payment returns true for PaymentError.Unknown (5xx/timeout) and false
+// payment returns true for PaymentError.Unknown (5xx, timeout), and false
 // for card declines and validation errors.
 //
-// Implementations must NOT return true for nil — a nil error is always
-// success and gobreaker handles that itself.
+// An implementation must never return true for nil. A nil error is always
+// a success, and gobreaker handles that itself.
 type Countable func(err error) bool
 
-// Config tunes the breaker. Defaults target Stripe's published error
-// rates: at 5 consecutive Unknown failures, we're almost certainly looking
-// at an incident, not bad luck, and rapid retries only worsen the blast
-// radius.
+// Config tunes the breaker. The defaults target Stripe's published error
+// rates. At 5 consecutive Unknown failures, an incident is almost certain,
+// not bad luck, and rapid retries only widen the damage.
 type Config struct {
 	// FailureThreshold is the number of consecutive Unknown failures that
 	// will open the breaker. Defaults to 5.
@@ -76,9 +76,9 @@ type Config struct {
 	// Defaults to 30s.
 	Cooldown time.Duration
 	// Interval clears the internal Counts periodically in the closed state,
-	// so isolated failures spaced far apart don't accumulate toward the
-	// threshold. 0 disables (counts persist until a success resets them).
-	// Defaults to 60s.
+	// so isolated failures spaced far apart do not add up toward the
+	// threshold. 0 turns this off, and the counts then last until a success
+	// resets them. Defaults to 60s.
 	Interval time.Duration
 	// Countable classifies errors returned from Stripe. Required.
 	Countable Countable
@@ -92,7 +92,7 @@ type Breaker struct {
 	mu sync.Mutex
 }
 
-// New constructs a Breaker. cfg.Countable is required; zero values for
+// New constructs a Breaker. cfg.Countable is required. Zero values in the
 // other fields are replaced with defaults.
 func New(cfg Config) *Breaker {
 	if cfg.FailureThreshold <= 0 {
@@ -105,9 +105,9 @@ func New(cfg Config) *Breaker {
 		cfg.Interval = 60 * time.Second
 	}
 	if cfg.Countable == nil {
-		// Safer default: treat every error as a failure. Production wiring
-		// always supplies a real classifier — this default exists only to
-		// avoid a nil deref if someone forgets.
+		// The safer default treats every error as a failure. Production
+		// wiring always supplies a real classifier. This default exists
+		// only to avoid a nil dereference if someone forgets.
 		cfg.Countable = func(err error) bool { return err != nil }
 	}
 
@@ -123,11 +123,11 @@ func New(cfg Config) *Breaker {
 		ReadyToTrip: func(c gb.Counts) bool {
 			return int(c.ConsecutiveFailures) >= threshold
 		},
-		// IsSuccessful: nil errors → success; non-nil errors → failure.
-		// IsExcluded rescues card declines (customer problem, not Stripe
-		// problem) from being counted as failures at all. gobreaker checks
-		// IsExcluded *before* IsSuccessful, so excluded errors also aren't
-		// counted as successes — they're neither.
+		// With the default IsSuccessful, a nil error is a success and a
+		// non-nil error is a failure. IsExcluded keeps card declines, a
+		// customer problem and not a Stripe problem, out of the failure
+		// count. gobreaker checks IsExcluded before IsSuccessful, so an
+		// excluded error is not counted as a success either.
 		IsExcluded: func(err error) bool {
 			if err == nil {
 				return false
@@ -144,10 +144,10 @@ func New(cfg Config) *Breaker {
 	return &Breaker{cb: cb}
 }
 
-// Execute runs fn under the breaker. Returns ErrOpen if the breaker is
-// rejecting; otherwise returns fn's (any, error). Only errors where
-// cfg.Countable returns true count toward the breaker's failure counter —
-// card declines return an error but are excluded from accounting.
+// Execute runs fn under the breaker. It returns ErrOpen if the breaker is
+// rejecting calls, and otherwise fn's (any, error). Only an error for which
+// cfg.Countable returns true counts toward the breaker's failure count. A
+// card decline returns an error but is left out of the count.
 func (b *Breaker) Execute(ctx context.Context, fn func(context.Context) (any, error)) (any, error) {
 	result, err := b.cb.Execute(func() (any, error) {
 		return fn(ctx)
@@ -158,9 +158,9 @@ func (b *Breaker) Execute(ctx context.Context, fn func(context.Context) (any, er
 	return result, err
 }
 
-// State returns the current breaker state. Intended for metrics; do NOT
-// gate calls on this (races with concurrent Execute) — always call
-// Execute and handle ErrOpen.
+// State returns the current breaker state, for metrics. Do not gate calls
+// on it, because it races with a concurrent Execute. Always call Execute
+// and handle ErrOpen.
 func (b *Breaker) State() State {
 	b.mu.Lock()
 	defer b.mu.Unlock()

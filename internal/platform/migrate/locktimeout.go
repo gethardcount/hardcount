@@ -15,8 +15,8 @@ import (
 const LockTimeoutEnv = "MIGRATION_LOCK_TIMEOUT"
 
 // DefaultLockTimeout is how long a migration waits for a lock when
-// LockTimeoutEnv is unset. Long enough to get past ordinary short
-// transactions, short enough that queued app queries recover quickly.
+// LockTimeoutEnv is unset. It is long enough to get past ordinary short
+// transactions, and short enough that queued app queries recover quickly.
 const DefaultLockTimeout = 5 * time.Second
 
 // lockTimeout reads LockTimeoutEnv. "0" means no limit (Postgres'

@@ -31,18 +31,18 @@ import (
 //go:embed sql
 var sqlFS embed.FS
 
-// versionTable is goose's record. Schema-qualified, because goose writes
-// its row in the migration's own transaction, and the baseline sets an
-// empty search_path for that transaction.
+// versionTable is goose's record. It is schema-qualified, because goose
+// writes its row in the migration's own transaction, and the baseline sets
+// an empty search_path for that transaction.
 const versionTable = "public.goose_db_version"
 
-// How long a command waits for another process's migration lock: goose
+// How long a command waits for another process's migration lock. goose
 // polls pg_try_advisory_lock every lockWaitPeriod seconds, lockWaitPolls
-// times: 30 minutes. Polling, not a
-// blocking pg_advisory_lock: a blocked lock statement holds a snapshot,
-// and an index build CONCURRENTLY in the other process waits for every
-// older snapshot, so the two would wait on each other (ADR-125, E3).
-// Tests shorten it.
+// times, which is 30 minutes. It polls instead of blocking in
+// pg_advisory_lock, because a blocked lock statement holds a snapshot. An
+// index build CONCURRENTLY in the other process waits for every older
+// snapshot, so the two would wait on each other (ADR-125, E3). Tests
+// shorten the wait.
 var (
 	lockWaitPeriod uint64 = 5
 	lockWaitPolls  uint64 = 360
@@ -64,20 +64,20 @@ func migrationFiles() fs.FS {
 // openPool opens a pool of one connection for one command. The caller
 // closes it before returning.
 //
-// One connection is enough: goose runs every file on the connection that
+// One connection is enough. goose runs every file on the connection that
 // holds its lock, and a Go migration in a transaction (migration 180) uses
 // that same connection. A Go migration without a transaction would need a
-// second one; goose refuses those when the pool has one connection, so such
-// a file fails loudly instead of waiting forever.
+// second connection. goose refuses such a migration when the pool has one
+// connection, so the file fails loudly instead of waiting forever.
 //
 // Every session carries lock_timeout from MIGRATION_LOCK_TIMEOUT (#987), so
 // a migration that cannot get a table lock stops instead of queueing every
 // app query on that table behind it. statement_timeout is left alone: a
 // migration that holds its locks should finish.
 //
-// Closing the pool matters: an index-build file that fails leaves
-// lock_timeout = 0 on its session (its RESET never ran), and the next
-// command must not reuse that session.
+// Closing the pool matters. An index-build file that fails leaves
+// lock_timeout = 0 on its session, because its RESET never ran, and the
+// next command must not reuse that session.
 func openPool(dsn string) (*sql.DB, error) {
 	timeout, err := lockTimeout()
 	if err != nil {
@@ -103,8 +103,9 @@ func openPool(dsn string) (*sql.DB, error) {
 }
 
 // newProvider builds the goose provider for one command. locked adds the
-// session locker; ReadPlan and CheckSchemaReady only list the sources and
-// never call the provider's database methods.
+// session locker. ReadPlan and CheckSchemaReady build theirs without it:
+// they only list the sources and never call the provider's database
+// methods.
 func newProvider(db *sql.DB, fsys fs.FS, locked bool) (*goose.Provider, error) {
 	opts := []goose.ProviderOption{
 		goose.WithTableName(versionTable),
@@ -122,15 +123,15 @@ func newProvider(db *sql.DB, fsys fs.FS, locked bool) (*goose.Provider, error) {
 }
 
 // migrationSession wraps goose's session locker. goose runs every
-// migration of a command on the connection it locks, so this is also where
-// that session is set up:
+// migration of a command on the connection it locks, so the locker is also
+// where that session is set up:
 //
 //   - search_path is public. The baseline names every object public.x, so
-//     a later file that says CREATE TABLE x must put x in public too, not
-//     in a schema the admin user's search_path lists first (its own
-//     schema, under Postgres's default "$user", public), where hardcount_app
-//     would not find it. The pool is closed after the command, so the
-//     setting goes with it.
+//     a later file that says CREATE TABLE x must put x in public too.
+//     Otherwise x lands in a schema that the admin user's search_path lists
+//     first (its own schema, under Postgres's default "$user", public),
+//     where hardcount_app would not find it. The pool is closed after the
+//     command, so the setting goes with it.
 //   - goose's "failed to acquire lock" becomes a LockWaitError. goose
 //     wraps the locker's error with %w, so errors.As finds it.
 type migrationSession struct{ lock.SessionLocker }
@@ -148,11 +149,11 @@ func (m migrationSession) SessionLock(ctx context.Context, conn *sql.Conn) error
 }
 
 // Up applies every pending migration with a pool of its own, closed on
-// return. The caller's app pool is untouched; only the DSN is needed.
+// return. The caller's app pool is untouched. Only the DSN is needed.
 //
-// Several processes may call Up at once (RUN_MIGRATIONS_ON_BOOT on several
-// copies): they take turns on goose's lock, and each applies only what is
-// still missing.
+// Several processes may call Up at once, as with RUN_MIGRATIONS_ON_BOOT on
+// several copies. They take turns on goose's lock, and each applies only
+// what is still missing.
 func Up(dsn string) error {
 	return up(context.Background(), dsn, migrationFiles())
 }
@@ -164,7 +165,8 @@ type UpSummary struct {
 	Version int64
 }
 
-// UpReport is Up, also saying what it did, for `hardcount migrate` to print.
+// UpReport is Up that also reports what it did, for `hardcount migrate` to
+// print.
 func UpReport(dsn string) (UpSummary, error) {
 	return upReport(context.Background(), dsn, migrationFiles())
 }
@@ -186,7 +188,8 @@ func upReport(ctx context.Context, dsn string, fsys fs.FS) (UpSummary, error) {
 	if err != nil {
 		return UpSummary{}, fmt.Errorf("read migration state: %w", err)
 	}
-	// Before the provider runs: goose creates goose_db_version first thing.
+	// Decide before the provider runs, because goose creates
+	// goose_db_version first thing.
 	switch decide(st) {
 	case actRefuse:
 		return UpSummary{}, ErrNoMigrationRecord
@@ -215,9 +218,10 @@ func upReport(ctx context.Context, dsn string, fsys fs.FS) (UpSummary, error) {
 		return UpSummary{Applied: len(results)}, upError(err, fsys, st, results)
 	}
 	if len(results) == 0 {
-		// Read again: another copy may have applied everything while this
-		// one waited for the lock, after st was read. Through the store, not
-		// the provider's GetDBVersion, which takes the migration lock again.
+		// Read the version again. Another copy may have applied everything
+		// after st was read, while this one waited for the lock. Read it
+		// through the store, not the provider's GetDBVersion, which takes
+		// the migration lock again.
 		store, err := versionStore()
 		if err != nil {
 			return UpSummary{}, err
@@ -272,7 +276,7 @@ func sourceName(s *goose.Source) string {
 }
 
 // isNoTxFile reports whether goose runs a migration file without a
-// transaction, the mark of an index build.
+// transaction, which marks an index build.
 func isNoTxFile(fsys fs.FS, path string) bool {
 	body, err := fs.ReadFile(fsys, path)
 	if err != nil {
@@ -287,12 +291,13 @@ func isNoTxFile(fsys fs.FS, path string) bool {
 }
 
 // gooseAnnotation reads one line of a migration file the way goose v3.27.0
-// does (internal/sqlparser, which is not importable): a line that starts
-// with "--" and contains "+goose" is an annotation, and with every "--" and
-// the first "+goose" removed, the trimmed rest is its command, compared
-// without case. goose refuses an indented annotation line, so it never runs
-// such a file at all; ok is false for one. The migration lints use this
-// too, so they and the runtime read a file the same way.
+// does, in internal/sqlparser, which is not importable. A line that starts
+// with "--" and contains "+goose" is an annotation. Its command is the rest
+// of the line, trimmed, with every "--" and the first "+goose" removed. The
+// command is compared without case. goose refuses an indented annotation
+// line, so it never runs such a file at all, and ok is false for one. The
+// migration lints use this function too, so they and the runtime read a
+// file the same way.
 func gooseAnnotation(line string) (cmd string, ok bool) {
 	line = strings.TrimRight(line, "\r")
 	if !strings.HasPrefix(line, "--") || !strings.Contains(line, "+goose") {

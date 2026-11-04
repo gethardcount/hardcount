@@ -13,14 +13,15 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 )
 
-// Handler exposes the recipes HTTP surface. The handler is thin: it
-// decodes path/body params, calls Service, and translates errors via
-// respond.FromError. All business logic lives in Service so handlers
+// Handler serves the recipes HTTP routes. It is thin: it decodes path and
+// body parameters, calls Service, and translates errors with
+// respond.FromError. All business logic lives in Service, so the handlers
 // stay safe to refactor.
 type Handler struct {
 	svc *Service
 }
 
+// NewHandler returns a Handler that serves svc.
 func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
@@ -34,11 +35,12 @@ func NewHandler(svc *Service) *Handler {
 //	POST   /{key}/instantiate          — idempotent apply under one tx
 //	GET    /instances                  — list installed recipes for tenant
 //
-// There is no uninstall: a recipe is an instantiation event, and the objects
-// it creates are owned by the operator (plans carry live subs; the catalog is
-// shared reference data) — there is nothing an uninstall could safely retract
-// (ADR-085). To retire the generated plan, archive it; the badge stays as a
-// truthful record of what was applied and at which version.
+// There is no uninstall. A recipe is an instantiation event, and the
+// objects it creates belong to the operator: plans carry live
+// subscriptions, and the catalog is shared reference data. So there is
+// nothing an uninstall could safely take back (ADR-085). To retire the
+// generated plan, archive it. The badge stays as a true record of what was
+// applied, and at which version.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Get("/", h.list)
@@ -80,23 +82,22 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, rec)
 }
 
-// PreviewRequest is the POST /preview body. Overrides is open-ended JSON
-// (the recipe's overridable schema constrains values); the service
-// validates against the recipe before rendering.
+// PreviewRequest is the POST /preview body. Overrides is open-ended JSON,
+// and the recipe's overridable schema limits its values. The service
+// validates it against the recipe before rendering.
 type PreviewRequest struct {
 	Overrides map[string]any `json:"overrides"`
 }
 
 func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
-	// Read-only: renders the recipe with overrides and writes nothing. MarkSkip
-	// DECLARES that — "this 2xx mutated nothing" — so the coverage detector does
-	// not report a preview as an uncovered mutation. (It used to opt out of a
-	// catch-all middleware that would have invented a "Created recipe" row; that
-	// middleware is gone (ADR-090), but the declaration is still required: the
-	// route is exempt(non_mutating_preview) in the registry, so the detector
-	// already skips it. MarkSkip is kept as the LOCAL declaration the registry
-	// note cites — the two agree, and if the exemption is ever lifted this call is
-	// what keeps the route from reporting as an uncovered mutation.)
+	// Read-only: this renders the recipe with overrides and writes nothing.
+	// MarkSkip declares that this 2xx changed nothing, so the audit-coverage
+	// detector does not report a preview as an uncovered mutation. The
+	// route is also exempt(non_mutating_preview) in the registry, so the
+	// detector already skips it. The declaration is still required: it is
+	// the local declaration that the registry note cites, and the two agree.
+	// If the exemption is ever lifted, this call keeps the route from being
+	// reported as an uncovered mutation.
 	audit.MarkSkip(r.Context())
 
 	key := chi.URLParam(r, "key")
@@ -113,8 +114,8 @@ func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
 }
 
 // InstantiateRequest is the POST /instantiate body. Apply is idempotent
-// (ADR-085): re-posting an already-installed recipe returns the existing
-// instance, so there is no force/overwrite knob.
+// (ADR-085). Posting an installed recipe again returns the existing
+// instance, so there is no force or overwrite option.
 type InstantiateRequest struct {
 	Overrides map[string]any `json:"overrides"`
 }
@@ -133,10 +134,11 @@ func (h *Handler) instantiate(w http.ResponseWriter, r *http.Request) {
 		respond.FromError(w, r, err, "recipe")
 		return
 	}
-	// An install emitted its audit row inside the service's coordinator tx
-	// (ADR-090), which accounts for the request. An idempotent re-apply installs
-	// nothing, emits nothing, and declares that itself (Service.Instantiate →
-	// audit.MarkSkip on the badge-exists branch) — a no-op deserves no record.
+	// An install writes its audit row inside the service's coordinator
+	// transaction (ADR-090), and that row accounts for the request. An
+	// idempotent re-apply installs nothing and writes no row, because a
+	// no-op deserves no record. Service.Instantiate declares that itself,
+	// with audit.MarkSkip on the branch where the badge exists.
 	respond.JSON(w, r, http.StatusCreated, inst)
 }
 

@@ -14,22 +14,22 @@ import (
 	kjson "sigs.k8s.io/json"
 )
 
-// The one rule for a request body Hardcount defines (every route but the
-// Stripe and Postmark webhooks and the LiteLLM callback, whose senders add
-// fields when they like):
+// One rule covers every request body that Hardcount defines. The exceptions
+// are the Stripe and Postmark webhooks and the LiteLLM callback, whose
+// senders add fields when they like. The rule:
 //
-//   - the body is one JSON value; anything else is a 400 "invalid JSON body";
-//   - a key the request type does not declare, at any depth, is a 422 with
-//     param set to the key; a key matches its field exactly, in its case;
-//   - a key the server sets (ReadOnly) is a 422 with param set to the key;
-//   - a route that takes no body refuses one with any key (NoBody).
+//   - The body is one JSON value. Anything else is a 400 "invalid JSON body".
+//   - A key the request type does not declare, at any depth, is a 422 with
+//     param set to the key. A key matches its field exactly, in its case.
+//   - A key the server sets (ReadOnly) is a 422 with param set to the key.
+//   - A route that takes no body refuses a body with any key (NoBody).
 //
-// encoding/json drops unknown keys silently: `trial_period_days` instead of
-// `trial_days` created an active, charged subscription with a 201, and a
-// PATCH with a misspelled field answered 200 and changed nothing. The
-// refusal is a 422, not a 400, because the idempotency middleware caches a
-// 400: a corrected retry under the same Idempotency-Key would get the
-// refusal replayed.
+// encoding/json drops unknown keys without a word. Without this rule,
+// `trial_period_days` instead of `trial_days` would create an active,
+// charged subscription with a 201. A PATCH with a misspelled field would
+// answer 200 and change nothing. The refusal is a 422, not a 400, because
+// the idempotency middleware caches a 400. A corrected retry under the same
+// Idempotency-Key would then get the refusal replayed.
 
 // DecodeOption changes what DecodeStrict and DecodeBody accept.
 type DecodeOption func(*decodeRule)
@@ -39,19 +39,20 @@ type decodeRule struct {
 	readOnly []string
 }
 
-// EmptyBodyOK lets a route whose body is optional take no body at all (or
-// only whitespace, or `null`): v keeps the values it had. A body that is
-// there follows the rule.
+// EmptyBodyOK lets a route whose body is optional take no body at all, only
+// whitespace, or `null`. v then keeps the values it had. A body that is
+// present follows the rule.
 func EmptyBodyOK(r *decodeRule) { r.emptyOK = true }
 
-// ReadOnly refuses top-level keys the request type declares but the server
-// sets, for a route that decodes the type it returns (id, tenant_id,
-// created_at). Without it they were accepted and ignored.
+// ReadOnly refuses top-level keys that the request type declares but the
+// server sets (id, tenant_id, created_at). It is for a route that decodes
+// the type it returns. Without this option, those keys are accepted and
+// ignored.
 func ReadOnly(keys ...string) DecodeOption {
 	return func(r *decodeRule) { r.readOnly = append(r.readOnly, keys...) }
 }
 
-// BodyError is why DecodeBody refused a body. Field is the refused key; it
+// BodyError says why DecodeBody refused a body. Field is the refused key. It
 // is empty when the body is not valid JSON for the type.
 type BodyError struct {
 	Field    string
@@ -72,8 +73,9 @@ func (e *BodyError) Error() string {
 
 func (e *BodyError) Unwrap() error { return e.Err }
 
-// DecodeStrict decodes the request body into v under the rule above. It
-// writes the refusal and returns false; the handler returns on false.
+// DecodeStrict decodes the request body into v under the rule above. On a
+// refusal it writes the response and returns false, and the handler then
+// returns.
 func DecodeStrict(w http.ResponseWriter, r *http.Request, v any, opts ...DecodeOption) bool {
 	if err := DecodeBody(r, v, opts...); err != nil {
 		WriteBodyError(w, r, err)
@@ -82,17 +84,18 @@ func DecodeStrict(w http.ResponseWriter, r *http.Request, v any, opts ...DecodeO
 	return true
 }
 
-// NoBody is the rule for a route that takes no body: it lists no field, so
-// a body with any field is a 422 naming it. No body, `{}` and `null` are
-// fine. Call it before the handler does anything else; it writes the
-// refusal and returns false, and the handler returns on false.
+// NoBody is the rule for a route that takes no body. It lists no field, so
+// a body with any field is a 422 naming that field. No body, `{}` and
+// `null` are accepted. Call it before the handler does anything else. On a
+// refusal it writes the response and returns false, and the handler then
+// returns.
 func NoBody(w http.ResponseWriter, r *http.Request) bool {
 	return DecodeStrict(w, r, &struct{}{}, EmptyBodyOK)
 }
 
 // DecodeBody is DecodeStrict for a handler that answers some refusals its
-// own way (the usage batch's 413). It returns a *BodyError; pass anything
-// it does not handle to WriteBodyError.
+// own way, such as the usage batch's 413. It returns a *BodyError. Pass any
+// error the handler does not answer itself to WriteBodyError.
 func DecodeBody(r *http.Request, v any, opts ...DecodeOption) error {
 	var rule decodeRule
 	for _, o := range opts {
@@ -101,8 +104,8 @@ func DecodeBody(r *http.Request, v any, opts ...DecodeOption) error {
 	return decodeBody(r, v, rule)
 }
 
-// WriteBodyError writes the response for a DecodeBody error: 422 naming the
-// field for a refused key, 400 "invalid JSON body" otherwise.
+// WriteBodyError writes the response for a DecodeBody error: a 422 naming
+// the field for a refused key, otherwise a 400 "invalid JSON body".
 func WriteBodyError(w http.ResponseWriter, r *http.Request, err error) {
 	var be *BodyError
 	if errors.As(err, &be) && be.Field != "" {
@@ -135,9 +138,9 @@ func decodeBody(r *http.Request, v any, rule decodeRule) error {
 	return decodeValue(raw, v, rule)
 }
 
-// DecodeValue is the rule for one JSON value already read from a body, such
-// as one event of the usage batch: a key v does not declare, in any case but
-// its own, is a *BodyError naming it.
+// DecodeValue applies the rule to one JSON value already read from a body,
+// such as one event of the usage batch. A key that v does not declare, with
+// exactly that spelling and case, is a *BodyError naming it.
 func DecodeValue(raw json.RawMessage, v any, opts ...DecodeOption) error {
 	var rule decodeRule
 	for _, o := range opts {
@@ -173,10 +176,10 @@ func decodeValue(raw json.RawMessage, v any, rule decodeRule) error {
 		return &BodyError{Err: err}
 	}
 	// encoding/json matches a key to a field without regard to case, so
-	// {"Email": ...} set email; the reference lists one spelling.
-	// sigs.k8s.io/json (Kubernetes' strict decoder) matches exactly. It only
-	// checks here: it reads whole numbers in an `any` as int64, so v keeps
-	// the encoding/json decode above.
+	// {"Email": ...} sets email, but the reference lists one spelling.
+	// sigs.k8s.io/json, Kubernetes' strict decoder, matches exactly. Here it
+	// only checks the keys. It reads whole numbers in an `any` as int64, so
+	// v keeps the encoding/json decode above.
 	if key := inexactKey(raw, v); key != "" {
 		return &BodyError{Field: key}
 	}
@@ -196,7 +199,8 @@ func inexactKey(raw json.RawMessage, v any) string {
 	if !errors.As(strictErrs[0], &fe) {
 		return ""
 	}
-	// FieldPath is items[0].Name; param is the key, as for an unknown one.
+	// FieldPath looks like items[0].Name. Param is the key itself (Name), as
+	// for an unknown key.
 	path := fe.FieldPath()
 	return path[strings.LastIndexAny(path, ".]")+1:]
 }

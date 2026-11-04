@@ -10,11 +10,11 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
-// renderRecipe applies overrides to every template-bearing string in r and
-// returns a copy with all `{{ .X }}` substitutions resolved. v1 supports
-// pure substitution only — no conditionals, no loops, no functions. The
-// override map is built by overlaying caller-provided overrides on top of
-// the recipe's declared defaults.
+// renderRecipe applies overrides to every template-bearing string in r,
+// and returns a copy with all `{{ .X }}` substitutions resolved. v1
+// supports plain substitution only: no conditionals, no loops and no
+// functions. The override map lays the caller's overrides over the
+// recipe's declared defaults.
 func renderRecipe(r domain.Recipe, overrides map[string]any) (domain.Recipe, error) {
 	merged, err := mergeOverrides(r, overrides)
 	if err != nil {
@@ -69,10 +69,10 @@ func renderRecipe(r domain.Recipe, overrides map[string]any) (domain.Recipe, err
 }
 
 // mergeOverrides validates each caller-supplied override against the
-// recipe's `overridable` declarations and returns a complete map (defaults
-// for keys the caller omitted, validated values for keys it supplied).
-// Unknown override keys are an error: silent ignores would mask
-// dashboard-side typos.
+// recipe's `overridable` declarations. It returns a complete map: defaults
+// for the keys the caller left out, and validated values for the keys it
+// sent. An unknown override key is an error, because ignoring it without a
+// word would hide a typo made in the dashboard.
 func mergeOverrides(r domain.Recipe, overrides map[string]any) (map[string]any, error) {
 	allowed := make(map[string]domain.RecipeOverride, len(r.Overridable))
 	for _, ov := range r.Overridable {
@@ -134,7 +134,8 @@ func validateOverrideValue(ov domain.RecipeOverride, v any) error {
 	case "int":
 		switch v.(type) {
 		case int, int32, int64, float64:
-			// JSON unmarshal yields float64 for numbers; accept and let the consumer cast.
+			// JSON decoding gives float64 for numbers. Accept it, and let the
+			// consumer convert it.
 		default:
 			return fmt.Errorf("override %q must be int, got %T", ov.Key, v)
 		}
@@ -142,14 +143,14 @@ func validateOverrideValue(ov domain.RecipeOverride, v any) error {
 	return nil
 }
 
-// templateRefPattern matches `{{ .X }}` references — used to validate at
-// recipe load time that every template variable resolves to a declared
-// override key. Loose matcher: tolerates whitespace and dotted form.
+// templateRefPattern matches `{{ .X }}` references. Recipe load uses it to
+// check that every template variable names a declared override key. It is
+// a loose matcher that allows whitespace and the dotted form.
 var templateRefPattern = regexp.MustCompile(`\{\{\s*\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}`)
 
-// validateTemplateReferences scans every template-bearing field in r and
-// asserts that each `{{ .X }}` reference matches a declared override key.
-// Catches typos at boot rather than at first instantiation.
+// validateTemplateReferences scans every template-bearing field in r, and
+// checks that each `{{ .X }}` reference matches a declared override key. It
+// catches typos at boot, not at the first install.
 func validateTemplateReferences(r domain.Recipe, allowed map[string]struct{}) error {
 	check := func(s, where string) error {
 		for _, m := range templateRefPattern.FindAllStringSubmatch(s, -1) {
