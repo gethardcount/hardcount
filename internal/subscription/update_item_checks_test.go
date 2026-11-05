@@ -112,7 +112,7 @@ func TestUpdateItem_BothEntryPointsCheckAlike(t *testing.T) {
 // read has to run before it.
 func TestUpdateItem_UnknownNewPlanAnswersOnNewPlanID(t *testing.T) {
 	now := time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC)
-	ctx := context.WithValue(context.Background(), auth.TestTenantIDKey(), "t1")
+	ctx := auth.WithTenantID(context.Background(), "t1")
 	plans := &fakePlanReader{plans: map[string]domain.Plan{
 		"p_a": {ID: "p_a", BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInAdvance, BaseAmountCents: 1000, Currency: "USD"},
 		"p_b": {ID: "p_b", BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInAdvance, BaseAmountCents: 2000, Currency: "USD"},
