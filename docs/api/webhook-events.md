@@ -54,7 +54,7 @@ invoice, just after this event
 Under Stripe Tax, `tax_transaction_id` can be recorded after this event;
 `GET /v1/invoices/{id}` shows it.
 
-**Also in `data`:** nothing.
+**Always sent.** **Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -180,7 +180,7 @@ Someone recorded a payment made outside Hardcount, such as a bank transfer
 or a cheque. `recovered_from` is the status the invoice was paid from:
 `finalized` or `uncollectible`.
 
-**Also in `data`:** `recovered_from`.
+**Always sent.** **Also in `data`:** `recovered_from`.
 
 <details>
 <summary>Example message</summary>
@@ -242,7 +242,7 @@ or a cheque. `recovered_from` is the status the invoice was paid from:
 
 An invoice was written off as bad debt.
 
-**Also in `data`:** nothing.
+**Always sent.** **Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -302,10 +302,10 @@ An invoice was written off as bad debt.
 ### `invoice.voided`
 
 An invoice was voided. Under Stripe Tax, Hardcount reverses the invoice's
-tax after it sends this event; `GET /v1/invoices/{id}` shows
-`tax_reversed_at` once that is done.
+tax just after the void is saved, so the invoice in this event has no
+`tax_reversed_at`; `GET /v1/invoices/{id}` shows it once that is done.
 
-**Also in `data`:** nothing.
+**Always sent.** **Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>

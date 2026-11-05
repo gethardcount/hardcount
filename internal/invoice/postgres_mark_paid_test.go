@@ -237,7 +237,7 @@ func TestMarkPaymentFailed_EnqueuesPaymentFailedInTx(t *testing.T) {
 		store := invoice.NewPostgresStore(db)
 		rec := &recordingOutbox{}
 		store.SetOutboxEnqueuer(rec)
-		invID := seedFinalizedInvoice(t, db, store, ctx, tenantID)
+		invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 
 		// First failure for pi_a → one payment.failed enqueued in the same tx.
 		if _, first, err := store.MarkPaymentFailedReportingTransition(ctx, tenantID, invID, failureReport("pi_a", "card declined"), nil); err != nil || !first.FirstNotice {
@@ -282,7 +282,7 @@ func TestMarkPaymentFailed_EnqueuesPaymentFailedInTx(t *testing.T) {
 		tenantID := testutil.CreateTestTenant(t, db, "MarkFailed InTx Rollback")
 		store := invoice.NewPostgresStore(db)
 		store.SetOutboxEnqueuer(&failingOutbox{failOn: domain.EventPaymentFailed})
-		invID := seedFinalizedInvoice(t, db, store, ctx, tenantID)
+		invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 
 		if _, _, err := store.MarkPaymentFailedReportingTransition(ctx, tenantID, invID, failureReport("pi_x", "declined"), nil); err == nil {
 			t.Fatal("a failed in-tx enqueue must surface an error")
@@ -324,7 +324,9 @@ func (f *failingOutbox) Enqueue(_ context.Context, _ *sql.Tx, _, eventType strin
 }
 
 // seedFinalizedInvoice seeds a finalized, tax-ok invoice with non-zero amounts.
-func seedFinalizedInvoice(t *testing.T, db *postgres.DB, store *invoice.PostgresStore, ctx context.Context, tenantID string) string {
+// It finalizes through a store with no outbox, so seeding queues no
+// invoice.finalized for a test that records the events of the step it tests.
+func seedFinalizedInvoice(t *testing.T, db *postgres.DB, ctx context.Context, tenantID string) string {
 	t.Helper()
 	invID := seedDraftInvoice(t, db, tenantID)
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -338,7 +340,7 @@ func seedFinalizedInvoice(t *testing.T, db *postgres.DB, store *invoice.Postgres
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit seed tx: %v", err)
 	}
-	if _, err := store.UpdateStatus(ctx, tenantID, invID, domain.InvoiceFinalized); err != nil {
+	if _, err := invoice.NewPostgresStore(db).UpdateStatus(ctx, tenantID, invID, domain.InvoiceFinalized); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
 	return invID
@@ -360,7 +362,7 @@ func TestMarkPaidCardSettlement_EnqueuesPaymentSucceededInTx(t *testing.T) {
 		store := invoice.NewPostgresStore(db)
 		rec := &recordingOutbox{}
 		store.SetOutboxEnqueuer(rec)
-		invID := seedFinalizedInvoice(t, db, store, ctx, tenantID)
+		invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 
 		_, transitioned, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_card", now, nil)
 		if err != nil {
@@ -392,7 +394,7 @@ func TestMarkPaidCardSettlement_EnqueuesPaymentSucceededInTx(t *testing.T) {
 		store := invoice.NewPostgresStore(db)
 		rec := &recordingOutbox{}
 		store.SetOutboxEnqueuer(rec)
-		invID := seedFinalizedInvoice(t, db, store, ctx, tenantID)
+		invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 
 		if _, _, err := store.MarkPaidReportingTransition(ctx, tenantID, invID, "pi_noncard", now); err != nil {
 			t.Fatalf("MarkPaidReportingTransition: %v", err)
@@ -414,7 +416,7 @@ func TestMarkPaidCardSettlement_RollsBackPaidFlipIfEventEnqueueFails(t *testing.
 	tenantID := testutil.CreateTestTenant(t, db, "MarkPaid Card Rollback")
 	store := invoice.NewPostgresStore(db)
 	store.SetOutboxEnqueuer(&failingOutbox{failOn: domain.EventPaymentSucceeded})
-	invID := seedFinalizedInvoice(t, db, store, ctx, tenantID)
+	invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 	now := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	if _, _, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_card", now, nil); err == nil {
@@ -447,25 +449,7 @@ func TestMarkPaid_FiresInvoicePaidOnceOnTransition(t *testing.T) {
 	rec := &recordingOutbox{}
 	store.SetOutboxEnqueuer(rec)
 	tenantID := testutil.CreateTestTenant(t, db, "MarkPaid InvoicePaid Event")
-	invID := seedDraftInvoice(t, db, tenantID)
-
-	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		t.Fatalf("begin seed tx: %v", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE invoices
-		    SET subtotal_cents = 1000, total_amount_cents = 1000,
-		        amount_due_cents = 1000, tax_status = 'ok'
-		  WHERE id = $1`, invID); err != nil {
-		t.Fatalf("seed amounts: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit seed tx: %v", err)
-	}
-	if _, err := store.UpdateStatus(ctx, tenantID, invID, domain.InvoiceFinalized); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
+	invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 
 	now := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 
