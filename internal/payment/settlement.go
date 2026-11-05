@@ -36,9 +36,10 @@ const (
 // enqueue the receipt email.
 //
 // Idempotent and safe to call from any entry point (ADR-049 discover-then-
-// settle): MarkPaid is a no-op on an already-paid invoice, and the card-stamp /
-// event / receipt steps are best-effort (log-only) so a duplicate call — e.g.
-// the webhook arriving after the reconciler already settled — does not fail.
+// settle): MarkPaid is a no-op on an already-paid invoice, and the receipt,
+// the anomaly events and the card stamp are best-effort (log-only) so a
+// duplicate call — e.g. the webhook arriving after the reconciler already
+// settled — does not fail.
 //
 // This is the consolidated implementation of what handlePaymentSucceeded did
 // inline (ADR-049 Phase 1); the webhook handler now resolves the invoice and
@@ -106,8 +107,9 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 	// (re-read sees paid); a truly CONCURRENT redelivery of the same charge
 	// slips past it because both readers saw `processing`. The
 	// SELECT … FOR UPDATE serializes those two, and exactly one gets
-	// transitioned=true — the once-only gate for both the in-tx events and the
-	// post-commit best-effort side-effects below (receipt email, card stamp).
+	// transitioned=true — the once-only gate for both the in-tx events and
+	// receipt, and the post-commit best-effort side-effects below (dunning
+	// resolve, card stamp).
 	// Detach from the caller's cancellation BEFORE the settle tx, not after
 	// it. Since ADR-040's amendment the receipt rides that tx, so the unit
 	// that must survive a client disconnect now STARTS at the transition — a
@@ -149,45 +151,21 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 			"invoice_id", inv.ID, "payment_intent_id", paymentIntentID, "source", source)
 		return nil
 	}
-	// The settle tx committed. Detach the post-commit side-effect block from
-	// the caller's cancellation: this ctx is usually a webhook REQUEST ctx,
-	// and a client disconnect / server drain mid-block would kill the
-	// remaining enqueues even though the payment is already booked — no
 
-	// DURABILITY TIERING. The consistency-critical events — invoice.paid AND
-	// payment.succeeded — are BOTH enqueued INSIDE
-	// MarkPaidCardSettlementTransition's tx (invoice/postgres.go), so they are
-	// crash-safe and exactly-once with the paid-flip (transactional outbox,
-	// ADR-040).
-	//
-	// Everything below is post-commit + best-effort BY DESIGN, ordered by
-	// what a process death costs, cheapest-to-lose LAST:
-	//   1. amount truth-check + receipt enqueue: fast DB writes with NO
-	//      reconciler behind them — a dropped receipt enqueue is gone for
-	//      good (the dispatcher's retry + DLQ only own delivery AFTER the
-	//      enqueue lands). They run FIRST, before any network call. This
-	//      block was historically last, below two Stripe calls, while its
-	//      comment claimed a "sub-ms" crash window — the window was
-	//      seconds-wide and grew every time a PR inserted another call
-	//      above it (2026-07-05 reassessment).
-	//   2. dunning resolve: idempotent AND backstopped — the dunning
-	//      sweep's paid-pre-check floor re-resolves it when the run's
-	//      next retry comes due (the sweep only processes due runs).
-	//   3. checkout-session expire + card stamp: Stripe NETWORK calls with
-	//      their own backstops (session ExpiresAt <= 1h; card stamp is a
-	//      cosmetic timeline sub-line).
-	//
-	// RULE for future additions: this block is APPEND-ONLY AT THE END —
-	// inserting a call above the receipt enqueue widens the unrecoverable
-	// window again. A new step may only go earlier if it is a fast DB write
-	// whose loss is MORE expensive than a receipt.
-	//
-	// Receipt email is deliberately NOT in-tx: strict atomicity is the wrong
-	// contract for email, and folding it in would drag customer-email
-	// resolution + the suppression-list read under the invoice row lock.
-	// DEFERRED UPGRADE (if a design partner needs guaranteed receipts): a
-	// receipt-pending marker + reconciler re-fire — tracked in
-	// docs/adr/README.md "Open follow-ups".
+	// invoice.paid, payment.succeeded and the receipt email (buildReceiptHook)
+	// are queued in MarkPaidCardSettlementTransition's transaction, so they
+	// commit with the paid-flip (ADR-040). The steps below run after that
+	// commit and are best-effort. They are ordered so the cheapest to lose
+	// runs last:
+	//   1. The amount truth-check, fast database writes. Nothing runs it
+	//      again, so a crash before it loses the payment.amount_mismatch
+	//      event and the anomaly marker.
+	//   2. The dunning resolve. The dunning sweep's paid check resolves the
+	//      run when its next retry comes due.
+	//   3. The checkout-session expire and the card stamp, Stripe network
+	//      calls. A session expires within an hour, and the card stamp is
+	//      only a timeline sub-line.
+	// Add a new step at the end, unless losing it costs more than step 1.
 
 	// Amount truth-check (ADR-068): the captured amount must equal what the
 	// transition booked (amount_paid = amount_due at settle). A drifted
@@ -198,13 +176,6 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 		s.escalatePaymentAnomaly(ctx, tenantID, fresh, domain.EventPaymentAmountMismatch, paymentIntentID, capturedCents, nil,
 			"captured amount differs from the amount booked at settle")
 	}
-
-	// Enqueue payment receipt email. s.emailReceipt is *OutboxSender
-	// (ADR-040), so SendPaymentReceipt is a fast DB INSERT and the
-	// dispatcher's retry loop owns delivery + backoff. Failure here logs but
-	// does not fail the caller — the payment already committed, and returning
-	// an error would make the webhook re-fire the whole event (re-MarkPaid +
-	// double-firing the customer-facing event).
 
 	slog.Info("payment succeeded",
 		"invoice_id", inv.ID,

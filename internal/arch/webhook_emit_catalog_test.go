@@ -5,7 +5,9 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,10 +32,81 @@ import (
 // event type at each call to be a constant whose value is in the catalog. A
 // string literal or another package's constant is checked by value, so
 // neither can slip past.
+//
+// The same walk tells the two ways an event reaches the outbox apart. Enqueue
+// inserts the row on the caller's transaction, so the event commits with its
+// change. EnqueueStandalone, and the Dispatch methods that call it, insert
+// the row in a second transaction after the change committed: a crash, a
+// deploy or a cancelled request between the two commits loses the event for
+// good. standaloneWebhookBacklog counts the sites that queue an event the
+// second way, and the counts only go down.
+//
+// A site is a call that queues a fixed event type after the commit: a
+// standalone sink call with a constant, or a call of a helper. A helper is a
+// function whose only calls queue a fixed event type, such as
+// billing.Engine.DispatchInvoiceFinalized, so each caller of a helper holds a
+// site too. The test does not see a new call of a function that holds a site
+// and does other work too, such as invoice.Service.finalize or
+// invoice.Service.AfterVoid: the call reaches a site already counted. A PR
+// that moves such a site must list that function's callers in its site-set.
+// The walk follows calls, so a helper passed as a function value is not
+// followed.
 
 // webhookSinkNames are the webhook package's entry points that write an
 // event to the outbox or dispatch it.
 var webhookSinkNames = map[string]bool{"Dispatch": true, "Enqueue": true, "EnqueueStandalone": true}
+
+// standaloneSinkNames are the sink names that queue the event in a
+// transaction of their own, after the caller's change has committed. An
+// interface method takes the class of its name: domain.EventDispatcher's
+// Dispatch is standalone, and each domain's OutboxEnqueuer.Enqueue is not.
+var standaloneSinkNames = map[string]bool{"Dispatch": true, "EnqueueStandalone": true}
+
+// standaloneWebhookBacklog counts the sites that queue a webhook event after
+// its business transaction commits, by "<pkg>.<Recv>.<Func> <event type>". A
+// new site fails the test, even in a function already listed: queue the
+// event in the transaction that writes the change instead. When a site moves
+// into its transaction, lower its count or delete its entry. When an event
+// type leaves the list, mark it "Always sent" in docs/api/webhook-events.md
+// (TestAlwaysSentMarksMatchTheBacklog checks the two agree).
+var standaloneWebhookBacklog = map[string]int{
+	"billing.Engine.DispatchInvoiceFinalized invoice.finalized":                         1,
+	"billing.Engine.FinalizeOnCreateInvoice invoice.finalized":                          1,
+	"billing.Engine.applyDueScheduledPlanChanges subscription.pending_change.applied":   1,
+	"billing.Engine.billFinalOnImmediateCancelImpl invoice.finalized":                   1,
+	"billing.Engine.billOnePeriod invoice.finalized":                                    1,
+	"billing.Engine.dispatchInvoiceFinalized invoice.finalized":                         1,
+	"billing.Engine.fireThreshold invoice.finalized":                                    1,
+	"billing.Engine.fireThreshold subscription.threshold_crossed":                       1,
+	"customer.Service.MarkEmailBounced customer.email_bounced":                          1,
+	"customer.Service.MarkEmailComplained customer.email_complained":                    1,
+	"dunning.Service.exhaustRun dunning.escalated":                                      1,
+	"dunning.Service.resolveRunAt dunning.resolved":                                     1,
+	"invoice.Service.AfterVoid invoice.voided":                                          1,
+	"invoice.Service.MarkUncollectible invoice.marked_uncollectible":                    1,
+	"invoice.Service.RecordOfflinePayment invoice.payment_recorded":                     1,
+	"invoice.Service.finalize invoice.finalized":                                        1,
+	"payment.Stripe.RecordCheckoutCard payment_method.updated":                          1,
+	"payment.Stripe.SettleSucceeded payment.amount_mismatch":                            1,
+	"payment.Stripe.SettleSucceeded payment.duplicate_charge":                           2,
+	"payment.Stripe.SettleSucceeded payment.received_on_voided_invoice":                 1,
+	"payment.Stripe.handlePaymentSucceeded payment.currency_mismatch":                   1,
+	"payment.Stripe.handleSetupIntentSucceeded payment_method.attached":                 1,
+	"subscription.Handler.addItem subscription.item.added":                              1,
+	"subscription.Handler.atomicAddItemWithProration invoice.finalized":                 1,
+	"subscription.Handler.atomicUpdateItemWithProration invoice.finalized":              1,
+	"subscription.Handler.cancelPendingItemChange subscription.pending_change.canceled": 1,
+	"subscription.Handler.clearScheduledCancel subscription.cancel_cleared":             1,
+	"subscription.Handler.dispatchProrationFinalized invoice.finalized":                 1,
+	"subscription.Handler.extendTrial subscription.trial_extended":                      1,
+	"subscription.Handler.handleItemProration invoice.finalized":                        1,
+	"subscription.Handler.pauseCollection subscription.collection_paused":               1,
+	"subscription.Handler.removeItem subscription.item.removed":                         1,
+	"subscription.Handler.resumeCollection subscription.collection_resumed":             1,
+	"subscription.Handler.scheduleCancel subscription.cancel_scheduled":                 1,
+	"subscription.Handler.updateItem subscription.item.updated":                         1,
+	"subscription.Handler.updateItem subscription.pending_change.scheduled":             1,
+}
 
 // webhookDynamicEmitAllowlist names the functions that hand the webhook
 // package an event type that is not a constant, each with its reason. The
@@ -61,7 +134,9 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 
 	// sinks maps a function (or interface method) to the indexes of its
 	// parameters that carry an event type into the webhook package.
+	// standalone marks the ones that reach a standalone sink.
 	sinks := map[*types.Func]map[int]bool{}
+	standalone := map[*types.Func]map[int]bool{}
 	add := func(fn *types.Func, i int) bool {
 		if sinks[fn] == nil {
 			sinks[fn] = map[int]bool{}
@@ -70,6 +145,16 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 			return false
 		}
 		sinks[fn][i] = true
+		return true
+	}
+	markStandalone := func(fn *types.Func, i int) bool {
+		if standalone[fn] == nil {
+			standalone[fn] = map[int]bool{}
+		}
+		if standalone[fn][i] {
+			return false
+		}
+		standalone[fn][i] = true
 		return true
 	}
 	eventParam := func(sig *types.Signature) int {
@@ -101,13 +186,16 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 				}
 				if idx := eventParam(fn.Type().(*types.Signature)); idx >= 0 {
 					add(fn, idx)
+					if standaloneSinkNames[fn.Name()] {
+						markStandalone(fn, idx)
+					}
 					seedRecv = append(seedRecv, ptr)
 				}
 			}
 		}
 	}
 	if len(sinks) < 3 {
-		t.Fatalf("found %d webhook entry points; want Service.Dispatch, OutboxStore.Enqueue and EnqueueStandalone at least", len(sinks))
+		t.Fatalf("found %d webhook entry points; want OutboxStore.Enqueue, OutboxStore.EnqueueStandalone and OutboxDispatcher.Dispatch at least", len(sinks))
 	}
 
 	// The consumer-defined interfaces those methods satisfy (domain's
@@ -139,6 +227,9 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 				}
 				if idx := eventParam(m.Type().(*types.Signature)); idx >= 0 {
 					add(m, idx)
+					if standaloneSinkNames[m.Name()] {
+						markStandalone(m, idx)
+					}
 				}
 			}
 		}
@@ -151,8 +242,10 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 		params map[*types.Var]int        // that FuncDecl's parameters
 		locals map[*types.Var][]ast.Expr // each value assigned to a local; nil entry = not a plain assignment
 		expr   *ast.CallExpr
+		outer  bool // not inside another call's arguments
 	}
 	var calls []call
+	inArgs := map[*ast.CallExpr]bool{}
 	for _, p := range pkgs {
 		for _, f := range p.Syntax {
 			file := p.Fset.Position(f.Pos()).Filename
@@ -186,7 +279,15 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 				ast.Inspect(fd.Body, func(n ast.Node) bool {
 					switch n := n.(type) {
 					case *ast.CallExpr:
-						calls = append(calls, call{p, file, encl, params, locals, n})
+						calls = append(calls, call{p, file, encl, params, locals, n, !inArgs[n]})
+						for _, a := range n.Args {
+							ast.Inspect(a, func(m ast.Node) bool {
+								if inner, ok := m.(*ast.CallExpr); ok {
+									inArgs[inner] = true
+								}
+								return true
+							})
+						}
 					case *ast.AssignStmt:
 						for i, l := range n.Lhs {
 							if len(n.Lhs) == len(n.Rhs) {
@@ -241,8 +342,31 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 		i, ok := c.params[v]
 		return i, ok
 	}
+	// constValues returns the values an event-type argument can hold, when
+	// each is a string constant: the argument itself, or every value assigned
+	// to the local variable it names.
+	constValues := func(c call, arg ast.Expr) ([]string, bool) {
+		values := []ast.Expr{arg}
+		if id, ok := ast.Unparen(arg).(*ast.Ident); ok {
+			if v, ok := c.pkg.TypesInfo.Uses[id].(*types.Var); ok {
+				if as, ok := c.locals[v]; ok {
+					values = as
+				}
+			}
+		}
+		var out []string
+		for _, e := range values {
+			tv, ok := c.pkg.TypesInfo.Types[e]
+			if e == nil || !ok || tv.Value == nil || tv.Value.Kind() != constant.String {
+				return nil, false
+			}
+			out = append(out, constant.StringVal(tv.Value))
+		}
+		return out, true
+	}
 
-	// A wrapper that passes its own parameter to a sink is a sink.
+	// A wrapper that passes its own parameter to a sink is a sink, and it is
+	// standalone when that sink is.
 	for changed := true; changed; {
 		changed = false
 		for _, c := range calls {
@@ -254,8 +378,107 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 				if idx >= len(c.expr.Args) {
 					continue
 				}
-				if pi, ok := passThrough(c, c.expr.Args[idx]); ok && add(c.encl, pi) {
+				pi, ok := passThrough(c, c.expr.Args[idx])
+				if !ok {
+					continue
+				}
+				if add(c.encl, pi) {
 					changed = true
+				}
+				if standalone[fn][idx] && markStandalone(c.encl, pi) {
+					changed = true
+				}
+			}
+		}
+	}
+
+	// A helper queues a fixed event type and does nothing else: its only
+	// calls are standalone sink calls with a constant, calls of other
+	// helpers, and the calls that build their arguments. Its callers decide
+	// to send the event, so each call of a helper is a site in its caller.
+	// An interface method that a helper's receiver implements is a helper
+	// too, as for the sinks.
+	var ifaces []*types.Interface
+	for _, p := range pkgs {
+		for _, name := range p.Types.Scope().Names() {
+			if tn, ok := p.Types.Scope().Lookup(name).(*types.TypeName); ok {
+				if it, ok := tn.Type().Underlying().(*types.Interface); ok {
+					ifaces = append(ifaces, it)
+				}
+			}
+		}
+	}
+	outerCalls := map[*types.Func][]call{}
+	for _, c := range calls {
+		if c.encl != nil && c.outer {
+			outerCalls[c.encl] = append(outerCalls[c.encl], c)
+		}
+	}
+	helpers := map[*types.Func]map[string]bool{} // helper -> the event types it queues
+	onlyQueues := func(cs []call) (map[string]bool, bool) {
+		evs := map[string]bool{}
+		for _, c := range cs {
+			fn := callee(c)
+			if fn == nil {
+				return nil, false
+			}
+			if hv, ok := helpers[fn]; ok {
+				for v := range hv {
+					evs[v] = true
+				}
+				continue
+			}
+			if standalone[fn] == nil {
+				return nil, false
+			}
+			for idx := range sinks[fn] {
+				if idx >= len(c.expr.Args) {
+					return nil, false
+				}
+				vs, ok := constValues(c, c.expr.Args[idx])
+				if !ok {
+					return nil, false
+				}
+				for _, v := range vs {
+					evs[v] = true
+				}
+			}
+		}
+		return evs, len(evs) > 0
+	}
+	for changed := true; changed; {
+		changed = false
+		for fn, cs := range outerCalls {
+			if helpers[fn] != nil {
+				continue
+			}
+			evs, ok := onlyQueues(cs)
+			if !ok {
+				continue
+			}
+			helpers[fn] = evs
+			changed = true
+			sig := fn.Type().(*types.Signature)
+			if sig.Recv() == nil {
+				continue
+			}
+			rt := sig.Recv().Type()
+			if _, ok := rt.(*types.Pointer); !ok {
+				rt = types.NewPointer(rt)
+			}
+			for _, it := range ifaces {
+				if !types.Implements(rt, it) {
+					continue
+				}
+				for i := 0; i < it.NumMethods(); i++ {
+					if m := it.Method(i); m.Name() == fn.Name() {
+						if helpers[m] == nil {
+							helpers[m] = map[string]bool{}
+						}
+						for v := range evs {
+							helpers[m][v] = true
+						}
+					}
 				}
 			}
 		}
@@ -263,6 +486,24 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 
 	checked := 0
 	var problems []string
+	standaloneFound := map[string]int{} // backlog key -> the sites the walk counted
+	sitesOf := map[string][]string{}    // backlog key -> where those sites are
+	addSite := func(c call, where, v string) {
+		key := c.pkg.Types.Name() + "." + funcName(c.encl) + " " + v
+		standaloneFound[key]++
+		sitesOf[key] = append(sitesOf[key], where)
+	}
+	for _, c := range calls {
+		fn := callee(c)
+		if fn == nil || helpers[fn] == nil || c.encl == nil {
+			continue
+		}
+		pos := c.pkg.Fset.Position(c.expr.Pos())
+		rel, _ := filepath.Rel(root, pos.Filename)
+		for v := range helpers[fn] {
+			addSite(c, rel+":"+strconv.Itoa(pos.Line), v)
+		}
+	}
 	for _, c := range calls {
 		fn := callee(c)
 		if fn == nil || sinks[fn] == nil {
@@ -276,29 +517,14 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 			pos := c.pkg.Fset.Position(arg.Pos())
 			rel, _ := filepath.Rel(root, pos.Filename)
 			where := rel + ":" + strconv.Itoa(pos.Line)
-			// The constant values this argument can hold: the argument itself,
-			// or every value assigned to the local variable it names.
-			values := []ast.Expr{arg}
-			if id, ok := ast.Unparen(arg).(*ast.Ident); ok {
-				if v, ok := c.pkg.TypesInfo.Uses[id].(*types.Var); ok {
-					if as, ok := c.locals[v]; ok {
-						values = as
-					}
-				}
-			}
-			allConst := true
-			for _, e := range values {
-				tv, ok := c.pkg.TypesInfo.Types[e]
-				if e == nil || !ok || tv.Value == nil || tv.Value.Kind() != constant.String {
-					allConst = false
-					break
-				}
-			}
-			if allConst {
-				for _, e := range values {
+			if values, ok := constValues(c, arg); ok {
+				for _, v := range values {
 					checked++
-					if v := constant.StringVal(c.pkg.TypesInfo.Types[e].Value); !domain.KnownWebhookEventTypes[v] {
+					if !domain.KnownWebhookEventTypes[v] {
 						problems = append(problems, where+": sends "+v+", which is not in domain.KnownWebhookEventTypes (an endpoint that names it gets 422 unknown event type)")
+					}
+					if standalone[fn][idx] && c.encl != nil {
+						addSite(c, where, v)
 					}
 				}
 				continue
@@ -317,10 +543,53 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 				"; pass a domain.Event* constant, or add the function to webhookDynamicEmitAllowlist with the reason its value is already in the catalog")
 		}
 	}
+	var standaloneSites []string
+	for key, n := range standaloneFound {
+		sort.Strings(sitesOf[key])
+		for _, where := range sitesOf[key] {
+			standaloneSites = append(standaloneSites, where+" "+key)
+		}
+		allowed := standaloneWebhookBacklog[key]
+		if n <= allowed {
+			continue
+		}
+		typ := key[strings.LastIndex(key, " ")+1:]
+		what := strings.Join(sitesOf[key], ", ") + " (" + key + ") queues " + typ
+		if allowed > 0 {
+			what = key + " has " + strconv.Itoa(n) + " sites (" + strings.Join(sitesOf[key], ", ") + "), and standaloneWebhookBacklog allows " +
+				strconv.Itoa(allowed) + ". The new one queues " + typ
+		}
+		problems = append(problems, what+" after the business transaction commits, so a crash, "+
+			"a deploy or a cancelled request between the two commits loses it. Queue it in the transaction that writes the change: "+
+			"OutboxStore.Enqueue(ctx, tx, …) in the store method that commits the transition (ADR-040, the MarkPaid pattern), "+
+			"with the payload built from the row that transaction wrote (ADR-131)")
+	}
+	for key, allowed := range standaloneWebhookBacklog {
+		n := standaloneFound[key]
+		switch {
+		case allowed < 1:
+			problems = append(problems, "standaloneWebhookBacklog lists "+key+" with a count of "+strconv.Itoa(allowed)+": delete the entry")
+		case n == 0:
+			problems = append(problems, "standaloneWebhookBacklog lists "+key+", but no site queues that event after its commit any more: "+
+				"delete the entry (the backlog only shrinks) and, if no other entry names the event, mark it Always sent in docs/api/webhook-events.md")
+		case n < allowed:
+			problems = append(problems, "standaloneWebhookBacklog allows "+strconv.Itoa(allowed)+" sites for "+key+", but the walk finds "+
+				strconv.Itoa(n)+": lower the count to "+strconv.Itoa(n)+" (the backlog only shrinks)")
+		}
+	}
 	sort.Strings(problems)
 	for _, p := range problems {
 		t.Error(p)
 	}
+	sort.Strings(standaloneSites)
+	t.Logf("%d sites queue a webhook event after its commit (%d backlog keys):\n%s",
+		len(standaloneSites), len(standaloneFound), strings.Join(standaloneSites, "\n"))
+	var helperNames []string
+	for fn := range helpers {
+		helperNames = append(helperNames, fn.Pkg().Name()+"."+funcName(fn))
+	}
+	sort.Strings(helperNames)
+	t.Logf("%d helpers, whose callers hold sites too: %s", len(helperNames), strings.Join(helperNames, ", "))
 	var names []string
 	for fn := range sinks {
 		names = append(names, fn.Pkg().Name()+"."+funcName(fn))
@@ -343,4 +612,65 @@ func funcName(fn *types.Func) string {
 		}
 	}
 	return fn.Name()
+}
+
+// TestAlwaysSentMarksMatchTheBacklog keeps docs/api/webhook-events.md true.
+// The page marks an event "Always sent" when it is queued in the transaction
+// of its change, so a crash cannot drop it. That holds for every catalog
+// event with no site in standaloneWebhookBacklog, and for no other.
+func TestAlwaysSentMarksMatchTheBacklog(t *testing.T) {
+	root := repoRoot(t)
+	b, err := os.ReadFile(filepath.Join(root, "docs", "api", "webhook-events.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	heading := regexp.MustCompile("^### `([a-z_.]+)`$")
+	marked := map[string]bool{}
+	headings := 0
+	current := ""
+	for _, line := range strings.Split(string(b), "\n") {
+		if m := heading.FindStringSubmatch(line); m != nil {
+			current = m[1]
+			headings++
+			continue
+		}
+		if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "### ") {
+			current = ""
+			continue
+		}
+		if current != "" && strings.HasPrefix(line, "**Always sent.**") {
+			marked[current] = true
+		}
+	}
+	if headings < 30 || len(marked) == 0 {
+		t.Fatalf("found %d event headings and %d Always sent marks in webhook-events.md; the parser no longer matches the page", headings, len(marked))
+	}
+
+	after := map[string][]string{} // event type -> its backlog keys
+	for key := range standaloneWebhookBacklog {
+		typ := key[strings.LastIndex(key, " ")+1:]
+		after[typ] = append(after[typ], key)
+	}
+	var problems []string
+	for typ := range domain.KnownWebhookEventTypes {
+		keys := after[typ]
+		switch {
+		case len(keys) == 0 && !marked[typ]:
+			problems = append(problems, typ+" is queued in the transaction of its change on every path now: mark it **Always sent.** in docs/api/webhook-events.md")
+		case len(keys) > 0 && marked[typ]:
+			sort.Strings(keys)
+			problems = append(problems, typ+" is marked Always sent in docs/api/webhook-events.md, but a site queues it after its commit, "+
+				"so a crash can drop it ("+strings.Join(keys, ", ")+"): remove the mark")
+		}
+	}
+	for typ := range marked {
+		if !domain.KnownWebhookEventTypes[typ] {
+			problems = append(problems, typ+" is marked Always sent but is not in domain.KnownWebhookEventTypes")
+		}
+	}
+	sort.Strings(problems)
+	for _, p := range problems {
+		t.Error(p)
+	}
+	t.Logf("%d of %d event types are marked Always sent", len(marked), len(domain.KnownWebhookEventTypes))
 }
