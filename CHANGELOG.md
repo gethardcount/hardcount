@@ -25,6 +25,7 @@ original text.
 
 ### Changed
 
+- **A plan change to an unknown plan now reports `param: new_plan_id`.** On a subscription with more than one item, `PATCH /v1/subscriptions/{id}/items/{itemID}` with an unknown `new_plan_id` answered 422 with `param: items` when the change was scheduled or prorated nothing. The message is unchanged. ([#1607](https://github.com/gethardcount/hardcount/pull/1607))
 - **The user docs read more clearly.** About 170 places across the concept pages, guides, API pages, self-host pages, runbooks and the API reference's descriptions: dense sentences split, terms defined where they are first used, and one name for each thing (the reconciler, the charge hold, a lost result, a spend threshold, a usage-only key, an account). Facts are unchanged. ([#1585](https://github.com/gethardcount/hardcount/pull/1585))
 
 ### Fixed
