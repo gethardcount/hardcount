@@ -1,3 +1,2 @@
-"hardcount" "hardcount"
 "hardcount_test_app" "hardcount_test_app"
 "hardcount_app" "hardcount_app"

@@ -23,9 +23,6 @@
   "ignoreDependencies": [
     // Sets the version react-router-dom runs on (a security bump), and the
     // react-router-dom imports are to move to it before React Router v8.
-    "react-router",
-    // A peer dependency of orval's OpenAPI parser (ajv-draft-04,
-    // ajv-formats). `npm ci --legacy-peer-deps` does not install peers.
-    "ajv"
+    "react-router"
   ]
 }
