@@ -132,10 +132,12 @@ func TestProration_DedupReplay_NoAudit(t *testing.T) {
 }
 
 // TestProration_AuditFailure_RollsBack: the row shares the item change's
-// fate (ADR-090), so a failed audit write rolls the plan change back, and
-// with it the invoice and the invoice.finalized queued on its insert. The
-// fake invoice store has no transaction; the invoice row's rollback is
-// proven against real Postgres in proration_finalized_integration_test.go.
+// fate (ADR-090), so a failed audit write fails the upgrade and leaves the
+// item on its old plan. The rig's invoice store is a fake that ignores the
+// transaction and has no outbox, so this proves only the plan rollback.
+// TestCreateWithLineItemsTx_FinalizedInvoiceQueuesItsEventInTheSameTx
+// (internal/invoice/outbox_in_tx_integration_test.go) proves that a rollback
+// removes the invoice.finalized queued on the insert.
 func TestProration_AuditFailure_RollsBack(t *testing.T) {
 	r := newProrationFinalizeRig(t)
 	r.rec.auditErr = errors.New("audit insert failed")

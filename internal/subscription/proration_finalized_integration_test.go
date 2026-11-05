@@ -98,7 +98,11 @@ func TestUpdateItem_ProrationFinalizeAudit_RidesTheItemChangeTx(t *testing.T) {
 
 // TestUpdateItem_ProrationFinalizeAuditFailure_RollsBackQuantity: the row
 // shares the item change's fate (ADR-090). A failed audit write rolls the
-// quantity back on the real tx, and with it the invoice and its event.
+// quantity back on the real tx. The invoice writer is a fake with no outbox,
+// so this proves only the quantity rollback.
+// TestCreateWithLineItemsTx_FinalizedInvoiceQueuesItsEventInTheSameTx
+// (internal/invoice/outbox_in_tx_integration_test.go) proves that a rollback
+// removes the invoice.finalized queued on the insert.
 func TestUpdateItem_ProrationFinalizeAuditFailure_RollsBackQuantity(t *testing.T) {
 	rec := &finalizeRecorderMock{auditErr: errors.New("audit insert failed")}
 	code, qty, _ := seatIncreaseOnRealTx(t, rec)
