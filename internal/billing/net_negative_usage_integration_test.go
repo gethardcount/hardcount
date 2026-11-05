@@ -103,9 +103,6 @@ func netNegativePlan(t *testing.T, ctx context.Context, f *thresholdFixture, suf
 // price) net -7. The invoice is made with the calls line only, and one row records
 // both meters below zero.
 func TestNetNegativeUsage_CycleClose_BillsZeroAndRecordsIt(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Net Negative Cycle")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
@@ -165,9 +162,6 @@ func TestNetNegativeUsage_CycleClose_BillsZeroAndRecordsIt(t *testing.T) {
 // carries the calls line, and the row rides the same transaction: an attempt
 // that rolls back leaves no row, and the retry that commits leaves one.
 func TestNetNegativeUsage_ImmediateCancelTx_BillsZeroAndRecordsIt(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Net Negative Cancel")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
@@ -234,9 +228,6 @@ func TestNetNegativeUsage_ImmediateCancelTx_BillsZeroAndRecordsIt(t *testing.T) 
 // The fire now records it on its own transaction, and the period close, which
 // bills only after the fire, does not record it again.
 func TestNetNegativeUsage_ThresholdFire_RecordedOnce(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Net Negative Threshold")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()

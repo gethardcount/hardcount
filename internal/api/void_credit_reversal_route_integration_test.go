@@ -91,7 +91,6 @@ func (r *voidRig) balance() int64 {
 // Each application here draws 0.01: the customer is granted 0.01, and the
 // apply draws all of it.
 func TestVoid_ReturnsEveryCreditApplication(t *testing.T) {
-	skipShort(t)
 	const applications = 101
 	r := newVoidRig(t)
 	invoiceID := r.finalizedInvoice()
@@ -122,7 +121,6 @@ func TestVoid_ReturnsEveryCreditApplication(t *testing.T) {
 // usage row first, the void's sum would miss that row, and the customer would
 // end short by what it drew. Each round uses a new invoice.
 func TestVoid_RacingCreditApplication_ReturnsWhatWasDrawn(t *testing.T) {
-	skipShort(t)
 	const rounds = 3
 	r := newVoidRig(t)
 	var held int64

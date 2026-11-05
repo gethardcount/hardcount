@@ -78,9 +78,13 @@ func TestMustWired_CoversEveryAuditedComponent(t *testing.T) {
 	// protect left every test green (mutation-verified). A gate whose condition is
 	// unreachable, under a comment asserting it "fails loudly", is the arc's
 	// canonical failure reproduced inside the fix for it — for the third time. So
-	// this version names the component and checks THAT, and the mutation is pinned
-	// below as a test.
-	for _, m := range structLiteralAuditWirings(text) {
+	// this version names the component and checks THAT, and it fails when the
+	// pattern matches no struct literal at all.
+	literals := structLiteralAuditWirings(text)
+	if len(literals) == 0 {
+		t.Fatal("found ZERO struct-literal audit wirings — either the style is gone (delete this gate) or the pattern stopped matching (fix it). A gate that matches nothing is not a gate.")
+	}
+	for _, m := range literals {
 		recv := enclosingVar(text, m[0])
 		if recv == "" {
 			t.Errorf("a struct literal at offset %d hands over auditLogger but this test cannot name the variable it is assigned to — teach enclosingVar the new shape rather than letting an un-gated emitter through", m[0])
@@ -127,29 +131,4 @@ func enclosingVar(text string, at int) string {
 		break
 	}
 	return best
-}
-
-// TestMustWired_StructLiteralGateIsNotDead is the mutation, pinned. The previous
-// version of the struct-literal check passed with BOTH of its subjects deleted;
-// this fails if that can ever be true again.
-func TestMustWired_StructLiteralGateIsNotDead(t *testing.T) {
-	src, err := os.ReadFile("router.go")
-	if err != nil {
-		t.Fatalf("read router.go: %v", err)
-	}
-	text := string(src)
-
-	literals := structLiteralAuditWirings(text)
-	if len(literals) == 0 {
-		t.Fatal("found ZERO struct-literal audit wirings — either the style is gone (delete this gate) or the pattern stopped matching (fix it). A gate that matches nothing is not a gate.")
-	}
-
-	// Every one of them must resolve to a NAME the gate can check. If this ever
-	// returns "", the check above degrades to a no-op for that component.
-	for _, m := range literals {
-		if enclosingVar(text, m[0]) == "" {
-			t.Errorf("struct-literal audit wiring at offset %d resolves to no variable — the gate cannot check it, so it is not gated", m[0])
-		}
-	}
-	t.Logf("struct-literal audit wirings gated: %d", len(literals))
 }

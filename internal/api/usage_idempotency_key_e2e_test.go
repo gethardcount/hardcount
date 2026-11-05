@@ -26,7 +26,6 @@ import (
 // Mutation-verify: delete the idempotency_key check in usage.resolve → the
 // keyless posts answer 201 and the row count goes up.
 func TestUsageIngest_IdempotencyKeyRequired_E2E(t *testing.T) {
-	skipShort(t)
 	db := testutil.SetupTestDB(t)
 	now := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
 	clk := clock.NewFake(now)

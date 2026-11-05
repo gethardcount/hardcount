@@ -9,10 +9,8 @@ import (
 	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 )
 
-// TestMain asserts that the WHOLE package-api test suite — every e2e test that
-// drives the real router (TestE2E_FullBillingCycle, the members-invite flow, the
-// test-mode flow, the self-host bootstrap flow) — produced ZERO uncovered
-// mutations.
+// TestMain asserts that the WHOLE package-api test suite — every test in the
+// package that drives the real router — produced ZERO uncovered mutations.
 //
 // This is the RUNTIME half of ADR-090's coverage model, and it is only possible
 // because these tests go through NewServer: the AuditCoverage detector is mounted
@@ -36,9 +34,9 @@ import (
 func TestMain(m *testing.M) {
 	before := mw.AuditUncoveredMutationsByRoute()
 
-	code := m.Run()
-	if code != 0 {
-		os.Exit(code) // a real test already failed; don't pile on
+	// Returning from TestMain exits with m.Run's code.
+	if code := m.Run(); code != 0 {
+		return // a real test already failed; don't pile on
 	}
 
 	if leaked := increasedRoutes(before, mw.AuditUncoveredMutationsByRoute()); len(leaked) > 0 {
@@ -51,8 +49,6 @@ func TestMain(m *testing.M) {
 			"Emit the row on the business transaction (audit.Logger.LogInTx). If the request truly mutates nothing, declare audit.MarkSkip.\n\n")
 		os.Exit(1)
 	}
-
-	os.Exit(code)
 }
 
 type routeDelta struct {

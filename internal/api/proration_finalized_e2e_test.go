@@ -25,7 +25,6 @@ import (
 // Mutation seam: drop the finalize audit emission or the post-commit
 // dispatch from the proration writer → this test fails on that count.
 func TestE2E_ProrationInvoice_FinalizedWebhookAndAuditRow(t *testing.T) {
-	skipShort(t)
 	changeAt := lagP0.AddDate(0, 0, 10)
 	cases := []struct {
 		name  string

@@ -20,9 +20,6 @@ import (
 // 300 at 10¢ + 300 at 2¢ = $36.00. Tokens: 500 at 4¢, then 1¢. 200 before
 // the fire ($8.00), 600 after: 300 at 4¢ + 300 at 1¢ = $15.00.
 func TestTwoGraduatedMeters_EachContinuesItsOwnTiersAcrossFire_RealStore(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	lf := newLiveFixture(t, "Two Graduated Meters", 100000)
 	ctx := lf.ctx
 	calls := lf.meterID

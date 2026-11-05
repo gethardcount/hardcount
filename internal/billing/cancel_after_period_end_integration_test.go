@@ -53,9 +53,6 @@ type cancelRig struct {
 
 func newCancelRig(t *testing.T, name string) *cancelRig {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, name)
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	t.Cleanup(cancel)
