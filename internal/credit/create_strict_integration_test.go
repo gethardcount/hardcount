@@ -44,7 +44,7 @@ func TestGrantAndAdjust_UnknownFieldRefused(t *testing.T) {
 			req.Header.Set("Idempotency-Key", key)
 		}
 		rr := httptest.NewRecorder()
-		srv.ServeHTTP(rr, req.WithContext(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID)))
+		srv.ServeHTTP(rr, req.WithContext(auth.WithTenantID(ctx, tenantID)))
 		return rr
 	}
 	ledgerRows := func() int {

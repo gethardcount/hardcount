@@ -52,7 +52,7 @@ func cnSendReq(t *testing.T, h *Handler, id, body string) *httptest.ResponseReco
 	req := httptest.NewRequest(http.MethodPost, "/v1/credit-notes/"+id+"/send", bytes.NewBufferString(body))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", id)
-	reqCtx := context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1")
+	reqCtx := auth.WithTenantID(req.Context(), "t1")
 	reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
 	req = req.WithContext(reqCtx)
 	rr := httptest.NewRecorder()

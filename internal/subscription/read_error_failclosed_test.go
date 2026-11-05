@@ -111,7 +111,7 @@ func withTenantRoute(req *http.Request, tenantID string, params map[string]strin
 		rctx.URLParams.Add(k, v)
 	}
 	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	return req.WithContext(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID))
+	return req.WithContext(auth.WithTenantID(ctx, tenantID))
 }
 
 func prorationHandler(t *testing.T) (*Handler, *blipOnceStore, string, string) {

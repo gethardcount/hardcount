@@ -278,13 +278,14 @@ func (s *Service) SetAuditLogger(l AuditLogger) { s.audit = l }
 // Optional — unset paths skip dispatch.
 func (s *Service) SetEventDispatcher(d domain.EventDispatcher) { s.events = d }
 
-// dispatchEvent enqueues an outbound webhook event and LOGS on failure rather
-// than silently dropping it. The dispatcher persists durably (ADR-040 outbox)
-// once the enqueue commits, so a non-nil error here means the enqueue INSERT
-// itself failed (a transient DB hiccup) and the event is lost — make that
-// visible (no-silent-fallbacks) instead of the prior `_ =` swallow. Atomicity
-// with the state-change (DispatchTx) is the deferred follow-up; this only closes
-// the silent-error vector.
+// dispatchEvent queues an outbound webhook event after the business
+// transaction has committed, and logs when the queue insert fails. Nothing
+// sends the event again: an insert failure, a crash or a cancelled ctx
+// between the commit and this insert loses it. An event queued on the
+// change's own transaction (OutboxStore.Enqueue in the store, as MarkPaid
+// does, ADR-040) cannot be lost that way;
+// internal/arch/webhook_emit_catalog_test.go lists the sites that still come
+// through here.
 func (s *Service) dispatchEvent(ctx context.Context, tenantID, eventType string, payload map[string]any) {
 	if s.events == nil {
 		return

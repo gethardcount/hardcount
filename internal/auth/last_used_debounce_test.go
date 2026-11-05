@@ -97,7 +97,7 @@ func TestLastUsed_TouchesAgainAfterInterval(t *testing.T) {
 	if got := settle(t, store.total.Load); got != 1 {
 		t.Fatalf("before interval: %d writes, want 1", got)
 	}
-	*now = now.Add(svc.touchInterval + time.Second)
+	*now = now.Add(lastUsedTouchInterval + time.Second)
 	for i := 0; i < 10; i++ {
 		_, _ = svc.ValidateKey(ctx, raw)
 	}
@@ -149,7 +149,7 @@ func TestLastUsed_TouchPrimitiveIsExactlyOnceUnderRace(t *testing.T) {
 	svc := NewService(store)
 	base := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	round := 0
-	svc.now = func() time.Time { return base.Add(time.Duration(round) * (svc.touchInterval + time.Second)) }
+	svc.now = func() time.Time { return base.Add(time.Duration(round) * (lastUsedTouchInterval + time.Second)) }
 	const goroutines = 512
 	for round = 0; round < 40; round++ {
 		before := store.total.Load()

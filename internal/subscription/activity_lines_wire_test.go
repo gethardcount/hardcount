@@ -100,7 +100,7 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 	// so only the first is linked (rule 8).
 	h.SetInvoiceLabeler(invoiceLabelsFake{"hc_inv_1": "HC-000123"})
 	rr := httptest.NewRecorder()
-	h.activityTimeline(rr, timelineRequest(context.WithValue(context.Background(), auth.TestTenantIDKey(), tenantID), subID))
+	h.activityTimeline(rr, timelineRequest(auth.WithTenantID(context.Background(), tenantID), subID))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
 	}

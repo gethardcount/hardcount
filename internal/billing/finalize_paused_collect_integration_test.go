@@ -106,7 +106,7 @@ func TestFinalize_PausedSubscriptionDraft_NotCharged(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/"+draft.ID+"/finalize", nil)
-	reqCtx := context.WithValue(postgres.WithLivemode(req.Context(), false), auth.TestTenantIDKey(), tenantID)
+	reqCtx := auth.WithTenantID(postgres.WithLivemode(req.Context(), false), tenantID)
 	rr := httptest.NewRecorder()
 	routes.ServeHTTP(rr, req.WithContext(reqCtx))
 	if rr.Code != http.StatusOK {

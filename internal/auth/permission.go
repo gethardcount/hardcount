@@ -121,17 +121,3 @@ func HasPermission(keyType KeyType, perm Permission) bool {
 	}
 	return perms[perm]
 }
-
-// AllPermissions returns every permission keyType holds, in no set order,
-// or nil for an unknown key type.
-func AllPermissions(keyType KeyType) []Permission {
-	perms, ok := keyPermissions[keyType]
-	if !ok {
-		return nil
-	}
-	result := make([]Permission, 0, len(perms))
-	for p := range perms {
-		result = append(result, p)
-	}
-	return result
-}

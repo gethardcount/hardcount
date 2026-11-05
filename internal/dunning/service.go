@@ -183,9 +183,14 @@ type CustomerEmailFetcher interface {
 // hosted-invoice URL credential (T0-17) — pass empty when unavailable
 // (drafts, pre-addendum invoices); the sender gracefully omits the CTA.
 // ctx carries livemode for the underlying enqueue / brand lookup.
+//
+// Both methods ride the caller's state transaction (ADR-040): the dunning
+// reschedule or escalation and its customer email commit together, so a
+// failover between the two cannot lose the email with the state standing.
+// The store wraps the call in a SAVEPOINT, so returning an error skips the
+// email, never the money write.
 type EmailNotifier interface {
-	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error
-	// SendDunningWarning emails the customer about a failed retry.
+	// SendDunningWarningTx emails the customer about a failed retry.
 	// failureReason is the latest decline reason (from the retrier's
 	// error message) — surfaced inline so customers can act
 	// (insufficient_funds → top up; lost_card → swap card). Empty
@@ -198,16 +203,10 @@ type EmailNotifier interface {
 	// your payment": the bank wants the customer to confirm it. Either way
 	// dunning retries skip that card, so the email must not promise a retry
 	// on a date, and failureReason is empty.
-	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error
+	SendDunningWarningTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error
+	// SendDunningEscalationTx emails the customer that retries ran out.
 	// outcome is what exhaustion actually did to THIS invoice, not what
 	// the policy asked for — the copy is composed from it (ADR-112).
-	SendDunningEscalation(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
-	// The Tx variants ride the caller's state transaction (ADR-040): the
-	// dunning reschedule/escalation and its customer email commit together,
-	// so a failover between the two can no longer lose the email with the
-	// state standing. The store wraps the call in a SAVEPOINT — returning an
-	// error skips the email, never the money write.
-	SendDunningWarningTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error
 	SendDunningEscalationTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
 }
 
@@ -363,9 +362,12 @@ func (s *Service) SetEventDispatcher(events domain.EventDispatcher) {
 	s.events = events
 }
 
-// fireEvent dispatches a webhook event. Synchronous: with the outbox (RES-1)
-// Dispatch is a short DB insert that must persist-before-return so a
-// process crash can't silently drop the event.
+// fireEvent queues a webhook event after the run's transaction has committed,
+// and logs when the queue insert fails. Nothing sends the event again: an
+// insert failure, a crash or a cancelled ctx between the commit and this
+// insert loses it. StartRun queues dunning.started in its transaction
+// instead (ADR-040); internal/arch/webhook_emit_catalog_test.go lists the
+// sites that still come through here.
 func (s *Service) fireEvent(ctx context.Context, tenantID, eventType string, payload map[string]any) {
 	if s.events == nil {
 		return

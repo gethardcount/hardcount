@@ -44,7 +44,7 @@ func TestAddItem_DayOneOfPeriod_BillsFullPeriod(t *testing.T) {
 	h.SetProrationDeps(plans, invoices)
 
 	body, _ := json.Marshal(AddItemInput{PlanID: "plan_new", Quantity: 1})
-	req := addItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, body)
+	req := addItemURL(auth.WithTenantID(ctx, tenantID), subID, body)
 
 	rr := httptest.NewRecorder()
 	h.addItem(rr, req)

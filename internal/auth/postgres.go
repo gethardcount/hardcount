@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -165,27 +164,13 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.A
 	}
 	defer postgres.Rollback(tx)
 
-	// The handler sends a limit of 1 to 100 (respond.ParsePage).
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-
-	where := ""
-	args := []any{}
-	if filter.Role != "" {
-		where = " WHERE key_type = $1"
-		args = append(args, filter.Role)
-	}
 	var total int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM api_keys`+where, args...).Scan(&total); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM api_keys`).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	args = append(args, limit, filter.Offset)
-	query := `SELECT ` + keyCols + ` FROM api_keys` + where +
-		fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
-
-	rows, err := tx.QueryContext(ctx, query, args...)
+	// The handler sends a limit of 1 to 100 (respond.ParsePage).
+	rows, err := tx.QueryContext(ctx, `SELECT `+keyCols+` FROM api_keys
+		ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`, filter.Limit, filter.Offset)
 	if err != nil {
 		return nil, 0, err
 	}
