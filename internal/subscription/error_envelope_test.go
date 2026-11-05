@@ -68,7 +68,7 @@ func TestSetBillingThresholds_MultiCurrencyErrorEnvelope(t *testing.T) {
 	store := newMemStore()
 	now := time.Now().UTC()
 	start, end := now.Add(-15*24*time.Hour), now.Add(15*24*time.Hour)
-	sub, err := store.Create(context.Background(), "t1", domain.Subscription{
+	sub, err := store.CreateWithBill(context.Background(), "t1", domain.Subscription{
 		Code: "sub-mc", CustomerID: "cus_1",
 		Status:                    domain.SubscriptionActive,
 		BillingTime:               domain.BillingTimeCalendar,
@@ -78,7 +78,7 @@ func TestSetBillingThresholds_MultiCurrencyErrorEnvelope(t *testing.T) {
 			{PlanID: "plan_usd", Quantity: 1},
 			{PlanID: "plan_eur", Quantity: 1},
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}

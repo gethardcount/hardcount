@@ -36,7 +36,8 @@ const goldenPath = "testdata/activity_lines.golden.json"
 // domain lists, and TestSubscriptionAuditWriters_UseTheVocabulary proves the
 // lists are exactly what the writers emit: every subscription audit row in
 // the code is written with a domain constant, never a literal, and every
-// constant in the lists has a writer.
+// constant in the lists has a writer, except the retired ones
+// (retiredAuditActions).
 
 // repoRoot is the module root, two levels above this package.
 func repoRoot(t *testing.T) string {
@@ -211,6 +212,14 @@ func scanSubscriptionAuditWriters(t *testing.T) writerScan {
 	return w
 }
 
+// retiredAuditActions are listed audit actions that no code writes any more.
+// The timeline still renders the rows earlier versions wrote with them.
+// subscription.proration_failed is one: an item change and its proration now
+// commit together or not at all.
+var retiredAuditActions = map[string]bool{
+	domain.AuditActionSubscriptionProrationFailed: true,
+}
+
 func TestSubscriptionAuditWriters_UseTheVocabulary(t *testing.T) {
 	w := scanSubscriptionAuditWriters(t)
 	for _, l := range w.literals {
@@ -220,7 +229,11 @@ func TestSubscriptionAuditWriters_UseTheVocabulary(t *testing.T) {
 		in := map[string]bool{}
 		for _, v := range listed {
 			in[v] = true
-			if _, ok := written[v]; !ok {
+			_, ok := written[v]
+			switch {
+			case retiredAuditActions[v] && ok:
+				t.Errorf("%s %q is retired but a writer emits it (%s)", what, v, strings.Join(written[v], ", "))
+			case !retiredAuditActions[v] && !ok:
 				t.Errorf("%s %q is listed but no writer emits it", what, v)
 			}
 		}

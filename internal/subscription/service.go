@@ -1096,13 +1096,12 @@ type ItemChangeResult struct {
 	// as the swap wrote it. nil for every other change, and for a swap to a
 	// plan billed in arrears, which bills the new period at its end.
 	NewPeriodInvoice *NewPeriodInvoice `json:"new_period_invoice,omitempty"`
-	// OrchestratedCrossAxis is true when UpdateItem went through the
-	// cross-axis (cross-interval or cross-cadence) orchestrator path.
-	// The handler MUST NOT run its legacy handleItemProration when
-	// this flag is set — the orchestrator already issued the refund
-	// credit and (for NEW in_advance) the new in_advance invoice;
-	// firing handleItemProration on top would emit a second credit
-	// against the same OLD period and over-credit the customer.
+	// OrchestratedCrossAxis is true when UpdateItemTx ran the immediate
+	// cross-interval swap (applyCrossIntervalPlanSwapTx). The handler must
+	// not run handleItemProration when it is set: the swap already wrote
+	// the refund credit and (for NEW in_advance) the new in_advance
+	// invoice, so a proration on top would emit a second credit against
+	// the same OLD period and over-credit the customer.
 	OrchestratedCrossAxis bool `json:"-"`
 	// crossAxisNewInvoice carries the swap invoice (the new in_advance
 	// period's base plus the old period's usage up to the swap) created
@@ -1182,11 +1181,10 @@ type ProrationDetail struct {
 	// notes AFTER the atomic tx commits: the credit-note service's tax reversal
 	// is an external Stripe call, so it can't ride the DB tx. ClawbackPieces
 	// are the shares domain.AllocateUnusedCredit placed, one per invoice that
-	// charged the item, newest first (ADR-118). On the ATOMIC path each is
-	// CREATED as a draft IN the caller's tx (createClawbackDraftsTx →
-	// ClawbackDraftIDs) so it commits with the item change, then ISSUED
-	// post-commit (issueClawbackDrafts); the non-atomic path create+issues
-	// inline via issueClawbackCreditNote. Internal — not API surface.
+	// charged the item, newest first (ADR-118). Each is CREATED as a draft
+	// IN the caller's tx (createClawbackDraftsTx → ClawbackDraftIDs) so it
+	// commits with the item change, then ISSUED post-commit
+	// (issueClawbackDrafts). Internal — not API surface.
 	ClawbackReason string               `json:"-"`
 	ClawbackMemo   string               `json:"-"`
 	ClawbackPieces []domain.CreditShare `json:"-"`
@@ -1196,14 +1194,15 @@ type ProrationDetail struct {
 	// ClawbackDraftIDs are the draft credit notes createClawbackDraftsTx wrote
 	// IN the atomic tx (atomic with the item change). issueClawbackDrafts issues
 	// them post-commit; RetryPendingClawbackIssue re-issues any whose Issue()
-	// failed. Empty on the non-atomic path (it issues inline). Internal.
+	// failed. Internal.
 	ClawbackDraftIDs []string `json:"-"`
 	// AutoChargeInvoiceID is the freshly-created proration CHARGE invoice to
-	// enroll into the auto-charge sweep AFTER the tx commits (the sweep then
-	// collects it — wall-clock cron for live subs, test-clock catchup on
-	// advance for clock-pinned). Set only on fresh creation of a positive
-	// proration invoice, never on the dedup-replay path (that invoice may
-	// already be paid). Empty for credit/adjustment paths. Internal.
+	// enroll into the auto-charge sweep on the item change's tx
+	// (enrollAutoChargeTx). The sweep then collects it — wall-clock cron for
+	// live subs, test-clock catchup on advance for clock-pinned. Set only on
+	// fresh creation of a positive proration invoice, never on the
+	// dedup-replay path (that invoice may already be paid). Empty for
+	// credit/adjustment paths. Internal.
 	AutoChargeInvoiceID string `json:"-"`
 	// finalizedInvoice is the proration invoice this change created already
 	// finalized, for the invoice.finalized webhook sent after commit
@@ -1337,151 +1336,182 @@ func (s *Service) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscript
 	return ItemChangeResult{Item: item, EffectiveAt: now, pricedFrom: itemChangeBase{sub: sub}}, nil
 }
 
-// UpdateItemTx is the in-transaction variant of UpdateItem for the
-// simple paths (quantity change, same-interval immediate plan change).
-// The immediate cross-interval swap runs here too, atomically
-// (applyCrossIntervalPlanSwapTx); the non-Tx UpdateItem refuses it. The
-// scheduled-change path needs no tx (no proration emission).
+// UpdateItemTx changes an item on the caller's tx: the handler's atomic
+// change-with-proration tx, so a failed proration rolls the change back too
+// (ADR-030 atomic-proration follow-through). It is the only writer of the
+// immediate cross-interval swap (applyCrossIntervalPlanSwapTx); UpdateItem
+// refuses it.
 //
-// The checks below read the item and the subscription before the tx. The
-// write then runs from the state read under the subscription row lock
+// The checks (checkItemChange) read the item and the subscription before the
+// tx. The write then runs from the state read under the subscription row lock
 // (changeItemUnderLock, or the swap's period CAS plus its item check), and
 // the result carries that state for the handler to price from (#1270).
 func (s *Service) UpdateItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, itemID string, input UpdateItemInput) (ItemChangeResult, error) {
-	if input.Quantity == nil && input.NewPlanID == "" {
-		return ItemChangeResult{}, errs.Invalid("body", "one of quantity or new_plan_id is required")
-	}
-	if input.Quantity != nil && input.NewPlanID != "" {
-		return ItemChangeResult{}, errs.Invalid("body", "quantity and new_plan_id cannot be set together; issue two requests")
-	}
-	sub, err := s.store.Get(ctx, tenantID, subscriptionID)
+	ctx, c, err := s.checkItemChange(ctx, tenantID, subscriptionID, itemID, input)
 	if err != nil {
 		return ItemChangeResult{}, err
 	}
+	if c.swapInterval != "" {
+		// Cross-interval, immediate, same-cadence → atomic restructure on
+		// THIS tx. The OLD-period refund + the new invoice's tax-commit and
+		// auto-charge run POST-commit in the handler (external Stripe steps
+		// must never ride the DB tx).
+		res, err := s.applyCrossIntervalPlanSwapTx(ctx, tx, tenantID, subscriptionID, itemID, input.NewPlanID, c.sub, c.swapInterval, c.swapTiming, c.now)
+		if err != nil {
+			return ItemChangeResult{}, err
+		}
+		// The swap proved this snapshot under the row lock: the period by
+		// its CAS, the items by its item check.
+		res.pricedFrom = itemChangeBase{sub: c.sub, item: c.item}
+		return res, nil
+	}
+	return s.changeItemUnderLock(ctx, tx, tenantID, subscriptionID, c.item, input)
+}
+
+// checkedItemChange is what checkItemChange read and decided: the
+// subscription and the item the checks ran on, the change instant, and, for
+// an immediate plan change to a plan with another billing interval, that
+// interval and the bill timing the swap keeps.
+type checkedItemChange struct {
+	sub  domain.Subscription
+	item domain.SubscriptionItem
+	now  time.Time
+	// swapInterval is set only for an immediate cross-interval plan swap.
+	swapInterval domain.BillingInterval
+	swapTiming   domain.BillTiming
+}
+
+// checkItemChange runs the checks UpdateItemTx and UpdateItem both make
+// before their write, on reads outside the change's tx. Exactly one of
+// Quantity and NewPlanID must be set. It returns ctx bound to the
+// subscription's pin, so the change instant and a scheduled change's
+// effective date land in simulated time on a clock-pinned subscription.
+//
+// The plan checks gate a scheduled change too: a pending swap onto an
+// archived plan, a meter another subscription bills, another currency or
+// another bill timing would take effect at the next cycle boundary.
+func (s *Service) checkItemChange(ctx context.Context, tenantID, subscriptionID, itemID string, input UpdateItemInput) (context.Context, checkedItemChange, error) {
+	if input.Quantity == nil && input.NewPlanID == "" {
+		return ctx, checkedItemChange{}, errs.Invalid("body", "one of quantity or new_plan_id is required")
+	}
+	if input.Quantity != nil && input.NewPlanID != "" {
+		return ctx, checkedItemChange{}, errs.Invalid("body", "quantity and new_plan_id cannot be set together; issue two requests")
+	}
+	sub, err := s.store.Get(ctx, tenantID, subscriptionID)
+	if err != nil {
+		return ctx, checkedItemChange{}, err
+	}
 	// The item comes from the same read as sub.Items, which the swap's item
 	// check compares under the lock: a change that commits between two reads
-	// cannot slip past it.
+	// cannot slip past it. An item of another subscription is not found here,
+	// so a request cannot change an item through a subscription it did not
+	// name (RLS already keeps other tenants out).
 	item, ok := findItem(sub.Items, itemID)
 	if !ok {
-		return ItemChangeResult{}, errs.ErrNotFound
+		return ctx, checkedItemChange{}, errs.ErrNotFound
 	}
 	if sub.Status != domain.SubscriptionActive {
-		return ItemChangeResult{}, errs.InvalidState(fmt.Sprintf("Items can only be changed on an active subscription. This one is %s.", sub.Status))
+		return ctx, checkedItemChange{}, errs.InvalidState(fmt.Sprintf("Items can only be changed on an active subscription. This one is %s.", sub.Status))
 	}
 	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
-	now := s.clock.Now(ctx)
+	c := checkedItemChange{sub: sub, item: item, now: s.clock.Now(ctx)}
 
 	if input.Quantity != nil {
 		if *input.Quantity < 1 {
-			return ItemChangeResult{}, errs.Invalid("quantity", "must be >= 1")
+			return ctx, checkedItemChange{}, errs.Invalid("quantity", "must be >= 1")
 		}
 		// The "same as current" check runs under the lock, against the
 		// quantity the change is priced from.
-		return s.changeItemUnderLock(ctx, tx, tenantID, subscriptionID, item, input)
+		return ctx, c, nil
 	}
 
-	// Plan-change branch. Same-interval + same-cadence immediate is the simple
-	// atomic plan write below. Cross-interval (same-cadence) immediate now
-	// restructures the cycle atomically on THIS tx via applyCrossIntervalPlanSwapTx
-	// (plan write + watermark + new in_advance invoice committed together).
-	// Scheduled changes still return the not-applicable sentinel (handler falls
-	// back to the legacy non-atomic flow); cross-cadence swaps are rejected.
 	if input.NewPlanID == item.PlanID {
-		return ItemChangeResult{}, errs.Invalid("new_plan_id", "new plan is the same as current plan")
+		return ctx, checkedItemChange{}, errs.Invalid("new_plan_id", "new plan is the same as current plan")
 	}
-	if s.plans != nil {
-		currentPlan, perr := s.plans.GetPlan(ctx, tenantID, item.PlanID)
-		if perr != nil {
-			return ItemChangeResult{}, errs.Invalid("items", fmt.Sprintf("plan %q not found", item.PlanID))
-		}
-		newPlan, perr := s.plans.GetPlan(ctx, tenantID, input.NewPlanID)
-		if perr != nil {
-			return ItemChangeResult{}, errs.Invalid("new_plan_id", fmt.Sprintf("plan %q not found", input.NewPlanID))
-		}
-		// Swapping ONTO an archived plan is new business on a retired price
-		// (ADR-067) — same guard as subscription.Create. Existing items
-		// already on an archived plan keep billing (archive ≠ cancel).
-		if newPlan.Status == domain.PlanArchived {
-			return ItemChangeResult{}, errs.InvalidState(fmt.Sprintf("plan %q is archived — pick an active plan", input.NewPlanID))
-		}
-		// Double-billing guard: the swapped-to plan's meters must be
-		// disjoint from every live sub of the customer and this sub's
-		// OTHER items. The item being swapped is excluded — its outgoing
-		// plan stops billing when the new one starts.
-		if err := s.rejectMeterOverlap(ctx, tenantID, sub.CustomerID, subscriptionID, itemID, []string{input.NewPlanID}); err != nil {
-			return ItemChangeResult{}, err
-		}
-		// Currency pin (ADR-100): a swap may not cross currencies — the
-		// proration path subtracts old-plan cents from new-plan cents as
-		// raw integers, and the sub's other items + profile + other subs
-		// must stay coherent. Outgoing plan resolved via the swapped item.
-		if err := s.guardSwapCurrency(ctx, tenantID, sub, subscriptionID, itemID, input.NewPlanID); err != nil {
-			return ItemChangeResult{}, err
-		}
-		if !input.Immediate {
-			return ItemChangeResult{}, errAtomicNotApplicable
-		}
-		// Mixed-interval guard — mirrors the non-atomic UpdateItem (the engine's
-		// hybrid-invoice + per-sub period anchor assume a UNIFORM interval across
-		// items). Without this, a multi-item swap would re-anchor the whole sub
-		// to the swapped item's new interval and bill the UNCHANGED items over
-		// the wrong period (e.g. a monthly item billed a full base over a yearly
-		// period — an overcharge). Reject the swap if the post-change set mixes
-		// intervals, exactly as the non-atomic path does.
-		hypothetical := make([]domain.SubscriptionItem, 0, len(sub.Items))
-		for _, existing := range sub.Items {
-			if existing.ID == itemID {
-				hypothetical = append(hypothetical, domain.SubscriptionItem{PlanID: input.NewPlanID})
-			} else {
-				hypothetical = append(hypothetical, existing)
-			}
-		}
-		if err := s.rejectMixedItemIntervals(ctx, tenantID, hypothetical); err != nil {
-			return ItemChangeResult{}, err
-		}
-		currentTiming := currentPlan.BaseBillTiming
-		if currentTiming == "" {
-			currentTiming = domain.BillInArrears
-		}
-		newTiming := newPlan.BaseBillTiming
-		if newTiming == "" {
-			newTiming = domain.BillInArrears
-		}
-		// Cross-cadence (in_advance ↔ in_arrears) plan-swap is unsupported —
-		// no industry peer documents it as an in-place change (2026-05-21
-		// verification). Same rejection + message as the non-atomic UpdateItem.
-		if currentTiming != newTiming {
-			return ItemChangeResult{}, errs.Invalid("new_plan_id", fmt.Sprintf(
-				"bill_timing change is not supported on plan-swap (current %s, new %s); cancel the subscription and start a new one with the target plan",
-				currentTiming, newTiming))
-		}
-		currentInterval := currentPlan.BillingInterval
-		if currentInterval == "" {
-			currentInterval = domain.BillingMonthly
-		}
-		newInterval := newPlan.BillingInterval
-		if newInterval == "" {
-			newInterval = domain.BillingMonthly
-		}
-		if currentInterval != newInterval {
-			// Cross-interval, immediate, same-cadence → atomic restructure on
-			// THIS tx. The OLD-period refund + the new invoice's tax-commit and
-			// auto-charge run POST-commit in the handler (external Stripe steps
-			// must never ride the DB tx).
-			res, err := s.applyCrossIntervalPlanSwapTx(ctx, tx, tenantID, subscriptionID, itemID, input.NewPlanID, sub, newInterval, newTiming, now)
-			if err != nil {
-				return ItemChangeResult{}, err
-			}
-			// The swap proved this snapshot under the row lock: the period by
-			// its CAS, the items by its item check.
-			res.pricedFrom = itemChangeBase{sub: sub, item: item}
-			return res, nil
+	// Skipped when PlanReader isn't wired (narrow unit tests).
+	if s.plans == nil {
+		return ctx, c, nil
+	}
+	currentPlan, perr := s.plans.GetPlan(ctx, tenantID, item.PlanID)
+	if perr != nil {
+		return ctx, checkedItemChange{}, errs.Invalid("items", fmt.Sprintf("plan %q not found", item.PlanID))
+	}
+	newPlan, perr := s.plans.GetPlan(ctx, tenantID, input.NewPlanID)
+	if perr != nil {
+		return ctx, checkedItemChange{}, errs.Invalid("new_plan_id", fmt.Sprintf("plan %q not found", input.NewPlanID))
+	}
+	// Swapping ONTO an archived plan is new business on a retired price
+	// (ADR-067) — same guard as subscription.Create. Existing items
+	// already on an archived plan keep billing (archive ≠ cancel).
+	if newPlan.Status == domain.PlanArchived {
+		return ctx, checkedItemChange{}, errs.InvalidState(fmt.Sprintf("plan %q is archived — pick an active plan", input.NewPlanID))
+	}
+	// Double-billing guard: the swapped-to plan's meters must be
+	// disjoint from every live sub of the customer and this sub's
+	// OTHER items. The item being swapped is excluded — its outgoing
+	// plan stops billing when the new one starts.
+	if err := s.rejectMeterOverlap(ctx, tenantID, sub.CustomerID, subscriptionID, itemID, []string{input.NewPlanID}); err != nil {
+		return ctx, checkedItemChange{}, err
+	}
+	// Currency pin (ADR-100): a swap may not cross currencies — the
+	// proration path subtracts old-plan cents from new-plan cents as
+	// raw integers, and the sub's other items + profile + other subs
+	// must stay coherent. Outgoing plan resolved via the swapped item.
+	if err := s.guardSwapCurrency(ctx, tenantID, sub, subscriptionID, itemID, input.NewPlanID); err != nil {
+		return ctx, checkedItemChange{}, err
+	}
+	// Mixed-interval guard: the engine's hybrid invoice and the per-sub
+	// period anchor assume one interval and one bill timing across items.
+	// Without it, a multi-item swap would re-anchor the whole sub to the
+	// swapped item's new interval and bill the unchanged items over the
+	// wrong period (e.g. a monthly item billed a full base over a yearly
+	// period — an overcharge).
+	hypothetical := make([]domain.SubscriptionItem, 0, len(sub.Items))
+	for _, existing := range sub.Items {
+		if existing.ID == itemID {
+			hypothetical = append(hypothetical, domain.SubscriptionItem{PlanID: input.NewPlanID})
+		} else {
+			hypothetical = append(hypothetical, existing)
 		}
 	}
-	if !input.Immediate {
-		return ItemChangeResult{}, errAtomicNotApplicable
+	if err := s.rejectMixedItemIntervals(ctx, tenantID, hypothetical); err != nil {
+		return ctx, checkedItemChange{}, err
 	}
-	return s.changeItemUnderLock(ctx, tx, tenantID, subscriptionID, item, input)
+	// Both legs default to in_arrears for pre-ADR-031 plans, matching the
+	// engine's lenient defaults.
+	currentTiming := currentPlan.BaseBillTiming
+	if currentTiming == "" {
+		currentTiming = domain.BillInArrears
+	}
+	newTiming := newPlan.BaseBillTiming
+	if newTiming == "" {
+		newTiming = domain.BillInArrears
+	}
+	// Cross-cadence (in_advance ↔ in_arrears) plan-swap is unsupported,
+	// immediate or scheduled — no industry peer documents it as an in-place
+	// change (2026-05-21 verification). The operator cancels and starts a
+	// new subscription on the target plan. The multi-item check above cannot
+	// catch it on a single-item subscription, so it is checked here.
+	if currentTiming != newTiming {
+		return ctx, checkedItemChange{}, errs.Invalid("new_plan_id", fmt.Sprintf(
+			"bill_timing change is not supported on plan-swap (current %s, new %s); cancel the subscription and start a new one with the target plan",
+			currentTiming, newTiming))
+	}
+	currentInterval := currentPlan.BillingInterval
+	if currentInterval == "" {
+		currentInterval = domain.BillingMonthly
+	}
+	newInterval := newPlan.BillingInterval
+	if newInterval == "" {
+		newInterval = domain.BillingMonthly
+	}
+	// An immediate same-cadence cross-interval swap restructures the cycle
+	// (applyCrossIntervalPlanSwapTx). A scheduled one takes effect at the
+	// boundary like any other scheduled change.
+	if input.Immediate && currentInterval != newInterval {
+		c.swapInterval, c.swapTiming = newInterval, newTiming
+	}
+	return ctx, c, nil
 }
 
 // changeItemUnderLock writes a quantity change, a same-interval immediate
@@ -1611,192 +1641,26 @@ func sameItems(a, b []domain.SubscriptionItem) bool {
 	return true
 }
 
-// errAtomicNotApplicable signals that the requested UpdateItem variant
-// (scheduled change, cross-interval swap, cross-cadence swap) doesn't
-// support the atomic-tx flow yet — handler should fall back to the
-// legacy non-atomic UpdateItem. Sentinel rather than a typed error so
-// the handler can errors.Is-match it.
-var errAtomicNotApplicable = errs.InvalidState("atomic-tx UpdateItem applies only to quantity changes + same-interval immediate plan changes")
-
-// UpdateItem applies a quantity-only patch OR a plan change (immediate or
-// scheduled) to a single item. Exactly one of Quantity/NewPlanID must be set.
-// Plan change semantics match the prior subscription-level ChangePlan: an
-// immediate change supersedes any existing pending change on the same item,
-// while a scheduled change records pending_plan_id + effective_at for the
-// billing engine to apply at the next cycle boundary.
+// UpdateItem changes an item in a transaction of its own, for a change the
+// handler does not prorate: a scheduled plan change, or an immediate change
+// in the last hours of a period. It runs UpdateItemTx's checks
+// (checkItemChange). An immediate change supersedes any pending change on
+// the item; a scheduled one records pending_plan_id and its effective date
+// for the billing engine to apply at the next cycle boundary.
+//
+// It refuses an immediate cross-interval swap (swap_requires_atomic_path):
+// only UpdateItemTx, on the handler's tx, may restructure the cycle, so the
+// swap's refund, plan write, period CAS and new-period invoice commit
+// together (ADR-118).
 func (s *Service) UpdateItem(ctx context.Context, tenantID, subscriptionID, itemID string, input UpdateItemInput) (ItemChangeResult, error) {
-	if input.Quantity == nil && input.NewPlanID == "" {
-		return ItemChangeResult{}, errs.Invalid("body", "one of quantity or new_plan_id is required")
-	}
-	if input.Quantity != nil && input.NewPlanID != "" {
-		return ItemChangeResult{}, errs.Invalid("body", "quantity and new_plan_id cannot be set together; issue two requests")
-	}
-
-	item, err := s.store.GetItem(ctx, tenantID, itemID)
+	ctx, c, err := s.checkItemChange(ctx, tenantID, subscriptionID, itemID, input)
 	if err != nil {
 		return ItemChangeResult{}, err
 	}
-	if item.SubscriptionID != subscriptionID {
-		// Scoping the item to its parent keeps a tenant from mutating an item
-		// on a subscription they didn't supply in the URL — the tenant_id RLS
-		// check already blocks cross-tenant, but intra-tenant cross-sub has to
-		// be enforced here.
-		return ItemChangeResult{}, errs.ErrNotFound
+	if c.swapInterval != "" {
+		return ItemChangeResult{}, errs.InvalidState("an immediate cross-interval plan swap must run on the atomic path").WithCode("swap_requires_atomic_path")
 	}
-	sub, err := s.store.Get(ctx, tenantID, subscriptionID)
-	if err != nil {
-		return ItemChangeResult{}, err
-	}
-	if sub.Status != domain.SubscriptionActive {
-		return ItemChangeResult{}, errs.InvalidState(fmt.Sprintf("Items can only be changed on an active subscription. This one is %s.", sub.Status))
-	}
-
-	// Bind via sub pin: pending_plan_effective_at (and the immediate-
-	// effectiveAt return) need to be in simulated time so the engine's
-	// catchup picks up the rollover at the operator's next Advance,
-	// not at wall-clock-2026.
-	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
-
-	if input.Quantity != nil {
-		if *input.Quantity < 1 {
-			return ItemChangeResult{}, errs.Invalid("quantity", "must be >= 1")
-		}
-		return s.changeItemInOwnTx(ctx, tenantID, subscriptionID, item, input)
-	}
-
-	if input.NewPlanID == item.PlanID {
-		return ItemChangeResult{}, errs.Invalid("new_plan_id", "new plan is the same as current plan")
-	}
-
-	// Mixed-interval / mixed-bill-timing guard on plan-change. Composes
-	// the post-change item set (other items unchanged + the new plan on
-	// this item) and asserts every interval AND every bill_timing
-	// matches. Same rationale as Create / AddItem — the period anchor
-	// and invoice shape are per-sub and would drift if a single item
-	// swapped to a different cadence. Skipped when PlanReader is
-	// unwired (narrow unit tests).
-	//
-	// The multi-item check catches mixes; the inline single-item guard
-	// below catches the case where swapping the only item changes the
-	// sub's bill_timing (e.g. in_arrears $29 → in_advance $49). The
-	// engine's hybrid-invoice shape assumes a uniform bill_timing per
-	// sub; cross-bill-timing swaps are not exercised end-to-end, so
-	// rejecting at request time is the pre-launch safe stance.
-	if s.plans != nil {
-		hypothetical := make([]domain.SubscriptionItem, 0, len(sub.Items))
-		for _, existing := range sub.Items {
-			if existing.ID == itemID {
-				hypothetical = append(hypothetical, domain.SubscriptionItem{PlanID: input.NewPlanID})
-			} else {
-				hypothetical = append(hypothetical, existing)
-			}
-		}
-		if err := s.rejectMixedItemIntervals(ctx, tenantID, hypothetical); err != nil {
-			return ItemChangeResult{}, err
-		}
-
-		// Single-item bill_timing-change guard. The multi-item check
-		// above can't fire when len(items)==1, so explicitly compare
-		// the current item's plan timing against the new plan's
-		// timing. Both legs default to in_arrears for pre-ADR-031
-		// plans to match the engine's lenient defaults.
-		currentPlan, err := s.plans.GetPlan(ctx, tenantID, item.PlanID)
-		if err != nil {
-			return ItemChangeResult{}, errs.Invalid("items", fmt.Sprintf("plan %q not found", item.PlanID))
-		}
-		newPlan, err := s.plans.GetPlan(ctx, tenantID, input.NewPlanID)
-		if err != nil {
-			return ItemChangeResult{}, errs.Invalid("new_plan_id", fmt.Sprintf("plan %q not found", input.NewPlanID))
-		}
-		// Same archived-plan guard as the atomic path (UpdateItemTx) and
-		// subscription.Create — swapping onto a retired price is new business
-		// (ADR-067).
-		if newPlan.Status == domain.PlanArchived {
-			return ItemChangeResult{}, errs.InvalidState(fmt.Sprintf("plan %q is archived — pick an active plan", input.NewPlanID))
-		}
-		// Double-billing guard — same as UpdateItemTx. Also gates SCHEDULED
-		// changes: a pending swap onto an already-billed meter would start
-		// double-billing at the next cycle boundary.
-		if err := s.rejectMeterOverlap(ctx, tenantID, sub.CustomerID, subscriptionID, itemID, []string{input.NewPlanID}); err != nil {
-			return ItemChangeResult{}, err
-		}
-		// Currency pin (ADR-100) — same as UpdateItemTx; also gates
-		// scheduled swaps, which would re-denominate at the next boundary.
-		if err := s.guardSwapCurrency(ctx, tenantID, sub, subscriptionID, itemID, input.NewPlanID); err != nil {
-			return ItemChangeResult{}, err
-		}
-		currentTiming := currentPlan.BaseBillTiming
-		if currentTiming == "" {
-			currentTiming = domain.BillInArrears
-		}
-		newTiming := newPlan.BaseBillTiming
-		if newTiming == "" {
-			newTiming = domain.BillInArrears
-		}
-		// Cross-cadence plan-swap (in_advance ↔ in_arrears) is
-		// rejected — both immediate and scheduled. 2026-05-21
-		// industry verification across Stripe / Lago / Orb / Chargebee
-		// / Recurly / Metronome found no documented support for
-		// swapping a customer between a prepaid plan and a postpaid
-		// plan as an in-place plan-change operation. Lago — the
-		// closest model to Hardcount (per-plan pay_in_advance flag) —
-		// explicitly documents same-cadence transitions only. The
-		// industry pattern is: change collection_method at sub level
-		// (Stripe) or end + recreate (Metronome contract transitions).
-		// Operator path: cancel + recreate with the target plan.
-		if currentTiming != newTiming {
-			return ItemChangeResult{}, errs.Invalid("new_plan_id", fmt.Sprintf(
-				"bill_timing change is not supported on plan-swap (current %s, new %s); cancel the subscription and start a new one with the target plan",
-				currentTiming, newTiming))
-		}
-
-		currentInterval := currentPlan.BillingInterval
-		if currentInterval == "" {
-			currentInterval = domain.BillingMonthly
-		}
-		newInterval := newPlan.BillingInterval
-		if newInterval == "" {
-			newInterval = domain.BillingMonthly
-		}
-		crossInterval := currentInterval != newInterval
-
-		// Immediate same-cadence cross-interval swap restructures the
-		// cycle (e.g. yearly→monthly downgrade mid-year). Path differs
-		// by cadence:
-		//
-		//   in_advance: refund the unused portion of the OLD prepaid
-		//   period (BillOnPlanSwapDraftsTx), jump current_period
-		//   to (now, NextBillingPeriodEnd for NEW interval), and
-		//   synchronously bill one invoice (BillOnPlanSwapTx): the NEW
-		//   in_advance period's base (with stub proration if calendar
-		//   snap shortens it) plus the OLD plan's usage over
-		//   (oldPS, now), which the jump closes.
-		//
-		//   in_arrears: truncate current_period to (oldPS, now). The
-		//   scheduler / catchup picks up next_billing_at=now, closes
-		//   the partial period under the OLD plan rate via segment-
-		//   aware billing (subscription_item_changes captures the
-		//   transition at `now`), then opens a new period under the
-		//   NEW plan's interval. No synchronous bill — same UX as any
-		//   other in_arrears cycle close.
-		//
-		// Industry shape (verified 2026-05-21): Stripe / Lago / Orb /
-		// Chargebee / Recurly all ship immediate cross-interval with
-		// similar restructure-and-bill semantics. Cross-cadence is
-		// rejected upstream — no industry peer documents it as an
-		// in-place plan-swap operation.
-		if input.Immediate && crossInterval {
-			// Only the atomic path (applyCrossIntervalPlanSwapTx, through the
-			// handler's tx) may restructure the cycle: its refund, plan write,
-			// period CAS and new-period invoice commit together. The old
-			// non-atomic variant refunded first and swapped after, and lost the
-			// refund on any failure in between (ADR-118).
-			return ItemChangeResult{}, errs.InvalidState("an immediate cross-interval plan swap must run on the atomic path").WithCode("swap_requires_atomic_path")
-		}
-	}
-
-	// A scheduled change, or an immediate one the handler does not prorate.
-	return s.changeItemInOwnTx(ctx, tenantID, subscriptionID, item, input)
+	return s.changeItemInOwnTx(ctx, tenantID, subscriptionID, c.item, input)
 }
 
 // changeItemInOwnTx runs changeItemUnderLock in a transaction of its own,
@@ -2990,7 +2854,7 @@ func (s *Service) EndTrial(ctx context.Context, tenantID, id string) (domain.Sub
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, ErrTrialCancelDue) {
+		if errors.Is(err, domain.ErrTrialCancelDue) {
 			// The SQL backstop caught a schedule that raced past the check
 			// above — same operator answer.
 			return domain.Subscription{}, errs.InvalidState("This subscription is scheduled to cancel. Undo the scheduled cancellation first, then end the trial.")
@@ -3033,7 +2897,7 @@ func (s *Service) cancelTrialAtEnd(ctx context.Context, tenantID string, sub dom
 		return false, nil
 	}
 	canceled, err := s.store.CancelAtTrialEnd(ctx, tenantID, sub.ID, *sub.TrialEndAt)
-	if errors.Is(err, ErrTrialCancelConflict) {
+	if errors.Is(err, domain.ErrTrialCancelConflict) {
 		return false, nil
 	}
 	if err != nil {
@@ -3134,7 +2998,7 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 			return nil
 		})
 		if err != nil {
-			if errors.Is(err, ErrTrialCancelDue) {
+			if errors.Is(err, domain.ErrTrialCancelDue) {
 				// A cancel schedule committed between the snapshot and the
 				// flip — the SQL guard blocked the activation. Route it.
 				fresh, gErr := s.store.Get(bound, tenantID, sub.ID)
@@ -3256,7 +3120,7 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 			return nil
 		})
 		if err != nil {
-			if errors.Is(err, ErrTrialCancelDue) {
+			if errors.Is(err, domain.ErrTrialCancelDue) {
 				// Schedule committed after the snapshot — the SQL guard
 				// blocked the activation. Route to the free cancel.
 				fresh, gErr := s.store.Get(ctx, sub.TenantID, sub.ID)

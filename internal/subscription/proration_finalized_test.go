@@ -41,8 +41,8 @@ func (m *finalizeRecorderMock) DispatchInvoiceFinalized(_ context.Context, _ str
 	m.dispatched = append(m.dispatched, inv)
 }
 
-// prorationFinalizeRig is an upgrade (Basic → Pro, 15 of 30 days left) on the
-// non-atomic path (no db wired) against a paid source invoice.
+// prorationFinalizeRig is an upgrade (Basic → Pro, 15 of 30 days left)
+// against a paid source invoice, on in-memory fakes.
 type prorationFinalizeRig struct {
 	h        *Handler
 	invoices *invoicesMock
@@ -79,11 +79,11 @@ func (r *prorationFinalizeRig) upgrade(t *testing.T) *httptest.ResponseRecorder 
 	return rr
 }
 
-// TestProration_NonAtomic_FinalizedInvoice_AuditThenDispatchOnce (#1279): the
-// non-atomic path writes the finalize row inside the invoice's own create tx
-// (the store hands emit the tx), then sends invoice.finalized once, for the
-// invoice it created.
-func TestProration_NonAtomic_FinalizedInvoice_AuditThenDispatchOnce(t *testing.T) {
+// TestProration_FinalizedInvoice_AuditThenDispatchOnce (#1279): the finalize
+// row is written with the invoice on the item change's tx, then
+// invoice.finalized goes out once, after the commit, for the invoice the
+// change created.
+func TestProration_FinalizedInvoice_AuditThenDispatchOnce(t *testing.T) {
 	r := newProrationFinalizeRig(t)
 	if rr := r.upgrade(t); rr.Code != http.StatusOK {
 		t.Fatalf("upgrade: %d %s", rr.Code, rr.Body.String())
@@ -139,18 +139,24 @@ func TestProration_DedupReplay_NoAuditNoDispatch(t *testing.T) {
 	}
 }
 
-// TestProration_NonAtomic_AuditFailure_NoInvoiceNoDispatch: the row shares the
-// invoice's fate, so a failed audit write leaves no invoice and sends no
-// webhook (the error surfaces as proration_failed).
-func TestProration_NonAtomic_AuditFailure_NoInvoiceNoDispatch(t *testing.T) {
+// TestProration_AuditFailure_RollsBackNoDispatch: the row shares the item
+// change's fate (ADR-090), so a failed audit write rolls the plan change back
+// and sends no webhook. The fake invoice store has no transaction; the
+// invoice row's rollback is proven against real Postgres in
+// proration_finalized_integration_test.go.
+func TestProration_AuditFailure_RollsBackNoDispatch(t *testing.T) {
 	r := newProrationFinalizeRig(t)
 	r.rec.auditErr = errors.New("audit insert failed")
 	rr := r.upgrade(t)
 	if rr.Code < 500 {
 		t.Fatalf("upgrade with a failing audit write: %d %s, want a 5xx", rr.Code, rr.Body.String())
 	}
-	if len(r.invoices.createdInvoices) != 0 {
-		t.Errorf("invoice kept after its audit write failed: %v", r.invoices.createdInvoices)
+	item, err := r.h.svc.store.GetItem(context.Background(), "t1", r.itemID)
+	if err != nil {
+		t.Fatalf("reload item: %v", err)
+	}
+	if item.PlanID != "plan_basic" {
+		t.Errorf("item plan after a failed finalize audit = %q, want plan_basic (the change rolls back)", item.PlanID)
 	}
 	if len(r.rec.dispatched) != 0 {
 		t.Errorf("invoice.finalized sent for an invoice that was rolled back: %v", r.rec.dispatched)

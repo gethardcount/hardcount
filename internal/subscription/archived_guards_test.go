@@ -91,11 +91,11 @@ func TestAddItem_RejectsArchivedPlan(t *testing.T) {
 				"pln_arch": {ID: "pln_arch", Currency: "USD", Status: domain.PlanArchived, BillingInterval: domain.BillingMonthly},
 				"pln_ok":   {ID: "pln_ok", Currency: "USD", Status: domain.PlanActive, BillingInterval: domain.BillingMonthly},
 			}})
-			sub, err := store.Create(ctx, "t1", domain.Subscription{
+			sub, err := store.CreateWithBill(ctx, "t1", domain.Subscription{
 				Code: "sub-add-arch", DisplayName: "S", CustomerID: "cus_1",
 				Status: domain.SubscriptionActive,
 				Items:  []domain.SubscriptionItem{{PlanID: "pln_base", Quantity: 1}},
-			})
+			}, nil)
 			if err != nil {
 				t.Fatalf("seed sub: %v", err)
 			}

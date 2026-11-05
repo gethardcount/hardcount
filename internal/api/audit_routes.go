@@ -257,7 +257,7 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"POST", "/v1/subscriptions/{id}/retry-billing"}:                   explicit("subscription.Service.RetryBilling → LogInTx(update, subscription; metadata action=billing_retried) on the transaction that clears the failure record; a subscription with no record answers 409 and emits nothing."),
 	{"PUT", "/v1/subscriptions/{id}/billing-thresholds"}:               explicit("subscription.Handler.setBillingThresholds → Log(update, subscription)."),
 	{"DELETE", "/v1/subscriptions/{id}/billing-thresholds"}:            explicit("subscription.Handler.clearBillingThresholds → Log(update, subscription)."),
-	{"POST", "/v1/subscriptions/{id}/items"}:                           explicit("subscription.Handler.addItem → Log(update, subscription) + a proration_failed row on the fallback path."),
+	{"POST", "/v1/subscriptions/{id}/items"}:                           explicit("subscription.Handler.addItem → Log(update, subscription)."),
 	{"PATCH", "/v1/subscriptions/{id}/items/{itemID}"}:                 explicit("subscription.Handler.updateItem → Log(subscription.item_updated)."),
 	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}"}:                explicit("subscription.Handler.removeItem → Log(update, subscription)."),
 	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}/pending-change"}: explicit("subscription.Handler.cancelPendingItemChange → Log(update, subscription; metadata action=cancel_pending_item_plan_change)."),

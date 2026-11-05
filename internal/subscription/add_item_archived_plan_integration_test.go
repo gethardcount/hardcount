@@ -84,7 +84,6 @@ func TestAddItem_ArchivedPlan_RefusedOnBothPaths(t *testing.T) {
 		},
 	}
 	h := NewHandler(svc)
-	h.SetDB(db)
 	h.SetProrationDeps(ps, invoices)
 
 	trialPeriodEnd := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)

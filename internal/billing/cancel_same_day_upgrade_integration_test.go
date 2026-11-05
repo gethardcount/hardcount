@@ -25,16 +25,8 @@ type prorationInvoices struct {
 	numberer invoice.InvoiceNumberer
 }
 
-func (a prorationInvoices) CreateInvoiceWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error) {
-	return a.CreateWithLineItemsAudited(ctx, tenantID, inv, items, emit)
-}
-
 func (a prorationInvoices) CreateInvoiceWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
 	return a.CreateWithLineItemsTx(ctx, tx, tenantID, inv, items)
-}
-
-func (a prorationInvoices) NextInvoiceNumber(ctx context.Context, tenantID string) (string, error) {
-	return a.numberer.NextInvoiceNumber(ctx, tenantID)
 }
 
 func (a prorationInvoices) NextInvoiceNumberTx(ctx context.Context, tx *sql.Tx, tenantID string) (string, error) {
@@ -89,7 +81,6 @@ func TestImmediateCancel_SameDayAsUnpaidUpgrade_VoidsUpgradeInvoice(t *testing.T
 	// Quantity 1 → 2 through the real handler, wired as internal/api/router.go
 	// wires it. No credit-note issuer: an increase credits nothing.
 	h := subscription.NewHandler(r.f.subSvc)
-	h.SetDB(r.f.db)
 	h.SetProrationDeps(r.f.pricingSvc, prorationInvoices{PostgresStore: r.f.invStore, numberer: r.f.settings})
 	h.SetProrationTaxApplier(prorationTax{engine: r.f.engine})
 	h.SetTenantLocator(r.f.engine)

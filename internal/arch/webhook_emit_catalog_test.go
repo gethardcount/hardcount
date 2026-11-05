@@ -99,7 +99,6 @@ var standaloneWebhookBacklog = map[string]int{
 	"subscription.Handler.clearScheduledCancel subscription.cancel_cleared":             1,
 	"subscription.Handler.dispatchProrationFinalized invoice.finalized":                 1,
 	"subscription.Handler.extendTrial subscription.trial_extended":                      1,
-	"subscription.Handler.handleItemProration invoice.finalized":                        1,
 	"subscription.Handler.pauseCollection subscription.collection_paused":               1,
 	"subscription.Handler.removeItem subscription.item.removed":                         1,
 	"subscription.Handler.resumeCollection subscription.collection_resumed":             1,

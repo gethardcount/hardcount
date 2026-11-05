@@ -74,7 +74,6 @@ func TestUpdateItem_ProrationSettingsUnreadable_RollsBack(t *testing.T) {
 				SubtotalCents: 6000, TotalAmountCents: 6000, CreatedAt: proPeriodStart,
 			}}
 			h := NewHandler(svcWithStore(store))
-			h.SetDB(db)
 			h.SetProrationDeps(&plansMock{plans: map[string]domain.Plan{plan.ID: plan}}, invoices)
 			tc.wire(h)
 

@@ -116,7 +116,6 @@ func TestRemoveItem_ClawbackDraftCreateFailure_RealTxRollsBackItemDelete(t *test
 	cn := &fakeCNIssuer{err: errors.New("simulated in-tx clawback draft create failure")}
 
 	h := NewHandler(svcWithStore(store))
-	h.SetDB(db)
 	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 

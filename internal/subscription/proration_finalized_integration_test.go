@@ -59,7 +59,6 @@ func seatIncreaseOnRealTx(t *testing.T, rec *finalizeRecorderMock) (int, int64, 
 		SubtotalCents: 6000, TotalAmountCents: 6000, CreatedAt: proPeriodStart,
 	}}
 	h := NewHandler(svcWithStore(store))
-	h.SetDB(db)
 	h.SetProrationDeps(&plansMock{plans: map[string]domain.Plan{plan.ID: plan}}, invoices)
 	h.SetInvoiceFinalizeRecorder(rec)
 

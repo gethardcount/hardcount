@@ -17,7 +17,7 @@ import (
 
 // An item change whose base × quantity does not fit int64 cents is refused
 // on the path production takes: the change and its proration run in one
-// transaction (SetDB), and the refusal rolls the change back. Here 18 seats
+// transaction, and the refusal rolls the change back. Here 18 seats
 // of 1e18 cents (1.8e19) do not fit. Amounts this large are not realistic.
 func TestItemChange_PastInt64RolledBack(t *testing.T) {
 	db := testutil.SetupTestDB(t)
@@ -74,7 +74,6 @@ func TestItemChange_PastInt64RolledBack(t *testing.T) {
 	}}
 	cn := &fakeCNIssuer{}
 	h := NewHandler(svcWithStore(store))
-	h.SetDB(db)
 	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 	reqCtx := clock.WithEffectiveNow(auth.WithTenantID(ctx, tenantID), proNow)
