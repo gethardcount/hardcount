@@ -329,11 +329,14 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	webhookOutSvc := webhook.NewService(webhookOutStore, nil, o.appEnv)
 	webhookOutH := webhook.NewHandler(webhookOutSvc)
 
-	// Outbound events go through a transactional outbox. A producer writes the
-	// event to webhook_outbox inside its business transaction. The dispatcher
-	// worker (cmd/hardcount/main.go) drains the queue and calls
-	// Service.Dispatch for each row. The outbox is always on (ADR-040),
-	// because dispatching directly gives up every retry guarantee.
+	// Outbound events go through the webhook_outbox table, which the
+	// dispatcher worker (cmd/hardcount/main.go) drains into events and their
+	// deliveries. The outbox is always on (ADR-040), because dispatching
+	// directly gives up every retry guarantee. The components given
+	// outboxStore below queue their events in the transaction of the change.
+	// The producers given eventDispatcher queue theirs after that transaction
+	// commits, so a crash in between loses the event;
+	// internal/arch/webhook_emit_catalog_test.go lists those sites.
 	outboxStore := webhook.NewOutboxStore(db)
 	// Queue-depth gauges, which the Grafana and runbook alerts watch. The
 	// counts run on a TxBypass transaction because they span tenants. Under
@@ -1145,6 +1148,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// When the handler exists, its emitter must be wired.
 		audit.MustWired(publicPaymentH)
 	}
+	// Webhook outbox wiring fails closed the same way. A store or service
+	// with no outbox queues none of its events, so a dropped setter line would
+	// boot and send nothing. Every component that holds an outbox joins this
+	// list; TestMustWiredOutbox_CoversEveryOutboxHolder pins it.
+	webhook.MustWiredOutbox(invoiceStore, creditStore, subStore, dunningStore, creditNoteSvc)
 
 	// Invoice finalize commits the Stripe Tax calculation into a
 	// tax_transaction, so the tenant's Stripe Tax reports show the final

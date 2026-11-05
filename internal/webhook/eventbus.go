@@ -59,9 +59,9 @@ func FrameFromEvent(e domain.WebhookEvent, status string, lastAttemptAt *time.Ti
 // EventBus is the in-memory pub/sub the SSE handler uses to live-tail
 // new events as they're dispatched. We deliberately do NOT poll the DB
 // on a tick — that approach burns the partial-index cache on every
-// poll and lags ~1s behind dispatch. Instead, the Service's Dispatch
-// path (and the OutboxDispatcher's success callback) calls
-// EventBus.Publish synchronously; subscribers receive frames within
+// poll and lags ~1s behind dispatch. Instead, the Service calls
+// EventBus.Publish synchronously when it creates an event and when a
+// delivery succeeds or fails for good; subscribers receive frames within
 // goroutine-scheduling latency.
 //
 // Slow subscribers do NOT block the publisher — Publish does a
@@ -139,8 +139,8 @@ func (b *EventBus) Subscribe(tenantID string) (<-chan StreamFrame, func()) {
 // Publish fans a frame out to every subscriber for the frame's tenant.
 // Non-blocking by construction: a slow subscriber drops the frame
 // silently rather than back-pressuring the dispatcher. The bus is hot-
-// path adjacent (called from Service.Dispatch) so we keep the lock
-// hold tight and read-only.
+// path adjacent (called from the outbox drain and the delivery path) so
+// we keep the lock hold tight and read-only.
 func (b *EventBus) Publish(tenantID string, frame StreamFrame) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()

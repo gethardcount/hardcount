@@ -352,11 +352,13 @@ func (h *Handler) SetCreditNoteIssuer(i CreditNoteIssuer) {
 	h.creditNotes = i
 }
 
-// fireEvent dispatches a subscription lifecycle event. Synchronous by design:
-// with the webhook_outbox in place (RES-1), Dispatch is a short DB insert that
-// must persist-before-return so a crash between the handler's respond.JSON and
-// event emission can't silently lose the event. Logging an error beats
-// dropping.
+// fireEvent queues a subscription event after the change's transaction has
+// committed, and logs when the queue insert fails. Nothing sends the event
+// again: an insert failure, a crash or a cancelled request between the commit
+// and this insert loses it. The store's transition writers queue their events
+// in the transaction instead (ADR-040);
+// internal/arch/webhook_emit_catalog_test.go lists the sites that still come
+// through here.
 //
 // The event carries sub (ADR-131), which the caller read after the change,
 // with its items. sub must be that read: an event built from a guess would

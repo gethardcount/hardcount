@@ -10,7 +10,7 @@ import (
 )
 
 // livemodeCapturingStore embeds the package memStore and records the ctx
-// livemode observed at the first store call Dispatch makes (CreateEvent) — the
+// livemode observed where dispatchFromOutbox creates the event — the
 // point that stamps webhook_event.livemode and drives the same-mode endpoint
 // filter.
 type livemodeCapturingStore struct {
@@ -21,7 +21,7 @@ type livemodeCapturingStore struct {
 
 // The P5 dispatch path creates the event via CreateEventWithDeliveries
 // (one tx); Go embedding doesn't virtual-dispatch, so the override must
-// sit on the method Dispatch actually calls.
+// sit on the method dispatchFromOutbox actually calls.
 func (s *livemodeCapturingStore) CreateEventWithDeliveries(ctx context.Context, tenantID string, e domain.WebhookEvent, endpointIDs []string, birthLease time.Duration, outboxRowID string) (domain.WebhookEvent, []domain.WebhookDelivery, error) {
 	s.captured = testutil.MustLivemode(ctx)
 	s.createCalled = true
@@ -30,7 +30,7 @@ func (s *livemodeCapturingStore) CreateEventWithDeliveries(ctx context.Context, 
 
 // TestDispatcher_Handle_PropagatesRowLivemodeIntoCtx pins the cross-mode-leak
 // guard. The background outbox dispatcher has no intrinsic mode, so handle()
-// must stamp each outbox row's Livemode into ctx BEFORE Service.Dispatch — else
+// must stamp each outbox row's Livemode into ctx BEFORE dispatchFromOutbox — else
 // a test-mode producer's event would match/deliver to LIVE endpoints (or vice
 // versa) and writes would land in the wrong RLS partition. The ctx handed in
 // deliberately carries NO livemode (the dispatcher's default), so a pass proves
@@ -58,10 +58,10 @@ func TestDispatcher_Handle_PropagatesRowLivemodeIntoCtx(t *testing.T) {
 				t.Fatalf("handle: %v", err)
 			}
 			if !store.createCalled {
-				t.Fatal("Dispatch never reached CreateEvent — test is vacuous")
+				t.Fatal("dispatchFromOutbox never reached CreateEventWithDeliveries — test is vacuous")
 			}
 			if store.captured != mode {
-				t.Errorf("ctx livemode inside Dispatch = %v, want %v (row.Livemode must propagate)", store.captured, mode)
+				t.Errorf("ctx livemode inside dispatchFromOutbox = %v, want %v (row.Livemode must propagate)", store.captured, mode)
 			}
 		})
 	}

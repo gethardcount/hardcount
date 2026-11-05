@@ -24,13 +24,12 @@ type DispatcherConfig struct {
 	BatchTimeout time.Duration
 }
 
-// Dispatcher drains the webhook_outbox by invoking Service.Dispatch for each
-// pending row. It is the bridge between the durable outbox (what producers
-// enqueue) and the existing per-endpoint delivery pipeline (webhook_events +
-// webhook_deliveries). Handler semantics: a row is marked 'dispatched' once
-// Service.Dispatch returns nil, which means the event has been persisted and
-// queued to all matching endpoints — per-endpoint HTTP retry is then owned
-// by Service.StartRetryWorker, independent of the outbox.
+// Dispatcher drains the webhook_outbox by handing each pending row to
+// Service.dispatchFromOutbox. It is the bridge between the durable outbox
+// (what producers enqueue) and the per-endpoint delivery pipeline
+// (webhook_events + webhook_deliveries). A row is marked 'dispatched' in the
+// transaction that saves its event and delivery rows. Per-endpoint HTTP retry
+// is then owned by Service.StartRetryWorker, independent of the outbox.
 type Dispatcher struct {
 	outbox *OutboxStore
 	svc    *Service
@@ -104,5 +103,5 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 	// inside the same tx as the event + delivery rows, so a crash
 	// between the two can no longer mint a duplicate event with a fresh
 	// id. ProcessBatch's own success mark becomes a CAS no-op backstop.
-	return d.svc.DispatchFromOutbox(ctx, row.ID, row.TenantID, row.EventType, row.Payload)
+	return d.svc.dispatchFromOutbox(ctx, row.ID, row.TenantID, row.EventType, row.Payload)
 }

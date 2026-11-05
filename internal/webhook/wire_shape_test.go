@@ -34,7 +34,7 @@ func TestWireShape_EndpointDeliveries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create endpoint: %v", err)
 	}
-	if err := svc.Dispatch(ctx, tenantID, "invoice.finalized", map[string]any{"invoice_id": "hc_inv_42"}); err != nil {
+	if err := svc.dispatchFromOutbox(ctx, "", tenantID, "invoice.finalized", map[string]any{"invoice_id": "hc_inv_42"}); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestWireShape_WebhookEventsStream_SnakeCase(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create endpoint: %v", err)
 	}
-	if err := svc.Dispatch(ctx, tenantID, "invoice.finalized", map[string]any{
+	if err := svc.dispatchFromOutbox(ctx, "", tenantID, "invoice.finalized", map[string]any{
 		"customer_id": "hc_cus_wireshape",
 		"invoice_id":  "hc_inv_42",
 	}); err != nil {
@@ -259,7 +259,7 @@ func TestWireShape_WebhookEventReplay(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create endpoint: %v", err)
 	}
-	if err := svc.Dispatch(ctx, tenantID, "invoice.finalized", map[string]any{
+	if err := svc.dispatchFromOutbox(ctx, "", tenantID, "invoice.finalized", map[string]any{
 		"invoice_id": "hc_inv_99",
 	}); err != nil {
 		t.Fatalf("dispatch: %v", err)
@@ -340,7 +340,7 @@ func TestWireShape_WebhookEventDeliveries(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create endpoint: %v", err)
 	}
-	if err := svc.Dispatch(ctx, tenantID, "invoice.finalized", map[string]any{
+	if err := svc.dispatchFromOutbox(ctx, "", tenantID, "invoice.finalized", map[string]any{
 		"invoice_id":  "hc_inv_77",
 		"customer_id": "hc_cus_77",
 	}); err != nil {

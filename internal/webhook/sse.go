@@ -31,9 +31,9 @@ import (
 // tenant_id so cross-tenant frames never reach this connection.
 //
 // We do NOT poll the DB on a tick. The EventBus is in-memory and
-// per-process: the Service publishes to it synchronously from Dispatch
-// (on whichever replica served the request or ran the outbox drain) and
-// from each delivery attempt (the first on the dispatching replica, a
+// per-process: the Service publishes to it synchronously when it creates
+// an event (on the replica that ran the outbox drain or served the replay)
+// and from each delivery attempt (the first on the dispatching replica, a
 // retry on whichever replica won that tick).
 // With two or more replicas, a stream sees only the frames published on
 // its own replica, so the live tail can miss events and status flips.
