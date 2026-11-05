@@ -2,9 +2,14 @@ package subscription
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
@@ -53,7 +58,8 @@ func TestUpdateItem_BothEntryPointsCheckAlike(t *testing.T) {
 		{"quantity below one", "", UpdateItemInput{Quantity: qty(0)}},
 		{"unknown item", "hc_si_missing", UpdateItemInput{Quantity: qty(2)}},
 		{"same plan", "", UpdateItemInput{NewPlanID: "p_a", Immediate: true}},
-		{"unknown plan", "", UpdateItemInput{NewPlanID: "p_missing", Immediate: true}},
+		{"unknown plan, immediate", "", UpdateItemInput{NewPlanID: "p_missing", Immediate: true}},
+		{"unknown plan, scheduled", "", UpdateItemInput{NewPlanID: "p_missing"}},
 		{"archived plan, immediate", "", UpdateItemInput{NewPlanID: "p_arch", Immediate: true}},
 		{"archived plan, scheduled", "", UpdateItemInput{NewPlanID: "p_arch"}},
 		{"other bill timing, immediate", "", UpdateItemInput{NewPlanID: "p_arr", Immediate: true}},
@@ -97,4 +103,56 @@ func TestUpdateItem_BothEntryPointsCheckAlike(t *testing.T) {
 			t.Errorf("pending plan effective at %v, want the period end %v", res.Item.PendingPlanEffectiveAt, sub.CurrentBillingPeriodEnd)
 		}
 	})
+}
+
+// The API refuses an unknown new_plan_id with a 422 whose param is
+// new_plan_id. The request here is a scheduled change on a two-item
+// subscription, which the handler sends to UpdateItem. The mixed-interval
+// check reads the new plan too and would name param items, so the plan
+// read has to run before it.
+func TestUpdateItem_UnknownNewPlanAnswersOnNewPlanID(t *testing.T) {
+	now := time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC)
+	ctx := context.WithValue(context.Background(), auth.TestTenantIDKey(), "t1")
+	plans := &fakePlanReader{plans: map[string]domain.Plan{
+		"p_a": {ID: "p_a", BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInAdvance, BaseAmountCents: 1000, Currency: "USD"},
+		"p_b": {ID: "p_b", BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInAdvance, BaseAmountCents: 2000, Currency: "USD"},
+	}}
+	store := newMemStore()
+	svc := NewService(store, clock.NewFake(now))
+	svc.SetPlanReader(plans)
+	sub, err := svc.Create(ctx, "t1", CreateInput{
+		Code: "s", DisplayName: "n", CustomerID: "c",
+		Items:       []CreateItemInput{{PlanID: "p_a"}, {PlanID: "p_b"}},
+		BillingTime: domain.BillingTimeAnniversary,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Wired as production wires it, so the handler routes the request as it
+	// would there.
+	h := NewHandler(svc)
+	h.SetProrationDeps(plans, &invoicesMock{})
+
+	itemID := sub.Items[0].ID
+	rr := httptest.NewRecorder()
+	h.updateItem(rr, updateItemURL(ctx, sub.ID, itemID, []byte(`{"new_plan_id":"p_missing"}`)))
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d, want 422; body %s", rr.Code, rr.Body.String())
+	}
+	var body respond.ErrorBody
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode the error body: %v; body %s", err, rr.Body.String())
+	}
+	if got := body.Error; got.Param != "new_plan_id" || got.Code != "validation_error" || got.Message != `plan "p_missing" not found` {
+		t.Errorf("error param %q code %q message %q, want param new_plan_id, code validation_error, message %q",
+			got.Param, got.Code, got.Message, `plan "p_missing" not found`)
+	}
+	item, err := store.GetItem(ctx, "t1", itemID)
+	if err != nil {
+		t.Fatalf("reload the item: %v", err)
+	}
+	if item.PlanID != "p_a" || item.PendingPlanID != "" {
+		t.Errorf("item plan %q pending %q, want p_a and no pending plan", item.PlanID, item.PendingPlanID)
+	}
 }
