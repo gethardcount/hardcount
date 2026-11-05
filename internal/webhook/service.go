@@ -252,7 +252,7 @@ func isBlockedIP(ip net.IP) bool {
 
 // EventBus exposes the in-memory pub/sub backing the SSE stream. The
 // handler subscribes per-request; the service publishes frames from
-// Dispatch and the deliver path. Returns the same instance for the
+// dispatchFromOutbox and the deliver path. Returns the same instance for the
 // lifetime of the service so multiple handlers / cmd-side workers
 // share one fan-out.
 func (s *Service) EventBus() *EventBus { return s.bus }
@@ -537,34 +537,22 @@ func (s *Service) DeleteEndpoint(ctx context.Context, tenantID, id string) error
 	return s.store.DeleteEndpoint(ctx, tenantID, id)
 }
 
-// Dispatch creates a webhook event and delivers it to all matching endpoints.
+// dispatchFromOutbox turns one webhook_outbox row into a webhook event with a
+// delivery row for each matching endpoint, then starts the first attempts.
+// Dispatcher.handle is its only production caller, so every event it makes
+// comes from a committed outbox row. An empty outboxRowID marks no row.
 //
-// Mode scoping: ListEndpoints runs under the caller's ctx livemode, which
-// RLS already filters on. The explicit ep.Livemode == event.Livemode check
-// below is defense-in-depth — if a future call path opens a bypass tx or
-// the RLS predicate is relaxed, test-mode events must still never cross
-// into a live endpoint (and vice versa). Cross-mode delivery would leak
-// synthetic data into production monitoring.
-func (s *Service) Dispatch(ctx context.Context, tenantID, eventType string, payload map[string]any) error {
-	return s.DispatchFromOutbox(ctx, "", tenantID, eventType, payload)
-}
-
-// DispatchFromOutbox is Dispatch carrying the webhook_outbox row that
-// produced this event, so the row's dispatched-mark commits ATOMICALLY
-// with the event + delivery rows (handler-owns-mark, P5): the old
-// separate mark meant a crash between the event commit and the outbox
-// mark re-ran the handler next tick and minted a duplicate event with a
-// fresh id — receivers cannot dedupe those. Empty outboxRowID = direct
-// dispatch (no outbox row).
+// The event, its delivery rows and the outbox row's dispatched mark commit in
+// one transaction (handler-owns-mark). With a separate mark, a crash between
+// the two would re-run the row and send a second event with a new id, which a
+// receiver cannot drop as a repeat.
 //
-// The endpoint fan-out is resolved FIRST (the event's livemode is the
-// ctx's — the 0021 trigger stamps the row from the same session GUC)
-// and the event + every matching delivery row are created in ONE store
-// tx, rows born leased (birthLeaseWindow): the in-process goroutines
-// own the first attempt; a crash any time after the commit leaves rows
-// the retry worker picks up at lease expiry — never an event no
-// delivery row references, never a NULL next_retry_at.
-func (s *Service) DispatchFromOutbox(ctx context.Context, outboxRowID, tenantID, eventType string, payload map[string]any) error {
+// The endpoints are read first, under the ctx's livemode, which RLS filters
+// on. The ep.Livemode check below backs that up, so a test-mode event never
+// reaches a live endpoint even on a path that skips RLS. Delivery rows are
+// born leased (birthLeaseWindow): this process makes the first attempt, and
+// after a crash the retry worker takes each row when its lease ends.
+func (s *Service) dispatchFromOutbox(ctx context.Context, outboxRowID, tenantID, eventType string, payload map[string]any) error {
 	endpoints, err := s.store.ListEndpoints(ctx, tenantID)
 	if err != nil {
 		return fmt.Errorf("list endpoints: %w", err)

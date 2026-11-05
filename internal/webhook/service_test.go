@@ -566,7 +566,7 @@ func TestDispatch(t *testing.T) {
 	})
 
 	// Dispatch an event
-	err := svc.Dispatch(ctx, "t1", "invoice.finalized", map[string]any{
+	err := svc.dispatchFromOutbox(ctx, "", "t1", "invoice.finalized", map[string]any{
 		"invoice_id": "inv_123",
 		"total":      19900,
 	})
@@ -678,7 +678,7 @@ func TestInactiveEndpoint_ListedButNeverDispatched(t *testing.T) {
 		t.Fatalf("list returned %d endpoints, want 2 — the inactive one must be visible or it is unreachable from the dashboard", len(eps))
 	}
 
-	if err := svc.Dispatch(ctx, "t1", "invoice.paid", map[string]any{"invoice_id": "inv_1"}); err != nil {
+	if err := svc.dispatchFromOutbox(ctx, "", "t1", "invoice.paid", map[string]any{"invoice_id": "inv_1"}); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	for _, d := range store.deliveries {
@@ -717,7 +717,7 @@ func TestDispatch_NonMatchingEvent(t *testing.T) {
 	})
 
 	// Dispatch a payment event — should NOT trigger delivery
-	_ = svc.Dispatch(ctx, "t1", "payment.succeeded", map[string]any{})
+	_ = svc.dispatchFromOutbox(ctx, "", "t1", "payment.succeeded", map[string]any{})
 
 	// Delivery is synchronous in test mode
 
@@ -738,7 +738,7 @@ func TestDispatch_WildcardEndpoint(t *testing.T) {
 		Events: []string{"*"},
 	})
 
-	_ = svc.Dispatch(ctx, "t1", "dunning.started", map[string]any{})
+	_ = svc.dispatchFromOutbox(ctx, "", "t1", "dunning.started", map[string]any{})
 	// Delivery is synchronous in test mode
 
 	if len(store.deliveries) != 1 {
@@ -778,7 +778,7 @@ func TestDelivery_FailedHTTP(t *testing.T) {
 
 	_, _ = svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{URL: "http://localhost:9999/hook"})
 	before := time.Now()
-	_ = svc.Dispatch(ctx, "t1", "invoice.finalized", map[string]any{})
+	_ = svc.dispatchFromOutbox(ctx, "", "t1", "invoice.finalized", map[string]any{})
 	// Delivery is synchronous in test mode
 
 	if len(store.deliveries) != 1 {
@@ -894,7 +894,7 @@ func TestReplay(t *testing.T) {
 		URL:    "http://localhost:9999/hook",
 		Events: []string{"invoice.finalized"},
 	})
-	_ = svc.Dispatch(ctx, "t1", "invoice.finalized", map[string]any{"id": "inv_1"})
+	_ = svc.dispatchFromOutbox(ctx, "", "t1", "invoice.finalized", map[string]any{"id": "inv_1"})
 
 	if len(store.deliveries) != 1 {
 		t.Fatalf("initial deliveries: got %d, want 1", len(store.deliveries))
@@ -941,7 +941,7 @@ func TestReplay_PinsLivemodeOnDelivery(t *testing.T) {
 		URL:    "http://localhost:9999/hook",
 		Events: []string{"invoice.finalized"},
 	})
-	_ = svc.Dispatch(testCtx, "t1", "invoice.finalized", map[string]any{"id": "inv_1"})
+	_ = svc.dispatchFromOutbox(testCtx, "", "t1", "invoice.finalized", map[string]any{"id": "inv_1"})
 
 	// Drain the original dispatch's delivery signal (also async on this
 	// service) and assert it was test-mode — proves the harness captures
@@ -989,7 +989,7 @@ func TestReplayDelivery_ScopedToOneEndpoint(t *testing.T) {
 	epB, _ := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9999/b", Events: []string{"invoice.finalized"},
 	})
-	_ = svc.Dispatch(ctx, "t1", "invoice.finalized", map[string]any{"id": "inv_1"})
+	_ = svc.dispatchFromOutbox(ctx, "", "t1", "invoice.finalized", map[string]any{"id": "inv_1"})
 	if len(store.deliveries) != 2 {
 		t.Fatalf("initial deliveries: got %d, want 2", len(store.deliveries))
 	}
@@ -1044,7 +1044,7 @@ func TestReplayDelivery_PausedEndpointRejected_NoOrphanClone(t *testing.T) {
 	ep, _ := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9999/hook", Events: []string{"invoice.finalized"},
 	})
-	_ = svc.Dispatch(ctx, "t1", "invoice.finalized", map[string]any{"id": "inv_1"})
+	_ = svc.dispatchFromOutbox(ctx, "", "t1", "invoice.finalized", map[string]any{"id": "inv_1"})
 	deliveryID := store.deliveries[0].ID
 	eventsBefore := len(store.events)
 
@@ -1084,7 +1084,7 @@ func TestRetryPending_DeletedEndpointResolvesDelivery(t *testing.T) {
 	ep, _ := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9999/hook", Events: []string{"invoice.finalized"},
 	})
-	_ = svc.Dispatch(ctx, "t1", "invoice.finalized", map[string]any{"id": "inv_1"})
+	_ = svc.dispatchFromOutbox(ctx, "", "t1", "invoice.finalized", map[string]any{"id": "inv_1"})
 	if got := store.deliveries[0].Status; got != domain.DeliveryPending {
 		t.Fatalf("fixture delivery status = %s, want pending after a 500 attempt", got)
 	}
@@ -1128,7 +1128,7 @@ func TestReplayDelivery_WrongEndpointPath404s(t *testing.T) {
 	epB, _ := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9999/b", Events: []string{"invoice.finalized"},
 	})
-	_ = svc.Dispatch(ctx, "t1", "invoice.finalized", map[string]any{"id": "inv_1"})
+	_ = svc.dispatchFromOutbox(ctx, "", "t1", "invoice.finalized", map[string]any{"id": "inv_1"})
 
 	var aDelivery domain.WebhookDelivery
 	for _, d := range store.deliveries {
@@ -1188,7 +1188,7 @@ func TestDispatch_ModeScoped(t *testing.T) {
 
 	// A test-mode Dispatch must land the event in the test partition and
 	// only produce a delivery for the test endpoint.
-	if err := svc.Dispatch(testCtx, "t1", "invoice.finalized", map[string]any{"n": 1}); err != nil {
+	if err := svc.dispatchFromOutbox(testCtx, "", "t1", "invoice.finalized", map[string]any{"n": 1}); err != nil {
 		t.Fatalf("test dispatch: %v", err)
 	}
 	if len(store.events) != 1 || store.events[0].Livemode {
@@ -1202,7 +1202,7 @@ func TestDispatch_ModeScoped(t *testing.T) {
 	}
 
 	// A live-mode Dispatch must only hit the live endpoint.
-	if err := svc.Dispatch(liveCtx, "t1", "invoice.finalized", map[string]any{"n": 2}); err != nil {
+	if err := svc.dispatchFromOutbox(liveCtx, "", "t1", "invoice.finalized", map[string]any{"n": 2}); err != nil {
 		t.Fatalf("live dispatch: %v", err)
 	}
 	if len(store.events) != 2 || !store.events[1].Livemode {
@@ -1340,7 +1340,7 @@ func TestRotateSecret_GracePeriod(t *testing.T) {
 	}
 
 	// Dispatch — header should carry BOTH signatures while grace is live.
-	if err := svc.Dispatch(ctx, "t1", "invoice.finalized", map[string]any{"invoice_id": "inv_1"}); err != nil {
+	if err := svc.dispatchFromOutbox(ctx, "", "t1", "invoice.finalized", map[string]any{"invoice_id": "inv_1"}); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	if httpClient.lastRequest == nil {
@@ -1358,7 +1358,7 @@ func TestRotateSecret_GracePeriod(t *testing.T) {
 	store.endpoints[created.Endpoint.ID] = ep
 
 	httpClient.lastRequest = nil
-	if err := svc.Dispatch(ctx, "t1", "invoice.finalized", map[string]any{"invoice_id": "inv_2"}); err != nil {
+	if err := svc.dispatchFromOutbox(ctx, "", "t1", "invoice.finalized", map[string]any{"invoice_id": "inv_2"}); err != nil {
 		t.Fatalf("dispatch 2: %v", err)
 	}
 	header2 := httpClient.lastRequest.Header.Get("Hardcount-Signature")

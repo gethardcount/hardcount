@@ -252,7 +252,7 @@ func (s *OutboxStore) ProcessBatch(ctx context.Context, limit int, handler Outbo
 
 // attemptRow runs the handler under the per-row budget (panic-recovered)
 // then CAS-marks on a ctx detached from the batch deadline. With
-// handler-owns-mark (DispatchFromOutbox marks the row inside the event
+// handler-owns-mark (dispatchFromOutbox marks the row inside the event
 // tx), the success mark here is a no-op backstop — the CAS's zero-row
 // case, expected and silent for success.
 func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler OutboxHandler) {
@@ -278,7 +278,7 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 	defer postgres.Rollback(mtx)
 
 	if hErr == nil {
-		// Backstop only — DispatchFromOutbox already marked it in-tx.
+		// Backstop only — dispatchFromOutbox already marked it in-tx.
 		_, _ = mtx.ExecContext(markCtx, `
 			UPDATE webhook_outbox
 			SET status = 'dispatched', dispatched_at = now(), last_error = NULL
