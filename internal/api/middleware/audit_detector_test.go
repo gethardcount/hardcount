@@ -314,7 +314,7 @@ func TestAuditCoverage_RealEmissionIsSilent(t *testing.T) {
 func invokeWithKeylessTenant(t *testing.T, h http.Handler, tenantID string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest("POST", "/v1/invoices", strings.NewReader(`{}`))
-	ctx := context.WithValue(req.Context(), auth.TestTenantIDKey(), tenantID)
+	ctx := auth.WithTenantID(req.Context(), tenantID)
 	ctx = postgres.WithLivemode(ctx, false)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req.WithContext(ctx))

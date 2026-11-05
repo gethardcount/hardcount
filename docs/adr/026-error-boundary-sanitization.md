@@ -202,9 +202,9 @@ to rotate credentials during an outage — a lie about the key.
 `auth.ValidateKey` now returns the sentinel `auth.ErrInvalidKey` for every
 definitive rejection (format, unknown prefix, hash mismatch, expiry);
 anything else means the verdict never happened. All three auth middlewares
-(auth.Middleware, session.Middleware, session.MiddlewareOrAPIKey — including
-its cookie branch, which previously degraded an outage to "missing
-credentials" via fall-through) map non-verdict errors to
+(auth.Middleware, session.Middleware (since removed: no route used it),
+session.MiddlewareOrAPIKey — including its cookie branch, which previously
+degraded an outage to "missing credentials" via fall-through) map non-verdict errors to
 `503 api_error/authentication_unavailable` with no upstream detail in the
 body. The sanitization boundary is unchanged: DB internals still never
 reach a response.

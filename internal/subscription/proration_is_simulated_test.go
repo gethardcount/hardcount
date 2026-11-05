@@ -18,7 +18,7 @@ import (
 // test can exercise both a clock-pinned and a wall-clock subscription.
 func seedSubWithClockAt(t *testing.T, store *memStore, tenantID, custID, plan string, ps, pe time.Time, clockID string) (string, string) {
 	t.Helper()
-	sub, err := store.Create(context.Background(), tenantID, domain.Subscription{
+	sub, err := store.CreateWithBill(context.Background(), tenantID, domain.Subscription{
 		Code:        fmt.Sprintf("sub-%d", len(store.subs)+1),
 		DisplayName: "Test Sub", CustomerID: custID,
 		Status:                    domain.SubscriptionActive,
@@ -27,7 +27,7 @@ func seedSubWithClockAt(t *testing.T, store *memStore, tenantID, custID, plan st
 		CurrentBillingPeriodEnd:   &pe,
 		TestClockID:               clockID,
 		Items:                     []domain.SubscriptionItem{{PlanID: plan, Quantity: 1}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed subscription: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestUpdateItem_PlanChange_StampsIsSimulatedFromTestClock(t *testing.T) {
 			h.SetProrationDeps(plans, invoices)
 
 			body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})
-			req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+			req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 			rr := httptest.NewRecorder()
 			h.updateItem(rr, req)
 

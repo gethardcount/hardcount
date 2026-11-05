@@ -40,7 +40,6 @@ type invoicesMock struct {
 	createInvoiceErr    error
 	setAutoChargeErr    error
 	nextNumberErr       error
-	nextNumberCalls     int
 	createdInvoices     []domain.Invoice
 	createdLineItems    [][]domain.InvoiceLineItem
 	lookupInvoice       domain.Invoice
@@ -56,16 +55,9 @@ type invoicesMock struct {
 	// downgrade clawback fan-out). When unset, it defaults to [sourceInvoice]
 	// so single-source clawback tests keep working.
 	fundingInvoices []domain.Invoice
-	// autoChargeEnrolled records invoice IDs passed to SetAutoChargePending(true)
+	// autoChargeEnrolled records invoice IDs passed to SetAutoChargePendingTx(true)
 	// so tests can assert a proration CHARGE invoice was enrolled for collection.
 	autoChargeEnrolled []string
-}
-
-func (m *invoicesMock) SetAutoChargePending(_ context.Context, _, id string, pending bool) error {
-	if pending {
-		m.autoChargeEnrolled = append(m.autoChargeEnrolled, id)
-	}
-	return nil
 }
 
 func (m *invoicesMock) SetAutoChargePendingTx(_ context.Context, _ *sql.Tx, _, id string, pending bool) error {
@@ -78,47 +70,12 @@ func (m *invoicesMock) SetAutoChargePendingTx(_ context.Context, _ *sql.Tx, _, i
 	return nil
 }
 
-func (m *invoicesMock) createInvoice(tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
-	if m.createInvoiceErr != nil {
-		return domain.Invoice{}, m.createInvoiceErr
-	}
-	inv.ID = fmt.Sprintf("hc_inv_test_%d", len(m.createdInvoices)+1)
-	inv.TenantID = tenantID
-	m.createdInvoices = append(m.createdInvoices, inv)
-	m.createdLineItems = append(m.createdLineItems, items)
-	return inv, nil
-}
-
-// CreateInvoiceWithLineItemsAudited runs emit as the store does, after the
-// insert; an emit error discards the invoice, as the store's rollback would.
-// The fake has no transaction, so emit gets a nil tx.
-func (m *invoicesMock) CreateInvoiceWithLineItemsAudited(_ context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error) {
-	out, err := m.createInvoice(tenantID, inv, items)
-	if err != nil || emit == nil {
-		return out, err
-	}
-	if err := emit(nil, out); err != nil {
-		m.createdInvoices = m.createdInvoices[:len(m.createdInvoices)-1]
-		m.createdLineItems = m.createdLineItems[:len(m.createdLineItems)-1]
-		return domain.Invoice{}, err
-	}
-	return out, nil
-}
-
 func (m *invoicesMock) GetByProrationSource(_ context.Context, _, _, _ string, _ domain.ItemChangeType, _ time.Time) (domain.Invoice, error) {
 	m.existingCreateCalls++
 	if m.lookupInvoiceErr != nil {
 		return domain.Invoice{}, m.lookupInvoiceErr
 	}
 	return m.lookupInvoice, nil
-}
-
-func (m *invoicesMock) NextInvoiceNumber(_ context.Context, _ string) (string, error) {
-	m.nextNumberCalls++
-	if m.nextNumberErr != nil {
-		return "", m.nextNumberErr
-	}
-	return "HC-000042", nil
 }
 
 func (m *invoicesMock) FindBaseInvoiceForPeriod(_ context.Context, _, _ string, _ time.Time) (domain.Invoice, error) {
@@ -141,16 +98,26 @@ func (m *invoicesMock) FindFundingInvoicesForPeriod(_ context.Context, _, _ stri
 	return nil, errs.ErrNotFound
 }
 
-// CreateInvoiceWithLineItemsTx + NextInvoiceNumberTx mirror their
-// non-Tx counterparts for tx-aware callers. Fakes ignore the tx; the
-// tests exercise business logic, not transactional atomicity (a
-// dedicated integration test covers that path against a real DB).
+// CreateInvoiceWithLineItemsTx and NextInvoiceNumberTx ignore the tx: the
+// fake has no transactions, so a rolled-back change keeps the invoice it
+// recorded. These tests exercise business logic; the integration tests
+// cover the rollback against a real DB.
 func (m *invoicesMock) CreateInvoiceWithLineItemsTx(_ context.Context, _ *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
-	return m.createInvoice(tenantID, inv, items)
+	if m.createInvoiceErr != nil {
+		return domain.Invoice{}, m.createInvoiceErr
+	}
+	inv.ID = fmt.Sprintf("hc_inv_test_%d", len(m.createdInvoices)+1)
+	inv.TenantID = tenantID
+	m.createdInvoices = append(m.createdInvoices, inv)
+	m.createdLineItems = append(m.createdLineItems, items)
+	return inv, nil
 }
 
-func (m *invoicesMock) NextInvoiceNumberTx(ctx context.Context, _ *sql.Tx, tenantID string) (string, error) {
-	return m.NextInvoiceNumber(ctx, tenantID)
+func (m *invoicesMock) NextInvoiceNumberTx(_ context.Context, _ *sql.Tx, _ string) (string, error) {
+	if m.nextNumberErr != nil {
+		return "", m.nextNumberErr
+	}
+	return "HC-000042", nil
 }
 
 // Deterministic reference window for proration-AMOUNT tests: a full 30-day
@@ -180,7 +147,7 @@ func seedSubWithItem(t *testing.T, store *memStore, tenantID, custID, initialPla
 // instant inside [periodStart, periodEnd] via clock.WithEffectiveNow.
 func seedSubWithItemAt(t *testing.T, store *memStore, tenantID, custID, initialPlan string, periodStart, periodEnd time.Time) (string, string) {
 	t.Helper()
-	sub, err := store.Create(context.Background(), tenantID, domain.Subscription{
+	sub, err := store.CreateWithBill(context.Background(), tenantID, domain.Subscription{
 		Code:        fmt.Sprintf("sub-%d", len(store.subs)+1),
 		DisplayName: "Test Sub", CustomerID: custID,
 		Status:                    domain.SubscriptionActive,
@@ -188,7 +155,7 @@ func seedSubWithItemAt(t *testing.T, store *memStore, tenantID, custID, initialP
 		CurrentBillingPeriodStart: &periodStart,
 		CurrentBillingPeriodEnd:   &periodEnd,
 		Items:                     []domain.SubscriptionItem{{PlanID: initialPlan, Quantity: 1}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed subscription: %v", err)
 	}
@@ -210,12 +177,11 @@ func updateItemURL(ctx context.Context, subID, itemID string, body []byte) *http
 // Tests
 // ---------------------------------------------------------------------------
 
-// TestUpdateItem_ProrationFailureSurfacesAs500 locks in the fix for a silent
-// data-loss bug: if proration generation fails after the plan change has
-// already committed, the error must surface as a 500 with the distinct code
-// "proration_failed". Prior behaviour was a 200 OK, leaving the customer on
-// the new plan but never billed (or credited) for the mid-cycle swap.
-func TestUpdateItem_ProrationFailureSurfacesAs500(t *testing.T) {
+// TestUpdateItem_ProrationFailureRollsTheChangeBack: the plan change and its
+// proration share one transaction, so a failed proration answers 500 and
+// leaves the item on its old plan. The customer is never left on the new
+// plan without the charge (or credit) for the mid-cycle swap.
+func TestUpdateItem_ProrationFailureRollsTheChangeBack(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
 
@@ -227,8 +193,8 @@ func TestUpdateItem_ProrationFailureSurfacesAs500(t *testing.T) {
 		"plan_old": {ID: "plan_old", Name: "Basic", BaseAmountCents: 1000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 		"plan_new": {ID: "plan_new", Name: "Pro", BaseAmountCents: 3000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 	}}
-	// NextInvoiceNumber fails → proration generation fails after the plan
-	// change has already committed.
+	// NextInvoiceNumberTx fails → proration generation fails after the plan
+	// change was written on the same transaction.
 	invoices := &invoicesMock{
 		nextNumberErr: errors.New("sequence unavailable"),
 		sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded},
@@ -238,7 +204,7 @@ func TestUpdateItem_ProrationFailureSurfacesAs500(t *testing.T) {
 	h.SetProrationDeps(plans, invoices)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -247,28 +213,15 @@ func TestUpdateItem_ProrationFailureSurfacesAs500(t *testing.T) {
 		t.Fatalf("status: got %d, want 500. body=%s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	errObj, ok := resp["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("missing error object in response: %s", rr.Body.String())
-	}
-	if code, _ := errObj["code"].(string); code != "proration_failed" {
-		t.Errorf("error.code: got %q, want %q", code, "proration_failed")
-	}
-
-	// The plan change itself must still have committed — that's the whole
-	// point of surfacing the error: state is divergent, and the client has to
-	// know so they can reconcile.
+	// The plan change rolled back with its proration: nothing half-applied
+	// for the client to reconcile.
 	storedItem, err := store.GetItem(ctx, tenantID, itemID)
 	if err != nil {
 		t.Fatalf("reload item: %v", err)
 	}
-	if storedItem.PlanID != "plan_new" {
-		t.Errorf("item plan_id: got %q, want %q (plan change should commit even when proration fails)",
-			storedItem.PlanID, "plan_new")
+	if storedItem.PlanID != "plan_old" {
+		t.Errorf("item plan_id: got %q, want %q (the plan change rolls back with its failed proration)",
+			storedItem.PlanID, "plan_old")
 	}
 }
 
@@ -321,7 +274,7 @@ func TestUpdateItem_ProrationDedup_UpgradeReturnsExisting(t *testing.T) {
 	h.SetProrationDeps(plans, invoices)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -445,7 +398,7 @@ func TestUpdateItem_ProrationAppliesTax(t *testing.T) {
 	h.SetProrationTaxApplier(taxMock)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -523,7 +476,7 @@ func TestUpdateItem_ProrationTaxedByPlanTaxCode(t *testing.T) {
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
 	rr := httptest.NewRecorder()
-	h.updateItem(rr, updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body))
+	h.updateItem(rr, updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
 	}
@@ -559,7 +512,7 @@ func TestUpdateItem_ProrationTaxErrorDefersToDraft(t *testing.T) {
 	h.SetProrationTaxApplier(taxMock)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -637,7 +590,7 @@ func TestUpdateItem_ProrationDeferredTaxCarriesRetryFacts(t *testing.T) {
 	h.SetProrationTaxApplier(taxMock)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -712,9 +665,9 @@ func TestHandler_Cancel_FiresSubscriptionCanceled(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+subID+"/cancel", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", subID)
-	req = req.WithContext(context.WithValue(
+	req = req.WithContext(auth.WithTenantID(
 		context.WithValue(ctx, chi.RouteCtxKey, rctx),
-		auth.TestTenantIDKey(), tenantID,
+		tenantID,
 	))
 
 	rr := httptest.NewRecorder()
@@ -754,7 +707,7 @@ func TestHandler_UpdateItem_ImmediatePlanChangeFiresItemUpdated(t *testing.T) {
 	h.SetEventDispatcher(dispatcher)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 	if rr.Code != http.StatusOK {
@@ -795,7 +748,7 @@ func TestHandler_UpdateItem_ScheduledPlanChangeFiresPendingChangeScheduled(t *te
 	h.SetEventDispatcher(dispatcher)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: false})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 	if rr.Code != http.StatusOK {
@@ -837,9 +790,9 @@ func TestHandler_RemoveItem_FiresItemRemoved(t *testing.T) {
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", subID)
 	rctx.URLParams.Add("itemID", firstItemID)
-	req = req.WithContext(context.WithValue(
+	req = req.WithContext(auth.WithTenantID(
 		context.WithValue(ctx, chi.RouteCtxKey, rctx),
-		auth.TestTenantIDKey(), tenantID,
+		tenantID,
 	))
 	rr := httptest.NewRecorder()
 	h.removeItem(rr, req)
@@ -889,9 +842,9 @@ func TestHandler_CancelPendingItemChange_FiresPendingChangeCanceled(t *testing.T
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", subID)
 	rctx.URLParams.Add("itemID", itemID)
-	req = req.WithContext(context.WithValue(
+	req = req.WithContext(auth.WithTenantID(
 		context.WithValue(ctx, chi.RouteCtxKey, rctx),
-		auth.TestTenantIDKey(), tenantID,
+		tenantID,
 	))
 	rr := httptest.NewRecorder()
 	h.cancelPendingItemChange(rr, req)
@@ -958,7 +911,7 @@ func TestAddItem_ProratesMidCycle(t *testing.T) {
 	h.SetProrationDeps(plans, invoices)
 
 	body, _ := json.Marshal(AddItemInput{PlanID: "plan_new", Quantity: 1})
-	req := addItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, body)
+	req := addItemURL(auth.WithTenantID(ctx, tenantID), subID, body)
 
 	rr := httptest.NewRecorder()
 	h.addItem(rr, req)
@@ -1014,7 +967,7 @@ func TestUpdateItem_QuantityIncreaseProratesAsInvoice(t *testing.T) {
 	// period, half-period → ~$10.
 	newQty := int64(3)
 	body, _ := json.Marshal(UpdateItemInput{Quantity: &newQty})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -1066,7 +1019,7 @@ func TestUpdateItem_PlanChange_StubPeriod_UsesFullCycleDenominator(t *testing.T)
 	h.SetProrationDeps(plans, invoices)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -1113,7 +1066,7 @@ func TestUpdateItem_QuantityDecreaseProratesAsCredit(t *testing.T) {
 	// Drop 3 → 1 = 2 seats × $10 = $20 full-period, half-period → ~$10 credit.
 	newQty := int64(1)
 	body, _ := json.Marshal(UpdateItemInput{Quantity: &newQty})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -1164,7 +1117,7 @@ func TestRemoveItem_ProratesAsCredit(t *testing.T) {
 	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 
-	req := removeItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, firstItemID)
+	req := removeItemURL(auth.WithTenantID(ctx, tenantID), subID, firstItemID)
 	rr := httptest.NewRecorder()
 	h.removeItem(rr, req)
 
@@ -1213,7 +1166,7 @@ func TestHandleItemProration_DefersOnInArrears(t *testing.T) {
 	h.SetProrationDeps(plans, invoices)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 
@@ -1246,7 +1199,7 @@ func TestUpdateItem_QuantityNoOpRejected(t *testing.T) {
 
 	sameQty := int64(1) // seeded qty is 1
 	body, _ := json.Marshal(UpdateItemInput{Quantity: &sameQty})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -1288,9 +1241,9 @@ func TestHandler_ScheduleCancel_FiresEvent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+subID+"/schedule-cancel", body)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", subID)
-	req = req.WithContext(context.WithValue(
+	req = req.WithContext(auth.WithTenantID(
 		context.WithValue(ctx, chi.RouteCtxKey, rctx),
-		auth.TestTenantIDKey(), tenantID,
+		tenantID,
 	))
 
 	rr := httptest.NewRecorder()
@@ -1347,9 +1300,9 @@ func TestHandler_ScheduleCancel_RejectsBadInput(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+subID+"/schedule-cancel", bytes.NewBufferString(tc.body))
 			rctx := chi.NewRouteContext()
 			rctx.URLParams.Add("id", subID)
-			req = req.WithContext(context.WithValue(
+			req = req.WithContext(auth.WithTenantID(
 				context.WithValue(ctx, chi.RouteCtxKey, rctx),
-				auth.TestTenantIDKey(), tenantID,
+				tenantID,
 			))
 			rr := httptest.NewRecorder()
 			h.scheduleCancel(rr, req)
@@ -1379,9 +1332,9 @@ func TestHandler_PauseCollection_FiresEvent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/subscriptions/"+subID+"/pause-collection", body)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", subID)
-	req = req.WithContext(context.WithValue(
+	req = req.WithContext(auth.WithTenantID(
 		context.WithValue(ctx, chi.RouteCtxKey, rctx),
-		auth.TestTenantIDKey(), tenantID,
+		tenantID,
 	))
 
 	rr := httptest.NewRecorder()
@@ -1441,9 +1394,9 @@ func TestHandler_PauseCollection_RejectsBadInput(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPut, "/subscriptions/"+subID+"/pause-collection", bytes.NewBufferString(tc.body))
 			rctx := chi.NewRouteContext()
 			rctx.URLParams.Add("id", subID)
-			req = req.WithContext(context.WithValue(
+			req = req.WithContext(auth.WithTenantID(
 				context.WithValue(ctx, chi.RouteCtxKey, rctx),
-				auth.TestTenantIDKey(), tenantID,
+				tenantID,
 			))
 			rr := httptest.NewRecorder()
 			h.pauseCollection(rr, req)
@@ -1476,9 +1429,9 @@ func TestHandler_ResumeCollection_FiresEvent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/subscriptions/"+subID+"/pause-collection", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", subID)
-	req = req.WithContext(context.WithValue(
+	req = req.WithContext(auth.WithTenantID(
 		context.WithValue(ctx, chi.RouteCtxKey, rctx),
-		auth.TestTenantIDKey(), tenantID,
+		tenantID,
 	))
 	rr := httptest.NewRecorder()
 	h.resumeCollection(rr, req)
@@ -1518,9 +1471,9 @@ func TestHandler_ClearScheduledCancel_FiresEvent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/subscriptions/"+subID+"/scheduled-cancel", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", subID)
-	req = req.WithContext(context.WithValue(
+	req = req.WithContext(auth.WithTenantID(
 		context.WithValue(ctx, chi.RouteCtxKey, rctx),
-		auth.TestTenantIDKey(), tenantID,
+		tenantID,
 	))
 	rr := httptest.NewRecorder()
 	h.clearScheduledCancel(rr, req)
@@ -1576,9 +1529,9 @@ func TestHandler_NothingToUndo_SendsNoEvent(t *testing.T) {
 			req := httptest.NewRequest(http.MethodDelete, "/subscriptions/"+subID+tc.path, nil)
 			rctx := chi.NewRouteContext()
 			rctx.URLParams.Add("id", subID)
-			req = req.WithContext(context.WithValue(
+			req = req.WithContext(auth.WithTenantID(
 				context.WithValue(ctx, chi.RouteCtxKey, rctx),
-				auth.TestTenantIDKey(), tenantID,
+				tenantID,
 			))
 			rr := httptest.NewRecorder()
 			tc.call(h, rr, req)
@@ -1613,7 +1566,7 @@ func TestHandler_EndTrial_FiresEvent(t *testing.T) {
 	trialEnd := now.Add(14 * 24 * time.Hour)
 	periodStart := now
 	periodEnd := trialEnd.Add(30 * 24 * time.Hour)
-	sub, err := store.Create(ctx, tenantID, domain.Subscription{
+	sub, err := store.CreateWithBill(ctx, tenantID, domain.Subscription{
 		Code: "sub-trial", DisplayName: "Trial Sub", CustomerID: "cus_1",
 		Status:                    domain.SubscriptionTrialing,
 		BillingTime:               domain.BillingTimeCalendar,
@@ -1623,7 +1576,7 @@ func TestHandler_EndTrial_FiresEvent(t *testing.T) {
 		CurrentBillingPeriodStart: &periodStart,
 		CurrentBillingPeriodEnd:   &periodEnd,
 		Items:                     []domain.SubscriptionItem{{PlanID: "plan_pro", Quantity: 1}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1636,9 +1589,9 @@ func TestHandler_EndTrial_FiresEvent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+sub.ID+"/end-trial", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", sub.ID)
-	req = req.WithContext(context.WithValue(
+	req = req.WithContext(auth.WithTenantID(
 		context.WithValue(ctx, chi.RouteCtxKey, rctx),
-		auth.TestTenantIDKey(), tenantID,
+		tenantID,
 	))
 	rr := httptest.NewRecorder()
 	h.endTrial(rr, req)
@@ -1679,9 +1632,9 @@ func TestHandler_EndTrial_RejectsNonTrialingSub(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+subID+"/end-trial", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", subID)
-	req = req.WithContext(context.WithValue(
+	req = req.WithContext(auth.WithTenantID(
 		context.WithValue(ctx, chi.RouteCtxKey, rctx),
-		auth.TestTenantIDKey(), tenantID,
+		tenantID,
 	))
 	rr := httptest.NewRecorder()
 	h.endTrial(rr, req)
@@ -1701,7 +1654,7 @@ func TestHandler_ExtendTrial_FiresEvent(t *testing.T) {
 	trialEnd := now.Add(14 * 24 * time.Hour)
 	periodStart := now
 	periodEnd := trialEnd.Add(30 * 24 * time.Hour)
-	sub, err := store.Create(ctx, tenantID, domain.Subscription{
+	sub, err := store.CreateWithBill(ctx, tenantID, domain.Subscription{
 		Code: "sub-trial-ext", DisplayName: "Trial Sub", CustomerID: "cus_1",
 		Status:                    domain.SubscriptionTrialing,
 		BillingTime:               domain.BillingTimeCalendar,
@@ -1711,7 +1664,7 @@ func TestHandler_ExtendTrial_FiresEvent(t *testing.T) {
 		CurrentBillingPeriodStart: &periodStart,
 		CurrentBillingPeriodEnd:   &periodEnd,
 		Items:                     []domain.SubscriptionItem{{PlanID: "plan_pro", Quantity: 1}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1728,9 +1681,9 @@ func TestHandler_ExtendTrial_FiresEvent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+sub.ID+"/extend-trial", bytes.NewReader(body))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", sub.ID)
-	req = req.WithContext(context.WithValue(
+	req = req.WithContext(auth.WithTenantID(
 		context.WithValue(ctx, chi.RouteCtxKey, rctx),
-		auth.TestTenantIDKey(), tenantID,
+		tenantID,
 	))
 	rr := httptest.NewRecorder()
 	h.extendTrial(rr, req)
@@ -1769,7 +1722,7 @@ func TestHandler_ExtendTrial_RejectsShorten(t *testing.T) {
 	trialEnd := now.Add(14 * 24 * time.Hour)
 	periodStart := now
 	periodEnd := trialEnd.Add(30 * 24 * time.Hour)
-	sub, err := store.Create(ctx, tenantID, domain.Subscription{
+	sub, err := store.CreateWithBill(ctx, tenantID, domain.Subscription{
 		Code: "sub-shrink", CustomerID: "cus_1",
 		Status:                    domain.SubscriptionTrialing,
 		BillingTime:               domain.BillingTimeCalendar,
@@ -1778,7 +1731,7 @@ func TestHandler_ExtendTrial_RejectsShorten(t *testing.T) {
 		CurrentBillingPeriodStart: &periodStart,
 		CurrentBillingPeriodEnd:   &periodEnd,
 		Items:                     []domain.SubscriptionItem{{PlanID: "plan_pro", Quantity: 1}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1791,9 +1744,9 @@ func TestHandler_ExtendTrial_RejectsShorten(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+sub.ID+"/extend-trial", bytes.NewReader(body))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", sub.ID)
-	req = req.WithContext(context.WithValue(
+	req = req.WithContext(auth.WithTenantID(
 		context.WithValue(ctx, chi.RouteCtxKey, rctx),
-		auth.TestTenantIDKey(), tenantID,
+		tenantID,
 	))
 	rr := httptest.NewRecorder()
 	h.extendTrial(rr, req)
@@ -1807,7 +1760,7 @@ func TestHandler_ExtendTrial_RejectsShorten(t *testing.T) {
 // whose template left the value unset is told (422 on status), not started
 // and billed. Leaving the field out still starts the subscription.
 func TestHandler_Create_RefusesEmptyOrNullStatus(t *testing.T) {
-	ctx := context.WithValue(context.Background(), auth.TestTenantIDKey(), "t1")
+	ctx := auth.WithTenantID(context.Background(), "t1")
 	store := newMemStore()
 	h := NewHandler(NewService(store, nil))
 

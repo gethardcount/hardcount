@@ -84,7 +84,6 @@ func TestAddItem_ArchivedPlan_RefusedOnBothPaths(t *testing.T) {
 		},
 	}
 	h := NewHandler(svc)
-	h.SetDB(db)
 	h.SetProrationDeps(ps, invoices)
 
 	trialPeriodEnd := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
@@ -138,7 +137,7 @@ func TestAddItem_ArchivedPlan_RefusedOnBothPaths(t *testing.T) {
 		return out
 	}
 
-	reqCtx := clock.WithEffectiveNow(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), proNow)
+	reqCtx := clock.WithEffectiveNow(auth.WithTenantID(ctx, tenantID), proNow)
 	addItem := func(subID, planID string) *httptest.ResponseRecorder {
 		body, _ := json.Marshal(AddItemInput{PlanID: planID, Quantity: 1})
 		rr := httptest.NewRecorder()

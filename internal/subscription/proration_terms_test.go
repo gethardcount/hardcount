@@ -68,7 +68,7 @@ func driveUpgradeProration(t *testing.T, configure func(*Handler)) (*httptest.Re
 	}
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 	return rr, invoices
@@ -129,9 +129,9 @@ func TestUpdateItem_ProrationInvoiceHonorsDueOnReceipt(t *testing.T) {
 
 // TestUpdateItem_ProrationFailsWhenNetTermsUnreadable: a settings read failure
 // fails the request with no proration invoice, instead of stamping a guessed
-// Net 30 (P24). This harness has no DB, so it runs the non-transactional path;
-// the item-change rollback on the production path is proven by
-// TestUpdateItem_ProrationSettingsUnreadable_RollsBack (real Postgres).
+// Net 30 (P24). This harness has no DB; the item-change rollback against
+// real Postgres is proven by
+// TestUpdateItem_ProrationSettingsUnreadable_RollsBack.
 func TestUpdateItem_ProrationFailsWhenNetTermsUnreadable(t *testing.T) {
 	rr, invoices := driveUpgradeProration(t, func(h *Handler) {
 		h.SetNetTermsReader(netTermsStub{err: errors.New("settings read: connection reset")})

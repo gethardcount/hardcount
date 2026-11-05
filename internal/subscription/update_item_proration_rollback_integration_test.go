@@ -75,10 +75,9 @@ func TestUpdateItem_ProrationInvoiceCreateFailure_RollsBackQuantity(t *testing.T
 	}
 
 	h := NewHandler(svcWithStore(store))
-	h.SetDB(db)
 	h.SetProrationDeps(plans, invoices)
 
-	reqCtx := clock.WithEffectiveNow(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), proNow)
+	reqCtx := clock.WithEffectiveNow(auth.WithTenantID(ctx, tenantID), proNow)
 	newQty := int64(2)
 	body, _ := json.Marshal(UpdateItemInput{Quantity: &newQty, Immediate: true})
 	req := updateItemURL(reqCtx, sub.ID, itemID, body)

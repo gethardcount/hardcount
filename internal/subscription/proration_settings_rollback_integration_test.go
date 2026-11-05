@@ -74,11 +74,10 @@ func TestUpdateItem_ProrationSettingsUnreadable_RollsBack(t *testing.T) {
 				SubtotalCents: 6000, TotalAmountCents: 6000, CreatedAt: proPeriodStart,
 			}}
 			h := NewHandler(svcWithStore(store))
-			h.SetDB(db)
 			h.SetProrationDeps(&plansMock{plans: map[string]domain.Plan{plan.ID: plan}}, invoices)
 			tc.wire(h)
 
-			reqCtx := clock.WithEffectiveNow(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), proNow)
+			reqCtx := clock.WithEffectiveNow(auth.WithTenantID(ctx, tenantID), proNow)
 			newQty := int64(2)
 			body, _ := json.Marshal(UpdateItemInput{Quantity: &newQty, Immediate: true})
 			rr := httptest.NewRecorder()

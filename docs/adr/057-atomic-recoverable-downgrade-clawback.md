@@ -5,7 +5,7 @@
 
 ## Summary
 
-A downgrade, item removal or quantity decrease against a paid invoice gives unused prepayment back as a clawback credit note. On the atomic path, that note is now created as a `draft` with `issue_pending=true` inside the item-change transaction, so a create failure rolls the item change back. The non-atomic fallback still creates and issues the note inline. The note is issued after commit, and `RetryPendingClawbackIssue` re-issues any pending draft on the scheduler tick. The in_advance mid-period cancel credit uses the same pattern, but only when every funding source is paid; there, a draft-create failure rolls back the whole cancel. If any source is unpaid, the whole cancel credit stays on the older post-commit path. Amended 2026-06-25: ADR-061 made `Issue()` atomic, so a failure partway through issuing is now safe to retry.
+A downgrade, item removal or quantity decrease against a paid invoice gives unused prepayment back as a clawback credit note. On the atomic path, that note is now created as a `draft` with `issue_pending=true` inside the item-change transaction, so a create failure rolls the item change back. The non-atomic fallback still creates and issues the note inline. The note is issued after commit, and `RetryPendingClawbackIssue` re-issues any pending draft on the scheduler tick. The in_advance mid-period cancel credit uses the same pattern, but only when every funding source is paid; there, a draft-create failure rolls back the whole cancel. If any source is unpaid, the whole cancel credit stays on the older post-commit path. Amended 2026-06-25: ADR-061 made `Issue()` atomic, so a failure partway through issuing is now safe to retry. Amended 2026-11-05: the non-atomic fallback is deleted. It ran only when the handler had no database wired, which production never did, so every clawback note is now created as a draft in the item-change transaction.
 
 ## Context
 
@@ -35,7 +35,7 @@ Split the clawback across the transaction boundary — **create in-tx, issue pos
 
 `issue_pending` is the discriminator so the reconciler never auto-issues **operator-created** drafts (they default `false`). Migration 0121 is additive (constant `DEFAULT false` → metadata-only on PG 11+) plus a partial index `(tenant_id, livemode) WHERE issue_pending AND status='draft'`.
 
-The **non-atomic fallback** path (`handleItemProration` with `tx == nil`, used when `h.db` isn't wired) is unchanged — it still create+issues inline via `issueClawbackCreditNote`.
+The **non-atomic fallback** path (`handleItemProration` with `tx == nil`, used when `h.db` isn't wired) is unchanged — it still create+issues inline via `issueClawbackCreditNote`. (Deleted 2026-11-05, with `issueClawbackCreditNote`; see the Summary.)
 
 ### Known gap: the post-flip partial-issue window (NOT closed here)
 

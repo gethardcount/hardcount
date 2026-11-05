@@ -203,7 +203,7 @@ func TestAuditReadPath_PredicatesPagingAndIndex(t *testing.T) {
 	t.Run("handler refuses a negative offset", func(t *testing.T) {
 		h := audit.NewHandler(logger)
 		req := httptest.NewRequest("GET", "/?offset=-5", nil)
-		reqCtx := context.WithValue(postgres.WithLivemode(base, true), auth.TestTenantIDKey(), tenant1)
+		reqCtx := auth.WithTenantID(postgres.WithLivemode(base, true), tenant1)
 		rec := httptest.NewRecorder()
 		h.Routes().ServeHTTP(rec, req.WithContext(reqCtx))
 		if rec.Code != 422 || !strings.Contains(rec.Body.String(), `"param":"offset"`) {

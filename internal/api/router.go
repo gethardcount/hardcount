@@ -976,11 +976,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// without it. Its invoice.finalized is queued by the invoice store, on
 	// the transaction that inserts it.
 	subH.SetInvoiceFinalizeRecorder(engine)
-	// The db handle lets addItem (and updateItem and removeItem, when they
-	// move to the same pattern) open one outer transaction around the item
-	// insert and the proration writes. So a failed proration cannot leave a
-	// half-committed orphan item.
-	subH.SetDB(db)
 	// With the engine wired, subscription.Service.Create emits the day-1
 	// invoice for an in_advance plan (ADR-031). It does nothing for
 	// in_arrears, the default. It is best-effort: a billing error is logged

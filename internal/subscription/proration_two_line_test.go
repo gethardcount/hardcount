@@ -46,7 +46,7 @@ func TestUpdateItem_PlanUpgrade_RendersTwoLines(t *testing.T) {
 	h.SetProrationDeps(plans, invoices) // no tax applier → zero tax
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -114,7 +114,7 @@ func TestUpdateItem_PlanUpgrade_TwoLineTaxApportionsAndTiesOut(t *testing.T) {
 	h.SetProrationTaxApplier(taxMock)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -183,7 +183,7 @@ func TestUpdateItem_QuantityIncrease_RendersTwoLines(t *testing.T) {
 
 	newQty := int64(3)
 	body, _ := json.Marshal(UpdateItemInput{Quantity: &newQty})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 
@@ -251,7 +251,7 @@ func TestUpdateItem_ItemAdd_KeepsSingleLine(t *testing.T) {
 		h.SetProrationDeps(plans, invoices)
 
 		body, _ := json.Marshal(AddItemInput{PlanID: "plan_addon", Quantity: 1})
-		req := addItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, body)
+		req := addItemURL(auth.WithTenantID(ctx, tenantID), subID, body)
 		rr := httptest.NewRecorder()
 		h.addItem(rr, req)
 

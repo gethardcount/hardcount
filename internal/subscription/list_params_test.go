@@ -1,7 +1,6 @@
 package subscription
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -43,7 +42,7 @@ func TestListHandler_StatusAndCollectionParams(t *testing.T) {
 		"?billing=ok":                      http.StatusUnprocessableEntity,
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/subscriptions"+query, nil)
-		req = req.WithContext(context.WithValue(req.Context(), auth.TestTenantIDKey(), tenantID))
+		req = req.WithContext(auth.WithTenantID(req.Context(), tenantID))
 		rr := httptest.NewRecorder()
 		h.list(rr, req)
 		if rr.Code != want {
@@ -68,7 +67,7 @@ func TestListHandler_FilterParamsAnswer422WithParam(t *testing.T) {
 		"?billing=ok":         "billing",
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/subscriptions"+query, nil)
-		req = req.WithContext(context.WithValue(req.Context(), auth.TestTenantIDKey(), tenantID))
+		req = req.WithContext(auth.WithTenantID(req.Context(), tenantID))
 		rr := httptest.NewRecorder()
 		h.list(rr, req)
 		if rr.Code != http.StatusUnprocessableEntity {
@@ -110,7 +109,7 @@ func TestListHandler_FilterMessageListsAllowedValues(t *testing.T) {
 		{`?billing=ok`, "failing"},
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/subscriptions"+tc.query, nil)
-		req = req.WithContext(context.WithValue(req.Context(), auth.TestTenantIDKey(), tenantID))
+		req = req.WithContext(auth.WithTenantID(req.Context(), tenantID))
 		rr := httptest.NewRecorder()
 		h.list(rr, req)
 		if !strings.Contains(rr.Body.String(), tc.want) {

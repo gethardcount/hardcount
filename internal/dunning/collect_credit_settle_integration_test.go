@@ -118,7 +118,7 @@ func TestCollect_CreditCoveredInvoice_ResolvesActiveDunningRun(t *testing.T) {
 	router := chi.NewRouter()
 	router.Mount("/v1/invoices", h.Routes())
 	req := httptest.NewRequest(http.MethodPost, "/v1/invoices/"+draft.ID+"/collect", nil)
-	reqCtx := context.WithValue(ctx, auth.TestTenantIDKey(), tenantID)
+	reqCtx := auth.WithTenantID(ctx, tenantID)
 	req = req.WithContext(reqCtx)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)

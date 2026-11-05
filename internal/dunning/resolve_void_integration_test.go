@@ -125,7 +125,7 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 	resolve := func(r rig) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/v1/dunning/runs/"+r.run.ID+"/resolve",
 			strings.NewReader(`{"resolution":"invoice_voided"}`))
-		req = req.WithContext(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID))
+		req = req.WithContext(auth.WithTenantID(ctx, tenantID))
 		rec := httptest.NewRecorder()
 		r.router.ServeHTTP(rec, req)
 		return rec

@@ -76,7 +76,7 @@ func TestManualFinalize_CollectsThroughTheEngine_E2E(t *testing.T) {
 	finalize := func(t *testing.T, id string) domain.Invoice {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPost, "/"+id+"/finalize", nil)
-		reqCtx := context.WithValue(postgres.WithLivemode(req.Context(), false), auth.TestTenantIDKey(), tenantID)
+		reqCtx := auth.WithTenantID(postgres.WithLivemode(req.Context(), false), tenantID)
 		rr := httptest.NewRecorder()
 		routes.ServeHTTP(rr, req.WithContext(reqCtx))
 		if rr.Code != http.StatusOK {

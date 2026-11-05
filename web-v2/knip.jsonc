@@ -16,8 +16,6 @@
     "src/components/ui/**"
   ],
   "ignoreFiles": [
-    // Whether to keep the openapi-typescript output is a separate decision.
-    "src/lib/api.gen.ts",
     // Kept until we decide whether the pages adopt them.
     "src/components/page/PageHeader.tsx",
     "src/components/page/DetailLayout.tsx"

@@ -1,7 +1,6 @@
 package subscription
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -52,7 +51,7 @@ func runUnknownFieldCases(t *testing.T, srv http.Handler, cases []struct{ method
 	for _, c := range cases {
 		t.Run(c.method+" "+c.path+" "+c.body, func(t *testing.T) {
 			req := httptest.NewRequest(c.method, c.path, strings.NewReader(c.body))
-			req = req.WithContext(context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1"))
+			req = req.WithContext(auth.WithTenantID(req.Context(), "t1"))
 			rr := httptest.NewRecorder()
 			srv.ServeHTTP(rr, req)
 			if rr.Code != http.StatusUnprocessableEntity {

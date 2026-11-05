@@ -48,7 +48,7 @@ func changeSeats(t *testing.T, base, from, to int64) (int, *invoicesMock, *fakeC
 
 	body, _ := json.Marshal(UpdateItemInput{Quantity: &to})
 	rr := httptest.NewRecorder()
-	h.updateItem(rr, updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body))
+	h.updateItem(rr, updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body))
 	return rr.Code, invoices, cn
 }
 

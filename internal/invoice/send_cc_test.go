@@ -46,7 +46,7 @@ func sendReq(t *testing.T, h *Handler, invoiceID, body string) *httptest.Respons
 	req := httptest.NewRequest(http.MethodPost, "/v1/invoices/"+invoiceID+"/send", bytes.NewBufferString(body))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", invoiceID)
-	reqCtx := context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1")
+	reqCtx := auth.WithTenantID(req.Context(), "t1")
 	reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
 	req = req.WithContext(reqCtx)
 	rr := httptest.NewRecorder()

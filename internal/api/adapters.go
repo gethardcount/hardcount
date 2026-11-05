@@ -1144,26 +1144,17 @@ func (a *noPaymentMethodNotifierAdapter) NotifyNoPaymentMethod(ctx context.Conte
 // tenant.SettingsStore to subscription.ProrationInvoiceCreator. The embedded
 // store supplies the methods whose names already match
 // (GetByProrationSource, FindBaseInvoiceForPeriod,
-// FindFundingInvoicesForPeriod, SetAutoChargePending and
-// SetAutoChargePendingTx). The methods below rename a store method or call
-// the numberer.
+// FindFundingInvoicesForPeriod and SetAutoChargePendingTx). The methods
+// below rename a store method or call the numberer.
 type prorationInvoiceCreatorAdapter struct {
 	*invoice.PostgresStore
 	numberer invoice.InvoiceNumberer
 }
 
-func (a *prorationInvoiceCreatorAdapter) CreateInvoiceWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error) {
-	return a.CreateWithLineItemsAudited(ctx, tenantID, inv, items, emit)
-}
-
-func (a *prorationInvoiceCreatorAdapter) NextInvoiceNumber(ctx context.Context, tenantID string) (string, error) {
-	return a.numberer.NextInvoiceNumber(ctx, tenantID)
-}
-
-// CreateInvoiceWithLineItemsTx and NextInvoiceNumberTx are the
-// in-transaction variants for the atomic flow that adds an item with
-// proration. The caller (subscription.Handler) owns the transaction. This
-// adapter only forwards to the Tx methods of the store and the numberer.
+// CreateInvoiceWithLineItemsTx and NextInvoiceNumberTx write the proration
+// invoice on the item change's transaction, which the caller
+// (subscription.Handler) owns. This adapter only forwards to the Tx methods
+// of the store and the numberer.
 func (a *prorationInvoiceCreatorAdapter) CreateInvoiceWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
 	return a.CreateWithLineItemsTx(ctx, tx, tenantID, inv, items)
 }

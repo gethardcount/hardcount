@@ -13,7 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
-// fakeCNIssuer records CreateAndIssueAdjustment calls so the downgrade-clawback
+// fakeCNIssuer records CreateAdjustmentDraftTx calls so the downgrade-clawback
 // tests can assert the GROSS amount, the source invoice id, and the reason
 // routed to the tax-reversing credit-note primitive (ADR-048).
 type fakeCNIssuer struct {
@@ -36,20 +36,12 @@ type cnIssueCall struct {
 	desc      string
 }
 
-func (f *fakeCNIssuer) CreateAndIssueAdjustment(_ context.Context, _, invoiceID string, gross int64, reason, desc string) (domain.CreditNote, error) {
-	f.calls = append(f.calls, cnIssueCall{invoiceID: invoiceID, gross: gross, reason: reason, desc: desc})
-	if f.err != nil {
-		return domain.CreditNote{}, f.err
-	}
-	return domain.CreditNote{ID: "hc_cn_test", InvoiceID: invoiceID}, nil
-}
-
 func (f *fakeCNIssuer) LockInvoicesForDraftsTx(context.Context, *sql.Tx, string, []string) error {
 	return nil
 }
 
-// CreateAdjustmentDraftTx records like CreateAndIssueAdjustment so f.calls
-// assertions hold on both the atomic (draft-in-tx) and non-atomic paths.
+// CreateAdjustmentDraftTx records each clawback draft the change writes on
+// its tx; Issue issues it after the commit.
 func (f *fakeCNIssuer) CreateAdjustmentDraftTx(_ context.Context, _ *sql.Tx, _, invoiceID string, gross int64, reason, desc string) (domain.CreditNote, error) {
 	f.calls = append(f.calls, cnIssueCall{invoiceID: invoiceID, gross: gross, reason: reason, desc: desc})
 	if f.err != nil {
@@ -97,7 +89,7 @@ func TestUpdateItem_Downgrade_RoutesGrossTaxReversingCreditNote(t *testing.T) {
 	h.SetCreditNoteIssuer(cn)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -108,7 +100,7 @@ func TestUpdateItem_Downgrade_RoutesGrossTaxReversingCreditNote(t *testing.T) {
 	// net 2000 grossed up by the source invoice's 6600/6000 ratio = 2200.
 	const wantGross = int64(2200)
 	if len(cn.calls) != 1 {
-		t.Fatalf("CreateAndIssueAdjustment calls: got %d, want 1", len(cn.calls))
+		t.Fatalf("clawback credit notes: got %d, want 1", len(cn.calls))
 	}
 	call := cn.calls[0]
 	if call.invoiceID != "src_inv" {
@@ -176,7 +168,7 @@ func TestUpdateItem_Downgrade_LIFOAcrossFundingInvoices(t *testing.T) {
 	h.SetCreditNoteIssuer(cn)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 
@@ -186,7 +178,7 @@ func TestUpdateItem_Downgrade_LIFOAcrossFundingInvoices(t *testing.T) {
 	// net credit 2000 fits entirely in the upgrade invoice's headroom → ONE CN
 	// against up_inv, grossed by ITS 4400/4000 ratio = 2200. Base untouched.
 	if len(cn.calls) != 1 {
-		t.Fatalf("CreateAndIssueAdjustment calls: got %d, want 1: %+v", len(cn.calls), cn.calls)
+		t.Fatalf("clawback credit notes: got %d, want 1: %+v", len(cn.calls), cn.calls)
 	}
 	if cn.calls[0].invoiceID != "up_inv" {
 		t.Errorf("LIFO must target the newest (upgrade) invoice, got %q (want up_inv — NOT the base)", cn.calls[0].invoiceID)
@@ -241,7 +233,7 @@ func TestUpdateItem_Downgrade_LIFOTiebreak_SameInstantFunding(t *testing.T) {
 	h.SetCreditNoteIssuer(cn)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 
@@ -249,7 +241,7 @@ func TestUpdateItem_Downgrade_LIFOTiebreak_SameInstantFunding(t *testing.T) {
 		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
 	}
 	if len(cn.calls) != 1 {
-		t.Fatalf("CreateAndIssueAdjustment calls: got %d, want 1: %+v", len(cn.calls), cn.calls)
+		t.Fatalf("clawback credit notes: got %d, want 1: %+v", len(cn.calls), cn.calls)
 	}
 	if cn.calls[0].invoiceID != "up_inv" {
 		t.Errorf("same-instant LIFO tiebreak must target the subscription_update invoice, got %q", cn.calls[0].invoiceID)
@@ -290,7 +282,7 @@ func TestUpdateItem_QuantityDecrease_RoutesGrossCreditNote(t *testing.T) {
 	// Decrease 3 → 1 seats: delta -2 × $10 = -2000/full period, 15/30 → net 1000.
 	newQty := int64(1)
 	body, _ := json.Marshal(UpdateItemInput{Quantity: &newQty})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -299,7 +291,7 @@ func TestUpdateItem_QuantityDecrease_RoutesGrossCreditNote(t *testing.T) {
 		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
 	}
 	if len(cn.calls) != 1 {
-		t.Fatalf("CreateAndIssueAdjustment calls: got %d, want 1", len(cn.calls))
+		t.Fatalf("clawback credit notes: got %d, want 1", len(cn.calls))
 	}
 	// net 1000 grossed up by 3300/3000 = 1100.
 	if got := cn.calls[0].gross; got != 1100 {
@@ -360,7 +352,7 @@ func TestUpdateItem_Downgrade_InFlightSource_DraftsInsteadOfDroppingCredit(t *te
 		h.SetCreditNoteIssuer(cn)
 
 		body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
-		req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+		req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
 		rr := httptest.NewRecorder()
 		h.updateItem(rr, req)
 		if rr.Code != http.StatusOK {

@@ -36,8 +36,8 @@ func (m *finalizeRecorderMock) EmitFinalizeAuditTx(_ context.Context, tx *sql.Tx
 	return nil
 }
 
-// prorationFinalizeRig is an upgrade (Basic → Pro, 15 of 30 days left) on the
-// non-atomic path (no db wired) against a paid source invoice.
+// prorationFinalizeRig is an upgrade (Basic → Pro, 15 of 30 days left)
+// against a paid source invoice, on in-memory fakes.
 type prorationFinalizeRig struct {
 	h        *Handler
 	invoices *invoicesMock
@@ -67,17 +67,18 @@ func newProrationFinalizeRig(t *testing.T) *prorationFinalizeRig {
 
 func (r *prorationFinalizeRig) upgrade(t *testing.T) *httptest.ResponseRecorder {
 	t.Helper()
-	ctx := context.WithValue(clock.WithEffectiveNow(context.Background(), proNow), auth.TestTenantIDKey(), "t1")
+	ctx := auth.WithTenantID(clock.WithEffectiveNow(context.Background(), proNow), "t1")
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})
 	rr := httptest.NewRecorder()
 	r.h.updateItem(rr, updateItemURL(ctx, r.subID, r.itemID, body))
 	return rr
 }
 
-// TestProration_NonAtomic_FinalizedInvoice_AuditOnce (#1279): the non-atomic
-// path writes the finalize row inside the invoice's own create tx (the store
-// hands emit the tx), once, for the invoice it created.
-func TestProration_NonAtomic_FinalizedInvoice_AuditOnce(t *testing.T) {
+// TestProration_FinalizedInvoice_AuditOnce (#1279): the finalize row is
+// written with the invoice on the item change's tx, once, for the invoice
+// the change created. Its invoice.finalized is the invoice store's, queued
+// on the same tx.
+func TestProration_FinalizedInvoice_AuditOnce(t *testing.T) {
 	r := newProrationFinalizeRig(t)
 	if rr := r.upgrade(t); rr.Code != http.StatusOK {
 		t.Fatalf("upgrade: %d %s", rr.Code, rr.Body.String())
@@ -130,17 +131,23 @@ func TestProration_DedupReplay_NoAudit(t *testing.T) {
 	}
 }
 
-// TestProration_NonAtomic_AuditFailure_NoInvoice: the row shares the
-// invoice's fate, so a failed audit write leaves no invoice (the error
-// surfaces as proration_failed).
-func TestProration_NonAtomic_AuditFailure_NoInvoice(t *testing.T) {
+// TestProration_AuditFailure_RollsBack: the row shares the item change's
+// fate (ADR-090), so a failed audit write rolls the plan change back, and
+// with it the invoice and the invoice.finalized queued on its insert. The
+// fake invoice store has no transaction; the invoice row's rollback is
+// proven against real Postgres in proration_finalized_integration_test.go.
+func TestProration_AuditFailure_RollsBack(t *testing.T) {
 	r := newProrationFinalizeRig(t)
 	r.rec.auditErr = errors.New("audit insert failed")
 	rr := r.upgrade(t)
 	if rr.Code < 500 {
 		t.Fatalf("upgrade with a failing audit write: %d %s, want a 5xx", rr.Code, rr.Body.String())
 	}
-	if len(r.invoices.createdInvoices) != 0 {
-		t.Errorf("invoice kept after its audit write failed: %v", r.invoices.createdInvoices)
+	item, err := r.h.svc.store.GetItem(context.Background(), "t1", r.itemID)
+	if err != nil {
+		t.Fatalf("reload item: %v", err)
+	}
+	if item.PlanID != "plan_basic" {
+		t.Errorf("item plan after a failed finalize audit = %q, want plan_basic (the change rolls back)", item.PlanID)
 	}
 }

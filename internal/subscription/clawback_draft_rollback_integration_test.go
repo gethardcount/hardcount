@@ -116,12 +116,11 @@ func TestRemoveItem_ClawbackDraftCreateFailure_RealTxRollsBackItemDelete(t *test
 	cn := &fakeCNIssuer{err: errors.New("simulated in-tx clawback draft create failure")}
 
 	h := NewHandler(svcWithStore(store))
-	h.SetDB(db)
 	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 
 	// Mid-period instant so remainingPeriodRatio > 0 → atomic clawback path taken.
-	reqCtx := clock.WithEffectiveNow(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), proNow)
+	reqCtx := clock.WithEffectiveNow(auth.WithTenantID(ctx, tenantID), proNow)
 	req := removeItemURL(reqCtx, sub.ID, removeItemID)
 	rr := httptest.NewRecorder()
 	h.removeItem(rr, req)

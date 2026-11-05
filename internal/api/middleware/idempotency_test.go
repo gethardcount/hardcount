@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"bytes"
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,7 +21,7 @@ func TestIdempotency_NoCaching_WithoutKey(t *testing.T) {
 
 	// No idempotency key — should execute every time
 	req := httptest.NewRequest("POST", "/v1/customers", strings.NewReader(`{}`))
-	ctx := context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1")
+	ctx := auth.WithTenantID(req.Context(), "t1")
 	req = req.WithContext(ctx)
 
 	rec := httptest.NewRecorder()
