@@ -13,7 +13,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/gethardcount/hardcount/internal/api/generated"
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/api/timefilter"
 	"github.com/gethardcount/hardcount/internal/auth"
@@ -239,26 +238,6 @@ var validRefundReasons = map[string]bool{
 	"requested_by_customer": true,
 	"other":                 true,
 }
-
-// getInvoiceServer is the slice of generated.ServerInterface that this
-// handler currently implements — the single OpenAPI operation
-// `getInvoice` (GET /v1/invoices/{id}). Two compile-time assertions
-// keep the spec, the generated interface, and the handler aligned: the
-// handler satisfies this slice, AND generated.ServerInterface (rebuilt
-// from api/openapi.yaml by `make gen`) still carries this exact method
-// signature — so renaming or re-typing the operation in the spec fails
-// the build here instead of surfacing as a runtime 404. The naive form
-// `var _ generated.ServerInterface = (*Handler)(nil)` cannot be used:
-// the handler implements one of ~60 generated operations. As more
-// operations migrate onto the typed surface, this slice broadens.
-type getInvoiceServer interface {
-	GetInvoice(w http.ResponseWriter, r *http.Request, id string)
-}
-
-var (
-	_ getInvoiceServer = (*Handler)(nil)                // handler ⊇ slice
-	_ getInvoiceServer = generated.ServerInterface(nil) // generated ⊇ slice
-)
 
 type Handler struct {
 	svc             *Service
@@ -515,16 +494,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	respond.List(w, r, invoices, total)
 }
 
-// GetInvoice is the OpenAPI-typed handler for `GET /v1/invoices/{id}`.
-// Signature matches generated.ServerInterface so the spec, the handler,
-// and the router stay aligned at compile time — see the two
-// `getInvoiceServer` assertions above (handler ⊇ slice; generated ⊇ slice).
-//
-// The chi route still calls h.get (which extracts the id via chi.URLParam
-// and delegates here), keeping the routing layer unchanged for now. As
-// more endpoints adopt this pattern we'll switch the chi mount to use
-// the generated route registration helper, which calls these typed
-// methods directly.
+// GetInvoice answers `GET /v1/invoices/{id}`: the invoice and its line items.
 func (h *Handler) GetInvoice(w http.ResponseWriter, r *http.Request, id string) {
 	tenantID := auth.TenantID(r.Context())
 

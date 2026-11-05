@@ -84,9 +84,8 @@ func TestStandaloneEmailSendsAreListed(t *testing.T) {
 			rel, _ := filepath.Rel(root, p)
 			rel = filepath.ToSlash(rel)
 			// The email package owns the senders, and its drain hands
-			// committed rows to SMTP. Generated code calls HTTP handlers
-			// that share the senders' names.
-			if d.IsDir() && (rel == "internal/email" || rel == "internal/api/generated") {
+			// committed rows to SMTP.
+			if d.IsDir() && rel == "internal/email" {
 				return filepath.SkipDir
 			}
 			if d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
