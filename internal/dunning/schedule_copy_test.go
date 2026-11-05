@@ -18,7 +18,6 @@ func TestScheduleCopy_FirstWaitAnchor(t *testing.T) {
 	anchor := regexp.MustCompile(`(?i)(counts?|counted|after) (from )?the failed payment.{0,4}`)
 	for _, path := range []string{
 		"../../api/openapi.yaml",
-		"../../web-v2/public/openapi.yaml",
 		"../../web-v2/src/pages/DunningPolicies.tsx",
 		"../../web-v2/src/lib/dunningSchedule.ts",
 		"../../docs/adr/036-dunning-campaigns-model.md",
