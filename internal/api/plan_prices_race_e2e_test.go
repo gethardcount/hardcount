@@ -204,7 +204,6 @@ func TestE2E_PlanPrices_PriceWriteAgainstFirstSubscription(t *testing.T) {
 		h := hold(t, admin, `SELECT 1 FROM plan_prices WHERE id = $1 FOR UPDATE`, ids[0])
 		edit := r.async(http.MethodPatch, "/v1/plans/"+plan+"/prices/"+ids[0], map[string]any{"mode": "per_unit", "unit_amount_cents": "5"})
 		testutil.WaitForLockWaiter(t, context.Background(), admin, "INSERT INTO plan_price_versions")
-		r.seq++
 		sub := r.async(http.MethodPost, "/v1/subscriptions", map[string]any{
 			"code": "pp-c3w", "display_name": "C3", "customer_id": cust, "billing_time": "anniversary",
 			"items": []map[string]any{{"plan_id": plan, "quantity": 1}},

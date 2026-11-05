@@ -27,7 +27,6 @@ import (
 //   - "properties": null and {}, which carry no dimensions. They are taken
 //     as if absent; dimensions sent beside {} are stored.
 func TestIngest_EdgeQuantitiesAndEmptyProperties(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_arrears", false)
 	ts := lagP0.Add(24 * time.Hour)
 	at := lagP0.Add(48 * time.Hour)
@@ -128,7 +127,6 @@ func TestIngest_EdgeQuantitiesAndEmptyProperties(t *testing.T) {
 // doors through the full router to real Postgres. It is a zero, so it is
 // taken, and it is stored as plain 0 (domain.CheckDecimal).
 func TestIngest_ZeroWithAHugeExponentStoredAsZero(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_arrears", false)
 	ts := lagP0.Add(24 * time.Hour)
 	at := lagP0.Add(48 * time.Hour)

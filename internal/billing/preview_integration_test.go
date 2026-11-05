@@ -190,9 +190,6 @@ func (f *previewFixture) countInvoiceRows(t *testing.T, ctx context.Context) (in
 // Same fixture as TestCustomerUsage_SingleMeterFlatParity (100 events ×
 // qty=10 × 1¢ = 1000c) so a regression in one shows up in the other.
 func TestCreatePreview_SingleMeterFlatParity(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newPreviewFixture(t, "Create Preview Single Meter")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()
@@ -261,9 +258,6 @@ func TestCreatePreview_SingleMeterFlatParity(t *testing.T) {
 // Same fixture as TestCustomerUsage_MultiDimDimensionMatchEcho (1000 input
 // @3¢ + 100 output @5¢ = 3500c).
 func TestCreatePreview_MultiDimDimensionMatchEcho(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newPreviewFixture(t, "Create Preview Multi Dim")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()
@@ -344,9 +338,6 @@ func TestCreatePreview_MultiDimDimensionMatchEcho(t *testing.T) {
 // the preview composes reads only. Counts invoices + invoice_line_items
 // before and after a CreatePreview call and asserts unchanged.
 func TestCreatePreview_NoWrites(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newPreviewFixture(t, "Create Preview No Writes")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()
@@ -393,9 +384,6 @@ func TestCreatePreview_NoWrites(t *testing.T) {
 // from a different tenant — the lookup surfaces ErrNotFound, which the
 // handler maps to 404. Same property customer-usage relies on.
 func TestCreatePreview_CrossTenantIsolation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newPreviewFixture(t, "Create Preview Cross Tenant A")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 15*time.Second)
 	defer cancel()
@@ -422,9 +410,6 @@ func TestCreatePreview_CrossTenantIsolation(t *testing.T) {
 // customer-usage surface so the dashboard's empty-state branch covers
 // both reads.
 func TestCreatePreview_CustomerHasNoSubscription(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newPreviewFixture(t, "Create Preview No Sub")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 15*time.Second)
 	defer cancel()
@@ -450,9 +435,6 @@ func TestCreatePreview_CustomerHasNoSubscription(t *testing.T) {
 // same tenant surfaces as 422 invalid_request, not as a silent preview of
 // the wrong sub.
 func TestCreatePreview_ExplicitSubscriptionWrongCustomer(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newPreviewFixture(t, "Create Preview Wrong Customer")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 15*time.Second)
 	defer cancel()
@@ -511,9 +493,6 @@ func (f *previewFixture) seedItemChange(t *testing.T, ctx context.Context, subID
 // warnings channel rather than silently hand back a number the cycle won't
 // match. Clean subs (the common/wedge case) stay warning-free.
 func TestCreatePreview_EstimateScopeWarnings(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newPreviewFixture(t, "Create Preview Warnings")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()

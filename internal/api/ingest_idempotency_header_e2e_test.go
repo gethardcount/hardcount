@@ -21,7 +21,6 @@ import (
 // Mutation-verify: pass nil instead of isIngestPath in router.go → the second
 // event on each route answers 422 idempotency_error, and rows are written.
 func TestIngest_IdempotencyKeyHeaderIsIgnored(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	ts := lagP0.Add(24 * time.Hour)
 	at := lagP0.Add(48 * time.Hour)

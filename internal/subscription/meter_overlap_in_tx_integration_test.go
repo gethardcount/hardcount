@@ -28,9 +28,6 @@ import (
 // Mutation: drop the store's check, and each write commits a second live
 // item that prices the meter.
 func TestStore_MeterOverlapCheckedOnTheWritesTransaction(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	r := newLockOrderRig(t)
 	at := clock.WithEffectiveNow(r.ctx, lockOrderPS)
 

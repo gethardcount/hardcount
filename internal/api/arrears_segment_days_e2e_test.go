@@ -28,7 +28,6 @@ import (
 //
 // Real server over HTTP, real Postgres.
 func TestArrearsBaseSegments_DaysAddUpToThePeriod(t *testing.T) {
-	skipShort(t)
 	first := time.Date(2026, 4, 11, 14, 24, 0, 0, time.UTC)
 	second := time.Date(2026, 4, 22, 4, 48, 0, 0, time.UTC)
 

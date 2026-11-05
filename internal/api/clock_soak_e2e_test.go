@@ -33,9 +33,6 @@ import (
 // billing day for every month-end customer; a violation here is the class the
 // doctor exists to catch at the moment it is created, not months later.
 func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test — requires postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "soak-bootstrap-token-1234")
 

@@ -18,9 +18,6 @@ import (
 // spend threshold queues carries the subscription as the API returns it
 // (ADR-131), and the crossing's own facts beside it.
 func TestThresholdFire_WebhookCarriesTheSubscription(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Webhook Payload")
 	f.engine.SetEventDispatcher(webhook.NewOutboxDispatcher(webhook.NewOutboxStore(f.db)))
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)

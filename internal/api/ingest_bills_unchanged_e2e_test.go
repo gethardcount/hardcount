@@ -25,7 +25,6 @@ import (
 // header), a single event sent twice with its key, and an event with
 // dimensions.
 func TestIngest_ValidEventsBillTheSame(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_arrears", false)
 	ev := func(key string, qty any, ts time.Time) map[string]any {
 		return map[string]any{
