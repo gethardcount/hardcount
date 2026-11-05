@@ -1,7 +1,6 @@
 package invoice
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -55,7 +54,7 @@ func TestListInvoices_SearchByCustomerWithEncryption(t *testing.T) {
 			search := func(t *testing.T, q string) []string {
 				t.Helper()
 				req := httptest.NewRequest(http.MethodGet, "/?search="+url.QueryEscape(q), nil)
-				ctx := context.WithValue(postgres.WithLivemode(req.Context(), false), auth.TestTenantIDKey(), r.tenantID)
+				ctx := auth.WithTenantID(postgres.WithLivemode(req.Context(), false), r.tenantID)
 				rr := httptest.NewRecorder()
 				routes.ServeHTTP(rr, req.WithContext(ctx))
 				if rr.Code != http.StatusOK {

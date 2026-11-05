@@ -21,9 +21,6 @@ const (
 	customerActorKey contextKey = "customer_actor_id"
 )
 
-// TestTenantIDKey returns the context key for tenant ID (for use in tests).
-func TestTenantIDKey() contextKey { return tenantIDKey }
-
 // Middleware validates the request's API key and puts its tenant context on
 // the request.
 func Middleware(svc *Service) func(http.Handler) http.Handler {
@@ -225,28 +222,4 @@ func extractBearerToken(r *http.Request) string {
 		return strings.TrimPrefix(auth, "Bearer ")
 	}
 	return r.Header.Get("X-API-Key")
-}
-
-// LivemodeFromRawKey peeks at a raw API key's prefix to recover the mode it
-// was minted for, without touching the DB. Returns ok=false for strings that
-// don't look like Hardcount API keys so callers can skip the check silently.
-func LivemodeFromRawKey(raw string) (live, ok bool) {
-	switch {
-	case strings.Contains(raw, "_live_"):
-		return true, true
-	case strings.Contains(raw, "_test_"):
-		return false, true
-	}
-	return false, false
-}
-
-// LivemodeFromRequest extracts the mode from whichever auth header the
-// request carries (Authorization: Bearer or X-API-Key), if any. Returns
-// ok=false when the request has no API key or the key prefix is unrecognised.
-func LivemodeFromRequest(r *http.Request) (live, ok bool) {
-	raw := extractBearerToken(r)
-	if raw == "" {
-		return false, false
-	}
-	return LivemodeFromRawKey(raw)
 }

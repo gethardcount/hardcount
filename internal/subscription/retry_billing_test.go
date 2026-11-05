@@ -209,7 +209,7 @@ func TestListHandler_BillingParam(t *testing.T) {
 		"?billing=failing+": http.StatusUnprocessableEntity,
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/subscriptions"+query, nil)
-		req = req.WithContext(context.WithValue(req.Context(), auth.TestTenantIDKey(), tenantID))
+		req = req.WithContext(auth.WithTenantID(req.Context(), tenantID))
 		rr := httptest.NewRecorder()
 		h.list(rr, req)
 		if rr.Code != want {

@@ -11,13 +11,11 @@ import (
 // active. Revoke handles logout.
 type Service struct {
 	store Store
-	now   func() time.Time
-	ttl   time.Duration
 }
 
-// NewService wires defaults: real wall clock, DefaultTTL.
+// NewService returns a Service backed by store. Sessions last DefaultTTL.
 func NewService(store Store) *Service {
-	return &Service{store: store, now: time.Now, ttl: DefaultTTL}
+	return &Service{store: store}
 }
 
 // IssueInput is the contract for Issue. Callers (the login handler) pass
@@ -39,7 +37,7 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (rawID string, sess 
 	if err != nil {
 		return "", Session{}, err
 	}
-	now := s.now().UTC()
+	now := time.Now().UTC()
 	sess = Session{
 		IDHash:     HashID(rawID),
 		UserID:     in.UserID,
@@ -47,7 +45,7 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (rawID string, sess 
 		Livemode:   in.Livemode,
 		CreatedAt:  now,
 		LastSeenAt: now,
-		ExpiresAt:  now.Add(s.ttl),
+		ExpiresAt:  now.Add(DefaultTTL),
 		UserAgent:  in.UserAgent,
 		IP:         in.IP,
 	}
@@ -68,7 +66,7 @@ func (s *Service) Resolve(ctx context.Context, rawID string) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
-	if !sess.IsActive(s.now()) {
+	if !sess.IsActive(time.Now()) {
 		return Session{}, ErrNotFound
 	}
 	return sess, nil

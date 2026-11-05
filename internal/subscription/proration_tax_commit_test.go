@@ -47,7 +47,7 @@ func TestUpdateItem_ProrationStampsProviderAndCommitsTax(t *testing.T) {
 	h, invoices, subID, itemID := prorationTaxCommitHandler(t, taxMock)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), "t1"), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, "t1"), subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 	if rr.Code != http.StatusOK {
@@ -88,7 +88,7 @@ func TestUpdateItem_ProrationCarriesExemptionStatus(t *testing.T) {
 		}}
 		h, invoices, subID, itemID := prorationTaxCommitHandler(t, taxMock)
 		body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-		req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), "t1"), subID, itemID, body)
+		req := updateItemURL(auth.WithTenantID(ctx, "t1"), subID, itemID, body)
 		rr := httptest.NewRecorder()
 		h.updateItem(rr, req)
 		if rr.Code != http.StatusOK {
@@ -112,7 +112,7 @@ func TestUpdateItem_ProrationCarriesExemptionStatus(t *testing.T) {
 		}}
 		h, invoices, subID, itemID := prorationTaxCommitHandler(t, taxMock)
 		body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-		req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), "t1"), subID, itemID, body)
+		req := updateItemURL(auth.WithTenantID(ctx, "t1"), subID, itemID, body)
 		rr := httptest.NewRecorder()
 		h.updateItem(rr, req)
 		if rr.Code != http.StatusOK {
@@ -145,7 +145,7 @@ func TestUpdateItem_ProrationManualProviderDoesNotCommit(t *testing.T) {
 	h, invoices, subID, itemID := prorationTaxCommitHandler(t, taxMock)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), "t1"), subID, itemID, body)
+	req := updateItemURL(auth.WithTenantID(ctx, "t1"), subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 	if rr.Code != http.StatusOK {

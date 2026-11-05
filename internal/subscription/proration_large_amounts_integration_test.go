@@ -77,7 +77,7 @@ func TestItemChange_PastInt64RolledBack(t *testing.T) {
 	h.SetDB(db)
 	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
-	reqCtx := clock.WithEffectiveNow(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), proNow)
+	reqCtx := clock.WithEffectiveNow(auth.WithTenantID(ctx, tenantID), proNow)
 
 	// 1 → 18 seats.
 	to := int64(18)

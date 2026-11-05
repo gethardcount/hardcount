@@ -61,7 +61,7 @@ func TestActivityTimeline_AuditQueryErrorSurfacesAs500(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	h.activityTimeline(rr, timelineRequest(
-		context.WithValue(context.Background(), auth.TestTenantIDKey(), tenantID), subID))
+		auth.WithTenantID(context.Background(), tenantID), subID))
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status: got %d, want 500 (empty-200 masks audit failures). body=%s", rr.Code, rr.Body.String())
@@ -95,7 +95,7 @@ func TestActivityTimeline_ScopePinnedAndTruncationFlagged(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	h.activityTimeline(rr, timelineRequest(
-		context.WithValue(context.Background(), auth.TestTenantIDKey(), tenantID), subID))
+		auth.WithTenantID(context.Background(), tenantID), subID))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
@@ -136,7 +136,7 @@ func TestActivityTimeline_NoTruncationOnFullHistory(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	h.activityTimeline(rr, timelineRequest(
-		context.WithValue(context.Background(), auth.TestTenantIDKey(), tenantID), subID))
+		auth.WithTenantID(context.Background(), tenantID), subID))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
@@ -204,7 +204,7 @@ func TestActivityTimeline_SortsByDisplayedSimAxis(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	h.activityTimeline(rr, timelineRequest(
-		context.WithValue(context.Background(), auth.TestTenantIDKey(), tenantID), subID))
+		auth.WithTenantID(context.Background(), tenantID), subID))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
 	}

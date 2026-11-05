@@ -70,7 +70,7 @@ func TestParkedRefusalsAnswerOneCode(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			rctx := chi.NewRouteContext()
 			rctx.URLParams.Add("id", inv.ID)
-			reqCtx := context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1")
+			reqCtx := auth.WithTenantID(req.Context(), "t1")
 			reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
 			req = req.WithContext(reqCtx)
 			rr := httptest.NewRecorder()

@@ -2,7 +2,6 @@ package invoice
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -32,7 +31,7 @@ func TestAddLineItem_RefusedOnBillingDraft(t *testing.T) {
 		body, _ := json.Marshal(AddLineItemInput{Description: "Extra seat", Quantity: 1, UnitAmountCents: 2000})
 		req := httptest.NewRequest(http.MethodPost, "/"+id+"/line-items", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		ctx := context.WithValue(postgres.WithLivemode(req.Context(), false), auth.TestTenantIDKey(), r.tenantID)
+		ctx := auth.WithTenantID(postgres.WithLivemode(req.Context(), false), r.tenantID)
 		rr := httptest.NewRecorder()
 		routes.ServeHTTP(rr, req.WithContext(ctx))
 		return rr

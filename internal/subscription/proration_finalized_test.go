@@ -72,7 +72,7 @@ func newProrationFinalizeRig(t *testing.T) *prorationFinalizeRig {
 
 func (r *prorationFinalizeRig) upgrade(t *testing.T) *httptest.ResponseRecorder {
 	t.Helper()
-	ctx := context.WithValue(clock.WithEffectiveNow(context.Background(), proNow), auth.TestTenantIDKey(), "t1")
+	ctx := auth.WithTenantID(clock.WithEffectiveNow(context.Background(), proNow), "t1")
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})
 	rr := httptest.NewRecorder()
 	r.h.updateItem(rr, updateItemURL(ctx, r.subID, r.itemID, body))
