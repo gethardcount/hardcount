@@ -755,7 +755,7 @@ func (s *PostgresStore) updateStatusInTx(ctx context.Context, tx *sql.Tx, id str
 // FinalizeWithDates flips status to finalized and re-stamps issued_at + due_at
 // to the finalize moment in one UPDATE — for operator-composed invoices whose
 // draft may have been created on an earlier (test-clock) instant. Cycle
-// invoices use UpdateStatus and keep their build-time dates.
+// drafts use FinalizeDraft and keep their build-time dates.
 //
 // The UPDATE carries an `AND status='draft'` CAS (ADR-078 D5): the service's
 // draft guard reads an earlier snapshot, so without the predicate a concurrent
@@ -2501,16 +2501,12 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 	if taxStatus == "" {
 		taxStatus = domain.InvoiceTaxOK
 	}
-	// Public token is a property of the finalized state. Service.Finalize
-	// mints one for the operator-driven path; the billing engine
-	// (engine.go + threshold_scan.go) inserts directly with status=
-	// finalized and previously skipped the mint, leaving every
-	// engine-generated invoice without a hosted_invoice_url. That breaks
-	// every customer-facing email CTA. Mint here so the invariant
-	// "finalized ⇒ has public_token" holds at the data boundary
-	// regardless of which caller produced the invoice. A generation
-	// failure is non-fatal — the row still inserts; operators can
-	// repair via the rotate endpoint.
+	// A finalized invoice has a public token: its hosted page, which every
+	// customer-facing email links to. The store mints it in every write that
+	// makes an invoice finalized: here, for an invoice inserted finalized,
+	// and in finalizedTx, for a draft that is finalized. A generation
+	// failure here is non-fatal: the row still inserts, and an operator can
+	// repair it with the rotate endpoint.
 	publicToken := inv.PublicToken
 	if publicToken == "" && inv.Status == domain.InvoiceFinalized {
 		if t, tokenErr := GeneratePublicToken(); tokenErr == nil {
