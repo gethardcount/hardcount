@@ -617,7 +617,7 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 && govulncheck ./...
 
   # codegen-drift fails the build when api/openapi.yaml has been edited
-  # without regenerating the Go and TS artifacts that derive from it
+  # without regenerating the TS artifacts that derive from it
   # (or vice versa — when a generated file was hand-edited). The check
   # is `make gen && git diff --exit-code`: regenerate everything from
   # the canonical spec, then assert nothing in the working tree

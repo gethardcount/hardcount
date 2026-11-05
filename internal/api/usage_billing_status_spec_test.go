@@ -1,76 +1,45 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
-	"os"
+	"fmt"
 	"slices"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/gethardcount/hardcount/internal/api/generated"
 	"github.com/gethardcount/hardcount/internal/integrations/litellm"
 	"github.com/gethardcount/hardcount/internal/usage"
 )
 
-// specSchema is one component schema of api/openapi.yaml: its required keys,
-// its property names and its enum.
-type specSchema struct {
-	Required   []string            `yaml:"required"`
-	Properties map[string]struct{} `yaml:"properties"`
-	Enum       []string            `yaml:"enum"`
-}
-
-func readSpecSchemas(t *testing.T) map[string]specSchema {
-	t.Helper()
-	raw, err := os.ReadFile(specPath)
-	if err != nil {
-		t.Fatalf("read spec: %v", err)
-	}
-	var spec struct {
-		Components struct {
-			Schemas map[string]specSchema `yaml:"schemas"`
-		} `yaml:"components"`
-	}
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		t.Fatalf("parse spec: %v", err)
-	}
-	return spec.Components.Schemas
-}
-
-// wantWireShape marshals v as the server does and checks it against the
-// spec schema: every required key is sent, every key sent is a property,
-// and the generated type decodes it with no unknown field.
-func wantWireShape(t *testing.T, schemas map[string]specSchema, name string, v any, generatedType any) {
+// wantWireShape marshals v as the server does and holds it to the spec
+// schema name with the example checker (openapi_examples_test.go): every
+// required key is sent, every key sent is a property, and every value has
+// its property's type and enum, in nested objects too. It returns the
+// object it checked.
+func wantWireShape(t *testing.T, name string, v any) map[string]any {
 	t.Helper()
 	raw, err := json.Marshal(v)
 	if err != nil {
 		t.Fatalf("%s: marshal: %v", name, err)
 	}
-	var keys map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &keys); err != nil {
+	// JSON is YAML. Read as YAML, a whole number is an int, as in the spec's
+	// examples: the checker's integer type needs one.
+	var value any
+	if err := yaml.Unmarshal(raw, &value); err != nil {
 		t.Fatalf("%s: %v", name, err)
 	}
-	schema, ok := schemas[name]
-	if !ok {
+	doc := specDoc(t)
+	if mapAt(doc, "components", "schemas", name) == nil {
 		t.Fatalf("%s is not a schema of api/openapi.yaml", name)
 	}
-	for _, k := range schema.Required {
-		if _, sent := keys[k]; !sent {
-			t.Errorf("%s: required key %q is not sent (%s)", name, k, raw)
-		}
+	c := &exampleChecker{doc: doc}
+	c.check(name, map[string]any{"$ref": "#/components/schemas/" + name}, value)
+	for _, e := range c.errs {
+		t.Errorf("%s (sent %s)", e, raw)
 	}
-	for k := range keys {
-		if _, ok := schema.Properties[k]; !ok {
-			t.Errorf("%s: key %q is sent but is not a property in api/openapi.yaml", name, k)
-		}
-	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(generatedType); err != nil {
-		t.Errorf("%s: the generated type does not decode %s: %v", name, raw, err)
-	}
+	obj, _ := value.(map[string]any)
+	return obj
 }
 
 // TestOpenAPISpec_UsageBillingStatus: the billing_status enum in the spec is
@@ -85,38 +54,33 @@ func TestOpenAPISpec_UsageBillingStatus(t *testing.T) {
 		}
 	}
 	slices.Sort(sent)
-	enum := slices.Clone(readSpecSchemas(t)["UsageBillingStatus"].Enum)
+	var enum []string
+	for _, e := range asList(mapAt(specDoc(t), "components", "schemas", "UsageBillingStatus")["enum"]) {
+		enum = append(enum, fmt.Sprint(e))
+	}
 	slices.Sort(enum)
 	if !slices.Equal(sent, enum) {
 		t.Errorf("UsageBillingStatus enum = %v, the server sends %v", enum, sent)
 	}
-	for _, s := range sent {
-		if !generated.UsageBillingStatus(s).Valid() {
-			t.Errorf("generated UsageBillingStatus does not accept %q: run make gen", s)
-		}
-	}
 }
 
-// TestWireShape_UnbilledCounts: the LiteLLM answer and the held-usage
-// release answer send the keys their spec schemas require, and nothing
-// else.
+// TestWireShape_UnbilledCounts: the LiteLLM answer, the held-usage release
+// answer and a batch event's answer each send the keys their spec schema
+// requires and nothing else, with the spec's types and enum values.
 func TestWireShape_UnbilledCounts(t *testing.T) {
-	schemas := readSpecSchemas(t)
 	counts := usage.UnbilledCounts{AfterClose: 1, NoPrice: 2, NotOnPlan: 3, OutsideSubscription: 4}
-	var spend generated.LitellmSpendResult
-	wantWireShape(t, schemas, "LitellmSpendResult", litellm.SpendResponse{Accepted: 10, UnbilledCounts: counts}, &spend)
-	if spend.AfterClose != 1 || spend.NoPrice != 2 || spend.NotOnPlan != 3 || spend.OutsideSubscription != 4 {
-		t.Errorf("LiteLLM counts decoded as %+v", spend)
+	spend := wantWireShape(t, "LitellmSpendResult", litellm.SpendResponse{Accepted: 10, UnbilledCounts: counts})
+	for k, want := range map[string]int{"after_close": 1, "no_price": 2, "not_on_plan": 3, "outside_subscription": 4} {
+		if spend[k] != want {
+			t.Errorf("LiteLLM %s = %v, want %d", k, spend[k], want)
+		}
 	}
-	var release generated.HeldUsageReleaseResult
-	wantWireShape(t, schemas, "HeldUsageReleaseResult", usage.ReleaseResult{CustomerID: "cus", Released: 3, NoPrice: 2, NotOnPlan: 1}, &release)
-	if release.NoPrice != 2 || release.NotOnPlan != 1 {
-		t.Errorf("release counts decoded as %+v", release)
+	release := wantWireShape(t, "HeldUsageReleaseResult", usage.ReleaseResult{CustomerID: "cus", Released: 3, NoPrice: 2, NotOnPlan: 1})
+	for k, want := range map[string]int{"no_price": 2, "not_on_plan": 1} {
+		if release[k] != want {
+			t.Errorf("release %s = %v, want %d", k, release[k], want)
+		}
 	}
-	var result generated.UsageEventBatchEventResult
-	wantWireShape(t, schemas, "UsageEventBatchEventResult", usage.BatchEventResult{Status: usage.BatchIngested, BillingStatus: usage.BillingStatusNoPrice}, &result)
-	if !result.Status.Valid() || !result.BillingStatus.Valid() {
-		t.Errorf("batch event result decoded as %+v", result)
-	}
-	wantWireShape(t, schemas, "UsageEventBatchEventResult", usage.BatchEventResult{Status: usage.BatchDeduplicated}, &generated.UsageEventBatchEventResult{})
+	wantWireShape(t, "UsageEventBatchEventResult", usage.BatchEventResult{Status: usage.BatchIngested, BillingStatus: usage.BillingStatusNoPrice})
+	wantWireShape(t, "UsageEventBatchEventResult", usage.BatchEventResult{Status: usage.BatchDeduplicated})
 }

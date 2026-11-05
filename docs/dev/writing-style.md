@@ -250,10 +250,9 @@ any corrections. The story of how the result was reached goes in an appendix.
 
 ## Code comments
 
-These rules cover comments in hand-written Go code. Generated code
-(`internal/api/generated/`) stays as the generator writes it. The reader is a
-contributor, a maintainer or an AI agent with the code open, so a comment adds
-only what the code cannot say. The rules above still apply: one idea per
+These rules cover comments in Go code. The reader is a contributor, a
+maintainer or an AI agent with the code open, so a comment adds only what the
+code cannot say. The rules above still apply: one idea per
 sentence, plain words and quiet emphasis.
 
 1. **Say why, not what.** Explain the reason, the rule the code keeps, or the

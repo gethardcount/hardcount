@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-
-	"github.com/gethardcount/hardcount/internal/api/generated"
 )
 
 // A billing_status is what Hardcount found when the event arrived (D07, ADR-130
@@ -378,7 +376,7 @@ func TestBillingStatus_BatchAnswersPerIndex(t *testing.T) {
 	if code != http.StatusCreated {
 		t.Fatalf("batch: %d %v, want 201", code, out)
 	}
-	wantWireShape(t, readSpecSchemas(t), "UsageEventBatchResult", out, &generated.UsageEventBatchResult{})
+	wantWireShape(t, "UsageEventBatchResult", out)
 	want := map[string]int{"ingested": 4, "deduplicated": 1, "total": 5, "no_price": 1, "not_on_plan": 1, "outside_subscription": 1, "after_close": 0}
 	for k, v := range want {
 		if got, ok := out[k].(float64); !ok || int(got) != v {
