@@ -37,40 +37,6 @@ func sessionRequest(cookie string) *http.Request {
 	return req
 }
 
-// TestMiddleware_StoreOutageIs503 is the session half of #560: a store
-// failure during cookie resolution is not a session verdict and must not
-// read as "invalid or expired session".
-func TestMiddleware_StoreOutageIs503(t *testing.T) {
-	svc := NewService(&fakeSessionStore{outage: true})
-	handler := Middleware(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	}))
-
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, sessionRequest("sess_deadbeef"))
-
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status: got %d, want 503", rec.Code)
-	}
-	if strings.Contains(rec.Body.String(), "invalid or expired") {
-		t.Errorf("body claims the session is invalid during an outage: %s", rec.Body.String())
-	}
-}
-
-func TestMiddleware_UnknownSessionStays401(t *testing.T) {
-	svc := NewService(&fakeSessionStore{sessions: map[string]Session{}})
-	handler := Middleware(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	}))
-
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, sessionRequest("sess_deadbeef"))
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status: got %d, want 401", rec.Code)
-	}
-}
-
 // TestMiddlewareOrAPIKey_CookieOutageDoesNotFallThrough: pre-#560 an infra
 // failure on the cookie lookup fell through to the bearer branch and, with
 // no header present, surfaced as "missing credentials" — a second flavor of

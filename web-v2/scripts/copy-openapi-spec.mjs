@@ -5,13 +5,14 @@
 //    (`/openapi.yaml`) for anyone who wants to fetch it. (The embedded
 //    Scalar viewer that used to render it at /docs/api was cut
 //    2026-04-29 — no in-app viewer exists today.)
-// 2. Local TS codegen (openapi-typescript + orval) reads the same file
-//    every other consumer reads.
+// 2. Local TS codegen (orval) reads the same file every other consumer
+//    reads.
 //
 // Wired as a `predev` / `prebuild` hook in package.json so the served
 // copy is always fresh — and as part of `npm run gen` so the codegen
 // pipeline (and the CI drift check that runs it) operates on the
-// canonical source.
+// canonical source. The copy is not committed (.gitignore); these hooks
+// make it.
 //
 // Symlinking would be more elegant but is fragile across hosts that
 // untar the repo onto Windows or that flatten symlinks (Vite's static

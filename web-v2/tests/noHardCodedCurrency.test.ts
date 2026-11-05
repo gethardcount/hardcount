@@ -16,7 +16,7 @@ function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(e => {
     const p = join(dir, e.name)
     if (e.isDirectory()) return e.name === 'gen' ? [] : sourceFiles(p)
-    return /\.tsx?$/.test(e.name) && e.name !== 'api.gen.ts' ? [p] : []
+    return /\.tsx?$/.test(e.name) ? [p] : []
   })
 }
 

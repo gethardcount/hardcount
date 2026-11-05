@@ -78,7 +78,7 @@ func TestFinalize_QueuesThenCollectsThroughTheOneCollector(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/invoices/"+inv.ID+"/finalize", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", inv.ID)
-	reqCtx := context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1")
+	reqCtx := auth.WithTenantID(req.Context(), "t1")
 	reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
 	rr := httptest.NewRecorder()
 	h.finalize(rr, req.WithContext(reqCtx))

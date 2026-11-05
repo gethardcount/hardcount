@@ -64,7 +64,7 @@ func TestCollectPayment_ChargesInTheInvoicesClock(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/invoices/"+inv.ID+"/collect", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", inv.ID)
-	reqCtx := context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1")
+	reqCtx := auth.WithTenantID(req.Context(), "t1")
 	reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
 	rr := httptest.NewRecorder()
 	h.collectPayment(rr, req.WithContext(reqCtx))

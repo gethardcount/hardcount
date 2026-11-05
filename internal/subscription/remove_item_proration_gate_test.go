@@ -44,7 +44,7 @@ func TestRemoveItem_ProrationGate(t *testing.T) {
 	}
 	remove := func(h *Handler, subID, itemID string) *httptest.ResponseRecorder {
 		rr := httptest.NewRecorder()
-		h.removeItem(rr, removeItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID))
+		h.removeItem(rr, removeItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID))
 		return rr
 	}
 

@@ -62,7 +62,7 @@ func seatIncreaseOnRealTx(t *testing.T, rec *finalizeRecorderMock) (int, int64, 
 	h.SetProrationDeps(&plansMock{plans: map[string]domain.Plan{plan.ID: plan}}, invoices)
 	h.SetInvoiceFinalizeRecorder(rec)
 
-	reqCtx := clock.WithEffectiveNow(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), proNow)
+	reqCtx := clock.WithEffectiveNow(auth.WithTenantID(ctx, tenantID), proNow)
 	qty := int64(2)
 	body, _ := json.Marshal(UpdateItemInput{Quantity: &qty, Immediate: true})
 	rr := httptest.NewRecorder()

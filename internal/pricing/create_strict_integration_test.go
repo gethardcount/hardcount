@@ -37,7 +37,7 @@ func TestPlanCreateAndStatus_Validated(t *testing.T) {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rr := httptest.NewRecorder()
-		srv.ServeHTTP(rr, req.WithContext(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID)))
+		srv.ServeHTTP(rr, req.WithContext(auth.WithTenantID(ctx, tenantID)))
 		return rr
 	}
 	param := func(rr *httptest.ResponseRecorder) string {
@@ -147,7 +147,7 @@ func TestPriceAndOverrideCreate_RefuseUnknownField(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rr := httptest.NewRecorder()
-		srv.ServeHTTP(rr, req.WithContext(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID)))
+		srv.ServeHTTP(rr, req.WithContext(auth.WithTenantID(ctx, tenantID)))
 		return rr
 	}
 	param := func(rr *httptest.ResponseRecorder) string {

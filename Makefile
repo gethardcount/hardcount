@@ -1,4 +1,4 @@
-.PHONY: build run test lint migrate migration dev clean gen gen-go gen-ts
+.PHONY: build run test lint migrate migration dev clean gen
 
 # .env (cp .env.example .env) configures the targets that start Hardcount or
 # its tools: run, dev, migrate, migrate-status and bootstrap. Only those
@@ -76,30 +76,14 @@ bootstrap:
 demo:
 	@echo "Run: ./scripts/demo.sh <YOUR_SECRET_KEY>"
 
-# Code generation from the OpenAPI spec at api/openapi.yaml — see
-# docs/dev/openapi-workflow.md. CI runs `make gen` followed by
-# `git diff --exit-code` so any drift between the spec and the
-# committed generated artifacts fails the build (same pattern Stripe
-# uses internally with its openapi repo). Run locally after editing
-# the spec; commit the regenerated files alongside the spec change.
-gen: gen-go gen-ts
-
-# Generate Go server interface + DTO types from api/openapi.yaml.
-# oapi-codegen is pinned in tools/tools.go and resolved through
-# go.mod, so the version is reproducible and bumps land like any
-# other dep change.
-gen-go:
-	go run -tags tools github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen \
-		--config api/cfg.yaml api/openapi.yaml
-
-# Generate TypeScript types (openapi-typescript) into
-# web-v2/src/lib/api.gen.ts and typed react-query hooks (orval) into
-# web-v2/src/lib/gen/queries.gen.ts. Also refreshes
-# web-v2/public/openapi.yaml — the SPA's predev/prebuild hook and the
-# codegen pipeline (plus its CI drift check) read that copy of the
-# canonical spec. (No embedded spec viewer exists — the /docs site was
-# cut 2026-04-29.)
-gen-ts:
+# Code generation from the OpenAPI spec at api/openapi.yaml: see
+# docs/dev/openapi-workflow.md. It writes the dashboard's typed
+# react-query hooks and schema types (orval) into web-v2/src/lib/gen/,
+# from a copy of the spec at web-v2/public/openapi.yaml (not committed).
+# CI runs `make gen`, then `git diff --exit-code`, so a spec change
+# without the regenerated files fails the build. Run it after editing
+# the spec, and commit the regenerated files with the spec change.
+gen:
 	cd web-v2 && npm run gen
 
 # Frontend

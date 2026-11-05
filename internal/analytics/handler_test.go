@@ -14,12 +14,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 )
 
-// ctxWithTenant injects a tenant ID into ctx the same way the real auth
-// middleware does — the analytics handlers rely on it.
-func ctxWithTenant(ctx context.Context, tenantID string) context.Context {
-	return context.WithValue(ctx, auth.TestTenantIDKey(), tenantID)
-}
-
 // ---------------------------------------------------------------------------
 // Route registration
 // ---------------------------------------------------------------------------
@@ -294,7 +288,7 @@ func TestNewHandler(t *testing.T) {
 }
 
 func TestTenantIDFromContext(t *testing.T) {
-	ctx := ctxWithTenant(context.Background(), "t_test_123")
+	ctx := auth.WithTenantID(context.Background(), "t_test_123")
 	if got := auth.TenantID(ctx); got != "t_test_123" {
 		t.Errorf("TenantID: got %q, want %q", got, "t_test_123")
 	}

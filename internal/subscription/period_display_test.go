@@ -75,9 +75,9 @@ func TestHandler_Get_PeriodDisplayTZ(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/subscriptions/"+subID, nil)
 			rctx := chi.NewRouteContext()
 			rctx.URLParams.Add("id", subID)
-			req = req.WithContext(context.WithValue(
+			req = req.WithContext(auth.WithTenantID(
 				context.WithValue(ctx, chi.RouteCtxKey, rctx),
-				auth.TestTenantIDKey(), tenantID,
+				tenantID,
 			))
 
 			rr := httptest.NewRecorder()

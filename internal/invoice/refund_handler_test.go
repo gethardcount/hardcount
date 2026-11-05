@@ -46,7 +46,7 @@ func postRefund(t *testing.T, h *Handler, body map[string]any) *httptest.Respons
 	}
 	req := httptest.NewRequest(http.MethodPost, "/v1/invoices/inv_1/refund", &buf)
 	// Tenant + chi URL param setup that the middleware stack would normally do.
-	ctx := context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1")
+	ctx := auth.WithTenantID(req.Context(), "t1")
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "inv_1")
 	ctx = context.WithValue(ctx, chi.RouteCtxKey, rctx)

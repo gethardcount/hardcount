@@ -102,7 +102,7 @@ func (f *strictCreateFixture) post(body, idemKey string) *httptest.ResponseRecor
 	if idemKey != "" {
 		req.Header.Set("Idempotency-Key", idemKey)
 	}
-	reqCtx := clock.WithEffectiveNow(context.WithValue(f.ctx, auth.TestTenantIDKey(), f.tenant), f.now)
+	reqCtx := clock.WithEffectiveNow(auth.WithTenantID(f.ctx, f.tenant), f.now)
 	rr := httptest.NewRecorder()
 	f.srv.ServeHTTP(rr, req.WithContext(reqCtx))
 	return rr
@@ -265,7 +265,7 @@ func TestGetSubscription_NoUsageCapKeys(t *testing.T) {
 	id := decodeSub(t, rr).ID
 
 	req := httptest.NewRequest(http.MethodGet, "/"+id, nil)
-	reqCtx := clock.WithEffectiveNow(context.WithValue(f.ctx, auth.TestTenantIDKey(), f.tenant), f.now)
+	reqCtx := clock.WithEffectiveNow(auth.WithTenantID(f.ctx, f.tenant), f.now)
 	get := httptest.NewRecorder()
 	f.srv.ServeHTTP(get, req.WithContext(reqCtx))
 	if get.Code != http.StatusOK {

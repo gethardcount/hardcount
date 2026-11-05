@@ -323,7 +323,7 @@ func newItemRaceRig(t *testing.T, db *postgres.DB, name string, qty int64, withK
 }
 
 func (r *itemRaceRig) send(at time.Time, q raceReq) *httptest.ResponseRecorder {
-	ctx := clock.WithEffectiveNow(context.WithValue(r.ctx, auth.TestTenantIDKey(), r.tenantID), at)
+	ctx := clock.WithEffectiveNow(auth.WithTenantID(r.ctx, r.tenantID), at)
 	rr := httptest.NewRecorder()
 	itemID := r.itemID
 	if q.itemID != "" {

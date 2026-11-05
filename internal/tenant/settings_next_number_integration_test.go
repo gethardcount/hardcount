@@ -38,7 +38,7 @@ func TestSettingsResponse_NextInvoiceSequencePerMode(t *testing.T) {
 		} else {
 			req = httptest.NewRequest(method, "/v1/settings", strings.NewReader(body))
 		}
-		ctx := context.WithValue(req.Context(), auth.TestTenantIDKey(), tenantID)
+		ctx := auth.WithTenantID(req.Context(), tenantID)
 		req = req.WithContext(postgres.WithLivemode(ctx, livemode))
 		rr := httptest.NewRecorder()
 		if method == http.MethodGet {

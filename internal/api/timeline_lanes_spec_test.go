@@ -11,8 +11,7 @@ import (
 // TestOpenAPISpec_TimelineDegradedLanes: every lane the payment-timeline
 // handler can name in `degraded` is a value of InvoicePaymentTimeline.degraded
 // in api/openapi.yaml. The enum is closed, so a lane missing from it makes the
-// generated Go and TypeScript types reject a response the server really
-// sends. The lanes are read from the handler's degrade("…") calls, so a new
+// generated TypeScript types reject a response the server really sends. The lanes are read from the handler's degrade("…") calls, so a new
 // lane fails here until the spec lists it.
 func TestOpenAPISpec_TimelineDegradedLanes(t *testing.T) {
 	src, err := os.ReadFile("../invoice/handler.go")

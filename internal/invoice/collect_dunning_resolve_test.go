@@ -40,7 +40,7 @@ func collectReq(t *testing.T, h *Handler, id string) *httptest.ResponseRecorder 
 	req := httptest.NewRequest(http.MethodPost, "/v1/invoices/"+id+"/collect", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", id)
-	reqCtx := context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1")
+	reqCtx := auth.WithTenantID(req.Context(), "t1")
 	reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
 	rr := httptest.NewRecorder()
 	h.collectPayment(rr, req.WithContext(reqCtx))
