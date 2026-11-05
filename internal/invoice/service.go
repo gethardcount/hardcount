@@ -1721,8 +1721,8 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	// instant than draft-create — and Net terms run from issuance. ctx is
 	// already bound to the invoice's clock (bindForInvoice above), so
 	// clock.Now is simulated time for clock-pinned customers. Net term is the
-	// value the draft was created with. Cycle invoices are born finalized at
-	// build time and keep those dates (the UpdateStatus branch).
+	// value the draft was created with. A cycle draft keeps the dates the
+	// engine built it with (the FinalizeDraft branch).
 	// Relief held on the draft is issued on the finalize tx, so the invoice
 	// is never chargeable at its full amount (row 13). A failure rolls the
 	// finalize back: the invoice stays a draft and nothing is charged.
@@ -1790,10 +1790,18 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 			"currency":           finalized.Currency,
 		})
 	}
-	// finalized is the row the finalize committed. The tax commit above may
-	// have recorded tax_transaction_id since; GET /v1/invoices/{id} shows it,
-	// and the finalize endpoint reads the invoice again after collecting it.
-	return finalized, nil
+	// Return the invoice as it is now, as GET /v1/invoices/{id} shows it. The
+	// tax commit and the held relief's steps above write the row after the
+	// finalize committed it, and the retry-tax endpoint responds with what
+	// this returns. If the read fails, return the row the finalize
+	// committed: the finalize stands.
+	current, err := s.store.Get(ctx, tenantID, id)
+	if err != nil {
+		slog.WarnContext(ctx, "invoice: read after finalize failed; returning the row the finalize committed",
+			"error", err, "tenant_id", tenantID, "invoice_id", finalized.ID)
+		return finalized, nil
+	}
+	return current, nil
 }
 
 // reverseInvoiceTax reverses the upstream tax transaction for an invoice being
