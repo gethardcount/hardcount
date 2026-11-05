@@ -5,15 +5,9 @@
 //
 // Generated artifacts live in src/lib/gen/ — a dedicated subdirectory
 // so re-runs don't risk wiping hand-written siblings if `clean` is
-// ever turned on. The hooks file (queries.gen.ts) and the schema
-// types file (schemas.gen.ts) sit there together; importing code
-// pulls from `@/lib/gen/queries` etc.
-//
-// `openapi-typescript` writes a parallel raw-type file at
-// src/lib/api.gen.ts (paths-as-keys flat type tree, useful for
-// endpoints we haven't migrated to typed hooks yet). Orval's role is
-// the hooks layer, openapi-typescript's is the broad type layer; both
-// regenerate from the same spec on `npm run gen`.
+// ever turned on. The hooks file (queries.gen.ts) and the schemas/
+// directory (one type file per schema) sit there together; importing
+// code pulls from `@/lib/gen/queries.gen` and `@/lib/gen/schemas/<name>`.
 //
 // `mutator` points orval at orvalClient.ts which delegates to the
 // existing apiRequest fetch wrapper in src/lib/api.ts — so generated
