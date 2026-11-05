@@ -70,7 +70,7 @@ func TestChokePointCloses(t *testing.T) {
 	t.Run("mark paid settles claims", func(t *testing.T) {
 		tenantID := testutil.CreateTestTenant(t, db, "Choke MarkPaid")
 		store := invoice.NewPostgresStore(db)
-		invID := seedFinalizedInvoice(t, db, store, ctx, tenantID)
+		invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 		claimID := seedOpenClaim(t, db, ctx, tenantID, invID)
 		if _, err := store.MarkPaid(ctx, tenantID, invID, "pi_x", now); err != nil {
 			t.Fatalf("mark paid: %v", err)
@@ -83,7 +83,7 @@ func TestChokePointCloses(t *testing.T) {
 	t.Run("void settles claims", func(t *testing.T) {
 		tenantID := testutil.CreateTestTenant(t, db, "Choke Void")
 		store := invoice.NewPostgresStore(db)
-		invID := seedFinalizedInvoice(t, db, store, ctx, tenantID)
+		invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 		claimID := seedOpenClaim(t, db, ctx, tenantID, invID)
 		if _, err := store.UpdateStatus(ctx, tenantID, invID, domain.InvoiceVoided); err != nil {
 			t.Fatalf("void: %v", err)
@@ -149,7 +149,7 @@ func TestChokePointCloses(t *testing.T) {
 				store.SetOutboxEnqueuer(outbox)
 				subs.SetOutboxEnqueuer(outbox)
 				store.SetDunningPauseReleaser(subs)
-				invID := seedFinalizedInvoice(t, db, store, ctx, tenantID)
+				invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 				inv, err := store.Get(ctx, tenantID, invID)
 				if err != nil {
 					t.Fatalf("get invoice: %v", err)
@@ -204,7 +204,7 @@ func TestChokePointCloses(t *testing.T) {
 	t.Run("credit application supersedes claims", func(t *testing.T) {
 		tenantID := testutil.CreateTestTenant(t, db, "Choke Credit")
 		store := invoice.NewPostgresStore(db)
-		invID := seedFinalizedInvoice(t, db, store, ctx, tenantID)
+		invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 		claimID := seedOpenClaim(t, db, ctx, tenantID, invID)
 
 		// Partial credit through the LIVE balance-credit writer

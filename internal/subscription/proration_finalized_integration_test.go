@@ -78,7 +78,7 @@ func seatIncreaseOnRealTx(t *testing.T, rec *finalizeRecorderMock) (int, int64, 
 
 // TestUpdateItem_ProrationFinalizeAudit_RidesTheItemChangeTx (#1279): on the
 // atomic path the finalize audit row is written on the item-change tx (the
-// recorder gets that tx), and invoice.finalized goes out once after commit.
+// recorder gets that tx), once.
 func TestUpdateItem_ProrationFinalizeAudit_RidesTheItemChangeTx(t *testing.T) {
 	rec := &finalizeRecorderMock{}
 	code, qty, invoices := seatIncreaseOnRealTx(t, rec)
@@ -92,17 +92,14 @@ func TestUpdateItem_ProrationFinalizeAudit_RidesTheItemChangeTx(t *testing.T) {
 	if len(rec.audits) != 1 || rec.audits[0].ID != id || rec.auditTxs[0] == nil {
 		t.Errorf("finalize audit: %d rows (txs %v), want one for %s on the item-change tx", len(rec.audits), rec.auditTxs, id)
 	}
-	if len(rec.dispatched) != 1 || rec.dispatched[0].ID != id {
-		t.Errorf("invoice.finalized dispatches: %v, want one for %s", rec.dispatched, id)
-	}
-	if got := rec.calls; len(got) != 2 || got[0] != "audit" || got[1] != "dispatch" {
-		t.Errorf("call order %v, want [audit dispatch]", got)
+	if got := rec.calls; len(got) != 1 || got[0] != "audit" {
+		t.Errorf("recorder calls %v, want [audit]", got)
 	}
 }
 
 // TestUpdateItem_ProrationFinalizeAuditFailure_RollsBackQuantity: the row
 // shares the item change's fate (ADR-090). A failed audit write rolls the
-// quantity back on the real tx and sends no webhook.
+// quantity back on the real tx, and with it the invoice and its event.
 func TestUpdateItem_ProrationFinalizeAuditFailure_RollsBackQuantity(t *testing.T) {
 	rec := &finalizeRecorderMock{auditErr: errors.New("audit insert failed")}
 	code, qty, _ := seatIncreaseOnRealTx(t, rec)
@@ -111,8 +108,5 @@ func TestUpdateItem_ProrationFinalizeAuditFailure_RollsBackQuantity(t *testing.T
 	}
 	if qty != 1 {
 		t.Errorf("quantity after a failed finalize audit = %d, want 1 (the change rolls back)", qty)
-	}
-	if len(rec.dispatched) != 0 {
-		t.Errorf("invoice.finalized sent for a rolled-back change: %v", rec.dispatched)
 	}
 }

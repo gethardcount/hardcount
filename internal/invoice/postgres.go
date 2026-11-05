@@ -41,10 +41,12 @@ type OutboxEnqueuer interface {
 	Enqueue(ctx context.Context, tx *sql.Tx, tenantID, eventType string, payload map[string]any) (string, error)
 }
 
-// SetOutboxEnqueuer wires transactional webhook emission for transitions that
-// fire from many call sites (notably invoice.paid, emitted from MarkPaid so it
-// fires exactly once regardless of which path settled the invoice). Optional —
-// when unset, no event is enqueued.
+// SetOutboxEnqueuer wires the webhook events the store queues in the
+// transaction of their change: every invoice.* event (postgres_events.go
+// and the paid flip) and the payment.* events its writers own. Each
+// transition queues its event in its one store writer, so the event goes
+// out once whichever path made the change. The router always wires it
+// (webhook.MustWiredOutbox); unset, as in narrow tests, no event is queued.
 func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 
 // CommitFunder grants a prepaid-commit credit block, in the funding invoice's
@@ -393,6 +395,9 @@ func (s *PostgresStore) CreateAudited(
 			return domain.Invoice{}, err
 		}
 	}
+	if err := s.bornFinalizedTx(ctx, tx, tenantID, inv); err != nil {
+		return domain.Invoice{}, err
+	}
 	// Emit only after the INSERT actually landed a row (the Scan above
 	// succeeded) — never on a failed/duplicate create.
 	if emit != nil {
@@ -573,21 +578,10 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.I
 	return invoices, total, rows.Err()
 }
 
+// UpdateStatus flips the invoice's status in its own transaction, with the
+// event of the move (UpdateStatusWithReversalPriorTx).
 func (s *PostgresStore) UpdateStatus(ctx context.Context, tenantID, id string, status domain.InvoiceStatus) (domain.Invoice, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	inv, err := s.updateStatusInTx(ctx, tx, id, status)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Invoice{}, err
-	}
-	return inv, nil
+	return s.UpdateStatusWithReversalPrior(ctx, tenantID, id, status, nil)
 }
 
 // UpdateStatusWithReversal flips the invoice status AND runs a caller-supplied
@@ -636,6 +630,10 @@ func (s *PostgresStore) UpdateStatusWithReversalPrior(ctx context.Context, tenan
 // the closure's writes on the same tx. The billing engine voids a fully-unused
 // unpaid prebill this way inside the cancel / plan-swap transaction, so the
 // relief commits — or rolls back — with the change that caused it.
+//
+// Last, it queues the move's event on tx (invoice.voided,
+// invoice.marked_uncollectible or invoice.finalized) and returns the
+// invoice as tx leaves it, the closure's writes included (statusChangedTx).
 func (s *PostgresStore) UpdateStatusWithReversalPriorTx(ctx context.Context, tx *sql.Tx, tenantID, id string, status domain.InvoiceStatus, fn func(tx *sql.Tx, prior domain.Invoice) error) (domain.Invoice, error) {
 	// Row lock + the true prior state; same row the CAS below updates, so no
 	// new lock ordering edge.
@@ -658,7 +656,7 @@ func (s *PostgresStore) UpdateStatusWithReversalPriorTx(ctx context.Context, tx 
 			return domain.Invoice{}, err
 		}
 	}
-	return inv, nil
+	return s.statusChangedTx(ctx, tx, tenantID, inv.ID, status)
 }
 
 // updateStatusInTx is the shared body: the status flip without owning the tx.
@@ -772,6 +770,10 @@ func (s *PostgresStore) updateStatusInTx(ctx context.Context, tx *sql.Tx, id str
 // rejected by its own draft re-check). A funder error fails finalize by
 // design: operator-synchronous, loud, retryable — never weaken to
 // post-commit.
+//
+// The finalize gives the invoice its hosted-page token and queues
+// invoice.finalized in this transaction too (finalizedTx), after
+// onFinalized, so the event shows what the hook did.
 func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time, taxedLineIDs []string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -865,6 +867,9 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 	if inv, err = s.runOnFinalizedTx(ctx, tx, inv, onFinalized); err != nil {
 		return domain.Invoice{}, err
 	}
+	if inv, err = s.finalizedTx(ctx, tx, tenantID, inv); err != nil {
+		return domain.Invoice{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.Invoice{}, err
 	}
@@ -874,7 +879,8 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 // FinalizeDraft flips a draft (a cycle invoice kept as a draft) to finalized
 // and runs onFinalized on the same tx before it commits, as FinalizeWithDates
 // does for an operator-composed invoice. Finalize issues the relief held on
-// the draft there (release plan row 13).
+// the draft there (release plan row 13). The token and invoice.finalized
+// ride the same tx (finalizedTx).
 func (s *PostgresStore) FinalizeDraft(ctx context.Context, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -886,6 +892,9 @@ func (s *PostgresStore) FinalizeDraft(ctx context.Context, tenantID, id string, 
 		return domain.Invoice{}, err
 	}
 	if inv, err = s.runOnFinalizedTx(ctx, tx, inv, onFinalized); err != nil {
+		return domain.Invoice{}, err
+	}
+	if inv, err = s.finalizedTx(ctx, tx, tenantID, inv); err != nil {
 		return domain.Invoice{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1311,13 +1320,14 @@ func (s *PostgresStore) MarkPaidReportingTransition(ctx context.Context, tenantI
 // MarkPaidOffline is MarkPaid for an operator-recorded payment (cheque,
 // wire): the paid flip sets paid_out_of_band and leaves the invoice with no
 // PaymentIntent, since no charge was sent to Stripe (it takes none, so this
-// path cannot write one). check runs on the invoice as it is under this
-// transition's row lock, before anything is written, and its error refuses
-// the payment. It exists so the offline path can refuse while a card charge
-// is in progress (#975) — the service's own read comes before the lock and
-// can miss a charge that started after it. Only the offline path gets a
-// check: the card settlement and the credit-covered settles run inside the
-// charge's own hold and must always be able to record it.
+// path cannot write one). It queues invoice.payment_recorded beside
+// invoice.paid, in the same transaction. check runs on the invoice as it is
+// under this transition's row lock, before anything is written, and its
+// error refuses the payment. It exists so the offline path can refuse while
+// a card charge is in progress (#975) — the service's own read comes before
+// the lock and can miss a charge that started after it. Only the offline
+// path gets a check: the card settlement and the credit-covered settles run
+// inside the charge's own hold and must always be able to record it.
 func (s *PostgresStore) MarkPaidOffline(ctx context.Context, tenantID, id string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
 	inv, _, err := s.markPaidReportingTransition(ctx, tenantID, id, "", paidAt, settleOffline, check, nil)
 	return inv, err
@@ -1473,6 +1483,16 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 	inv, err := s.markPaidLockedTx(ctx, tx, tenantID, id, stripePaymentIntentID, paidAt, kind)
 	if err != nil {
 		return domain.Invoice{}, false, err
+	}
+	// An offline payment's event says which status the invoice was paid
+	// from, which the paid row no longer holds. That is the status read
+	// under the row lock above, so a write-off that committed after the
+	// caller's own read still shows.
+	if kind == settleOffline {
+		if err := s.enqueueInvoiceEventTx(ctx, tx, tenantID, domain.EventInvoicePaymentRecorded, inv,
+			map[string]any{"recovered_from": status}); err != nil {
+			return domain.Invoice{}, false, err
+		}
 	}
 	// The money email rides THIS transaction (ADR-040 amendment): enqueued
 	// beside the events above, gated on the same transition, inside a
@@ -2444,12 +2464,17 @@ func (s *PostgresStore) CreateWithLineItemsAudited(
 // has already opened a tx wrapping the sub-item insert, and the
 // proration invoice insert needs to share that tx so a failure here
 // rolls back the item add too. ADR-030 atomic-proration follow-through.
+// The engine's coordinator transactions use it too. An invoice born
+// finalized queues invoice.finalized on the caller's tx, so the event
+// commits or rolls back with the caller's change.
 func (s *PostgresStore) CreateWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
 	return s.createWithLineItemsInTx(ctx, tx, tenantID, inv, items)
 }
 
 // createWithLineItemsInTx is the shared body. The exported wrappers
-// differ only in tx ownership.
+// differ only in tx ownership. Every invoice the engine or a proration
+// creates goes through it, and it queues invoice.finalized for one born
+// finalized (bornFinalizedTx).
 func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
 	id := postgres.NewID("hc_inv")
 	// Canonical UPPERCASE ISO-4217 (see Create) — normalize the header and
@@ -2596,6 +2621,9 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 		}
 	}
 
+	if err := s.bornFinalizedTx(ctx, tx, tenantID, inv); err != nil {
+		return domain.Invoice{}, err
+	}
 	return inv, nil
 }
 

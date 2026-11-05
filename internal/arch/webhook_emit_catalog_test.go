@@ -43,11 +43,11 @@ import (
 //
 // A site is a call that queues a fixed event type after the commit: a
 // standalone sink call with a constant, or a call of a helper. A helper is a
-// function whose only calls queue a fixed event type, such as
-// billing.Engine.DispatchInvoiceFinalized, so each caller of a helper holds a
-// site too. The test does not see a new call of a function that holds a site
-// and does other work too, such as invoice.Service.finalize or
-// invoice.Service.AfterVoid: the call reaches a site already counted. A PR
+// function whose only calls queue a fixed event type, so each caller of a
+// helper holds a site too. The test does not see a new call of a function
+// that holds a site and does other work too, such as
+// dunning.Service.resolveRunAt or payment.Stripe.SettleSucceeded: the call
+// reaches a site already counted. A PR
 // that moves such a site must list that function's callers in its site-set.
 // The walk follows calls, so a helper passed as a function value is not
 // followed.
@@ -70,22 +70,12 @@ var standaloneSinkNames = map[string]bool{"Dispatch": true, "EnqueueStandalone":
 // type leaves the list, mark it "Always sent" in docs/api/webhook-events.md
 // (TestAlwaysSentMarksMatchTheBacklog checks the two agree).
 var standaloneWebhookBacklog = map[string]int{
-	"billing.Engine.DispatchInvoiceFinalized invoice.finalized":                         1,
-	"billing.Engine.FinalizeOnCreateInvoice invoice.finalized":                          1,
 	"billing.Engine.applyDueScheduledPlanChanges subscription.pending_change.applied":   1,
-	"billing.Engine.billFinalOnImmediateCancelImpl invoice.finalized":                   1,
-	"billing.Engine.billOnePeriod invoice.finalized":                                    1,
-	"billing.Engine.dispatchInvoiceFinalized invoice.finalized":                         1,
-	"billing.Engine.fireThreshold invoice.finalized":                                    1,
 	"billing.Engine.fireThreshold subscription.threshold_crossed":                       1,
 	"customer.Service.MarkEmailBounced customer.email_bounced":                          1,
 	"customer.Service.MarkEmailComplained customer.email_complained":                    1,
 	"dunning.Service.exhaustRun dunning.escalated":                                      1,
 	"dunning.Service.resolveRunAt dunning.resolved":                                     1,
-	"invoice.Service.AfterVoid invoice.voided":                                          1,
-	"invoice.Service.MarkUncollectible invoice.marked_uncollectible":                    1,
-	"invoice.Service.RecordOfflinePayment invoice.payment_recorded":                     1,
-	"invoice.Service.finalize invoice.finalized":                                        1,
 	"payment.Stripe.RecordCheckoutCard payment_method.updated":                          1,
 	"payment.Stripe.SettleSucceeded payment.amount_mismatch":                            1,
 	"payment.Stripe.SettleSucceeded payment.duplicate_charge":                           2,
@@ -93,13 +83,9 @@ var standaloneWebhookBacklog = map[string]int{
 	"payment.Stripe.handlePaymentSucceeded payment.currency_mismatch":                   1,
 	"payment.Stripe.handleSetupIntentSucceeded payment_method.attached":                 1,
 	"subscription.Handler.addItem subscription.item.added":                              1,
-	"subscription.Handler.atomicAddItemWithProration invoice.finalized":                 1,
-	"subscription.Handler.atomicUpdateItemWithProration invoice.finalized":              1,
 	"subscription.Handler.cancelPendingItemChange subscription.pending_change.canceled": 1,
 	"subscription.Handler.clearScheduledCancel subscription.cancel_cleared":             1,
-	"subscription.Handler.dispatchProrationFinalized invoice.finalized":                 1,
 	"subscription.Handler.extendTrial subscription.trial_extended":                      1,
-	"subscription.Handler.handleItemProration invoice.finalized":                        1,
 	"subscription.Handler.pauseCollection subscription.collection_paused":               1,
 	"subscription.Handler.removeItem subscription.item.removed":                         1,
 	"subscription.Handler.resumeCollection subscription.collection_resumed":             1,

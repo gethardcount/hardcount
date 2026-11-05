@@ -2,23 +2,20 @@ package invoice_test
 
 import (
 	"context"
-	"encoding/json"
 	"reflect"
 	"testing"
-	"time"
 
-	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // committingTaxCommitter stands in for billing.Engine.CommitTax under Stripe
 // Tax: the commit records the tax transaction on the invoice row.
 type committingTaxCommitter struct {
-	store *invoice.PostgresStore
+	store interface {
+		SetTaxTransaction(ctx context.Context, tenantID, id, taxTransactionID string) error
+	}
 	calls int
 }
 
@@ -31,44 +28,30 @@ func (c *committingTaxCommitter) CheckTaxCalculationUsable(context.Context, stri
 	return nil
 }
 
-// TestFinalize_WebhookShowsTheRowAtTheEvent: invoice.finalized sent by
-// Service.Finalize carries the invoice as the database held it when the
-// event was created (ADR-131). Finalize writes the row twice after the
-// finalize itself: the hosted-page token (which moves updated_at) and, under
-// Stripe Tax, the tax transaction. The event must show both writes, never the
-// token with the updated_at from before it.
-func TestFinalize_WebhookShowsTheRowAtTheEvent(t *testing.T) {
+// TestFinalize_UnderStripeTax_EventIsTheFinalizedRow: invoice.finalized
+// carries the invoice as the finalize transaction committed it, with its
+// hosted-page token (ADR-131). Under Stripe Tax the tax transaction is
+// recorded after that commit, since it is a call to Stripe, so the event
+// carries no tax_transaction_id and GET /v1/invoices/{id} shows it. Finalize
+// returns the row it committed.
+func TestFinalize_UnderStripeTax_EventIsTheFinalizedRow(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Finalize Webhook Tax")
-	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{ExternalID: "cus_fin_tax", DisplayName: "Finalize Tax"})
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	store := invoice.NewPostgresStore(db)
-	svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
+	store, svc := eventsWired(db)
 	committer := &committingTaxCommitter{store: store}
 	svc.SetTaxCommitter(committer)
-	events := &rowAtDispatch{store: store, got: map[string]map[string]any{}, row: map[string]domain.Invoice{}}
-	svc.SetEventDispatcher(events)
-
-	inv, err := store.Create(ctx, tenantID, domain.Invoice{
-		CustomerID: cust.ID, InvoiceNumber: "HC-FIN-TAX-1",
-		Status: domain.InvoiceDraft, PaymentStatus: domain.PaymentPending,
-		Currency: "USD", SubtotalCents: 10000, TotalAmountCents: 10800, AmountDueCents: 10800,
-		TaxFacts:           domain.TaxFacts{TaxAmountCents: 800, TaxProvider: "stripe_tax", TaxCalculationID: "taxcalc_fin_1"},
-		BillingPeriodStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
-		BillingPeriodEnd:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+	draft := seedInvoice(t, db, ctx, tenantID, domain.Invoice{
+		InvoiceNumber: "HC-FIN-TAX-1", Status: domain.InvoiceDraft,
+		SubtotalCents: 10000, TotalAmountCents: 10800, AmountDueCents: 10800,
+		TaxFacts: domain.TaxFacts{TaxAmountCents: 800, TaxProvider: "stripe_tax", TaxCalculationID: "taxcalc_fin_1"},
 	})
-	if err != nil {
-		t.Fatalf("seed draft: %v", err)
-	}
 
-	returned, err := svc.Finalize(ctx, tenantID, inv.ID)
+	returned, err := svc.Finalize(ctx, tenantID, draft.ID)
 	if err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
-	final, err := store.Get(ctx, tenantID, inv.ID)
+	final, err := store.Get(ctx, tenantID, draft.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,24 +59,19 @@ func TestFinalize_WebhookShowsTheRowAtTheEvent(t *testing.T) {
 		t.Fatalf("finalize side writes: %d commits, tax_transaction_id %q, token set %v; want 1 commit, tx_taxcalc_fin_1, a token",
 			committer.calls, final.TaxTransactionID, final.PublicToken != "")
 	}
-	payload, ok := events.got[domain.EventInvoiceFinalized]
-	if !ok {
-		t.Fatal("no invoice.finalized event")
+	got := queuedEvents(t, db, tenantID, domain.EventInvoiceFinalized, draft.ID)
+	if len(got) != 1 {
+		t.Fatalf("%d invoice.finalized rows, want 1", len(got))
 	}
-	asJSON := func(v any) map[string]any {
-		enc, _ := json.Marshal(v)
-		var m map[string]any
-		_ = json.Unmarshal(enc, &m)
-		return m
+	// The committed row is the row now, without the tax commit's two writes.
+	committed := final
+	committed.TaxTransactionID = ""
+	committed.UpdatedAt = returned.UpdatedAt
+	if want := asData(t, domain.InvoiceWebhookData(committed, nil)); !reflect.DeepEqual(got[0], want) {
+		t.Errorf("invoice.finalized differs from the finalized row:\n got %v\nwant %v", got[0], want)
 	}
-	got := asJSON(payload)[domain.WebhookResourceInvoice]
-	want := asJSON(domain.InvoiceWebhookData(events.row[domain.EventInvoiceFinalized], nil))[domain.WebhookResourceInvoice]
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("invoice.finalized data.invoice differs from the row when the event was created:\n got %v\nwant %v", got, want)
-	}
-	// Finalize returns the same row to its callers.
-	if returned.TaxTransactionID != final.TaxTransactionID || !returned.UpdatedAt.Equal(final.UpdatedAt) {
-		t.Errorf("Finalize returned tax_transaction_id %q updated_at %v; the row has %q %v",
-			returned.TaxTransactionID, returned.UpdatedAt, final.TaxTransactionID, final.UpdatedAt)
+	if returned.TaxTransactionID != "" || returned.PublicToken != final.PublicToken {
+		t.Errorf("Finalize returned tax_transaction_id %q token %q; want the finalized row: no tax transaction yet, token %q",
+			returned.TaxTransactionID, returned.PublicToken, final.PublicToken)
 	}
 }

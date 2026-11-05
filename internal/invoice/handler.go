@@ -565,10 +565,9 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The finalize audit row AND the invoice.finalized webhook are emitted
-	// by service.Finalize — the canonical single writer, covering this
-	// endpoint AND the tax-retry auto-finalize. Pre-fix the webhook fired
-	// from here only, so the tax-retry path silently skipped it.
+	// service.Finalize is the one finalize path, for this endpoint and the
+	// tax-retry auto-finalize alike. Its transaction queued invoice.finalized
+	// (the store), and it wrote the finalize audit row.
 
 	// No automatic "here's your invoice" email on finalize while Stripe is
 	// connected. Hardcount auto-charges the saved card (Stripe
@@ -609,10 +608,10 @@ func (h *Handler) void(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	// Service.Void is the whole void: the status flip, the credit reversal
-	// and the audit row in one transaction, then AfterVoid's legs (stop
-	// collection at Stripe, tax reversal, invoice.voided, close the dunning
-	// run), the same for every void path.
+	// Service.Void is the whole void: the status flip, the credit reversal,
+	// the audit row and invoice.voided in one transaction, then AfterVoid's
+	// legs (stop collection at Stripe, tax reversal, close the dunning run),
+	// the same for every void path.
 	inv, err := h.svc.Void(r.Context(), tenantID, id)
 	if err != nil {
 		respond.FromError(w, r, err, "invoice")

@@ -191,7 +191,6 @@ type Service struct {
 	settings       TenantSettingsReader
 	currencyFacts  CustomerCurrencyFacts
 	audit          AuditLogger
-	events         domain.EventDispatcher
 	// collectionStopper and dunningResolver are AfterVoid's Stripe and
 	// dunning legs; collectionStopper is also MarkUncollectible's Checkout
 	// expiry. Only a test leaves them unwired.
@@ -272,29 +271,6 @@ func (s *Service) SetTenantSettingsReader(r TenantSettingsReader) { s.settings =
 
 // SetAuditLogger wires the audit logger.
 func (s *Service) SetAuditLogger(l AuditLogger) { s.audit = l }
-
-// SetEventDispatcher wires outbound webhook dispatch for state-
-// transitioning service methods (MarkUncollectible, RecordPayment).
-// Optional — unset paths skip dispatch.
-func (s *Service) SetEventDispatcher(d domain.EventDispatcher) { s.events = d }
-
-// dispatchEvent queues an outbound webhook event after the business
-// transaction has committed, and logs when the queue insert fails. Nothing
-// sends the event again: an insert failure, a crash or a cancelled ctx
-// between the commit and this insert loses it. An event queued on the
-// change's own transaction (OutboxStore.Enqueue in the store, as MarkPaid
-// does, ADR-040) cannot be lost that way;
-// internal/arch/webhook_emit_catalog_test.go lists the sites that still come
-// through here.
-func (s *Service) dispatchEvent(ctx context.Context, tenantID, eventType string, payload map[string]any) {
-	if s.events == nil {
-		return
-	}
-	if err := s.events.Dispatch(ctx, tenantID, eventType, payload); err != nil {
-		slog.ErrorContext(ctx, "failed to enqueue webhook event",
-			"event_type", eventType, "tenant_id", tenantID, "error", err)
-	}
-}
 
 // CustomerCurrencyFacts reads the stored facts a manual invoice's currency
 // must agree with (ADR-100, ADR-129): the customer's billing-profile currency
@@ -1773,22 +1749,14 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	if err != nil {
 		return domain.Invoice{}, err
 	}
-	// Generate the hosted-invoice-URL token. Non-fatal if it fails — mirrors
-	// the tax-commit convention below: the invoice is already authoritative
-	// after UpdateStatus, so a transient DB hiccup on a side-effect doesn't
-	// unwind the state transition. Operators can repair via the rotate
-	// endpoint. Happens BEFORE tax commit because the rotate endpoint will
-	// anyway need to talk to Stripe-less code paths, and token generation
-	// is pure Go with no external dependency.
-	if token, tokenErr := GeneratePublicToken(); tokenErr != nil {
-		slog.Warn("invoice: public token generation failed at finalize",
-			"error", tokenErr, "tenant_id", tenantID, "invoice_id", finalized.ID)
-	} else if err := s.store.SetPublicToken(ctx, tenantID, id, token); err != nil {
-		slog.Warn("invoice: public token persist failed at finalize",
-			"error", err, "tenant_id", tenantID, "invoice_id", finalized.ID)
-	} else {
-		finalized.PublicToken = token
-	}
+	// The finalize transaction gave the invoice its hosted-page token and
+	// queued invoice.finalized with the row it committed (the store's
+	// finalizedTx), so a crash from here on loses neither. The steps below
+	// run after that commit. The event comes before the collector applies
+	// credit (ADR-116), so its amount_due_cents is before that credit, and
+	// before the tax commit, so it carries no tax_transaction_id recorded
+	// here.
+	//
 	// Commit Stripe Tax calculation to a tax_transaction at finalize. Missing
 	// calculation id = manual/none provider — skip silently. Commit failure
 	// does not unwind finalize: the invoice is already authoritative; we log
@@ -1822,29 +1790,9 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 			"currency":           finalized.Currency,
 		})
 	}
-	// The token and tax writes above changed the row after the finalize
-	// write returned it: the token moved updated_at, and the tax commit
-	// recorded tax_transaction_id. Read it again, so the event and the caller
-	// get the row as it is now (ADR-131), not the finalize's copy with only
-	// the token patched in, a state the row never had. If the read fails,
-	// the event is not sent and an error is logged (ADR-131 rule 5).
-	fresh, readErr := s.store.Get(ctx, tenantID, id)
-	if readErr != nil {
-		slog.Error("invoice: invoice.finalized not sent: the invoice could not be read after the finalize",
-			"error", readErr, "tenant_id", tenantID, "invoice_id", finalized.ID)
-	} else {
-		finalized = fresh
-	}
-	// invoice.finalized webhook — emitted HERE for the same single-writer
-	// reason as the audit row above: pre-fix the handler fired it, so the
-	// tax-retry auto-finalize chain (RetryTax → Finalize) silently never
-	// notified integrators that a tax-deferred invoice finalized.
-	// It carries the finalized invoice (ADR-131), as the engine's sender does
-	// (billing.DispatchInvoiceFinalized). The collector applies credit after
-	// this (ADR-116), so its amount_due_cents is before that credit.
-	if s.events != nil && readErr == nil {
-		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceFinalized, domain.InvoiceWebhookData(finalized, nil))
-	}
+	// finalized is the row the finalize committed. The tax commit above may
+	// have recorded tax_transaction_id since; GET /v1/invoices/{id} shows it,
+	// and the finalize endpoint reads the invoice again after collecting it.
 	return finalized, nil
 }
 
@@ -2165,14 +2113,14 @@ func (s *Service) voidEffectsTx(ctx context.Context, tx *sql.Tx, tenantID string
 // HTTP handlers, so a relief void left the invoice payable on a live
 // Checkout session and its dunning run active until the run's next due tick.
 //
-// In order:
+// invoice.voided is not one of these legs: the void's own transaction
+// queued it, with the row the void committed (the store's
+// statusChangedTx), so it commits with the void. In order:
 //  1. Stop collection at Stripe: expire the invoice's live Checkout
 //     sessions, then cancel its PaymentIntent. Money first.
-//  2. Send invoice.voided, with the row the void committed. It goes before
-//     the tax leg, which stamps tax_reversed_at, so the event shows the
-//     row as it was when Hardcount created the event (ADR-131).
-//  3. Reverse the upstream tax.
-//  4. Resolve the invoice's active dunning run as invoice_voided. A caller
+//  2. Reverse the upstream tax. It stamps tax_reversed_at, which the event
+//     queued before it does not carry.
+//  3. Resolve the invoice's active dunning run as invoice_voided. A caller
 //     that resolves the run itself afterwards (the dunning handler) loses
 //     the resolve CAS and gets the resolved row back.
 //
@@ -2189,12 +2137,6 @@ func (s *Service) AfterVoid(ctx context.Context, tenantID string, voided domain.
 	ctx = context.WithoutCancel(ctx)
 	if s.collectionStopper != nil {
 		s.collectionStopper.StopCollection(ctx, tenantID, voided)
-	}
-	// invoice.voided webhook — single-writer at the service layer (same
-	// pattern as finalized/marked_uncollectible/payment_recorded), so
-	// engine-triggered voids notify integrators too.
-	if s.events != nil {
-		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceVoided, domain.InvoiceWebhookData(voided, nil))
 	}
 	// Invoice-stable reversal reference (inv_taxrev_<id>). Void permits an
 	// `uncollectible` source (annulling a bad debt is a legitimate operator
@@ -2306,11 +2248,12 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 	// Void and credit note still reverse — see reverseInvoiceTax. That
 	// asymmetry is the decision: they change what was supplied; this does not.
 
-	// The write-off has committed, so every leg below runs to the end even if
-	// the caller's context ends now (an API timeout, a client disconnect, a
-	// dunning tick stopping), as in AfterVoid. The audit row and the event go
-	// first: they are local writes, and the Stripe expiry after them can take
-	// as long as Stripe does.
+	// The write-off has committed, and its transaction queued
+	// invoice.marked_uncollectible (the store's statusChangedTx). Every leg
+	// below runs to the end even if the caller's context ends now (an API
+	// timeout, a client disconnect, a dunning tick stopping), as in
+	// AfterVoid. The audit row goes first: it is a local write, and the
+	// Stripe expiry after it can take as long as Stripe does.
 	ctx = context.WithoutCancel(ctx)
 
 	if s.audit != nil {
@@ -2320,9 +2263,6 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 			"amount_due_cents": updated.AmountDueCents,
 			"currency":         updated.Currency,
 		})
-	}
-	if s.events != nil {
-		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceMarkedUncollectible, domain.InvoiceWebhookData(updated, nil))
 	}
 
 	// Stop the invoice being payable on a Checkout page the customer still has
@@ -2406,13 +2346,13 @@ func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note s
 	//
 	// The payment refusal runs again under MarkPaidOffline's row lock, with
 	// the charge hold: a charge claimed after the read above would otherwise
-	// collect the same invoice a second time (#975).
+	// collect the same invoice a second time (#975). The same transaction
+	// queues invoice.paid and invoice.payment_recorded.
 	updated, err := s.store.MarkPaidOffline(ctx, tenantID, id, now,
 		func(tx *sql.Tx, locked domain.Invoice) error {
 			// A charge that settled after the read above leaves the row paid;
 			// the paid transition would then be a quiet no-op, and the audit
-			// row and invoice.payment_recorded below would record a payment
-			// that never happened.
+			// row below would record a payment that never happened.
 			if locked.Status == domain.InvoicePaid {
 				return errs.InvalidState("invoice is already paid")
 			}
@@ -2423,10 +2363,7 @@ func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note s
 	}
 	// amount_cents is what the settle BOOKED — AmountPaidCents on the
 	// post-transition row. MarkPaid flips amount_paid=amount_due and
-	// amount_due=0 in the same statement, so reading AmountDueCents here
-	// (the pre-fix bug) reported amount_cents: 0 on every offline payment
-	// — the audit trail and the invoice.payment_recorded webhook both
-	// told integrators a zero-value payment was recorded.
+	// amount_due=0 in the same statement, so AmountDueCents here is 0.
 	if s.audit != nil {
 		meta := map[string]any{
 			"action":                "payment_recorded",
@@ -2454,14 +2391,6 @@ func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note s
 			}
 		}
 		_ = s.audit.Log(ctx, tenantID, domain.AuditActionUpdate, "invoice", updated.ID, updated.InvoiceNumber, meta)
-	}
-	if s.events != nil {
-		// The paid invoice holds the amount (amount_paid_cents) and the time
-		// (paid_at, which MarkPaidOffline set to now). The status it was paid
-		// from is gone from it, so it rides beside it.
-		s.dispatchEvent(ctx, tenantID, domain.EventInvoicePaymentRecorded, domain.InvoiceWebhookData(updated, map[string]any{
-			"recovered_from": string(inv.Status),
-		}))
 	}
 	return updated, nil
 }

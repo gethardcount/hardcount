@@ -96,21 +96,19 @@ func (a endingAudit) Log(ctx context.Context, tenantID, action, resourceType, re
 	return err
 }
 
-// A committed write-off runs its audit row, its invoice.marked_uncollectible
-// event and its Stripe Checkout expiry to the end even when the caller's
-// context ends part-way, as a committed void does (AfterVoid). Before, only
-// the Stripe leg ran on a context that outlives the caller's, and the event
-// was enqueued after it on the caller's: a slow Stripe lost the event for
-// good while the write-off stood.
+// A committed write-off runs its audit row and its Stripe Checkout expiry to
+// the end even when the caller's context ends part-way, as a committed void
+// does (AfterVoid). Its invoice.marked_uncollectible committed with the
+// write-off, so the caller's context cannot reach it.
 //
-// Mutations: run the legs on the caller's context (drop the WithoutCancel)
-// → the second case is red; also put the expiry back before the event → the
-// first case is red too.
+// Mutation: run the legs on the caller's context (drop the WithoutCancel)
+// → the second case is red.
 func TestMarkUncollectible_CallerContextEnds_EveryLegStillRuns(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	base := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Write-off Caller Ends")
 	store := invoice.NewPostgresStore(db)
+	store.SetOutboxEnqueuer(webhook.NewOutboxStore(db))
 
 	for i, tc := range []struct {
 		name   string
@@ -134,7 +132,6 @@ func TestMarkUncollectible_CallerContextEnds_EveryLegStillRuns(t *testing.T) {
 			svc := invoice.NewService(store, nil, nil)
 			svc.SetCollectionStopper(stopper)
 			svc.SetAuditLogger(logger)
-			svc.SetEventDispatcher(webhook.NewOutboxDispatcher(webhook.NewOutboxStore(db)))
 
 			got, err := svc.MarkUncollectible(ctx, tenantID, inv.ID)
 			if err != nil {

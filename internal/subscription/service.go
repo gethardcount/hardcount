@@ -65,8 +65,9 @@ type Biller interface {
 	// FinishRelief after commit.
 	BillOnCancelDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (domain.Relief, error)
 	// FinishRelief runs a committed relief's post-commit legs (issue the
-	// drafts; the voids' tax reversal and webhook). Best-effort: each leg is
-	// durable and recovered by its own sweep.
+	// drafts; the voids' tax reversal). Best-effort: each leg is durable and
+	// recovered by its own sweep. Each void's invoice.voided committed with
+	// the relief.
 	FinishRelief(ctx context.Context, sub domain.Subscription, r domain.Relief)
 	// ThresholdBilledThroughTx reads, on the caller's tx, the instant a
 	// mid-cycle threshold invoice already billed sub's CURRENT period
@@ -97,9 +98,10 @@ type Biller interface {
 	// bill. afterCommit is never nil; the caller runs it only once the tx
 	// commits (it counts usage the invoice left unpriced).
 	BillOnPlanSwapTx(ctx context.Context, tx *sql.Tx, before, after domain.Subscription, at time.Time) (inv domain.Invoice, ok bool, afterCommit func(), err error)
-	// FinalizeOnCreateInvoice runs the post-commit external steps (audit, tax
+	// FinalizeOnCreateInvoice runs the post-commit external steps (tax
 	// commit, auto-charge) for an invoice inserted via BillOnCreateTx or
-	// BillOnPlanSwapTx. Called AFTER the tx commits — never inside it.
+	// BillOnPlanSwapTx. Called AFTER the tx commits — never inside it. The
+	// invoice's audit row and invoice.finalized committed with the insert.
 	FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscription, inv domain.Invoice)
 }
 
@@ -1205,11 +1207,6 @@ type ProrationDetail struct {
 	// proration invoice, never on the dedup-replay path (that invoice may
 	// already be paid). Empty for credit/adjustment paths. Internal.
 	AutoChargeInvoiceID string `json:"-"`
-	// finalizedInvoice is the proration invoice this change created already
-	// finalized, for the invoice.finalized webhook sent after commit
-	// (dispatchProrationFinalized). nil for a draft, a credit and the dedup
-	// replay.
-	finalizedInvoice *domain.Invoice
 }
 
 // addItemQuantity checks the request alone and returns the quantity to
@@ -2005,8 +2002,8 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 //
 //   - OLD-period refund. It was written ON the swap tx by
 //     BillOnPlanSwapDraftsTx (ADR-118); here only its post-commit legs run
-//     (draft Issue; a void's tax reversal and webhook), each recovered by its
-//     own sweep if this fails.
+//     (draft Issue; a void's tax reversal), each recovered by its own sweep
+//     if this fails. A void's invoice.voided committed with the swap.
 //   - FinalizeOnCreateInvoice (tax commit + auto-charge) for the swap invoice
 //     committed inside the swap tx, if one was created.
 //   - The swap invoice's afterCommit (counts usage it left unpriced).
@@ -2037,8 +2034,9 @@ func (s *Service) FinalizeCrossIntervalSwap(ctx context.Context, tenantID string
 //
 // If a step fails here, the credit notes, the tax commit and the collection
 // are each picked up by their own sweep (RetryPendingClawbackIssue,
-// RetryPendingTaxCommit, the auto-charge sweep). The invoice.finalized
-// webhook is not: no sweep sends it again.
+// RetryPendingTaxCommit, the auto-charge sweep). The final invoice's
+// invoice.finalized and each relief void's invoice.voided need none: they
+// committed with the change.
 func (s *Service) finishReliefThenCollect(ctx context.Context, sub domain.Subscription, r domain.Relief, inv domain.Invoice) {
 	// The change has committed, so both legs run to the end even if the
 	// caller's context ends now: an API request's timeout or a client

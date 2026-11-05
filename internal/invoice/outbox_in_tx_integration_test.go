@@ -38,7 +38,6 @@ func eventsWired(db *postgres.DB) (*invoice.PostgresStore, *invoice.Service) {
 	store := invoice.NewPostgresStore(db)
 	store.SetOutboxEnqueuer(outbox)
 	svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
-	svc.SetEventDispatcher(webhook.NewOutboxDispatcher(outbox))
 	return store, svc
 }
 
