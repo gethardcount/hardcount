@@ -98,8 +98,7 @@ verified to make (day headers), it says so.
    one run.
 
 Writers apply them from
-[Activity lines](../dev/activity-lines.md) in the writing-style
-guide, which gives the examples.
+[Activity lines](../dev/activity-lines.md), which gives the examples.
 
 ### The owner's eight decisions
 

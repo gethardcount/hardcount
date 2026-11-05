@@ -9,17 +9,35 @@ or an end customer sees.
 
 An activity line is one row on an activity card: the invoice and subscription
 Activity cards, the Dunning page's recovery timeline and the customer's Sent
-emails card. The backend builds every word of a line. The dashboard formats
+emails card. The backend builds every word of a row. The dashboard formats
 money and times and lays the row out. Use these rules when you add or change a
-line. The decision behind them is
+row. The decision behind them is
 [ADR-128](../adr/128-activity-line-standard.md).
 
-A line has up to three parts:
+**Where the code is:**
+
+- `internal/platform/activity` holds what every card shares: the `Line`
+  type, the tones, the actor words and `FormatMoney`.
+- Each card's rows are worded in `internal/invoice/activity_lines.go`,
+  `internal/subscription/activity_lines.go` and `sentEmailLine` in
+  `internal/customer/handler.go`. Payment-recovery rows, on the invoice card
+  and the Dunning page, are worded in `internal/invoice/recovery_lines.go`.
+- The dashboard's row component is `web-v2/src/components/ActivityList.tsx`,
+  with its helpers in `web-v2/src/lib/activityLine.ts`. Its one money
+  formatter is `formatCents` in `web-v2/src/lib/money.ts`.
+  `activity.FormatMoney` prints the same text in the backend.
+- Golden files pin the wording: `TestActivityLinesGolden` in
+  `internal/invoice` and `internal/subscription`, and
+  `TestSentEmailLinesGolden` in `internal/customer`. After a wording change,
+  regenerate the file with `-update` and read its JSON diff, for example
+  `go test ./internal/invoice -run TestActivityLinesGolden -update`.
+
+A row has up to three lines, and its time sits on the right:
 
 ```
-●  Payment failed · $24.73                                    10:13 AM
-   Card declined: insufficient funds          <- problem line
-   Automatic · Recorded Oct 18, 8:14 PM       <- meta line
+●  Payment failed · $24.73                     10:13 AM   <- title (and amount)
+   Card declined: insufficient funds                      <- problem line
+   Automatic · Recorded Oct 18, 8:14 PM                   <- meta line
 ```
 
 1. **One event, one wording.** An event has the same title on every page it
@@ -39,7 +57,7 @@ A line has up to three parts:
      Never cents, never `¢`, never `12.00 CAD`.
    - A title's amount always means the same thing. A credit note row always
      shows the credit note's total; the meta line splits it into its parts.
-4. **Who did it, on every line, from a fixed set.** The actor is the last
+4. **Who did it, on every row, from a fixed set.** The actor is the last
    part of the meta line, before any Recorded part:
    - a person: `by <name>`, or `by <email>` when there is no name;
    - an API key: `by API key <key name>`;
@@ -57,12 +75,16 @@ A line has up to three parts:
      insufficient funds", not "Your card has insufficient funds."
    - "Uncollectible" is the one word for an invoice written off as bad debt.
 6. **One clock rule.**
-   - A line is dated on the entity's calendar, at the instant the event
-     happened. For an automatic event, that is the instant the contract names
-     (renewal, trial end, retry slot), never the instant a clock was moved.
+   - A row is dated at the instant the event happened, on the customer's
+     clock. For a customer on a [test clock](../concepts/test-clocks.md) (a
+     pretend clock for test customers), that is the clock's time. For every
+     other customer, it is real time. The dashboard shows it in the
+     account's time zone.
+   - An automatic event happened at the instant it was due (a renewal, a
+     trial end, a retry slot), never at the instant a clock was moved.
    - On a test clock, the meta line ends with `· Recorded <real date and
      time>`. "Recorded" is the only word for the real-world time.
-   - Nothing else differs between a test-clock line and a real-clock line.
+   - Nothing else differs between a test-clock row and a real-clock row.
 7. **Four tones, one meaning each.** The words carry the meaning; the dot only
    repeats it.
 

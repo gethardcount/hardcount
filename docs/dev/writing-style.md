@@ -1,9 +1,10 @@
 # Writing style for Hardcount docs
 
 How to write docs in this repo so they are easy to read and still precise.
-Use it when you write a new doc and when you touch an old one. It applies to
-every Markdown file: README, guides, runbooks, ADRs, design docs, CHANGELOG,
-the release checklist and the files AI agents read (CLAUDE.md, playbooks).
+It is for anyone who writes a new doc or changes an old one, a person or an
+AI agent. It applies to every Markdown file: README, guides, runbooks, ADRs,
+design docs, CHANGELOG, the release checklist and the files AI agents read
+(CLAUDE.md, playbooks).
 Comments in Go code follow the same ideas, with the extra rules in
 [Code comments](code-comments.md). The words the dashboard shows follow
 [Activity lines and UI words](activity-lines.md).
@@ -33,14 +34,18 @@ the sentences.
 
 ## One reader, one job
 
-Every page has one reader and one job, in plain words. Results, method,
-how-to and history go on separate pages: a guide holds no measurements, a
-result page holds no run steps, and a reference holds no story of how it came
-to be.
+Every page names its one reader and its one job in its first lines
+([Change](#change) rule 1). Results, method, how-to and reference go on
+separate pages:
 
-An investigation story goes to a dated record in `docs/dev/records/`, kept as
-written. The page that needs its result keeps a short summary and links the
-record.
+- a how-to holds no measurements;
+- a results page holds no steps to reproduce its runs;
+- a method page holds no results;
+- a reference holds no story of how it came to be.
+
+History, such as an investigation story, goes to a dated record in
+`docs/dev/records/`, kept as written. The page that needs its result keeps a
+short summary and links the record.
 
 Before you move a fact, `git grep` for its home. If a page already holds it,
 delete the copy and link there. If none does, move it verbatim to the page
@@ -50,7 +55,7 @@ whose reader needs it. ADR bodies and records never receive moved text.
 
 - **Precise technical terms.** Idempotency, at-least-once, RLS, fencing
   token, p99, DLQ. Never replace a precise term with a vague one. Define it
-  instead (see rule 3).
+  instead (see [Change](#change) rule 3).
 - **Every number, command, code block, link and table value.**
 - **The reasoning.** Engineers come for the why. Keep it; put it after the
   what.
@@ -66,12 +71,15 @@ whose reader needs it. ADR bodies and records never receive moved text.
 2. **One idea per sentence.** Aim for 15 to 22 words on average. A sentence
    over 35 words needs a reason. Most long sentences are chains of dashes,
    semicolons and parentheses: break the chain first.
-3. **Define words a cold reader cannot know.** Billing terms (dunning,
-   proration, clawback, credit note, prepaid commit) get a short definition
-   on first use in reader-facing docs. Project words (parked, catch-up,
-   site-set) are defined once in a glossary or replaced with plain words.
-   Write the meaning first and keep the term in parentheses, so search and
-   experts still find it.
+3. **Define words a cold reader (someone new to Hardcount and to this page)
+   cannot know.** Billing terms (dunning, proration, clawback, credit note,
+   prepaid commit) get a short definition on first use in reader-facing
+   docs. Project words (parked, catch-up, site-set) are defined once in a
+   glossary, or replaced with plain words. Words a user meets go in the
+   [glossary](../glossary.md). Words from the code, the database and the
+   operations docs go in the [contributor glossary](glossary.md). Write the
+   meaning first and keep the term in parentheses, so search and experts
+   still find it.
 4. **Keep history out of the reader's path.** PR numbers, incident stories
    and ADR numbers used as the *reason* for a rule go behind a link: "See
    ADR-041", not "per ADR-041, which removed the fallback in #312".
@@ -173,9 +181,10 @@ the one result to see, on one line:
 never lives inside a table cell.
 
 **Results doc (benchmark, drill).** Open with the result and its conditions
-in one short paragraph. Then the setup, the runs, what it does not show, and
-any corrections. The story of how the result was reached goes in a dated
-record, and the results doc links it
+in one short paragraph. Then the full conditions, a summary of the runs, what
+it does not show, and any corrections. The steps to reproduce the runs go on
+a how-to page. The story of how the result was reached goes in a dated
+record. The results doc links both
 ([One reader, one job](#one-reader-one-job)).
 
 ## Checks
@@ -189,19 +198,37 @@ record, and the results doc links it
 
 ## Changing existing docs safely
 
-- **A PR that reshapes a page carries that page's accuracy fixes.** To
-  reshape is to reword, restructure or rewrite. The PR description lists each
-  fact that changed, with the code that proves it. Everything else is
-  wording, proven by an empty fact diff (next item).
-- **The fact diff.** Compare the numbers, code, code blocks and link targets
-  of each changed file against the base branch. Every difference is a changed
-  fact in the description, or is explained there, such as a moved line or a
-  repointed link. Check that no link or `#anchor` broke.
+- **A PR that rewords, restructures or rewrites a page also fixes its
+  facts.** It checks every fact the page keeps against the code, and fixes
+  each one that is false. The PR description lists each fact that changed,
+  with the code that proves it. Every other difference is wording, proven by
+  the fact diff (next item).
+- **The fact diff.** This function lists the numbers, inline code,
+  code-block lines and link targets of a page. Paste it into bash or zsh,
+  then compare the base branch with your branch:
+
+  ```bash
+  facts() {
+    awk '/^ *[`][`][`]/ { c = !c; next } c { sub(/^ +/, ""); print "code: " $0; next } 1' "$@" |
+      grep -oE '^code: .*|`[^`]+`|\]\([^)]*\)|[0-9]([0-9.,:]*[0-9])?%?' | sort
+  }
+  diff <(git show origin/main:docs/dev/writing-style.md | facts) <(facts docs/dev/writing-style.md)
+  ```
+
+  A line that only moved prints nothing. When a PR splits a page, give the
+  second `facts` every new page. List every difference in the PR description,
+  either as a changed fact with its proof or with a reason, such as a
+  repointed link or a deleted history line. To see which lines moved, run
+  `git diff --color-moved origin/main -- <files>`. Check that no link or
+  `#anchor` broke ([Checks](#checks)).
 - **A cold-reader check for a rewritten or restructured page.** Before merge,
-  a reader who has not seen the old page reads the new one as its named
-  reader. They report each sentence they read twice, each term used before it
-  is defined, and whether they could do the job.
+  a reader who has not seen the old page reads the new one, in the role of
+  the reader it names. The reader can be a teammate or a fresh AI agent. They
+  report each sentence they read twice, each term used before it is defined,
+  and whether they could do the job. Their report goes in the PR thread. Each
+  finding is fixed, or answered in the thread, before merge.
 - **Do not rewrite records.** ADR bodies, old CHANGELOG entries and dated
   audit or benchmark records stay as written. Add a summary or a status
-  banner on top instead. The one exception is a link target, which changes
-  when the page or section it points to moves.
+  banner on top instead. The one exception is a link to a page or section
+  that moved. Its target changes, and so does the page name in the link's
+  own sentence.

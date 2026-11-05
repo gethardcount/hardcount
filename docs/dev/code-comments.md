@@ -1,9 +1,10 @@
 # Code comments
 
-These rules cover comments in Go code. The reader is a contributor, a
-maintainer or an AI agent with the code open, so a comment adds only what the
-code cannot say. The [writing style](writing-style.md) rules still apply:
-one idea per sentence, plain words and quiet emphasis.
+These rules are for anyone who writes or changes a comment in Go code. A
+comment's reader is a contributor, a maintainer or an AI agent with the code
+open, so a comment adds only what the code cannot say. The
+[writing style](writing-style.md) rules still apply: one idea per sentence,
+plain words and quiet emphasis.
 
 1. **Say why, not what.** Explain the reason, the rule the code keeps, or the
    trap it avoids. Do not repeat what the next line does. If a better name
@@ -46,8 +47,8 @@ one idea per sentence, plain words and quiet emphasis.
    - Wrap at about 80 columns, as most of the code already does.
 8. **A wrong comment is a bug.** When you change code, update or delete the
    comments that describe it in the same commit. A false comment you find
-   while doing other work gets its own PR or an issue. It never rides inside a
-   clarity change.
+   while doing other work gets its own PR or an issue. Do not fix it in a PR
+   that only rewords comments.
 
 Keep the markers that tools read: `//go:` directives, and
 `//nolint:<linter> // <reason>` waivers (golangci-lint requires the reason).
@@ -124,6 +125,12 @@ sites and the design of a superseded ADR. A caller needs these 16:
   ```
 
   A comment at the end of a code line shows up here. Check each one by hand.
-- **Truth and clarity stay apart.** A rewording PR keeps every fact. A
-  comment that disagrees with the code is fixed in a truth PR that re-checks
-  the claim against the code.
+- **Rewording and fact fixes stay apart.** A rewording PR changes only how
+  comments are written, and keeps every fact. A truth PR fixes comments that
+  disagree with the code, and re-checks each claim against the code. Docs
+  allow both in one PR
+  ([Changing existing docs safely](writing-style.md#changing-existing-docs-safely)),
+  but comments do not. A comment often says what the code is meant to do, so
+  when the two disagree, the code may be the part that is wrong. Deciding
+  which is wrong means reading the code, and the fix may be a code change,
+  which a comments-only PR cannot hold.
