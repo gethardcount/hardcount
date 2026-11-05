@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -280,6 +282,162 @@ func TestFinalize_InvoiceFinalizedIsSentOnce(t *testing.T) {
 		t.Errorf("amounts: credits_applied %v due %v total %v, want 2500, 7500 and 10000",
 			inv["credits_applied_cents"], inv["amount_due_cents"], inv["total_amount_cents"])
 	}
+}
+
+// coveringRelief is a held-relief issuer whose note covers the whole draft.
+// On the finalize transaction it makes the writes a relief note makes to the
+// invoice (ApplyCreditNoteTx, then SettleZeroDueTx), so the invoice is paid
+// before the finalize commits. With fail set, it fails after those writes.
+type coveringRelief struct {
+	store *invoice.PostgresStore
+	fail  bool
+}
+
+func (r coveringRelief) IssueHeldReliefTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice) (func(context.Context), error) {
+	if _, err := r.store.ApplyCreditNoteTx(ctx, tx, tenantID, inv.ID, inv.AmountDueCents, 0); err != nil {
+		return nil, err
+	}
+	if _, settled, err := r.store.SettleZeroDueTx(ctx, tx, tenantID, inv.ID, time.Now().UTC()); err != nil || !settled {
+		return nil, fmt.Errorf("settle the covered invoice: settled %v, error %v", settled, err)
+	}
+	if r.fail {
+		return nil, errors.New("the relief note could not be issued")
+	}
+	return nil, nil
+}
+
+// finalizeDrafts are the two kinds of draft a finalize takes out of draft:
+// an operator-composed one (FinalizeWithDates) and a subscription's
+// (FinalizeDraft).
+var finalizeDrafts = []struct {
+	name   string
+	reason domain.InvoiceBillingReason
+}{
+	{"operator-composed draft", domain.BillingReasonManual},
+	{"subscription draft", domain.BillingReasonSubscriptionCycle},
+}
+
+// TestFinalize_HeldReliefPaysTheDraft_InvoiceFinalizedIsStillQueued: a held
+// relief note that covers the draft marks it paid inside the finalize
+// transaction. The invoice was finalized first, so that transaction queues
+// one invoice.finalized beside the one invoice.paid, and invoice.finalized
+// is the row the transaction committed.
+func TestFinalize_HeldReliefPaysTheDraft_InvoiceFinalizedIsStillQueued(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Outbox Finalize Relief Pays")
+	store, svc := eventsWired(db)
+	svc.SetHeldReliefIssuer(coveringRelief{store: store})
+
+	for i, tc := range finalizeDrafts {
+		t.Run(tc.name, func(t *testing.T) {
+			draft := seedInvoice(t, db, ctx, tenantID, domain.Invoice{
+				InvoiceNumber: fmt.Sprintf("HC-OHR-%d", i), Status: domain.InvoiceDraft, BillingReason: tc.reason,
+				SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
+			})
+			if _, err := svc.Finalize(ctx, tenantID, draft.ID); err != nil {
+				t.Fatalf("finalize: %v", err)
+			}
+			row, err := store.Get(ctx, tenantID, draft.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row.Status != domain.InvoicePaid {
+				t.Fatalf("status = %s, want paid: the relief covers the draft", row.Status)
+			}
+			oneEventOfTheRow(t, db, store, tenantID, domain.EventInvoiceFinalized, draft.ID, nil)
+			if got := queuedEvents(t, db, tenantID, domain.EventInvoicePaid, draft.ID); len(got) != 1 {
+				t.Errorf("%d invoice.paid rows, want 1", len(got))
+			}
+		})
+	}
+}
+
+// TestFinalize_HookFails_NothingIsQueued: a finalize hook error rolls the
+// whole finalize back, the hook's own writes included. The invoice stays a
+// draft with no hosted-page token, and no event about it is queued: no
+// invoice.finalized, and no invoice.paid from the relief that paid it before
+// failing.
+func TestFinalize_HookFails_NothingIsQueued(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Outbox Finalize Hook Fails")
+	store, svc := eventsWired(db)
+	svc.SetHeldReliefIssuer(coveringRelief{store: store, fail: true})
+
+	for i, tc := range finalizeDrafts {
+		t.Run(tc.name, func(t *testing.T) {
+			draft := seedInvoice(t, db, ctx, tenantID, domain.Invoice{
+				InvoiceNumber: fmt.Sprintf("HC-OHF-%d", i), Status: domain.InvoiceDraft, BillingReason: tc.reason,
+				SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
+			})
+			if _, err := svc.Finalize(ctx, tenantID, draft.ID); err == nil {
+				t.Fatal("finalize succeeded although its hook failed")
+			}
+			row, err := store.Get(ctx, tenantID, draft.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row.Status != domain.InvoiceDraft || row.PublicToken != "" {
+				t.Errorf("status %s, token set %v; want a draft with no token", row.Status, row.PublicToken != "")
+			}
+			if n := outboxRowsAbout(t, db, tenantID, draft.ID); n != 0 {
+				t.Errorf("%d webhook_outbox rows about the invoice, want 0: the finalize rolled back", n)
+			}
+		})
+	}
+}
+
+// outboxRowsAbout counts the webhook_outbox rows of any event type whose data
+// names the invoice, read under the tenant's row-level security.
+func outboxRowsAbout(t *testing.T, db *postgres.DB, tenantID, invoiceID string) int {
+	t.Helper()
+	ctx := postgres.WithLivemode(context.Background(), false)
+	var n int
+	if err := db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx,
+			`SELECT count(*) FROM webhook_outbox WHERE payload->'invoice'->>'id' = $1`, invoiceID).Scan(&n)
+	}); err != nil {
+		t.Fatalf("count outbox rows: %v", err)
+	}
+	return n
+}
+
+// crashingTaxCommitter is the Stripe Tax commit, the first step after a
+// finalize commits. It panics: the process dies there. A tax retry runs that
+// step on a detached context, so a cancel cannot stop it.
+type crashingTaxCommitter struct{}
+
+func (crashingTaxCommitter) CommitTax(context.Context, string, string, string) error {
+	panic("process stopped after the finalize committed")
+}
+
+func (crashingTaxCommitter) CheckTaxCalculationUsable(context.Context, string, string, string) error {
+	return nil
+}
+
+// TestRetryTax_ProcessStopsAfterFinalize_InvoiceFinalizedIsQueued: a tax
+// retry that resolves a subscription's draft finalizes it, and the finalize
+// transaction queues invoice.finalized. The process dying at the first step
+// after that commit cannot lose it.
+func TestRetryTax_ProcessStopsAfterFinalize_InvoiceFinalizedIsQueued(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Outbox Retry Tax Stops")
+	store, svc := eventsWired(db)
+	svc.SetTaxCommitter(crashingTaxCommitter{})
+	svc.SetTaxRetrier(resolvingRetrier{db: db, store: store})
+	draft := taxPendingCycleDraft(t, db, ctx, tenantID, "HC-ORT-1")
+
+	survive(func() { _, _ = svc.RetryTax(ctx, tenantID, draft.ID) })
+	row, err := store.Get(ctx, tenantID, draft.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != domain.InvoiceFinalized {
+		t.Fatalf("status = %s, want finalized", row.Status)
+	}
+	oneEventOfTheRow(t, db, store, tenantID, domain.EventInvoiceFinalized, draft.ID, nil)
 }
 
 // crashingStopper is the Stripe leg of a void, the first step after the void
