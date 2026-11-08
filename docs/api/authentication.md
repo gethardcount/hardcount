@@ -58,7 +58,9 @@ session can:
 
 - manage team members (`/v1/members`);
 - change the account settings (`PUT /v1/settings`), which test and live
-  mode share. A key can read them.
+  mode share. A key can read them;
+- send the test email (`POST /v1/settings/email/test`), which goes to the
+  signed-in member's own address.
 
 ### Which key goes where
 
@@ -84,7 +86,7 @@ without touching the others, and each has its own
   anything, except an event it sends again: a repeated `idempotency_key`
   answers with the first event. Rotate it too.
 
-A test key leaks only test data, and test mode cannot charge a real card.
+A leaked test key exposes test data and the account settings, which both modes share. Test mode cannot charge a real card.
 
 ## When a key is refused
 

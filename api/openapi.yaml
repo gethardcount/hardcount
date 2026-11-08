@@ -87,8 +87,8 @@ components:
 
         - `hc_secret_test_…` and `hc_secret_live_…`: a secret key. It has full
           access to one account's test or live data, except the team-member
-          routes and the test email, which need a dashboard sign-in. Keep it
-          on your server.
+          routes, the test email and changing the account settings, which
+          need a dashboard sign-in. Keep it on your server.
         - `hc_ingest_test_…` and `hc_ingest_live_…`: a usage-only key, for a
           gateway such as LiteLLM. It can call `POST /v1/usage-events`,
           `POST /v1/usage-events/batch`, `POST /v1/integrations/litellm/spend`
@@ -27621,6 +27621,8 @@ paths:
     put:
       tags: [Dashboard]
       x-internal: true
+      security:
+        - SessionCookie: []
       summary: Update account settings
       operationId: updateTenantSettings
       description: |
