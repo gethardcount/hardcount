@@ -905,11 +905,8 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 		return false, fmt.Errorf("create threshold invoice: %w", err)
 	}
 
-	// The finalize AUDIT row already committed inside the fire tx above (same
-	// finalize-row contract as the cycle path). Here
-	// only the post-commit WEBHOOK fires.
-	e.dispatchInvoiceFinalized(ctx, sub, inv)
-
+	// The finalize AUDIT row and invoice.finalized already committed inside
+	// the fire tx above (the same contract as the cycle path).
 	// Commit tax (Stripe parity) — matches the cycle scan's flow.
 	if inv.TaxProvider != "" && inv.TaxCalculationID != "" {
 		if err := e.CommitTax(ctx, sub.TenantID, inv.ID, inv.TaxCalculationID); err != nil {
