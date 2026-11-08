@@ -135,6 +135,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	db.AppURL = strings.TrimSpace(os.Getenv("APP_DATABASE_URL"))
+	if err := CheckDatabaseURL("APP_DATABASE_URL", db.AppURL); err != nil {
+		return Config{}, err
+	}
 
 	migrateOnBoot, err := boolEnv("RUN_MIGRATIONS_ON_BOOT", false)
 	if err != nil {
@@ -419,7 +422,43 @@ func loadDatabaseURL() (string, error) {
 	if dbURL == "" {
 		return "", fmt.Errorf("DATABASE_URL or DB_HOST/DB_NAME/DB_USER/DB_PASSWORD required")
 	}
+	if err := CheckDatabaseURL("DATABASE_URL", dbURL); err != nil {
+		return "", err
+	}
 	return dbURL, nil
+}
+
+// CheckDatabaseURL refuses a database URL with an unencoded @ in its user
+// name or password. The driver reads such a URL the way psql does: the
+// password ends at the first @, and the rest of it becomes the host name.
+// The connection then fails with a host-name lookup error that prints that
+// part of the password, and the server would log it on every start. The
+// error names the setting and never holds the URL. A keyword/value string
+// (host=... password=...) has no URL syntax, so it passes as is.
+func CheckDatabaseURL(setting, dbURL string) error {
+	rest, ok := strings.CutPrefix(dbURL, "postgres://")
+	if !ok {
+		rest, ok = strings.CutPrefix(dbURL, "postgresql://")
+	}
+	if !ok {
+		return nil
+	}
+	// Like the driver, take the user name and password up to the first @
+	// before any /, and the host and port after it up to a / or ?. A host
+	// or port never holds an @, so one there comes from the user name or
+	// password.
+	at := strings.IndexAny(rest, "@/")
+	if at < 0 || rest[at] != '@' {
+		return nil
+	}
+	hostPort := rest[at+1:]
+	if end := strings.IndexAny(hostPort, "/?"); end >= 0 {
+		hostPort = hostPort[:end]
+	}
+	if strings.Contains(hostPort, "@") {
+		return fmt.Errorf("%s has an unencoded @ in its user name or password. Percent-encode each @ there as %%40: the database driver would read the rest of the password as the host name", setting)
+	}
+	return nil
 }
 
 func envOr(key, fallback string) string {

@@ -87,7 +87,26 @@ The output holds passwords and keys, so keep it private.
 Set the key in `.env` (`openssl rand -hex 32`) and run `docker compose up -d` again.
 
 **`docker compose` refuses with `HARDCOUNT_APP_DB_PASSWORD is required`, or the API exits with `default/guessable password`.**
-Set `HARDCOUNT_APP_DB_PASSWORD` in `.env` to a random value (`openssl rand -hex 24`) and start the stack again. Compose builds `APP_DATABASE_URL` from it. On an existing data volume, also set the new password on the `hardcount_app` user, as in the next entry.
+Set `HARDCOUNT_APP_DB_PASSWORD` in `.env` to a random value (`openssl rand -hex 24`) and start the stack again. Compose builds `APP_DATABASE_URL` from it. On an existing data volume, also set the new password on the `hardcount_app` user, as in the `could not open the app database connection` entry below.
+
+**The API exits with `DATABASE_URL has an unencoded @` or `APP_DATABASE_URL has an unencoded @`.**
+Compose puts `POSTGRES_PASSWORD` into `DATABASE_URL`, and `HARDCOUNT_APP_DB_PASSWORD` into `APP_DATABASE_URL`, as written. An `@` in either password breaks the URL. Writing it as `%40` in `.env` does not help, because Postgres reads the same setting as the password itself. Instead:
+
+1. In `.env`, set the password behind the URL the error names to a new value from `openssl rand -hex 24`.
+2. Set the same password on its database user. Postgres reads these settings only when it creates its data, on an empty data volume. For `POSTGRES_PASSWORD`, run the commands in the next entry. For `HARDCOUNT_APP_DB_PASSWORD`, run the ones in the entry after it.
+3. Run `docker compose up -d`.
+
+**The API exits with `password authentication failed for user "hardcount"`.**
+The admin user's password differs from `POSTGRES_PASSWORD`. Postgres sets that password only on its very first start, on an empty data volume. On an existing volume, set it yourself, then run `docker compose up -d`:
+
+```bash
+set -a; . ./.env; set +a
+echo "ALTER ROLE :\"role\" PASSWORD :'pw';" | docker compose exec -T postgres \
+  psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-hardcount}" -d "${POSTGRES_DB:-hardcount}" \
+  -v role="${POSTGRES_USER:-hardcount}" -v pw="${POSTGRES_PASSWORD:?set it in .env first}"
+```
+
+The old password is not needed: inside the container, `psql` connects over a local socket, which the Postgres image trusts. The rest works as in the next entry.
 
 **The API exits with `could not open the app database connection`.**
 The `hardcount_app` user is missing, or its password differs from `HARDCOUNT_APP_DB_PASSWORD`. Postgres creates that user only on its very first start, on an empty data volume. On an existing volume, set the password yourself:

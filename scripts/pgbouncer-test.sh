@@ -13,11 +13,15 @@
 # statement; the proof is that the whole suite still passes through it.
 set -euo pipefail
 
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=SCRIPTDIR/ci/pinned-images.sh
+. "$SCRIPTS/ci/pinned-images.sh"
+
 MODE="${PGB_MODE:-local}"
-IMAGE="${PGB_IMAGE:-edoburu/pgbouncer:v1.24.1-p1}"
+IMAGE="${PGB_IMAGE:-$PGBOUNCER_IMAGE}"
 NAME="hardcount-pgbouncer-test"
 PKGS="${PGB_PACKAGES:-./...}"
-DIR="$(cd "$(dirname "$0")" && pwd)/pgbouncer"
+DIR="$SCRIPTS/pgbouncer"
 CONF="$(mktemp -d)"
 
 if [ "$MODE" = "ci" ]; then
@@ -53,4 +57,6 @@ echo "pgbouncer up (transaction mode) -> ${DB_HOST}:5432; app pool via localhost
 
 export TEST_ADMIN_DATABASE_URL="${TEST_ADMIN_DATABASE_URL:-postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable}"
 export TEST_DATABASE_URL="postgres://hardcount_test_app:hardcount_test_app@localhost:6432/hardcount_test?sslmode=disable"
+# PKGS stays unquoted: PGB_PACKAGES may name several packages.
+# shellcheck disable=SC2086
 go test -p 1 $PKGS -count=1 -short=false

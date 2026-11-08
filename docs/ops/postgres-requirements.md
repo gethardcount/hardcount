@@ -6,7 +6,7 @@ The Compose stack already covers the version, the extensions and the two users, 
 
 ## Checklist
 
-- [ ] Postgres 16. Versions 14, 15 and 17 are expected to work but are not tested; see [Which Postgres works](#which-postgres-works).
+- [ ] Postgres 16. Versions 15, 17 and 18 are expected to work, but the tests run only on 16. Postgres 14 is no longer supported. See [Which Postgres works](#which-postgres-works).
 - [ ] [Three extensions](#extensions) exist, or the admin user may create them.
 - [ ] [Two database users](#the-two-database-users): an admin user for upgrades and a limited user for requests.
 - [ ] [The idle-transaction timeout](#timeouts-on-the-limited-user) set on the limited user, and a query timeout if you want one.
@@ -109,9 +109,11 @@ A connection pooler, such as PgBouncer, shares a few database connections among 
 |---|---|---|
 | Direct connection | Yes | Yes |
 | PgBouncer, session mode | Yes | Yes |
-| PgBouncer 1.21 or newer, transaction mode, `max_prepared_statements` above 0 | Yes. CI runs the whole test suite this way, with PgBouncer 1.24 and `max_prepared_statements` set to 200. | No |
+| PgBouncer 1.21 or newer, transaction mode, `max_prepared_statements` above 0 | Yes. CI runs the whole test suite this way, with PgBouncer 1.26.1 and `max_prepared_statements` set to 200. | No |
 | Older PgBouncer in transaction mode | Yes, if you add `default_query_exec_mode=cache_describe` to both database URLs | No |
 | RDS Proxy | Expected to work, not tested. It pins each client to one connection, so it pools little. | Use a direct connection |
+
+**Use PgBouncer 1.26.1 or newer.** Older releases have security bugs that let a client crash or hang PgBouncer, or log in as another user who signs in with SCRAM ([PgBouncer changelog](https://www.pgbouncer.org/changelog.html)).
 
 **Database upgrades need a direct or session-mode connection.** They hold a lock for the whole run, and some steps run outside a transaction. Run them over that connection, with `RUN_MIGRATIONS_ON_BOOT=true` or the `hardcount migrate` command, as a deploy step.
 
@@ -152,14 +154,15 @@ Hardcount's migrations create the indexes its queries need. Check `pg_stat_user_
 
 ## Which Postgres works
 
-**Tested** means a test run against it exists. **Exercised** means it has carried real load, outside CI. **Expected** means no run, but a reason from the code to think it works. **Untested** means no run and no such reason.
+**Tested** means a test run against it exists. **Exercised** means it has carried real load, outside CI. **Expected** means no run, but a reason from the code to think it works. **Untested** means no run and no such reason. **Not supported** means the Postgres project no longer fixes bugs or security issues in that version.
 
 | Postgres | Status | Notes |
 |---|---|---|
 | Postgres 16 | ✅ Tested | CI, every PR (`postgres:16-alpine`) |
 | AWS RDS for Postgres 16 | ✅ Exercised | The AWS benchmark rig. Set `rds.force_ssl=1` and use `sslmode=require` in the database URLs. |
-| Postgres 14 | ⚠️ Expected | CI applies the migrations on `postgres:14-alpine` for every PR; the tests run only on 16 |
-| Postgres 15, 17 | ⚠️ Expected | No migration uses syntax newer than 14; not run in CI |
+| Postgres 15, 18 | ⚠️ Expected | CI applies the migrations on `postgres:15-alpine` and `postgres:18-alpine` for every PR; the tests run only on 16 |
+| Postgres 17 | ⚠️ Expected | No migration uses syntax newer than 15; not run in CI |
+| Postgres 14 | ❌ Not supported | End of life on 2026-11-12. Move to 16, the tested version. |
 | Google Cloud SQL for Postgres | ⚠️ Expected | Standard Postgres; not tested |
 | Aurora Postgres | ⚠️ Expected | Its storage works differently, which may slow long billing runs; not tested |
 | TimescaleDB | ⚠️ Untested | Compatible with Postgres; turning `usage_events` into a hypertable is untested |
