@@ -172,7 +172,7 @@ func addCentsSigned(a, b int64) (int64, bool) {
 // commitInvoiceSubtotal is the subtotal to tax an invoice from. For an
 // invoice with a commit line it is the sum of the lines, not the stored
 // header. An operator's lines always hold what was entered (a tax write
-// keeps their amounts; see keepStoredLineForm), but a tax-inclusive draft
+// keeps their amounts; see keepEnteredAmounts), but a tax-inclusive draft
 // computed before the commit line was left out stored a header with that
 // line carved to net. Taxed from that header, such a draft finalized after
 // the change would be invoiced the net while its full credit is granted.
@@ -202,10 +202,10 @@ func commitInvoiceSubtotal(lineItems []domain.InvoiceLineItem, subtotal int64) (
 //   - Tax-exclusive: the price is the stored amount, which tax never
 //     changes, and the subtotal is the stored header's.
 //   - Tax-inclusive: the price holds the tax, and the line total is that
-//     price. A line taxed when the engine built it stores its net in the
-//     amount (the carve rewrote it) and its price in the total. A line an
-//     operator entered, or one never taxed, stores its price in both. The
-//     header subtotal is the net after any successful calculation, so the
+//     price. A taxed line on billing's draft stores its net in the amount
+//     (the carve rewrote it) and its price in the total. A line an operator
+//     entered, or one never taxed, stores its price in both. The header
+//     subtotal is the net after any successful calculation, so the
 //     subtotal is the sum of the line prices instead.
 //
 // Taxing a stored net carved the tax out a second time: the invoice total
@@ -226,17 +226,25 @@ func storedTaxBasis(items []domain.InvoiceLineItem, headerSubtotal int64, inclus
 	return basis, subtotal, nil
 }
 
-// keepStoredLineForm sets the amount each recomputed line is saved with. A
-// line stored at its price (amount equal to total) keeps it. A line stored
-// at its net takes the new net, so its amount, tax and total still add up
-// when the new calculation carves a different tax (a rate change, a new
-// address). In tax-exclusive mode the calculation leaves every amount as
-// stored, so this changes nothing there.
-func keepStoredLineForm(computed, stored []domain.InvoiceLineItem) {
+// keepEnteredAmounts sets the amount each recomputed line is saved with. Who
+// made the invoice decides it, not the line's numbers:
+//
+//   - Billing (a subscription's draft): the net the calculation returned,
+//     which computed already holds. A build saves its lines that way, so
+//     every line's amount, tax and total add up, also after a rate change
+//     or on a line that had no tax before.
+//   - An operator (inv.OperatorComposed): the amount entered, which is the
+//     price. The subtotal of a line added later sums these amounts
+//     (AddLineItemAtomicAudited), and commitInvoiceSubtotal reads them.
+//
+// In tax-exclusive mode the calculation returns every amount as stored, so
+// both give the stored amount there.
+func keepEnteredAmounts(inv domain.Invoice, computed, stored []domain.InvoiceLineItem) {
+	if !inv.OperatorComposed() {
+		return
+	}
 	for i := range computed {
-		if stored[i].AmountCents == stored[i].TotalAmountCents {
-			computed[i].AmountCents = stored[i].AmountCents
-		}
+		computed[i].AmountCents = stored[i].AmountCents
 	}
 }
 

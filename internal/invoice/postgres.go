@@ -2069,8 +2069,8 @@ func errLinesChanged() error {
 // It rewrites each line's amount and tax stamps and the invoice-level tax
 // columns, counts the attempt in tax_retry_count (not the initial one), and
 // recomputes total + amount_due. The engine passes the amount each line
-// keeps: its price, or its net when a tax-inclusive line is stored net.
-// Returns errs.InvalidState when the invoice is not a draft
+// keeps: on billing's draft the net of the new calculation, on an
+// operator's the amount entered. Returns errs.InvalidState when the invoice is not a draft
 // (caller surfaces 409), invoice_lines_changed when a line was added after
 // the computation read the invoice, and errs.ErrNotFound when the invoice
 // doesn't exist (caller surfaces 404).

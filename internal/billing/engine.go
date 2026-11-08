@@ -5353,7 +5353,7 @@ func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invo
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("recompute tax: %w", err)
 	}
-	keepStoredLineForm(basis, items)
+	keepEnteredAmounts(inv, basis, items)
 
 	// Read the net subtotal/discount OFF the taxApp result, mirroring the
 	// cycle build path (billOnePeriod). In tax-INCLUSIVE mode the
