@@ -36,12 +36,12 @@ func TestInvoiceSums_MatchThePagedSumsUnderAPage(t *testing.T) {
 	n := 0
 	for i := range 8 {
 		now := time.Now().UTC()
-		inv, err := r.invoices.Create(r.ctx, r.tenantID, domain.Invoice{
+		inv, err := r.invoices.CreateWithLineItems(r.ctx, r.tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: fmt.Sprintf("INV-SUMS-%d", i),
 			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending, Currency: "USD",
 			SubtotalCents: 1_000_000, TotalAmountCents: 1_000_000, AmountDueCents: 1_000_000,
 			BillingPeriodStart: now.Add(-720 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice: %v", err)
 		}

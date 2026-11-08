@@ -174,11 +174,11 @@ func (d *dunningRetryRig) useCharger(charger *payment.Stripe) {
 func (d *dunningRetryRig) dunnedInvoice(custID, num string) domain.Invoice {
 	d.t.Helper()
 	now := time.Now().UTC()
-	inv, err := d.invoices.Create(d.ctx, d.tenantID, domain.Invoice{
+	inv, err := d.invoices.CreateWithLineItems(d.ctx, d.tenantID, domain.Invoice{
 		CustomerID: custID, InvoiceNumber: num, Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
 		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-	})
+	}, nil)
 	if err != nil {
 		d.t.Fatalf("create invoice: %v", err)
 	}
@@ -619,11 +619,11 @@ func TestDunningRetry_AppliesOnlyTheInvoiceCurrency(t *testing.T) {
 		t.Fatalf("grant: %v", err)
 	}
 	now := time.Now().UTC()
-	eur, err := d.invoices.Create(d.ctx, d.tenantID, domain.Invoice{
+	eur, err := d.invoices.CreateWithLineItems(d.ctx, d.tenantID, domain.Invoice{
 		CustomerID: custID, InvoiceNumber: "INV-CCY-EUR", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "EUR", SubtotalCents: 3000, TotalAmountCents: 3000, AmountDueCents: 3000,
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create EUR invoice: %v", err)
 	}

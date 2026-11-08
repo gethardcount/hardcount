@@ -98,8 +98,7 @@ verified to make (day headers), it says so.
    one run.
 
 Writers apply them from
-[Activity lines](../dev/writing-style.md#activity-lines) in the writing-style
-guide, which gives the examples.
+[Activity lines](../dev/activity-lines.md), which gives the examples.
 
 ### The owner's eight decisions
 
@@ -320,4 +319,4 @@ made the attempt owns its facts.
   the entity's calendar, and its ordering rule.
 - [ADR-112](112-dunning-exhaustion-settles-two-questions.md): the dunning
   escalation outcome tokens.
-- Writing rules: [Activity lines](../dev/writing-style.md#activity-lines).
+- Writing rules: [Activity lines](../dev/activity-lines.md).

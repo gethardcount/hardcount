@@ -155,12 +155,12 @@ func (r *shRig) seedFor(num string, withStripeCustomer bool) domain.Invoice {
 		}
 	}
 	now := time.Now().UTC()
-	inv, err := r.invoices.Create(r.ctx, r.tenantID, domain.Invoice{
+	inv, err := r.invoices.CreateWithLineItems(r.ctx, r.tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: num, Status: domain.InvoiceFinalized,
 		PaymentStatus: domain.PaymentPending, Currency: "USD", SubtotalCents: shDue,
 		TotalAmountCents: shDue, AmountDueCents: shDue,
 		BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-	})
+	}, nil)
 	if err != nil {
 		r.t.Fatalf("create invoice: %v", err)
 	}

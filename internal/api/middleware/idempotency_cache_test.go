@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -226,7 +225,6 @@ func invokeWithKey(t *testing.T, h http.Handler, tenantID, key, body string) *ht
 	ctx := auth.WithTenantID(req.Context(), tenantID)
 	ctx = postgres.WithLivemode(ctx, false)
 	req = req.WithContext(ctx)
-	req.Body = io.NopCloser(strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec

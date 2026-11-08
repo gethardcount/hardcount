@@ -81,14 +81,14 @@ func TestRemoveItem_SoftDeleteIsFKSafeAndReAddable(t *testing.T) {
 	// A proration invoice FK-referencing item A (ON DELETE RESTRICT). A hard delete
 	// of item A would be blocked by THIS row.
 	at := periodStart.Add(10 * 24 * time.Hour)
-	refInv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+	refInv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, SubscriptionID: sub.ID,
 		InvoiceNumber: "SD-PRO-A", Status: domain.InvoiceDraft, PaymentStatus: domain.PaymentPending, Currency: "USD",
 		BillingPeriodStart: periodStart, BillingPeriodEnd: periodStart.AddDate(0, 1, 0),
 		BillingReason:       domain.BillingReasonSubscriptionUpdate,
 		SourcePlanChangedAt: &at, SourceSubscriptionItemID: itemA, SourceChangeType: domain.ItemChangeTypeAdd,
 		IssuedAt: &at, DueAt: &at, NetPaymentTermDays: 0,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create referencing invoice: %v", err)
 	}

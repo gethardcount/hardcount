@@ -1,7 +1,6 @@
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
-import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
@@ -79,7 +78,6 @@ export default defineConfig([
       js.configs.recommended,
       tseslint.configs.recommended,
       reactHooks.configs.flat.recommended,
-      reactRefresh.configs.vite,
     ],
     languageOptions: {
       ecmaVersion: 2020,
@@ -87,14 +85,6 @@ export default defineConfig([
     },
     rules: {
       'no-restricted-syntax': [...noWallClockNow, noRawScrollPane, ...noRawInvoiceMoneyRead],
-      // HMR ergonomics only (fast-refresh works best when component files
-      // export only components) — zero runtime correctness. shadcn-style
-      // component files and context/hook co-location trip it ~40×; the
-      // industry-standard posture for this template is warn, not error.
-      // Off: it only affects hot reload in development, and its warnings
-      // filled the few annotation slots GitHub shows per run, hiding the
-      // hook warnings that can be real bugs.
-      'react-refresh/only-export-components': 'off',
     },
   },
   {

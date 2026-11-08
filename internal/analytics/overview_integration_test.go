@@ -80,7 +80,7 @@ func makePaidInvoice(t *testing.T, ctx context.Context, store *invoice.PostgresS
 	t.Helper()
 	now := time.Now().UTC()
 	issued := now
-	inv, err := store.Create(ctx, tenantID, domain.Invoice{
+	inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID:         custID,
 		InvoiceNumber:      fmt.Sprintf("INV-%s-%d", currency, total),
 		Status:             domain.InvoicePaid,
@@ -93,7 +93,7 @@ func makePaidInvoice(t *testing.T, ctx context.Context, store *invoice.PostgresS
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour),
 		BillingPeriodEnd:   now,
 		IssuedAt:           &issued,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create %s invoice: %v", currency, err)
 	}

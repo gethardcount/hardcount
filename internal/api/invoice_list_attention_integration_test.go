@@ -33,10 +33,6 @@ func (c *tenantTxCounter) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pg
 }
 func (c *tenantTxCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
-type stripeAlwaysConnected struct{}
-
-func (stripeAlwaysConnected) HasFor(context.Context, string, bool) (bool, error) { return true, nil }
-
 // Issue #1142: GET /v1/invoices took ~110 ms for 25 rows because every row
 // read its own attention facts (payment setup, Stripe credentials, and for
 // unpaid rows customer, dunning run, pause, payment page), each its own
@@ -92,15 +88,16 @@ func TestInvoiceList_AttentionCostIsPerPage_RealStore(t *testing.T) {
 			now := time.Now().UTC()
 			in.AmountDueCents, in.AmountPaidCents, in.PaidAt = 0, 5000, &now
 		}
-		inv, err := seedInv.Create(ctx, tenantID, in)
+		inv, err := seedInv.CreateWithLineItems(ctx, tenantID, in, nil)
 		if err != nil {
 			t.Fatalf("create invoice %s: %v", key, err)
 		}
 		return inv.ID
 	}
 
-	// One row per batched fact. Create queues a finalized, pending invoice for
-	// collection (collectionQueuedAtFinalize), so a ready card reads "scheduled".
+	// One row per batched fact. CreateWithLineItems queues a finalized, pending
+	// invoice for collection (collectionQueuedAtFinalize), so a ready card reads
+	// "scheduled".
 	scheduled := newInvoice("scheduled", newCustomer("ready", "ready@acme.test", true), "", domain.InvoiceFinalized, domain.PaymentPending)
 
 	pausedCust := newCustomer("paused", "paused@acme.test", true)
@@ -140,7 +137,7 @@ func TestInvoiceList_AttentionCostIsPerPage_RealStore(t *testing.T) {
 	svc.SetDunningRunReader(dunning.NewPostgresStore(traced))
 	svc.SetSubscriptionPauseReader(subscription.NewPostgresStore(traced))
 	svc.SetPaymentPageReader(invStore)
-	svc.SetStripeChecker(stripeAlwaysConnected{})
+	svc.SetStripeChecker(stripeConnectedForTest{connected: true})
 
 	list := func() ([]domain.Invoice, int64) {
 		t.Helper()

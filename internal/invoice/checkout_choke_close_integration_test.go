@@ -60,9 +60,6 @@ func claimStatus(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, c
 // any of the three close statements and its subtest fails with status
 // 'open' (the pre-fix "stored open session for a settled invoice" race).
 func TestChokePointCloses(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	now := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -85,7 +82,7 @@ func TestChokePointCloses(t *testing.T) {
 		store := invoice.NewPostgresStore(db)
 		invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 		claimID := seedOpenClaim(t, db, ctx, tenantID, invID)
-		if _, err := store.UpdateStatus(ctx, tenantID, invID, domain.InvoiceVoided); err != nil {
+		if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, invID, domain.InvoiceVoided, nil); err != nil {
 			t.Fatalf("void: %v", err)
 		}
 		if got := claimStatus(t, db, ctx, tenantID, claimID); got != "invoice_settled" {

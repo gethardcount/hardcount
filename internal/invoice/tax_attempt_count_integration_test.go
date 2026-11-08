@@ -35,12 +35,12 @@ func TestUpdateTaxAtomic_InitialAttemptDoesNotCountAsRetry(t *testing.T) {
 		t.Fatalf("create customer: %v", err)
 	}
 
-	inv, err := store.Create(ctx, tenantID, domain.Invoice{
+	inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, Status: domain.InvoiceDraft,
 		PaymentStatus: domain.PaymentPending,
 		Currency:      "USD", SubtotalCents: 10000, TotalAmountCents: 10000,
 		AmountDueCents: 10000,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

@@ -67,12 +67,12 @@ func TestGetStats_RecoveredAndAtRiskLeaveOutClosedInvoices(t *testing.T) {
 		n++
 		now := time.Now().UTC()
 		issued := now
-		inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: "INV-TERM-" + string(rune('A'+n)),
 			Status: status, PaymentStatus: payment,
 			Currency: "USD", SubtotalCents: due + paid, TotalAmountCents: due + paid, AmountDueCents: due, AmountPaidCents: paid,
 			BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &issued,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice %d: %v", n, err)
 		}

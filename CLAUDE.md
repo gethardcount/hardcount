@@ -113,7 +113,7 @@ Every user-visible ship updates the docs that describe it, in the same PR:
 - `docs/adr/` if the change is a decision worth re-litigating later.
 - `docs/roadmap.md` ("Now", "Next", "Later", "Not building", "Shipped recently") — keep aligned with reality; if a roadmap item is silently descoped, edit the roadmap first, then act.
 
-How to write them: **[docs/dev/writing-style.md](docs/dev/writing-style.md)** (point first, one idea per sentence, define terms, clarity and truth in separate PRs).
+How to write them: **[docs/dev/writing-style.md](docs/dev/writing-style.md)** (one reader and one job per page, point first, one idea per sentence, define terms). A PR that rewords, restructures or rewrites a page also checks every fact the page keeps against the code and fixes the false ones. Its description lists each changed fact with the code that proves it.
 
 The bar isn't "perfect docs." The bar is "the doc doesn't lie." A doc that says "logs link to stdout" when the code returns an error is worse than no doc.
 

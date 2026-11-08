@@ -44,12 +44,12 @@ func TestGetStats_AtRiskScopedToDefaultCurrency(t *testing.T) {
 	mkInvoice := func(num, currency string, due int64) string {
 		now := time.Now().UTC()
 		issued := now
-		inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: num,
 			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
 			Currency: currency, SubtotalCents: due, TotalAmountCents: due, AmountDueCents: due,
 			BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &issued,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create %s invoice: %v", currency, err)
 		}
@@ -111,12 +111,12 @@ func TestGetStats_AtRiskByCurrency(t *testing.T) {
 		t.Helper()
 		now := time.Now().UTC()
 		issued := now
-		inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: num,
 			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
 			Currency: currency, SubtotalCents: due, TotalAmountCents: due, AmountDueCents: due,
 			BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &issued,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create %s invoice: %v", num, err)
 		}

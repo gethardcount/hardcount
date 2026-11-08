@@ -45,7 +45,6 @@ type ppRig struct {
 // newPPRig is a tenant with a test-mode key (test clocks need test mode).
 func newPPRig(t *testing.T, name string) *ppRig {
 	t.Helper()
-	skipShort(t)
 	db := testutil.SetupTestDB(t)
 	clk := clock.NewFake(time.Now().UTC())
 	r := &ppRig{t: t, db: db, clk: clk, srv: NewServer(db, clk, nil)}

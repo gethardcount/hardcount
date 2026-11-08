@@ -30,12 +30,12 @@ func settleFixture(t *testing.T, db *postgres.DB, ctx context.Context, name stri
 	}
 	store = invoice.NewPostgresStore(db)
 	now := time.Now().UTC()
-	inv, err := store.Create(ctx, tenantID, domain.Invoice{
+	inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-" + name, Status: domain.InvoiceFinalized,
 		PaymentStatus: domain.PaymentPending, Currency: "USD", SubtotalCents: 5000,
 		TotalAmountCents: 5000, AmountDueCents: 5000, BillingPeriodStart: now.Add(-time.Hour),
 		BillingPeriodEnd: now, IssuedAt: &now,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
@@ -62,9 +62,6 @@ func outboxCount(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, e
 // Mutation check: move the hook after tx.Commit → the crash window returns and
 // the shared-fate assertion below (rollback case) fails.
 func TestSettleTransitions_EmailRidesTheTx(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test — requires postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	outbox := email.NewOutboxStore(db)

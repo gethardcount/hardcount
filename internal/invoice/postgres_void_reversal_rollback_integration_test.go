@@ -3,7 +3,6 @@ package invoice_test
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/credit"
@@ -13,53 +12,14 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestUpdateStatusWithReversal_ReversalFailure_RealTxRollsBackVoid is the
-// real-Postgres proof of the void atomicity (#29): UpdateStatusWithReversal
-// flips the invoice to voided AND runs the consumed-credit reversal in ONE tx,
-// so a reversal failure must roll the VOID back. Otherwise the invoice lands
-// voided while the customer's applied credits stay consumed — silently
-// stripping them of the credits they paid the invoice with, with no reconciler
-// to re-drive the reversal. Only a real tx proves the status flip is undone.
-func TestUpdateStatusWithReversal_ReversalFailure_RealTxRollsBackVoid(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	store := invoice.NewPostgresStore(db)
-	tenantID := testutil.CreateTestTenant(t, db, "Void Reversal Rollback")
-	invID := seedDraftInvoice(t, db, tenantID)
-
-	reverseErr := errors.New("simulated in-tx credit reversal failure")
-	called := false
-	_, err := store.UpdateStatusWithReversal(ctx, tenantID, invID, domain.InvoiceVoided, func(tx *sql.Tx) error {
-		called = true
-		return reverseErr
-	})
-	if !errors.Is(err, reverseErr) {
-		t.Fatalf("UpdateStatusWithReversal must surface the reverseFn error, got %v", err)
-	}
-	if !called {
-		t.Fatal("reverseFn was never invoked — the test is vacuous")
-	}
-
-	// The real assertion: the void flip MUST have rolled back — a fresh read
-	// still sees the invoice in its prior (draft) status, not voided.
-	after, err := store.Get(ctx, tenantID, invID)
-	if err != nil {
-		t.Fatalf("get after rollback: %v", err)
-	}
-	if after.Status != domain.InvoiceDraft {
-		t.Fatalf("void must roll back on a reversal failure; status=%q, want draft (voided-but-credits-still-consumed strands customer credits)", after.Status)
-	}
-	if after.VoidedAt != nil {
-		t.Errorf("voided_at must be unset after rollback; got %v", after.VoidedAt)
-	}
-}
-
-// TestUpdateStatusWithReversal_Success_CommitsVoidAndCreditGrant proves the
-// cross-store coordinator tx actually COMMITS: a reversal grant appended on the
-// invoice store's tx (the credit store's AppendEntryTx, the same call
+// TestUpdateStatusWithReversalPrior_Success_CommitsVoidAndCreditGrant proves
+// the cross-store coordinator tx actually COMMITS: a reversal grant appended on
+// the invoice store's tx (the credit store's AppendEntryTx, the same call
 // ReverseForInvoiceTx makes) lands in customer_credit_ledger together with the
-// voided status — neither half is silently rolled back or RLS-blocked.
-func TestUpdateStatusWithReversal_Success_CommitsVoidAndCreditGrant(t *testing.T) {
+// voided status — neither half is silently rolled back or RLS-blocked. The
+// rollback half (a closure error undoes the void) is pinned by the intx_audit
+// subtest "closure failure rolls the void back and writes no audit row".
+func TestUpdateStatusWithReversalPrior_Success_CommitsVoidAndCreditGrant(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	store := invoice.NewPostgresStore(db)
@@ -73,7 +33,7 @@ func TestUpdateStatusWithReversal_Success_CommitsVoidAndCreditGrant(t *testing.T
 	}
 	custID := seeded.CustomerID
 
-	voided, err := store.UpdateStatusWithReversal(ctx, tenantID, invID, domain.InvoiceVoided, func(tx *sql.Tx) error {
+	voided, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, invID, domain.InvoiceVoided, func(tx *sql.Tx, _ domain.Invoice) error {
 		_, e := creditStore.AppendEntryTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
 			Currency:                "USD",
 			CustomerID:              custID,
@@ -86,7 +46,7 @@ func TestUpdateStatusWithReversal_Success_CommitsVoidAndCreditGrant(t *testing.T
 		return e
 	})
 	if err != nil {
-		t.Fatalf("UpdateStatusWithReversal: %v", err)
+		t.Fatalf("UpdateStatusWithReversalPrior: %v", err)
 	}
 	if voided.Status != domain.InvoiceVoided {
 		t.Fatalf("returned status=%q, want voided", voided.Status)

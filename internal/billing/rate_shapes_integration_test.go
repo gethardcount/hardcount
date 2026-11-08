@@ -29,9 +29,6 @@ import (
 // close-mirror preview just before the end must equal the final invoice's
 // usage, and the live balance must equal that preview.
 func TestRateShapes_PreviewEqualsTheInvoice(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	type event struct {
 		qty  string
 		dims map[string]any

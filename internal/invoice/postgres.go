@@ -227,7 +227,7 @@ const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoi
 	billing_period_start, billing_period_end, issued_at, due_at, paid_at, voided_at, uncollectible_at,
 	COALESCE(stripe_payment_intent_id,''), COALESCE(last_payment_error,''),
 	auto_charge_pending, net_payment_term_days, COALESCE(memo,''), COALESCE(footer,''),
-	metadata, created_at, updated_at, source_plan_changed_at, COALESCE(source_subscription_item_id,''),
+	created_at, updated_at, source_plan_changed_at, COALESCE(source_subscription_item_id,''),
 	COALESCE(source_change_type,''),
 	tax_provider, tax_calculation_id, COALESCE(tax_transaction_id,''),
 	tax_reverse_charge, tax_exempt_reason,
@@ -304,123 +304,6 @@ func splitTopLevelCommas(s string) []string {
 	}
 	out = append(out, s[start:])
 	return out
-}
-
-func (s *PostgresStore) Create(ctx context.Context, tenantID string, inv domain.Invoice) (domain.Invoice, error) {
-	return s.CreateAudited(ctx, tenantID, inv, nil)
-}
-
-// CreateAudited is Create with an in-tx audit emission (ADR-090): emit runs on
-// the SAME transaction as the header INSERT, after the row exists (so it can
-// reference the store-assigned id / invoice number) and BEFORE commit — the
-// invoice and its audit row share one fate. An emission error aborts the
-// create. nil emit = unaudited write (engine/cycle paths, whose canonical
-// evidence is the finalize row).
-func (s *PostgresStore) CreateAudited(
-	ctx context.Context, tenantID string, inv domain.Invoice,
-	emit func(tx *sql.Tx, out domain.Invoice) error,
-) (domain.Invoice, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	// Canonical UPPERCASE ISO-4217. This is the single chokepoint both
-	// manual (Service.Create) and cycle (engine, incl. its "usd" fallback)
-	// invoices funnel through, so the stored currency can't vary by origin.
-	// Must match the tenant default ("USD") because analytics/dunning
-	// revenue queries filter with a case-sensitive `currency = $1`.
-	inv.Currency = strings.ToUpper(inv.Currency)
-
-	id := postgres.NewID("hc_inv")
-	// Honor caller-provided CreatedAt — engine paths pass clk.Now()
-	// so test-clock-driven invoices align with their issued_at /
-	// due_at on simulation time. Zero falls back to wall-clock.
-	now := inv.CreatedAt
-	if now.IsZero() {
-		now = clock.Now(ctx)
-	}
-	metaJSON, _ := json.Marshal(inv.Metadata)
-	if inv.Metadata == nil {
-		metaJSON = []byte("{}")
-	}
-
-	taxStatus := inv.TaxStatus
-	if taxStatus == "" {
-		taxStatus = domain.InvoiceTaxOK
-	}
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO invoices (id, tenant_id, customer_id, subscription_id, invoice_number,
-			status, payment_status, currency, subtotal_cents, discount_cents, tax_amount_cents, tax_name,
-			tax_country, tax_id,
-			total_amount_cents, amount_due_cents, amount_paid_cents, credits_applied_cents,
-			billing_period_start, billing_period_end, issued_at, due_at,
-			net_payment_term_days, memo, footer, metadata, created_at, updated_at,
-			source_plan_changed_at, source_subscription_item_id, source_change_type,
-			tax_provider, tax_calculation_id, tax_reverse_charge, tax_exempt_reason,
-			tax_status, tax_deferred_at, tax_retry_count, tax_pending_reason, tax_error_code, billing_reason,
-			is_simulated, billing_timezone, auto_charge_pending)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43)
-		RETURNING `+invCols,
-		id, tenantID, inv.CustomerID, postgres.NullableString(inv.SubscriptionID), inv.InvoiceNumber,
-		inv.Status, inv.PaymentStatus, inv.Currency,
-		inv.SubtotalCents, inv.DiscountCents, inv.TaxAmountCents, inv.TaxName,
-		inv.TaxCountry, inv.TaxID,
-		inv.TotalAmountCents, inv.AmountDueCents, inv.AmountPaidCents, inv.CreditsAppliedCents,
-		inv.BillingPeriodStart, inv.BillingPeriodEnd,
-		postgres.NullableTime(inv.IssuedAt), postgres.NullableTime(inv.DueAt),
-		inv.NetPaymentTermDays, postgres.NullableString(inv.Memo),
-		postgres.NullableString(inv.Footer), metaJSON, now,
-		postgres.NullableTime(inv.SourcePlanChangedAt),
-		postgres.NullableString(inv.SourceSubscriptionItemID),
-		postgres.NullableString(string(inv.SourceChangeType)),
-		inv.TaxProvider, inv.TaxCalculationID, inv.TaxReverseCharge, inv.TaxExemptReason,
-		string(taxStatus), postgres.NullableTime(inv.TaxDeferredAt), inv.TaxRetryCount, inv.TaxPendingReason,
-		postgres.NullableString(inv.TaxErrorCode),
-		postgres.NullableString(string(inv.BillingReason)),
-		inv.IsSimulated,
-		postgres.NullableString(inv.BillingTimezone),
-		collectionQueuedAtFinalize(inv.Status, inv.PaymentStatus),
-	).Scan(s.scanInvDest(&inv)...)
-
-	if err != nil {
-		if mapped := mapInvoiceUniqueViolation(err, inv); mapped != nil {
-			return domain.Invoice{}, mapped
-		}
-		return domain.Invoice{}, err
-	}
-	if inv.Status != domain.InvoiceDraft {
-		if err := s.stampIssuedPartiesTx(ctx, tx, &inv); err != nil {
-			return domain.Invoice{}, err
-		}
-	}
-	if err := s.bornFinalizedTx(ctx, tx, tenantID, inv); err != nil {
-		return domain.Invoice{}, err
-	}
-	// Emit only after the INSERT actually landed a row (the Scan above
-	// succeeded) — never on a failed/duplicate create.
-	if emit != nil {
-		if err := emit(tx, inv); err != nil {
-			return domain.Invoice{}, fmt.Errorf("audit emission: %w", err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Invoice{}, err
-	}
-	return inv, nil
-}
-
-// ActionRequiredObsolete reports whether an action-required email for this
-// invoice is moot. Settled (payment succeeded, voided, uncollectible) or
-// ABSENT (test-clock teardown hard-deletes invoices; the email must not
-// deliver a dead link asking for payment) both count as obsolete.
-func (s *PostgresStore) ActionRequiredObsolete(ctx context.Context, tenantID, invoiceNumber string) (bool, error) {
-	state, err := s.InvoiceTerminalState(ctx, tenantID, invoiceNumber)
-	if err != nil {
-		return false, err
-	}
-	return state != "", nil
 }
 
 // InvoiceTerminalState reports the terminal state an action-required
@@ -501,22 +384,6 @@ func (s *PostgresStore) GetByProrationSource(ctx context.Context, tenantID, subs
 	return inv, err
 }
 
-func (s *PostgresStore) GetByNumber(ctx context.Context, tenantID, number string) (domain.Invoice, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	var inv domain.Invoice
-	err = tx.QueryRowContext(ctx, `SELECT `+invCols+` FROM invoices WHERE invoice_number = $1`, number).
-		Scan(s.scanInvDest(&inv)...)
-	if err == sql.ErrNoRows {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	return inv, err
-}
-
 func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.Invoice, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, filter.TenantID)
 	if err != nil {
@@ -578,35 +445,21 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.I
 	return invoices, total, rows.Err()
 }
 
-// UpdateStatus flips the invoice's status in its own transaction, with the
-// event of the move (UpdateStatusWithReversalPriorTx).
-func (s *PostgresStore) UpdateStatus(ctx context.Context, tenantID, id string, status domain.InvoiceStatus) (domain.Invoice, error) {
-	return s.UpdateStatusWithReversalPrior(ctx, tenantID, id, status, nil)
-}
-
-// UpdateStatusWithReversal flips the invoice status AND runs a caller-supplied
-// in-tx side effect (the consumed-credit reversal on void) in ONE transaction.
-// Either both commit or neither does: a reversal failure rolls the status flip
-// back, so the invoice never lands voided-but-credits-still-consumed (which
-// would silently strip the customer of credits they paid the invoice with).
-// reverseFn receives the same *sql.Tx and must do all its writes on it.
-// Mirrors subscription.CreateWithBill — the store owns the tx, the cross-domain
-// effect is a callback so no peer-package import leaks in.
-func (s *PostgresStore) UpdateStatusWithReversal(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, reverseFn func(tx *sql.Tx) error) (domain.Invoice, error) {
-	var fn func(tx *sql.Tx, locked domain.Invoice) error
-	if reverseFn != nil {
-		fn = func(tx *sql.Tx, _ domain.Invoice) error { return reverseFn(tx) }
-	}
-	return s.UpdateStatusWithReversalPrior(ctx, tenantID, id, status, fn)
-}
-
-// UpdateStatusWithReversalPrior is UpdateStatusWithReversal handing the
-// closure the invoice as it is UNDER THE ROW LOCK, read FOR UPDATE on this
-// same tx before the flip. The service's earlier snapshot races concurrent
-// transitions: an audit row stamping status_before from it could permanently
-// record the wrong provenance (ADR-090 PR4 review), and a refusal decided on
-// it misses a charge that started after the read (#975). A closure error
-// rolls the flip back.
+// UpdateStatusWithReversalPrior flips the invoice status AND runs a
+// caller-supplied in-tx side effect (the consumed-credit reversal on void) in
+// ONE transaction. Either both commit or neither does: a reversal failure rolls
+// the status flip back, so the invoice never lands
+// voided-but-credits-still-consumed (which would silently strip the customer
+// of credits they paid the invoice with). fn receives the same *sql.Tx and
+// must do all its writes on it. The store owns the tx, and the cross-domain
+// effect is a callback, so no peer-package import leaks in.
+//
+// fn also gets the invoice as it is UNDER THE ROW LOCK, read FOR UPDATE on
+// this same tx before the flip. The service's earlier snapshot races
+// concurrent transitions: an audit row stamping status_before from it could
+// permanently record the wrong provenance (ADR-090 PR4 review), and a refusal
+// decided on it misses a charge that started after the read (#975). A closure
+// error rolls the flip back.
 func (s *PostgresStore) UpdateStatusWithReversalPrior(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, fn func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -660,8 +513,8 @@ func (s *PostgresStore) UpdateStatusWithReversalPriorTx(ctx context.Context, tx 
 }
 
 // updateStatusInTx is the shared body: the status flip without owning the tx.
-// UpdateStatus opens+commits its own; UpdateStatusWithReversal threads the
-// credit reversal through the same one.
+// UpdateStatusWithReversalPriorTx runs it on the caller's tx, between the row
+// lock and the closure's writes; FinalizeDraft runs it on the tx it opens.
 //
 // The UPDATE carries an in-SQL allowed-source CAS (ADR-078 D5). The service
 // guards (Void's paid/in-flight checks, Finalize's draft check,
@@ -765,8 +618,8 @@ func (s *PostgresStore) updateStatusInTx(ctx context.Context, tx *sql.Tx, id str
 // Commit funding (ADR-078 D2): when the invoice carries a commit line, the
 // injected commitFunder grants the credit block IN THIS TX — the status flip
 // and the grant commit or roll back together. The commit line is read in-tx,
-// AFTER the flip (the row UPDATE serializes against AddLineItemAtomic's FOR
-// UPDATE, so a line added concurrently with finalize is either seen here or
+// AFTER the flip (the row UPDATE serializes against AddLineItemAtomicAudited's
+// FOR UPDATE, so a line added concurrently with finalize is either seen here or
 // rejected by its own draft re-check). A funder error fails finalize by
 // design: operator-synchronous, loud, retryable — never weaken to
 // post-commit.
@@ -784,7 +637,7 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 	// The lines must be the ones Finalize read before computing tax. A line
 	// added after the tax write would otherwise be finalized with no tax, and
 	// a commit line's credit granted below without its charge being taxed
-	// (#1298). AddLineItemAtomic takes this row lock too, so a line either
+	// (#1298). AddLineItemAtomicAudited takes this row lock too, so a line either
 	// lands first and is seen here, or finds the invoice finalized.
 	var locked string
 	err = tx.QueryRowContext(ctx, `SELECT status FROM invoices WHERE id = $1 FOR UPDATE`, id).Scan(&locked)
@@ -1684,23 +1537,6 @@ func (s *PostgresStore) SetPaymentCard(ctx context.Context, tenantID, id, brand,
 	return tx.Commit()
 }
 
-func (s *PostgresStore) ApplyCreditNote(ctx context.Context, tenantID, id string, amountCents int64) (domain.Invoice, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	inv, err := s.ApplyCreditNoteTx(ctx, tx, tenantID, id, amountCents, 0)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Invoice{}, err
-	}
-	return inv, nil
-}
-
 // LockForCreditNoteTx locks the invoice row on the caller's coordinator tx and
 // returns it as it is under the lock. Credit-note Issue() takes it before
 // anything else and decides from this row, because the amount still due and the
@@ -1889,7 +1725,7 @@ func (s *PostgresStore) SettleZeroDue(ctx context.Context, tenantID, id string, 
 // money columns (totals not recomputed from line items; credits bumped
 // without a ledger entry), bypassing every in-tx recompute guard the live
 // paths use. Re-adding an unguarded totals/credits writer re-opens the
-// drift class — write through AddLineItemAtomic / credit.ApplyToInvoiceAtomic.
+// drift class — write through AddLineItemAtomicAudited / credit.ApplyToInvoiceAtomic.
 
 // nominalRateArg returns the driver value for the nullable
 // nominal_unit_amount_decimal column: the decimal (via its Valuer) when set,
@@ -1922,56 +1758,6 @@ func scanNominalRate(n decimal.NullDecimal) *decimal.Decimal {
 	}
 	d := n.Decimal
 	return &d
-}
-
-func (s *PostgresStore) CreateLineItem(ctx context.Context, tenantID string, item domain.InvoiceLineItem) (domain.InvoiceLineItem, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.InvoiceLineItem{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	id := postgres.NewID("hc_ili")
-	now := clock.Now(ctx)
-	metaJSON, _ := json.Marshal(item.Metadata)
-	if item.Metadata == nil {
-		metaJSON = []byte("{}")
-	}
-
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO invoice_line_items (id, invoice_id, tenant_id, line_type, meter_id,
-			description, quantity, unit_amount_cents, amount_cents, tax_rate, tax_amount_cents,
-			total_amount_cents, currency, pricing_mode, price_id,
-			billing_period_start, billing_period_end, metadata, created_at,
-			tax_jurisdiction, tax_code, tax_reason, quantity_decimal, nominal_unit_amount_decimal, meter_unit, dimension_match)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
-		RETURNING id, invoice_id, tenant_id, line_type, COALESCE(meter_id,''), description,
-			quantity, unit_amount_cents, amount_cents, tax_rate, tax_amount_cents,
-			total_amount_cents, currency, COALESCE(pricing_mode,''),
-			COALESCE(price_id,''), billing_period_start, billing_period_end,
-			metadata, created_at, tax_jurisdiction, tax_code, tax_reason, quantity_decimal
-	`, id, item.InvoiceID, tenantID, item.LineType, postgres.NullableString(item.MeterID),
-		item.Description, item.Quantity, item.UnitAmountCents, item.AmountCents,
-		item.TaxRate, item.TaxAmountCents, item.TotalAmountCents, item.Currency,
-		postgres.NullableString(item.PricingMode), postgres.NullableString(item.PriceID),
-		postgres.NullableTime(item.BillingPeriodStart), postgres.NullableTime(item.BillingPeriodEnd),
-		metaJSON, now, item.TaxJurisdiction, item.TaxCode, item.TaxabilityReason, item.QuantityDecimal,
-		nominalRateArg(item.NominalUnitAmountDecimal), postgres.NullableString(item.MeterUnit), matchArg(item.DimensionMatch),
-	).Scan(&item.ID, &item.InvoiceID, &item.TenantID, &item.LineType, &item.MeterID,
-		&item.Description, &item.Quantity, &item.UnitAmountCents, &item.AmountCents,
-		&item.TaxRate, &item.TaxAmountCents, &item.TotalAmountCents, &item.Currency,
-		&item.PricingMode, &item.PriceID,
-		&item.BillingPeriodStart, &item.BillingPeriodEnd, &metaJSON, &item.CreatedAt,
-		&item.TaxJurisdiction, &item.TaxCode, &item.TaxabilityReason, &item.QuantityDecimal)
-
-	if err != nil {
-		return domain.InvoiceLineItem{}, err
-	}
-	_ = json.Unmarshal(metaJSON, &item.Metadata)
-	if err := tx.Commit(); err != nil {
-		return domain.InvoiceLineItem{}, err
-	}
-	return item, nil
 }
 
 func (s *PostgresStore) ListLineItems(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceLineItem, error) {
@@ -2071,24 +1857,18 @@ func (s *PostgresStore) GetOutstandingBalance(ctx context.Context, tenantID, cus
 	return out, nil
 }
 
-// AddLineItemAtomic inserts a line item and recomputes invoice totals in a
-// single transaction, locking the invoice row FOR UPDATE so concurrent
+// AddLineItemAtomicAudited inserts a line item and recomputes invoice totals
+// in a single transaction, locking the invoice row FOR UPDATE so concurrent
 // AddLineItem calls serialize on that row and subtotal reflects every
-// committed line item. Fails if the invoice isn't in draft status, or if billing
-// made it for a subscription (invoice_not_manual).
-func (s *PostgresStore) AddLineItemAtomic(
-	ctx context.Context, tenantID, invoiceID string, item domain.InvoiceLineItem,
-) (domain.InvoiceLineItem, domain.Invoice, error) {
-	return s.AddLineItemAtomicAudited(ctx, tenantID, invoiceID, item, nil)
-}
-
-// AddLineItemAtomicAudited is AddLineItemAtomic with an in-tx audit emission
-// (ADR-090): emit runs on the SAME transaction, after the line INSERT and the
-// totals recompute have both landed and BEFORE commit. It receives the
-// persisted line AND the rewritten invoice (for the invoice number the audit
-// row is labelled with — read inside the tx, not from a pre-tx snapshot). An
-// emission error rolls the line item and the totals back together. nil emit =
-// unaudited write.
+// committed line item. Fails if the invoice isn't in draft status, or if
+// billing made it for a subscription (invoice_not_manual).
+//
+// emit is the in-tx audit emission (ADR-090): it runs on the SAME
+// transaction, after the line INSERT and the totals recompute have both
+// landed and BEFORE commit. It receives the persisted line AND the rewritten
+// invoice (for the invoice number the audit row is labelled with — read
+// inside the tx, not from a pre-tx snapshot). An emission error rolls the
+// line item and the totals back together. nil emit = unaudited write.
 func (s *PostgresStore) AddLineItemAtomicAudited(
 	ctx context.Context, tenantID, invoiceID string, item domain.InvoiceLineItem,
 	emit func(tx *sql.Tx, item domain.InvoiceLineItem, inv domain.Invoice) error,
@@ -2284,6 +2064,14 @@ func errLinesChanged() error {
 		WithCode("invoice_lines_changed")
 }
 
+// UpdateTaxAtomic re-stamps an invoice's tax decision, at finalize or on a
+// retry. It locks the invoice row and refuses unless the invoice is a draft,
+// rewrites the per-line tax stamps and the invoice-level tax columns, counts
+// the attempt in tax_retry_count (not the initial one), and recomputes total
+// + amount_due. Returns errs.InvalidState when the invoice is not a draft
+// (caller surfaces 409), invoice_lines_changed when a line was added after
+// the computation read the invoice, and errs.ErrNotFound when the invoice
+// doesn't exist (caller surfaces 404).
 func (s *PostgresStore) UpdateTaxAtomic(
 	ctx context.Context, tenantID, invoiceID string,
 	update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem,
@@ -2295,15 +2083,14 @@ func (s *PostgresStore) UpdateTaxAtomic(
 	defer postgres.Rollback(tx)
 
 	var (
-		status    domain.InvoiceStatus
-		taxStatus string
-		subtotal  int64
-		discount  int64
+		status   domain.InvoiceStatus
+		subtotal int64
+		discount int64
 	)
 	err = tx.QueryRowContext(ctx,
-		`SELECT status, tax_status, subtotal_cents, discount_cents FROM invoices WHERE id = $1 FOR UPDATE`,
+		`SELECT status, subtotal_cents, discount_cents FROM invoices WHERE id = $1 FOR UPDATE`,
 		invoiceID,
-	).Scan(&status, &taxStatus, &subtotal, &discount)
+	).Scan(&status, &subtotal, &discount)
 	if err == sql.ErrNoRows {
 		return domain.Invoice{}, errs.ErrNotFound
 	}
@@ -2322,7 +2109,6 @@ func (s *PostgresStore) UpdateTaxAtomic(
 		return domain.Invoice{}, errs.InvalidState(fmt.Sprintf(
 			"invoice tax is only mutable on draft invoices (current: %s)", status))
 	}
-	_ = taxStatus // selected for the FOR UPDATE lock; no longer gated here
 
 	// The computation read the header and the lines before calling the tax
 	// provider. A line added since then changed both, and this write would
@@ -2431,10 +2217,10 @@ func (s *PostgresStore) CreateWithLineItems(ctx context.Context, tenantID string
 // CreateWithLineItemsAudited is CreateWithLineItems with an in-tx audit
 // emission (ADR-090): emit runs on the SAME transaction as the header + line
 // INSERTs, after they all land and BEFORE commit, so an emission error rolls
-// the whole composed invoice back. The two manual-create shapes (bare header
-// vs create-with-lines) therefore audit identically — a draft created either
-// way leaves exactly one 'create' row. nil emit = unaudited write (engine
-// cycle/threshold invoices).
+// the whole composed invoice back. Both manual-create shapes (a bare header,
+// with no items, and create-with-lines) come through here, so a draft created
+// either way leaves exactly one 'create' row. nil emit = unaudited write
+// (engine cycle/threshold invoices).
 func (s *PostgresStore) CreateWithLineItemsAudited(
 	ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem,
 	emit func(tx *sql.Tx, out domain.Invoice) error,
@@ -2477,10 +2263,10 @@ func (s *PostgresStore) CreateWithLineItemsTx(ctx context.Context, tx *sql.Tx, t
 // finalized (bornFinalizedTx).
 func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
 	id := postgres.NewID("hc_inv")
-	// Canonical UPPERCASE ISO-4217 (see Create) — normalize the header and
-	// every line so origin (manual vs cycle) can't change the casing and
-	// the stored value matches the tenant default the analytics/dunning
-	// revenue queries filter on case-sensitively.
+	// Canonical UPPERCASE ISO-4217 — normalize the header and every line so
+	// origin (manual vs cycle) can't change the casing and the stored value
+	// matches the tenant default ("USD") the analytics/dunning revenue
+	// queries filter on case-sensitively.
 	inv.Currency = strings.ToUpper(inv.Currency)
 	for i := range items {
 		items[i].Currency = strings.ToUpper(items[i].Currency)
@@ -2491,10 +2277,6 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 	now := inv.CreatedAt
 	if now.IsZero() {
 		now = clock.Now(ctx)
-	}
-	metaJSON, _ := json.Marshal(inv.Metadata)
-	if inv.Metadata == nil {
-		metaJSON = []byte("{}")
 	}
 
 	taxStatus := inv.TaxStatus
@@ -2516,6 +2298,8 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 	// Store the token as an encrypted blob (reversible, for re-send URLs) + a
 	// SHA-256 blind index (for lookup). Never store the raw token.
 	encToken, tokenHash := s.encodeToken(publicToken)
+	// metadata is written as '{}': nothing sets Invoice.Metadata, and no
+	// read returns the column.
 	err := tx.QueryRowContext(ctx, `
 		INSERT INTO invoices (id, tenant_id, customer_id, subscription_id, invoice_number,
 			status, payment_status, currency, subtotal_cents, discount_cents, tax_amount_cents,
@@ -2528,7 +2312,7 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 			tax_status, tax_deferred_at, tax_retry_count, tax_pending_reason, tax_error_code, billing_reason,
 			public_token_encrypted, public_token_hash, paid_at, voided_at, is_simulated,
 			billing_timezone, auto_charge_pending)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,'{}',$27,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47)
 		RETURNING `+invCols,
 		id, tenantID, inv.CustomerID, postgres.NullableString(inv.SubscriptionID), inv.InvoiceNumber,
 		inv.Status, inv.PaymentStatus, inv.Currency,
@@ -2539,7 +2323,7 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 		inv.BillingPeriodStart, inv.BillingPeriodEnd,
 		postgres.NullableTime(inv.IssuedAt), postgres.NullableTime(inv.DueAt),
 		inv.NetPaymentTermDays, postgres.NullableString(inv.Memo),
-		postgres.NullableString(inv.Footer), metaJSON, now,
+		postgres.NullableString(inv.Footer), now,
 		postgres.NullableTime(inv.SourcePlanChangedAt),
 		postgres.NullableString(inv.SourceSubscriptionItemID),
 		postgres.NullableString(string(inv.SourceChangeType)),
@@ -2571,7 +2355,7 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 	// Invoice-level commit rules (ADR-078): commit lines live only on
 	// manual invoices, at most one per invoice. Enforced here so the
 	// composer's atomic create-with-lines path carries the same rules as
-	// AddLineItemAtomic (buildLineItem validates only line-local rules).
+	// AddLineItemAtomicAudited (buildLineItem validates only line-local rules).
 	commitLines := 0
 	for i := range items {
 		if items[i].IsCommitLine() {
@@ -3502,11 +3286,6 @@ func (s *PostgresStore) ListAutoChargePendingForClock(ctx context.Context, tenan
 	return invoices, rows.Err()
 }
 
-// MarkPaidBatch atomically marks an invoice as paid (used by MarkPaid — kept for interface compat).
-func (s *PostgresStore) MarkPaidBatch(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error) {
-	return s.MarkPaid(ctx, tenantID, id, stripePaymentIntentID, paidAt)
-}
-
 // ListUnknownPayments returns invoices whose payment_status is 'unknown' and
 // whose last update is older than `olderThan` — the reconciler's cooling
 // window before querying Stripe for the authoritative outcome.
@@ -4026,8 +3805,8 @@ func (s *PostgresStore) scanInvoiceRows(rows *sql.Rows, queryErr error) ([]domai
 // stampIssuedPartiesTx copies what the invoice prints about its buyer and
 // its seller onto the row, on the transaction that takes it out of draft
 // (ADR-109). Every SQL statement that issues an invoice calls it before
-// commit: createWithLineItemsInTx and CreateAudited for invoices born issued,
-// updateStatusInTx and FinalizeWithDates for drafts being finalized. So the
+// commit: createWithLineItemsInTx for invoices born issued, updateStatusInTx
+// and FinalizeWithDates for drafts being finalized. So the
 // copy and the status change commit together or not at all.
 //
 // The buyer tax ID is the invoice's own tax_id when set (the ID tax was
@@ -4093,7 +3872,6 @@ func (s *PostgresStore) openBillTo(b domain.DocumentBillTo) (domain.DocumentBill
 }
 
 func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
-	var metaJSON []byte
 	return []any{
 		&inv.ID, &inv.TenantID, &inv.CustomerID, &inv.SubscriptionID, &inv.InvoiceNumber,
 		&inv.Status, &inv.PaymentStatus, &inv.Currency,
@@ -4104,7 +3882,7 @@ func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
 		&inv.IssuedAt, &inv.DueAt, &inv.PaidAt, &inv.VoidedAt, &inv.UncollectibleAt,
 		&inv.StripePaymentIntentID, &inv.LastPaymentError,
 		&inv.AutoChargePending, &inv.NetPaymentTermDays, &inv.Memo, &inv.Footer,
-		&metaJSON, &inv.CreatedAt, &inv.UpdatedAt, &inv.SourcePlanChangedAt,
+		&inv.CreatedAt, &inv.UpdatedAt, &inv.SourcePlanChangedAt,
 		&inv.SourceSubscriptionItemID, (*string)(&inv.SourceChangeType),
 		&inv.TaxProvider, &inv.TaxCalculationID, &inv.TaxTransactionID,
 		&inv.TaxReverseCharge, &inv.TaxExemptReason,
@@ -4264,6 +4042,11 @@ const baseFundsPeriod = `i.status <> 'voided'`
 // 2026-10-23). ORDER BY created_at DESC + LIMIT 1 surfaces the
 // most-recent matching invoice (relevant for plan-swap chains within
 // the same period that re-issued the base line).
+//
+// For in_advance plans, the cycle-close invoice from the prior period (or
+// BillOnCreate's day-1 invoice for new subs) carries the base line whose
+// billing_period_start matches the period's start. For in_arrears plans no
+// such line exists. Returns errs.ErrNotFound when no matching invoice exists.
 func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error) {
 	if subscriptionID == "" {
 		return domain.Invoice{}, errs.ErrNotFound

@@ -55,7 +55,6 @@ func usageBilled(invs []lagInvoice) int64 {
 // the scan admits April at B+30m, the engine declines it inside its grace,
 // and the run answers 206 with the subscription saved as failing.
 func TestInvoiceGrace_LateUsageInsideTheGraceIsBilled(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	r.ingest(lagP0.AddDate(0, 0, 19), 100)
 	r.ingestAt(lagB.Add(-10*time.Minute), lagB.Add(30*time.Minute), 40)
@@ -92,7 +91,6 @@ func TestInvoiceGrace_LateUsageInsideTheGraceIsBilled(t *testing.T) {
 // INVOICE_GRACE_PERIOD=0 the run a minute after B closes April, and the event
 // arriving at B+30m misses it.
 func TestInvoiceGrace_ZeroKeepsTheOldTiming(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(0))
 	r.ingest(lagP0.AddDate(0, 0, 19), 100)
 	if n := r.run(lagB.Add(time.Minute)); n != 1 {
@@ -116,7 +114,6 @@ func TestInvoiceGrace_ZeroKeepsTheOldTiming(t *testing.T) {
 // GetDueBillingForTenant only → the run at C+30m admits the subscription, the
 // engine declines it, and the drain saves errStillDue as a failure.
 func TestInvoiceGrace_MidPeriodCancelAtWaitsTheGrace(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	// A cancel_at must lie past the period in progress (April), so May's
 	// middle is the earliest mid-period instant.
@@ -158,7 +155,6 @@ func TestInvoiceGrace_MidPeriodCancelAtWaitsTheGrace(t *testing.T) {
 // Mutation check: make Cancel's pre-close honour the grace → the cancel is
 // refused with 409 unbilled_period.
 func TestInvoiceGrace_ImmediateCancelClosesTheEndedPeriodNow(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	r.ingest(lagP0.AddDate(0, 0, 19), 100)
 
@@ -175,7 +171,6 @@ func TestInvoiceGrace_ImmediateCancelClosesTheEndedPeriodNow(t *testing.T) {
 // subscription write inside the grace closes the ended period first (#1038)
 // and does not wait for the grace.
 func TestInvoiceGrace_SubscriptionWriteClosesTheEndedPeriodNow(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	r.ingest(lagP0.AddDate(0, 0, 19), 100)
 
@@ -194,7 +189,6 @@ func TestInvoiceGrace_SubscriptionWriteClosesTheEndedPeriodNow(t *testing.T) {
 // invalid), and the failure is saved. Once the cause is fixed,
 // retry-billing closes April at once, still inside the grace.
 func TestInvoiceGrace_RetryBillingDoesNotWait(t *testing.T) {
-	skipShort(t)
 	// in_advance: the close that fails on negative net terms is the one the
 	// close-lag suite already uses (TestCloseLag_ItemWritesWhileBillingFails_Refused).
 	r := newLagRigWith(t, "in_advance", false, WithInvoiceGrace(e2eGrace))
@@ -221,7 +215,6 @@ func TestInvoiceGrace_RetryBillingDoesNotWait(t *testing.T) {
 // inside May's grace bills April at once and leaves May for a run after its
 // grace.
 func TestInvoiceGrace_CatchUpOverHTTP(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	if n := r.run(lagP2.Add(30 * time.Minute)); n != 1 {
 		t.Fatalf("run at Jun 1 + 30m generated %d invoices, want April's only", n)
@@ -268,12 +261,12 @@ func (r *lagRig) exhaustedDunning(subAction domain.DunningSubscriptionAction, in
 	}
 	d.pol = pol
 	issued := lagP0.AddDate(0, 0, 11)
-	inv, err := invoice.NewPostgresStore(r.db).Create(ctx, r.tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(r.db).CreateWithLineItems(ctx, r.tenantID, domain.Invoice{
 		CustomerID: r.custID, SubscriptionID: r.subID, InvoiceNumber: "GRACE-1", BillingReason: domain.BillingReasonManual,
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
 		SubtotalCents: 500, TotalAmountCents: 500, AmountDueCents: 500,
 		BillingPeriodStart: lagP0.AddDate(0, 0, 10), BillingPeriodEnd: issued, IssuedAt: &issued,
-	})
+	}, nil)
 	if err != nil {
 		r.t.Fatalf("create invoice: %v", err)
 	}
@@ -379,7 +372,6 @@ func (d *graceDunning) escalated() {
 // (April usage 100); send the wait down the action_failed path → the run is
 // due a day later.
 func TestInvoiceGrace_DunningPauseWaitsForTheGrace(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	r.ingest(lagP0.AddDate(0, 0, 19), 100)
 	d := r.exhaustedDunning(domain.SubActionPause, domain.InvActionMarkUncollectible, lagB)
@@ -389,7 +381,7 @@ func TestInvoiceGrace_DunningPauseWaitsForTheGrace(t *testing.T) {
 		t.Fatalf("at B+5m: period start=%v pause=%+v failure=%+v, want April open, no pause, no failure", s.CurrentBillingPeriodStart, s.PauseCollection, s.BillingFailure)
 	}
 	d.waiting("at B+5m", lagB.Add(e2eGrace))
-	if inv := r.invoiceStatus(d.invID); inv != string(domain.InvoiceFinalized) {
+	if inv := flowStr(r.invoice(d.invID), "status"); inv != string(domain.InvoiceFinalized) {
 		t.Fatalf("at B+5m the invoice is %s, want finalized: the write-off waits with the pause", inv)
 	}
 
@@ -406,7 +398,7 @@ func TestInvoiceGrace_DunningPauseWaitsForTheGrace(t *testing.T) {
 		t.Fatalf("after the grace: period start=%v, want May", s.CurrentBillingPeriodStart)
 	}
 	d.escalated()
-	if inv := r.invoiceStatus(d.invID); inv != string(domain.InvoiceUncollectible) {
+	if inv := flowStr(r.invoice(d.invID), "status"); inv != string(domain.InvoiceUncollectible) {
 		t.Errorf("after the grace the invoice is %s, want uncollectible", inv)
 	}
 	if got := r.cycleInvoice(r.invoices(), lagP0).sum("usage"); got != 140 {
@@ -420,7 +412,6 @@ func TestInvoiceGrace_DunningPauseWaitsForTheGrace(t *testing.T) {
 // after it, with April's invoice carrying the usage that arrived inside the
 // grace.
 func TestInvoiceGrace_DunningCancelWaitsForTheGrace(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	r.ingest(lagP0.AddDate(0, 0, 19), 100)
 	d := r.exhaustedDunning(domain.SubActionCancel, domain.InvActionNone, lagB)
@@ -451,7 +442,6 @@ func TestInvoiceGrace_DunningCancelWaitsForTheGrace(t *testing.T) {
 // Mutation checks: bill with grace 0 in Engine.BillDue, or have
 // closeEndedPeriods pass 0 to it → May is closed at 00:05 too.
 func TestInvoiceGrace_DunningCatchUpClosesTheOlderPeriodAndWaits(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	r.ingest(lagP0.AddDate(0, 0, 19), 100)
 	r.ingest(lagB.AddDate(0, 0, 9), 30)
@@ -477,13 +467,4 @@ func TestInvoiceGrace_DunningCatchUpClosesTheOlderPeriodAndWaits(t *testing.T) {
 		r.logInvoices(r.invoices())
 		t.Errorf("May usage = %dc, want 70c: the 40 calls that arrived inside May's grace belong on May's invoice", got)
 	}
-}
-
-// invoiceStatus is the invoice's status as GET /v1/invoices/{id} returns it.
-func (r *lagRig) invoiceStatus(id string) string {
-	r.t.Helper()
-	out := r.must(http.MethodGet, "/v1/invoices/"+id, r.clk.Now(context.Background()), nil, http.StatusOK)
-	inv, _ := out["invoice"].(map[string]any)
-	s, _ := inv["status"].(string)
-	return s
 }

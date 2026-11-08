@@ -42,7 +42,7 @@ func TestInvoice_Timestamps_SerializeAsCanonicalUTC(t *testing.T) {
 
 	start := time.Date(2026, 5, 1, 18, 30, 0, 0, time.UTC)
 	end := time.Date(2026, 5, 31, 18, 30, 0, 0, time.UTC)
-	created, err := invStore.Create(ctx, tenantID, domain.Invoice{
+	created, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID:         cust.ID,
 		InvoiceNumber:      "HC-UTC-1",
 		Status:             domain.InvoiceDraft,
@@ -50,7 +50,7 @@ func TestInvoice_Timestamps_SerializeAsCanonicalUTC(t *testing.T) {
 		Currency:           "USD",
 		BillingPeriodStart: start,
 		BillingPeriodEnd:   end,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

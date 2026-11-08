@@ -61,9 +61,6 @@ func (f *boundaryStripe) ListPaymentIntentsForCustomer(context.Context, string, 
 //     later offers a card refund for money that came by bank transfer. A
 //     success for that charge is a second payment, flagged as one.
 func TestOfflinePayment_RacedWithCardChargeAtTheStripeCall(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test — requires postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	invStore := invoice.NewPostgresStore(db)

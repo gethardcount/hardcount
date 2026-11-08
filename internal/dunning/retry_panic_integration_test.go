@@ -57,12 +57,12 @@ func addDueRun(t *testing.T, f *exhaustFixture, number string, next time.Time) (
 	if err != nil {
 		t.Fatalf("read run: %v", err)
 	}
-	inv, err := f.invoices.Create(f.ctx, f.tenantID, domain.Invoice{
+	inv, err := f.invoices.CreateWithLineItems(f.ctx, f.tenantID, domain.Invoice{
 		CustomerID: x.CustomerID, InvoiceNumber: number,
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
 		SubtotalCents: 1500, TotalAmountCents: 1500, AmountDueCents: 1500,
 		BillingPeriodStart: x.BillingPeriodStart, BillingPeriodEnd: x.BillingPeriodEnd, IssuedAt: x.IssuedAt,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
