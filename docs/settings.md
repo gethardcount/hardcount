@@ -39,7 +39,7 @@ Hardcount uses two database users. The admin user runs migrations; the limited u
 
 Every whole-number setting above stops start-up when its value is not a whole number, such as `5s`.
 
-Hardcount reads `DATABASE_URL` and `APP_DATABASE_URL` the way `psql` does. In the user name and password, percent-encode each special character, such as `@` as `%40` and `/` as `%2F`. An unencoded `@` in the password stops start-up with a connection error. `DB_PASSWORD` needs no encoding: Hardcount encodes it.
+Hardcount reads `DATABASE_URL` and `APP_DATABASE_URL` the way `psql` does. In the user name and password, percent-encode each special character, such as `@` as `%40` and `/` as `%2F`. When the user name or password holds an unencoded `@`, Hardcount refuses to start, and the error names the setting. When a parameter such as `sslmode` appears twice, the last value counts. `DB_PASSWORD` needs no encoding: Hardcount encodes it.
 
 ## Server and network
 
