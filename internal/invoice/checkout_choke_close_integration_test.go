@@ -60,9 +60,6 @@ func claimStatus(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, c
 // any of the three close statements and its subtest fails with status
 // 'open' (the pre-fix "stored open session for a settled invoice" race).
 func TestChokePointCloses(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	now := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)

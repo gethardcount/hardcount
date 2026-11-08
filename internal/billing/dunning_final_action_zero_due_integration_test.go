@@ -132,9 +132,6 @@ type zeroDueFinalActionRig struct {
 // one retry, then cancel and write off. Events go to the real outboxes.
 func newZeroDueFinalActionRig(t *testing.T, name string) *zeroDueFinalActionRig {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleDunning)
 	r := &zeroDueFinalActionRig{t: t, ctx: ctx, db: db, tenantID: testutil.CreateTestTenant(t, db, name)}

@@ -25,7 +25,6 @@ import (
 // Mutation check: draw the threshold flag only past the subscription's
 // start instant → the 09:00 event carries no status.
 func TestBillingStatus_FirstDayBeforeTheStartBeforeAPaidThreshold(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.newSub("mid-day", r.planA, dayAt(11, 0), nil)
 	if s := r.sub(); !s.CurrentBillingPeriodStart.Equal(uwDay) {
@@ -71,7 +70,6 @@ func TestBillingStatus_FirstDayBeforeTheStartBeforeAPaidThreshold(t *testing.T) 
 // Mutation check: take the floor from the start instant, not the first
 // billed instant → the late event is outside_subscription.
 func TestBillingStatus_FirstDayBeforeTheStartInTheInvoicedFirstPeriod(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.newSub("mid-day", r.planA, dayAt(11, 0), nil)
 	out := r.postLabelled("calls", "early-0900", dayAt(9, 0), dayAt(12, 0), 5, nil)
@@ -100,7 +98,6 @@ func TestBillingStatus_FirstDayBeforeTheStartInTheInvoicedFirstPeriod(t *testing
 // Mutation check: classify an event after the period end by the current
 // period's plans → the model b event is no_price, and then billed.
 func TestBillingStatus_LaterPeriodWhileTheCloseIsBehind(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	tokens := r.newMeter("tokens", "sum")
 	plan := r.planPricing("plan_behind",

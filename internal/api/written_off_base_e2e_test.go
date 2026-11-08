@@ -50,7 +50,6 @@ func (r *lagRig) invoiceMoney(invID string, at time.Time) (status string, due, p
 // refused; over a written-off base it must be refused the same way. Over a
 // paid base it goes ahead and writes the 1500c proration invoice.
 func TestE2E_WrittenOffBase_UpgradeIsRefusedAsUnpaid(t *testing.T) {
-	skipShort(t)
 	upgrade := func(r *lagRig) (int, []byte) {
 		return r.do(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, reliefCancelAt,
 			map[string]any{"new_plan_id": r.planB, "immediate": true})
@@ -125,7 +124,6 @@ func TestE2E_WrittenOffBase_UpgradeIsRefusedAsUnpaid(t *testing.T) {
 // Mutation seam: in handleItemProration, block on a base with nothing due
 // again (drop the amount-due term) → the written-off arm is red.
 func TestE2E_WrittenOffBase_NothingDue_UpgradeGoesAhead(t *testing.T) {
-	skipShort(t)
 	upgradeAt := reliefCancelAt.Add(24 * time.Hour) // Apr 17: 14 of 30 days left
 	for _, tc := range []struct {
 		name       string
@@ -176,7 +174,6 @@ func TestE2E_WrittenOffBase_NothingDue_UpgradeGoesAhead(t *testing.T) {
 // A cancel on Apr 1, with none of the period used, voids an unpaid base; a
 // written-off base is voided the same way, so nothing is left to pay.
 func TestE2E_WrittenOffBase_CancelThenLatePayment(t *testing.T) {
-	skipShort(t)
 	payAt := reliefCancelAt.Add(24 * time.Hour)
 
 	for _, tc := range []struct {
@@ -252,7 +249,6 @@ func TestE2E_WrittenOffBase_CancelThenLatePayment(t *testing.T) {
 // unused time (1000c x 15/30). On an unpaid invoice that is a 500c adjustment
 // that leaves 3500c due; a written-off invoice must get the same.
 func TestE2E_WrittenOffBase_RemovedItemLowersWhatIsDue(t *testing.T) {
-	skipShort(t)
 	for _, tc := range []struct {
 		name       string
 		writeOff   bool
@@ -298,7 +294,6 @@ func TestE2E_WrittenOffBase_RemovedItemLowersWhatIsDue(t *testing.T) {
 // never applies: 1000c or 500c stays due, balance 0); hand back every applied
 // credit on the void, ignoring what the note returned (balance 5000c).
 func TestE2E_WrittenOffBase_CreditsApplied_CancelThenVoid(t *testing.T) {
-	skipShort(t)
 	for _, tc := range []struct {
 		name       string
 		writeOff   bool

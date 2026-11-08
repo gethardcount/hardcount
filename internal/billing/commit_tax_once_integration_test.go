@@ -145,9 +145,6 @@ func TestCommitTax_PurchaseUntaxed_UsageTaxedOnce_E2E(t *testing.T) {
 // reverse that tax. The fixture writes the old invoice's tax directly, since
 // no current path produces a taxed commit line.
 func TestCommitRelief_TaxedPurchase_StillReversesItsTax(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Commit Taxed Before")

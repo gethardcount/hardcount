@@ -404,9 +404,6 @@ func TestClaimChargeForDunningRetry_StatusMatrix(t *testing.T) {
 // auto_charge_claimed_until lease, so holding it excludes every other
 // initiator; 'unknown' is rejected (reconciler-owned); release frees it.
 func TestClaimChargeForManualCollect_SharedLeaseAndPredicate(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Manual Collect Claim")
