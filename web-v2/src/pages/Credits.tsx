@@ -8,7 +8,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
-import { api, formatCents, formatCentsBare, formatDate, formatDateTime, getActiveCurrency, getCurrencySymbol } from '@/lib/api'
+import { api, formatCents, formatCentsBare, formatDate, formatDateTime, getCurrencySymbol } from '@/lib/api'
 import { amountsByCurrencyText, sumByCurrency } from '@/lib/money'
 import { amountInputError, dollarsToWholeCents } from '@/lib/priceInput'
 import { CURRENCIES as GEO_CURRENCIES } from '@/lib/geo'
@@ -241,9 +241,10 @@ export default function CreditsPage() {
   }
 
   // One balance row per customer and currency (ADR-129): the page total is
-  // one figure per currency, never one sum.
+  // one figure per currency, never one sum. With nothing left in any
+  // currency, the zero has no currency of its own, so it is bare.
   const totalOutstanding = amountsByCurrencyText(sumByCurrency(balances.map(b => ({ currency: b.currency, amount_cents: b.balance_cents }))))
-    ?? formatCents(0, getActiveCurrency())
+    ?? formatCentsBare(0)
   // The selected customer's balances, one per currency, ordered by currency.
   const selectedBalances = balances
     .filter(b => b.customer_id === selectedCustomerId)
@@ -685,8 +686,8 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
   // The customer's billing currency: the caller's when it knows it, else the
   // picked customer's (lib/customerCurrency). Undefined with no customer
   // picked, or while a read is loading or failed.
-  const resolvedCurrency = useCustomerCurrency(effectiveCustomerId || undefined)
-  const customerCurrency = effectiveCustomerId ? (currency ?? resolvedCurrency?.currency) : undefined
+  const currencyRead = useCustomerCurrency(effectiveCustomerId || undefined)
+  const customerCurrency = effectiveCustomerId ? (currency ?? currencyRead.currency?.currency) : undefined
   // A deduction draws on the credit in one currency, so it offers only the
   // currencies with a positive balance. Same key as the customer page's
   // balance, so the read is shared.
@@ -708,6 +709,10 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
       ?? deductable[0])?.currency
     : (pickedCurrency ?? customerCurrency)
   const [currencyError, setCurrencyError] = useState('')
+  // A grant waits for its currency: the customer's, once the reads behind it
+  // have loaded, or one the operator picks. Under the picker, the dialog says
+  // it is loading, or that a read failed, so the disabled button has a reason.
+  const grantWaitsForCurrency = !isDeduct && !!effectiveCustomerId && !dialogCurrency
   // The confirm step names the customer; with the server-searched picker
   // there's no local list to look it up in, so fetch the picked one.
   const { data: pickedData } = useQuery({
@@ -846,6 +851,14 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                     ? 'Removed from the balance in this currency only.'
                     : "Pays only this customer's invoices in this currency. It is never converted."}
                 </p>
+                {grantWaitsForCurrency && (currencyRead.failure ? (
+                  <LoadError what="this customer's currency" error={currencyRead.failure.error}
+                    onRetry={currencyRead.failure.retry} className="py-3">
+                    You can also pick a currency above.
+                  </LoadError>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Loading this customer's currency…</p>
+                ))}
                 {currencyError && <p className="text-destructive text-sm">{currencyError}</p>}
               </div>
 
@@ -928,7 +941,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={saveMutation.isPending || (isDeduct && !!effectiveCustomerId && !balancesQuery.isLoading && deductable.length === 0)} variant={isDeduct ? 'destructive' : 'default'}>
+                <Button type="submit" disabled={saveMutation.isPending || grantWaitsForCurrency || (isDeduct && !!effectiveCustomerId && !balancesQuery.isLoading && deductable.length === 0)} variant={isDeduct ? 'destructive' : 'default'}>
                   {saveMutation.isPending ? (
                     <>
                       <Loader2 size={14} className="animate-spin mr-2" />

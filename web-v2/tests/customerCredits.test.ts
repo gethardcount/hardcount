@@ -1,12 +1,10 @@
 // Pins how the customer page explains credits. The defect: a fully used
 // $500 grant left no trace (balance $0.00, no grant row) and Outstanding
 // $4,160 sat beside a $4,660 invoice with no word about the credit.
-import { test, beforeEach } from 'vitest'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { setActiveCurrency } from '../src/lib/money.ts'
 import { creditTotalsLine, grantState, grantUsedCents, invoiceCreditNote, ledgerEntryLabel, ledgerEntryTitle, outstandingIncludesCredit, splitGrants } from '../src/lib/customerCredits.ts'
 
-beforeEach(() => setActiveCurrency('USD'))
 const NOW = Date.parse('2026-10-16T12:00:00Z')
 
 test('a fully used grant still shows in the totals', () => {
