@@ -64,6 +64,8 @@ This happens only with Stripe Tax. The invoice waits: it is not issued, emailed 
 
 After 8 automatic tries, Hardcount stops and the notice says so. Click the notice's retry button to try again: **Retry now** when the provider could not be reached or Stripe is now connected, **Retry tax** otherwise.
 
+Stripe keeps a tax calculation for 24 hours, and Hardcount finalizes with one up to 23 hours old. A draft that waits longer, such as one whose subscription has collection paused, cannot be finalized with it: finalize answers `tax_calculation_expired`. Retry the tax (`POST /v1/invoices/{id}/retry-tax`), then finalize. With tax-inclusive pricing the retry keeps the total at the sum of the line prices; only the tax inside them follows the new calculation.
+
 ## What to watch
 
 Hardcount counts every tax calculation that fails on the metric `hardcount_tax_outcome_total`, with `outcome="deferred"` and a `reason`. It counts attempts, not invoices: an invoice whose tax keeps failing adds one for each automatic retry. Successful calculations are not counted, so any increase means something needs a look: alert when its rate is above zero.

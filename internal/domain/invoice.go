@@ -486,8 +486,8 @@ const (
 
 // InvoiceTaxRetryUpdate is the snapshot UpdateTaxAtomic writes to a pending
 // invoice when an operator (or the retry worker) triggers a tax recompute.
-// It carries the new tax decision and the resulting headline totals. The
-// per-line tax stamps travel in the lineItems argument.
+// It carries the new tax decision and the resulting headline totals. Each
+// line's amount and tax stamps travel in the lineItems argument.
 //
 // An empty TaxCalculationID with TaxStatus=pending means the retry itself
 // failed. The row stays blocked from finalize, and the dashboard banner

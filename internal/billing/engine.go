@@ -679,9 +679,10 @@ type InvoiceWriter interface {
 	// reference (Stripe: tx_xxx) after CommitTax succeeds. Required for
 	// later reversal when a credit note is issued against the invoice.
 	SetTaxTransaction(ctx context.Context, tenantID, id string, taxTransactionID string) error
-	// UpdateTaxAtomic re-stamps an invoice's tax decision after a manual
-	// retry. Used by Engine.RetryTaxForInvoice to persist the recomputed
-	// per-line and invoice-level tax fields atomically.
+	// UpdateTaxAtomic re-stamps a draft's tax decision. Used by
+	// computeAndPersistInvoiceTax (retry and finalize-time tax) to persist
+	// the recomputed line amounts, per-line and invoice-level tax fields
+	// atomically.
 	UpdateTaxAtomic(ctx context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem) (domain.Invoice, error)
 }
 
@@ -1765,6 +1766,18 @@ func domesticReverseCharge(status domain.CustomerTaxStatus, customerCountry, reg
 // Safe to call with subtotal-discount <= 0 — returns zero tax and leaves
 // line items untouched.
 func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, currency string, subtotal, discount int64, lineItems []domain.InvoiceLineItem) (TaxApplication, error) {
+	ctx, ts, err := e.loadTaxSettings(ctx, tenantID)
+	if err != nil {
+		return TaxApplication{}, err
+	}
+	return e.applyTax(ctx, ts, tenantID, customerID, currency, subtotal, discount, lineItems)
+}
+
+// loadTaxSettings checks the tax wiring, pins the tenant on ctx and reads
+// the tenant's settings. A caller that needs the settings before it builds
+// the lines to tax (computeAndPersistInvoiceTax) reads them here once and
+// passes them to applyTax, so both steps see the same tax mode.
+func (e *Engine) loadTaxSettings(ctx context.Context, tenantID string) (context.Context, domain.TenantSettings, error) {
 	// Wiring is required, not optional. Tests that don't need tax
 	// must wire NoneProvider explicitly (e.NewResolver(nil) +
 	// e.SetTaxProviderResolver) — the previous silent zero-tax
@@ -1772,27 +1785,10 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 	// here so the caller sees the misconfiguration in the log
 	// instead of getting a $0-tax invoice.
 	if e.taxProviders == nil {
-		return TaxApplication{}, fmt.Errorf("tax provider resolver not wired (call SetTaxProviderResolver)")
+		return ctx, domain.TenantSettings{}, fmt.Errorf("tax provider resolver not wired (call SetTaxProviderResolver)")
 	}
 	if e.settings == nil {
-		return TaxApplication{}, fmt.Errorf("settings store not wired")
-	}
-
-	// Every invoice with priced lines passes here, so this is where its
-	// amounts are held to int64 cents: when the lines' sizes sum inside
-	// int64, no sum of them wraps, whatever the caller or the steps below
-	// add up. (The callers' own sums are checked too.)
-	if err := checkLineAmountsFit(lineItems); err != nil {
-		return TaxApplication{}, err
-	}
-	subtotal, err := commitInvoiceSubtotal(lineItems, subtotal)
-	if err != nil {
-		return TaxApplication{}, err
-	}
-	app := TaxApplication{
-		SubtotalCents: subtotal,
-		DiscountCents: discount,
-		TaxFacts:      domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK},
+		return ctx, domain.TenantSettings{}, fmt.Errorf("settings store not wired")
 	}
 
 	// Pin tenant_id on ctx before resolving the provider. The
@@ -1814,7 +1810,29 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 	// rare.
 	ts, err := e.settings.Get(ctx, tenantID)
 	if err != nil {
-		return TaxApplication{}, fmt.Errorf("load tenant settings: %w", err)
+		return ctx, domain.TenantSettings{}, fmt.Errorf("load tenant settings: %w", err)
+	}
+	return ctx, ts, nil
+}
+
+// applyTax is ApplyTaxToLineItems after the settings read: ctx carries the
+// tenant, and ts is the tenant's settings.
+func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, tenantID, customerID, currency string, subtotal, discount int64, lineItems []domain.InvoiceLineItem) (TaxApplication, error) {
+	// Every invoice with priced lines passes here, so this is where its
+	// amounts are held to int64 cents: when the lines' sizes sum inside
+	// int64, no sum of them wraps, whatever the caller or the steps below
+	// add up. (The callers' own sums are checked too.)
+	if err := checkLineAmountsFit(lineItems); err != nil {
+		return TaxApplication{}, err
+	}
+	subtotal, err := commitInvoiceSubtotal(lineItems, subtotal)
+	if err != nil {
+		return TaxApplication{}, err
+	}
+	app := TaxApplication{
+		SubtotalCents: subtotal,
+		DiscountCents: discount,
+		TaxFacts:      domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK},
 	}
 	app.TaxName = ts.TaxName
 
@@ -5308,34 +5326,45 @@ func (e *Engine) ComputeTaxForInvoice(ctx context.Context, tenantID, invoiceID s
 
 // computeAndPersistInvoiceTax is the shared core behind RetryTaxForInvoice
 // and ComputeTaxForInvoice. Callers own the gating (draft, tax_status); this
-// re-runs ApplyTaxToLineItems against the invoice's current line items and
+// re-runs the tax calculation against the invoice's current line items and
 // persists the decision atomically via UpdateTaxAtomic. inv must already be
 // loaded by the caller (the gate reads it) — passed in to avoid a second
 // GetInvoice round-trip.
+//
+// The calculation taxes each line's price, not what the line stores
+// (storedTaxBasis): with tax-inclusive prices, a line taxed at build stores
+// its net, and taxing that net again carved the tax out twice.
 func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invoiceID string, inv domain.Invoice) (domain.Invoice, error) {
 	items, err := e.invoices.ListLineItems(ctx, tenantID, invoiceID)
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("list line items: %w", err)
 	}
 
-	taxApp, err := e.ApplyTaxToLineItems(ctx, tenantID, inv.CustomerID, inv.Currency,
-		inv.SubtotalCents, inv.DiscountCents, items)
+	taxCtx, ts, err := e.loadTaxSettings(ctx, tenantID)
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("recompute tax: %w", err)
 	}
+	basis, subtotal, err := storedTaxBasis(items, inv.SubtotalCents, ts.TaxInclusive)
+	if err != nil {
+		return domain.Invoice{}, fmt.Errorf("recompute tax: %w", err)
+	}
+	taxApp, err := e.applyTax(taxCtx, ts, tenantID, inv.CustomerID, inv.Currency,
+		subtotal, inv.DiscountCents, basis)
+	if err != nil {
+		return domain.Invoice{}, fmt.Errorf("recompute tax: %w", err)
+	}
+	keepStoredLineForm(basis, items)
 
 	// Read the net subtotal/discount OFF the taxApp result, mirroring the
-	// cycle build path (billOnePeriod). In tax-INCLUSIVE mode
-	// ApplyTaxToLineItems carves tax OUT of the gross the operator entered,
-	// so taxApp.SubtotalCents is the net (< inv.SubtotalCents) and
-	// taxApp.TaxAmountCents is the portion already embedded in the gross —
-	// adding it onto inv.SubtotalCents (the gross) would double-count tax
-	// and overstate the total by ~one tax amount. In tax-EXCLUSIVE mode
-	// (the common case) taxApp.SubtotalCents/DiscountCents pass through
-	// unchanged (== inv.*), so this is a no-op there. Persisting the net
-	// subtotal/discount keeps subtotal − discount + tax == gross, the same
-	// invariant the cycle path maintains, and keeps the header consistent
-	// with the per-line net amounts ApplyTaxToLineItems already wrote.
+	// cycle build path (billOnePeriod). In tax-INCLUSIVE mode the
+	// calculation carves tax OUT of the line prices, so
+	// taxApp.SubtotalCents is the net and taxApp.TaxAmountCents is the
+	// portion already embedded in the prices — adding it onto the prices
+	// would double-count tax and overstate the total by ~one tax amount. In
+	// tax-EXCLUSIVE mode (the common case) taxApp.SubtotalCents/DiscountCents
+	// pass through unchanged (== inv.*), so this is a no-op there.
+	// Persisting the net subtotal/discount keeps subtotal − discount + tax
+	// == gross, the same invariant the cycle path maintains.
 	totalWithTax := taxApp.SubtotalCents - taxApp.DiscountCents + taxApp.TaxAmountCents
 	if totalWithTax < 0 {
 		totalWithTax = 0
@@ -5366,7 +5395,7 @@ func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invo
 		BasisDiscountCents: inv.DiscountCents,
 	}
 
-	return e.invoices.UpdateTaxAtomic(ctx, tenantID, invoiceID, update, items)
+	return e.invoices.UpdateTaxAtomic(ctx, tenantID, invoiceID, update, basis)
 }
 
 // nextTaxRetry decides whether the reconciler should pick this row
