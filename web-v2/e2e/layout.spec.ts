@@ -59,6 +59,9 @@ test.describe('desktop', () => {
     await nav.getByRole('link', { name: 'Pricing' }).click()
     await expect(page.getByRole('heading', { level: 1, name: 'Pricing', exact: true })).toBeVisible()
     await expect(nav.getByRole('link', { name: 'Invoices' })).toHaveText('Invoices4')
+    // The setup checklist asks the same endpoint and may still be waiting:
+    // let its answer through before the page closes.
+    await page.unrouteAll({ behavior: 'wait' })
   })
 
   test('a page that is still downloading loads inside the sidebar', async ({ page }) => {
