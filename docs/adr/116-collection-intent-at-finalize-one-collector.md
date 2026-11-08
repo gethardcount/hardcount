@@ -17,7 +17,7 @@ The inline code also existed in several copies: an engine pipeline, a cycle/thre
 ## Decision
 
 1. **The store records the intent.** These writes set `auto_charge_pending` from the new status in the same SQL statement:
-   - the two INSERTs (`CreateAudited`, `createWithLineItemsInTx`);
+   - the two INSERTs (`CreateAudited`, `createWithLineItemsInTx`; `CreateAudited` was deleted 2026-11-08, so operator create uses the second);
    - `updateStatusInTx` (draft→finalized; void and uncollectible clear it);
    - `FinalizeWithDates`.
 

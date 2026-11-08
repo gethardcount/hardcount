@@ -261,12 +261,12 @@ func (r *lagRig) exhaustedDunning(subAction domain.DunningSubscriptionAction, in
 	}
 	d.pol = pol
 	issued := lagP0.AddDate(0, 0, 11)
-	inv, err := invoice.NewPostgresStore(r.db).Create(ctx, r.tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(r.db).CreateWithLineItems(ctx, r.tenantID, domain.Invoice{
 		CustomerID: r.custID, SubscriptionID: r.subID, InvoiceNumber: "GRACE-1", BillingReason: domain.BillingReasonManual,
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
 		SubtotalCents: 500, TotalAmountCents: 500, AmountDueCents: 500,
 		BillingPeriodStart: lagP0.AddDate(0, 0, 10), BillingPeriodEnd: issued, IssuedAt: &issued,
-	})
+	}, nil)
 	if err != nil {
 		r.t.Fatalf("create invoice: %v", err)
 	}

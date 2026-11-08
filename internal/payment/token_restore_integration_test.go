@@ -36,13 +36,13 @@ func TestPaymentUpdateToken_BurnAndRestoreSemantics(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	issued := now
 	due := now.Add(7 * 24 * time.Hour)
-	inv, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		InvoiceNumber: "INV-TOK-1", CustomerID: cust.ID,
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
 		Currency: "USD", TotalAmountCents: 5000, AmountDueCents: 5000,
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now,
 		IssuedAt: &issued, DueAt: &due,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

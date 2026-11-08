@@ -35,12 +35,12 @@ func exhaustedRunPG(t *testing.T, name string) (context.Context, *dunning.Postgr
 		t.Fatalf("upsert policy: %v", err)
 	}
 	now := time.Now().UTC()
-	inv, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-" + name, Status: domain.InvoiceFinalized,
 		PaymentStatus: domain.PaymentFailed, Currency: "USD", SubtotalCents: 5000,
 		TotalAmountCents: 5000, AmountDueCents: 5000, BillingPeriodStart: now.Add(-time.Hour),
 		BillingPeriodEnd: now, IssuedAt: &now,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

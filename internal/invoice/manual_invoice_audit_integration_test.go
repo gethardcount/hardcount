@@ -9,7 +9,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
@@ -18,8 +17,9 @@ import (
 // The manual-invoice routes (POST /v1/invoices, POST /v1/invoices/{id}/line-items)
 // used to get their audit rows from the HTTP catch-all middleware, which GUESSED
 // the action/resource from the URL. These tests pin the ADR-090 replacement:
-// an explicit in-tx emission on BOTH manual-create store paths and on the
-// line-item add, each sharing fate with its business mutation.
+// an explicit in-tx emission on the manual create (both request shapes, one
+// store method) and on the line-item add, each sharing fate with its business
+// mutation.
 
 var errEmitBoom = errors.New("injected audit emission failure")
 
@@ -93,10 +93,11 @@ func wantNum(t *testing.T, meta map[string]any, key string, want int64) {
 	}
 }
 
-// B2 — POST /v1/invoices. The route has TWO store paths (bare header when the
-// request carries no lines; CreateWithLineItems when it does). Both must audit,
-// and both must share fate with the emission.
-func TestInvoiceCreate_AuditsBothStorePathsAndSharesFate(t *testing.T) {
+// B2 — POST /v1/invoices. The route takes two request shapes: a bare header
+// when the request carries no lines, and a create with lines when it does.
+// Both go through one store method, CreateWithLineItemsAudited. Each shape must
+// audit, and each must share fate with the emission.
+func TestInvoiceCreate_AuditsBothCreateShapesAndSharesFate(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	logger := audit.NewLogger(db)
@@ -188,8 +189,8 @@ func TestInvoiceCreate_AuditsBothStorePathsAndSharesFate(t *testing.T) {
 			t.Fatalf("emitter ran %d times, want exactly 1 (the test is vacuous otherwise)", emitter.calls)
 		}
 
-		if _, err := store.GetByNumber(ctx, tenantID, "INV-BARE-FAIL"); !errors.Is(err, errs.ErrNotFound) {
-			t.Fatalf("the invoice must roll back with its failed audit emission; GetByNumber err = %v", err)
+		if _, total, err := store.List(ctx, invoice.ListFilter{TenantID: tenantID}); err != nil || total != 0 {
+			t.Fatalf("the invoice must roll back with its failed audit emission; tenant has %d invoices (err = %v), want 0", total, err)
 		}
 		if rows := invoiceAuditRows(t, logger, ctx, tenantID); len(rows) != 0 {
 			t.Errorf("audit row leaked from a rolled-back create: %+v", rows)
@@ -216,8 +217,8 @@ func TestInvoiceCreate_AuditsBothStorePathsAndSharesFate(t *testing.T) {
 			t.Fatalf("emitter ran %d times, want exactly 1", emitter.calls)
 		}
 
-		if _, err := store.GetByNumber(ctx, tenantID, "INV-LINES-FAIL"); !errors.Is(err, errs.ErrNotFound) {
-			t.Fatalf("the composed invoice (header + lines) must roll back with its failed audit emission; GetByNumber err = %v", err)
+		if _, total, err := store.List(ctx, invoice.ListFilter{TenantID: tenantID}); err != nil || total != 0 {
+			t.Fatalf("the composed invoice (header + lines) must roll back with its failed audit emission; tenant has %d invoices (err = %v), want 0", total, err)
 		}
 		if rows := invoiceAuditRows(t, logger, ctx, tenantID); len(rows) != 0 {
 			t.Errorf("audit row leaked from a rolled-back create: %+v", rows)
@@ -238,14 +239,14 @@ func TestInvoiceAddLineItem_AuditsAndSharesFate(t *testing.T) {
 	seedDraft := func(t *testing.T, tenantID, suffix string) domain.Invoice {
 		t.Helper()
 		cust := seedAuditCustomer(t, db, tenantID, suffix)
-		inv, err := store.Create(ctx, tenantID, domain.Invoice{
+		inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID:    cust.ID,
 			InvoiceNumber: "INV-ADD-" + suffix,
 			Status:        domain.InvoiceDraft,
 			PaymentStatus: domain.PaymentPending,
 			Currency:      "USD",
 			BillingReason: domain.BillingReasonManual,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("seed draft invoice: %v", err)
 		}
@@ -341,7 +342,7 @@ func TestInvoiceAddLineItem_AuditsAndSharesFate(t *testing.T) {
 	t.Run("rejected add (non-draft invoice) emits nothing", func(t *testing.T) {
 		tenantID := testutil.CreateTestTenant(t, db, "Invoice AddLine Rejected")
 		inv := seedDraft(t, tenantID, "rejected")
-		if _, err := store.UpdateStatus(ctx, tenantID, inv.ID, domain.InvoiceFinalized); err != nil {
+		if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, inv.ID, domain.InvoiceFinalized, nil); err != nil {
 			t.Fatalf("finalize seed invoice: %v", err)
 		}
 		svc := newAuditedInvoiceService(t, db, logger, "INV-UNUSED")

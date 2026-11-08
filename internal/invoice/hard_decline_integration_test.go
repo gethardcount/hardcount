@@ -51,11 +51,11 @@ func (r *hardDeclineStoreRig) card(custID, pm string) paymentmethods.PaymentMeth
 
 func (r *hardDeclineStoreRig) invoice(custID, num string) string {
 	r.t.Helper()
-	inv, err := r.store.Create(r.ctx, r.tenantID, domain.Invoice{
+	inv, err := r.store.CreateWithLineItems(r.ctx, r.tenantID, domain.Invoice{
 		CustomerID: custID, InvoiceNumber: num, Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		BillingPeriodStart: time.Now().UTC().Add(-30 * 24 * time.Hour), BillingPeriodEnd: time.Now().UTC(),
-	})
+	}, nil)
 	if err != nil {
 		r.t.Fatalf("create invoice: %v", err)
 	}

@@ -41,7 +41,7 @@ func TestParkEnded_ActivityShowsNoUnknownRow(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newSnapRig(t, "Park Ended Activity")
-			inv, err := r.store.Create(r.ctx, r.tenantID, r.protoInvoice("INV-PARK-ACT", domain.InvoiceFinalized, domain.BillingReasonManual))
+			inv, err := r.store.CreateWithLineItems(r.ctx, r.tenantID, r.protoInvoice("INV-PARK-ACT", domain.InvoiceFinalized, domain.BillingReasonManual), nil)
 			if err != nil {
 				t.Fatalf("create invoice: %v", err)
 			}

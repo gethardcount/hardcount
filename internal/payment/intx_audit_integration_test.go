@@ -32,12 +32,12 @@ func seedPayable(t *testing.T, db *postgres.DB, ctx context.Context, tenantID st
 	}
 	now := time.Now().UTC()
 	issued := now
-	inv, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-" + suffix[len(suffix)-8:],
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", SubtotalCents: 10000, TotalAmountCents: 10000, AmountDueCents: 10000,
 		BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &issued,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed invoice: %v", err)
 	}

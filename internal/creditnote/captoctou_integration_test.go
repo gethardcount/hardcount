@@ -40,7 +40,7 @@ func TestCreateUnderInvoiceLock_SerializesCap(t *testing.T) {
 
 	now := time.Now().UTC()
 	issued := now
-	inv, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID:         cust.ID,
 		InvoiceNumber:      "INV-CAP-1",
 		Status:             domain.InvoiceFinalized,
@@ -52,7 +52,7 @@ func TestCreateUnderInvoiceLock_SerializesCap(t *testing.T) {
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour),
 		BillingPeriodEnd:   now,
 		IssuedAt:           &issued,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

@@ -73,12 +73,12 @@ func newDunningPauseRig(t *testing.T, name string) *dunningPauseRig {
 func (r *dunningPauseRig) invoice(number string, due int64) string {
 	r.t.Helper()
 	now := time.Now().UTC()
-	inv, err := r.invs.Create(r.ctx, r.tenantID, domain.Invoice{
+	inv, err := r.invs.CreateWithLineItems(r.ctx, r.tenantID, domain.Invoice{
 		CustomerID: r.custID, SubscriptionID: r.subID, InvoiceNumber: number,
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
 		SubtotalCents: 1000, TotalAmountCents: 1000, AmountDueCents: due,
 		BillingPeriodStart: now.Add(-24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-	})
+	}, nil)
 	if err != nil {
 		r.t.Fatalf("create invoice %s: %v", number, err)
 	}

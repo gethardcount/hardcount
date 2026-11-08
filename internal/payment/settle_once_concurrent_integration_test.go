@@ -174,12 +174,12 @@ func (r *settleRaceRig) seed(t *testing.T, name string) (string, domain.Invoice)
 		t.Fatalf("create customer: %v", err)
 	}
 	now := time.Now().UTC()
-	inv, err := r.invStore.Create(r.ctx, tenantID, domain.Invoice{
+	inv, err := r.invStore.CreateWithLineItems(r.ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-" + name, Status: domain.InvoiceFinalized,
 		PaymentStatus: domain.PaymentPending, Currency: "USD", SubtotalCents: settleDue,
 		TotalAmountCents: settleDue, AmountDueCents: settleDue,
 		BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
