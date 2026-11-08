@@ -14,7 +14,7 @@
 set -euo pipefail
 
 MODE="${PGB_MODE:-local}"
-IMAGE="${PGB_IMAGE:-edoburu/pgbouncer:v1.24.1-p1}"
+IMAGE="${PGB_IMAGE:-edoburu/pgbouncer:v1.26.1-p0}"
 NAME="hardcount-pgbouncer-test"
 PKGS="${PGB_PACKAGES:-./...}"
 DIR="$(cd "$(dirname "$0")" && pwd)/pgbouncer"

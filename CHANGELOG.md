@@ -23,9 +23,13 @@ original text.
 
 - Set `HOSTED_INVOICE_BASE_URL`, `CUSTOMER_PORTAL_URL` and `PAYMENT_UPDATE_RETURN_URL`, in every environment: none has a default any more. While one is unset, the flow it serves is refused instead of sending the customer to `http://localhost:5173`. The hosted invoice page shows no Pay button, setup links answer 409 `return_address_not_set`, and the "add a payment method" email is not sent. Saved-card charges and retries are unaffected. A quick-start `.env` made earlier lacks two of them: add the `HOSTED_INVOICE_BASE_URL` and `PAYMENT_UPDATE_RETURN_URL` lines `quickstart.sh` now writes ([settings](docs/settings.md)).
 - Webhook receivers under Stripe Tax: `invoice.finalized` for a finalized draft (by an operator, or after a tax retry) no longer carries the `tax_transaction_id` that finalize records. Hardcount records it just after the event, as it already did for invoices a subscription bills. Read it with `GET /v1/invoices/{id}`.
+- Postgres 14 is end of life on 2026-11-12. Hardcount no longer lists it as supported; move to 15 or newer ([which Postgres works](docs/ops/postgres-requirements.md#which-postgres-works)).
 
 ### Changed
 
+- **CI applies the migrations on Postgres 18 instead of 14.** Postgres 14 reaches end of life on 2026-11-12, and 18 is the version a new install gets by default. The tests still run on 16 ([which Postgres works](docs/ops/postgres-requirements.md#which-postgres-works)). ([#DEPS1PR](https://github.com/gethardcount/hardcount/pull/DEPS1PR))
+- **The Compose stacks run Redis 8.10.2 instead of Redis 7.** The `redis:7-alpine` image is built on Alpine 3.21, which stopped getting security fixes on 2026-11-01. Redis holds only rate-limit counts, which start again from zero when the new container starts. ([#DEPS1PR](https://github.com/gethardcount/hardcount/pull/DEPS1PR))
+- **The API image is built on Debian 13 instead of Debian 12.** The Debian 12 distroless base is no longer built, so its time zone data stopped at version 2026b. The new base has 2026f. Hardcount uses this data for each account's billing dates. ([#DEPS1PR](https://github.com/gethardcount/hardcount/pull/DEPS1PR))
 - **A plan change to an unknown plan now reports `param: new_plan_id`.** On a subscription with more than one item, `PATCH /v1/subscriptions/{id}/items/{itemID}` with an unknown `new_plan_id` answered 422 with `param: items` when the change was scheduled or prorated nothing. The message is unchanged. ([#1607](https://github.com/gethardcount/hardcount/pull/1607))
 - **Generated code nothing used is deleted.** `make gen` now writes only the dashboard's orval hooks and types. The Go types in `internal/api/generated`, `web-v2/src/lib/api.gen.ts` and its generator `openapi-typescript` are gone, and `web-v2/public/openapi.yaml` is no longer committed. The dashboard still serves `/openapi.yaml`. No API change. ([#1604](https://github.com/gethardcount/hardcount/pull/1604))
 - **The user docs read more clearly.** About 170 places across the concept pages, guides, API pages, self-host pages, runbooks and the API reference's descriptions: dense sentences split, terms defined where they are first used, and one name for each thing (the reconciler, the charge hold, a lost result, a spend threshold, a usage-only key, an account). Facts are unchanged. ([#1585](https://github.com/gethardcount/hardcount/pull/1585))
@@ -39,6 +43,7 @@ original text.
 
 ### Security
 
+- **Run PgBouncer 1.26.1 or newer in front of Hardcount.** Older releases have security bugs that let a client crash or hang PgBouncer, or log in as another user who signs in with SCRAM. CI now runs the test suite through 1.26.1 ([connection poolers](docs/ops/postgres-requirements.md#connection-poolers)). ([#DEPS1PR](https://github.com/gethardcount/hardcount/pull/DEPS1PR))
 - **`golang.org/x/net` is v0.62.0.** It fixes CVE-2026-78661, a denial of service in its HTML parser. Hardcount never calls that parser, so it was not exposed, but image scanners flag the old version. ([#1614](https://github.com/gethardcount/hardcount/pull/1614))
 
 ## [0.9.2] - 2026-11-02

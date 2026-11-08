@@ -1,19 +1,19 @@
 # Build stage
-# Pin the exact patch (not the floating 1.25 tag) so the shipped binary always
-# carries the patched stdlib — the build cache otherwise reuses an older 1.25.x
-# layer and the image ships CVEs the Grype gate (critical) then rejects.
+# Pin the exact patch, not a floating minor tag such as 1.26, so the shipped
+# binary carries the patched standard library. With a floating tag the build
+# cache can reuse an older patch, and the image ships CVEs that the Grype gate
+# (critical) rejects.
 #
-# This pin MUST be >= go.mod's `go` directive. The image runs GOTOOLCHAIN=local,
-# so an older builder does not silently download a newer toolchain — it refuses:
-# "go.mod requires go >= 1.25.13 (running go 1.25.12)". CI enforces the ordering
-# (the go-version-consistency step in .github/workflows/ci.yml), because the
-# docker job only runs on main: bumping go.mod in a PR used to leave main's
-# image build broken with nothing failing until after the merge.
+# This pin must be at least go.mod's `go` directive. The image runs
+# GOTOOLCHAIN=local, so an older builder does not download a newer toolchain:
+# it stops with "go.mod requires go >= <version>". The go-version-consistency
+# step in .github/workflows/ci.yml checks this on every PR, because the docker
+# job runs only on main.
 # The builder runs on the machine doing the build and cross-compiles for
 # the target, so a multi-platform build needs no emulation.
 FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS builder
 
-RUN apk add --no-cache git ca-certificates
+RUN apk add --no-cache ca-certificates
 
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -29,7 +29,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -o /hardcount ./cmd/hardcount
 
 # Runtime stage — distroless has no shell, no package manager, minimal CVE surface
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 
 LABEL org.opencontainers.image.source="https://github.com/gethardcount/hardcount"
 LABEL org.opencontainers.image.description="Hardcount — usage-based billing engine"

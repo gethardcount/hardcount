@@ -205,7 +205,10 @@ An INVALID index is one Postgres keeps but never uses.
      the backup over it. The next `hardcount migrate` must refuse and change
      nothing.
    - HEAD applies on Postgres 14. If it fails, the docs stop calling 14
-     the oldest version that should work.
+     the oldest version that should work. *(Amended 2026-11-08: Postgres 14
+     reaches end of life on 2026-11-12. This check now applies HEAD on
+     Postgres 18, the newest major, and the docs no longer list 14 as
+     supported.)*
 10. **Rollout.** Four PRs, in order:
     1. This ADR.
     2. The cut-over: code, baseline, tests, the `migrations` job and the

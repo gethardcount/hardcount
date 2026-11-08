@@ -21,7 +21,8 @@
 #                  migration added a table that refers to a backed-up one:
 #                  the restore must stop and change nothing
 #                  (docs/ops/backup-considerations.md, section 4).
-#   Postgres 14    HEAD applies on postgres:14 and reports up to date.
+#   Postgres 18    HEAD applies on postgres:18, the newest major and the one
+#                  a new install gets by default, and reports up to date.
 #
 # Needs Docker, psql and pg_restore on the host, and Go to build HEAD.
 #   HARDCOUNT_BIN   a HEAD build of cmd/hardcount (default: built into a temp dir)
@@ -51,7 +52,7 @@ if [ -z "${HARDCOUNT_BIN:-}" ]; then
 fi
 
 docker pull -q "$POSTGRES16_IMAGE" >/dev/null
-docker pull -q "$POSTGRES14_IMAGE" >/dev/null
+docker pull -q "$POSTGRES18_IMAGE" >/dev/null
 
 # The versions HEAD ships: 0 (goose's own row), 180, then every file in sql/.
 SHIPPED=$(
@@ -282,21 +283,21 @@ restore_drill() {
   echo "restore drill: the restore over a newer database stopped, nothing changed"
 }
 
-pg14() {
-  say "Postgres 14: HEAD applies"
-  local c=mig-pg14 url
+pg18() {
+  say "Postgres 18: HEAD applies"
+  local c=mig-pg18 url
   CONTAINERS+=("$c")
-  start_pg "$c" "$POSTGRES14_IMAGE" compose
+  start_pg "$c" "$POSTGRES18_IMAGE" compose
   check_app_timeout "$c" compose
   url=$(dsn compose "$PG_PORT")
   head_hardcount "$url" migrate
-  head_hardcount "$url" migrate status | tee "$OUT/pg14-status.txt"
-  grep -q 'up to date, nothing to apply' "$OUT/pg14-status.txt" || fail "postgres 14: status is not up to date"
+  head_hardcount "$url" migrate status | tee "$OUT/pg18-status.txt"
+  grep -q 'up to date, nothing to apply' "$OUT/pg18-status.txt" || fail "postgres 18: status is not up to date"
 }
 
 fresh_install compose
 fresh_install managed
 fresh_install citest
 restore_drill
-pg14
+pg18
 say "migrations: all checks passed"
