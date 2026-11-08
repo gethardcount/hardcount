@@ -20,7 +20,7 @@
 #                  Then restore it over a newer database, one where a later
 #                  migration added a table that refers to a backed-up one:
 #                  the restore must stop and change nothing
-#                  (docs/ops/backup-considerations.md, section 4).
+#                  (docs/ops/restore.md, "Before you restore").
 #   Postgres 14    HEAD applies on postgres:14 and reports up to date.
 #
 # Needs Docker, psql and pg_restore on the host, and Go to build HEAD.

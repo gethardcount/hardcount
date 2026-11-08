@@ -18,7 +18,6 @@ import { creditExpiryLabel, startOfNextDayInTZ } from '@/lib/dates'
 import type { Customer, CreditBalance } from '@/lib/api'
 import { applyApiError } from '@/lib/formErrors'
 import { downloadCSV } from '@/lib/csv'
-import { Layout } from '@/components/Layout'
 import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { useSortable, type SortDir } from '@/hooks/useSortable'
@@ -276,7 +275,7 @@ export default function CreditsPage() {
   // ---- Detail View ----
   if (selectedCustomerId) {
     return (
-      <Layout>
+      <>
         {/* Header with back, customer info, balance, and actions */}
         <div className="flex flex-wrap items-start gap-3 mb-6">
           <Button variant="ghost" size="sm" onClick={closeDetail} className="mt-1">
@@ -514,7 +513,7 @@ export default function CreditsPage() {
             onOpenChange={(open) => { if (!open) setShowDeduct(false) }}
             onDone={() => { setShowDeduct(false); loadLedger(selectedCustomerId); loadData(); toast.success('Credits deducted') }} />
         )}
-      </Layout>
+      </>
     )
   }
 
@@ -530,7 +529,7 @@ export default function CreditsPage() {
   const customersWithCredits = new Set(creditRows.map(r => r.customer.id))
 
   return (
-    <Layout>
+    <>
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">Credits</h1>
@@ -617,7 +616,7 @@ export default function CreditsPage() {
           onOpenChange={(open) => { if (!open) setShowGrant(false) }}
           onDone={() => { setShowGrant(false); loadData(); toast.success('Credits granted') }} />
       )}
-    </Layout>
+    </>
   )
 }
 

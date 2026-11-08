@@ -7,7 +7,15 @@ first. Every shipped change, with its date, is in the
 
 ## Now
 
-The item planned right after v0.9.0 has shipped ([Shipped recently](#shipped-recently)). What comes next is below.
+The item planned right after v0.9.0 has shipped ([Shipped recently](#shipped-recently)). In progress:
+
+- **A safe restore mode.** After a database restore, Hardcount refuses to
+  start until a catch-up has read from Stripe every payment, refund and
+  dispute since the backup. A payment whose invoice the restore lost becomes
+  credit for that customer. Today the [restore page](ops/restore.md) has the
+  operator match these by hand.
+
+What comes next is below.
 
 ## Next
 

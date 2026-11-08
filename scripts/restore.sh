@@ -170,7 +170,7 @@ fi
 # are cluster-level, so pg_dump of a database cannot carry them; the target
 # must provision them first. Fail before touching anything, with the remedy.
 if ! psql "$DATABASE_URL" -tAc "SELECT 1 FROM pg_roles WHERE rolname='hardcount_app'" 2>/dev/null | grep -q 1; then
-  die "Target cluster has no 'hardcount_app' role — the archive's GRANTs will roll the restore back. Create it first (CREATE ROLE hardcount_app LOGIN PASSWORD '<your-password>'; see docker/init.sql for the dev shape and docs/ops/backup-considerations.md for the restore runbook), then re-run." 1
+  die "Target cluster has no 'hardcount_app' role — the archive's GRANTs will roll the restore back. Create it first (CREATE ROLE hardcount_app LOGIN PASSWORD '<your-password>'; see docker/init.sql for the dev shape and docs/ops/restore.md for the restore runbook), then re-run." 1
 fi
 
 # The backup's privileges: SQL the restore runs last (see privilege_sql).
