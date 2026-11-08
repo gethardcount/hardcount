@@ -18,7 +18,9 @@ import (
 	"github.com/stripe/stripe-go/v82/webhook"
 	"gopkg.in/yaml.v3"
 
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/user"
 )
 
 // Helpers shared by the flow journeys (*_flow_e2e_test.go). Each journey
@@ -233,6 +235,18 @@ func flowBootstrap(t *testing.T, ts *httptest.Server, token, email, password str
 		"owner_email":    email,
 		"owner_password": password,
 	}}).want(t, 201, "bootstrap").body
+}
+
+// flowSignIn adds an owner to an account made without bootstrap, and signs
+// them in through POST /v1/auth/login. A journey uses it for a route only a
+// dashboard session may call, such as PUT /v1/settings.
+func flowSignIn(t *testing.T, db *postgres.DB, ts *httptest.Server, tenantID string) *http.Cookie {
+	t.Helper()
+	email, password := "owner_"+tenantID+"@flow.test", "flow-sign-in-pw-12"
+	if _, err := user.NewService(user.NewPostgresStore(db), clock.Real()).CreateUser(t.Context(), email, password, tenantID, "owner"); err != nil {
+		t.Fatalf("add an owner to %s: %v", tenantID, err)
+	}
+	return login(t, ts, email, password)
 }
 
 // flowCount runs a COUNT query outside row-level security.

@@ -242,6 +242,7 @@ import type {
   SetStripeWebhookSecretBody,
   SetSubscriptionBillingThresholdsBody,
   StripeConnection,
+  StripeConnectionForbiddenResponse,
   Subscription,
   SubscriptionItem,
   SubscriptionItemChangeResult,
@@ -17145,6 +17146,9 @@ export const getUpdateTenantSettingsUrl = () => {
  *
  * A save that changes a field writes one audit row listing each
  * change. The row is filed in test mode, whichever mode you save from.
+ *
+ * Takes only a dashboard session. Test and live mode share these
+ * settings, and an API key belongs to one mode, so a key gets 403.
  * @summary Update account settings
  */
 export const updateTenantSettings = async (tenantSettingsInput: TenantSettingsInput, options?: RequestInit): Promise<TenantSettings> => {
@@ -17399,8 +17403,10 @@ export const getConnectStripeUrl = () => {
 }
 
 /**
- * Saves your own Stripe keys for one mode (`livemode` in the body
- * picks the mode, not the caller's mode). Calling it again for the
+ * Saves your own Stripe keys for one mode, the one `livemode` in the
+ * body picks. An API key can connect only its own mode: a test key
+ * test mode, a live key live mode. A dashboard session can connect
+ * either. Calling it again for the
  * same mode replaces the keys; a webhook secret saved before is kept
  * when the body sends none. Key prefixes must match the mode:
  * `sk_test_`/`rk_test_` and `pk_test_` for test, `sk_live_`/`rk_live_`
@@ -17433,7 +17439,7 @@ export const connectStripe = async (connectStripeBody: ConnectStripeBody, option
 
 
 
-export const getConnectStripeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getConnectStripeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | StripeConnectionForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectStripe>>, TError,{data: ConnectStripeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof connectStripe>>, TError,{data: ConnectStripeBody}, TContext> => {
 
@@ -17462,12 +17468,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ConnectStripeMutationResult = NonNullable<Awaited<ReturnType<typeof connectStripe>>>
     export type ConnectStripeMutationBody = ConnectStripeBody
-    export type ConnectStripeMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type ConnectStripeMutationError = InvalidBodyResponse | UnauthorizedResponse | StripeConnectionForbiddenResponse | Error | RateLimitedResponse
 
     /**
  * @summary Connect a Stripe account
  */
-export const useConnectStripe = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useConnectStripe = <TError = InvalidBodyResponse | UnauthorizedResponse | StripeConnectionForbiddenResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectStripe>>, TError,{data: ConnectStripeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof connectStripe>>,
@@ -17489,9 +17495,10 @@ export const getListStripeConnectionsUrl = () => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Returns the account's Stripe connections for both modes in one list
- * (at most two rows, live first), whatever the caller's mode. No
- * secret values are returned, only prefixes and last four characters.
+ * Returns the Stripe connections the caller manages, live first. A
+ * dashboard session gets both modes, so at most two rows. An API key
+ * gets only its own mode's connection. No secret values are returned,
+ * only prefixes and last four characters.
  * @summary List Stripe connections
  */
 export const listStripeConnections = async ( options?: RequestInit): Promise<ListStripeConnections200> => {
@@ -17594,7 +17601,9 @@ export const getSetStripeWebhookSecretUrl = (mode: 'test' | 'live',) => {
 
 /**
  * Saves the `whsec_` signing secret for a mode that is already
- * connected, without entering the API keys again. Hardcount does not call
+ * connected, without entering the API keys again. An API key can set
+ * it only for its own mode; a dashboard session can set either.
+ * Hardcount does not call
  * Stripe here; the secret is checked on each incoming webhook.
  * Until a secret is saved, Stripe webhooks for the mode are refused.
  * Writes an audit row (never the secret).
@@ -17616,7 +17625,7 @@ export const setStripeWebhookSecret = async (mode: 'test' | 'live',
 
 
 
-export const getSetStripeWebhookSecretMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getSetStripeWebhookSecretMutationOptions = <TError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setStripeWebhookSecret>>, TError,{mode: 'test' | 'live';data: SetStripeWebhookSecretBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof setStripeWebhookSecret>>, TError,{mode: 'test' | 'live';data: SetStripeWebhookSecretBody}, TContext> => {
 
@@ -17645,12 +17654,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SetStripeWebhookSecretMutationResult = NonNullable<Awaited<ReturnType<typeof setStripeWebhookSecret>>>
     export type SetStripeWebhookSecretMutationBody = SetStripeWebhookSecretBody
-    export type SetStripeWebhookSecretMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type SetStripeWebhookSecretMutationError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | RateLimitedResponse
 
     /**
  * @summary Set the Stripe webhook signing secret
  */
-export const useSetStripeWebhookSecret = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const useSetStripeWebhookSecret = <TError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setStripeWebhookSecret>>, TError,{mode: 'test' | 'live';data: SetStripeWebhookSecretBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setStripeWebhookSecret>>,
@@ -17672,7 +17681,9 @@ export const getDisconnectStripeUrl = (mode: 'test' | 'live',) => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Deletes the saved Stripe keys and webhook secret for the mode.
+ * Deletes the saved Stripe keys and webhook secret for the mode. An
+ * API key can disconnect only its own mode; a dashboard session can
+ * disconnect either.
  * Hardcount cannot reach Stripe in that mode until you connect again,
  * and Stripe webhooks for it are refused. Connecting again creates a
  * connection with a new `id`, so the webhook URL in Stripe must change
@@ -17694,7 +17705,7 @@ export const disconnectStripe = async (mode: 'test' | 'live', options?: RequestI
 
 
 
-export const getDisconnectStripeMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | BodyNotAllowedResponse | RateLimitedResponse,
+export const getDisconnectStripeMutationOptions = <TError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectStripe>>, TError,{mode: 'test' | 'live'}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof disconnectStripe>>, TError,{mode: 'test' | 'live'}, TContext> => {
 
@@ -17723,12 +17734,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DisconnectStripeMutationResult = NonNullable<Awaited<ReturnType<typeof disconnectStripe>>>
 
-    export type DisconnectStripeMutationError = Error | UnauthorizedResponse | ForbiddenResponse | BodyNotAllowedResponse | RateLimitedResponse
+    export type DisconnectStripeMutationError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Disconnect Stripe for one mode
  */
-export const useDisconnectStripe = <TError = Error | UnauthorizedResponse | ForbiddenResponse | BodyNotAllowedResponse | RateLimitedResponse,
+export const useDisconnectStripe = <TError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectStripe>>, TError,{mode: 'test' | 'live'}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof disconnectStripe>>,

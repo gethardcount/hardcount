@@ -19,9 +19,10 @@ import (
 // All operations run under TxBypass and filter by (tenant_id, livemode)
 // explicitly in WHERE clauses. RLS is skipped because this store is the
 // single boundary that administers credentials across BOTH modes for the
-// same tenant — a settings handler authenticated as one mode must still
-// write to the other. Callers (handler, resolver, webhook verifier) are
-// responsible for authorizing tenant access before invoking store methods.
+// same tenant — a dashboard session in one mode still manages the other
+// mode's connection. Callers (service, resolver, webhook verifier) are
+// responsible for authorizing tenant and mode access before invoking store
+// methods; the Service's request-facing methods check the mode.
 type Store struct {
 	db  *postgres.DB
 	enc *crypto.Encryptor

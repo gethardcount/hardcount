@@ -1816,7 +1816,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// Team membership is for dashboard sessions only. An API key is a
 		// machine credential with no user to attribute an invite or removal
 		// to, so it gets 403 here. The service checks again on invite.
-		r.With(auth.RequireSession()).Mount("/members", membersH.Routes())
+		r.With(auth.RequireSession("manage team membership")).Mount("/members", membersH.Routes())
 		// The /customers subtree mixes reads (GET list, get, billing-profile)
 		// and writes (POST create, PATCH update, PUT billing-profile, GDPR
 		// delete-data). RequireMethod picks the permission by HTTP method,
@@ -1892,7 +1892,14 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// was already emitted.
 		r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/webhook_events", webhookOutH.EventRoutes())
 		r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/audit-log", auditH.Routes())
-		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings", settingsH.Routes())
+		// Test and live mode share the account settings, and a key belongs
+		// to one mode, so a key may read them but only the dashboard changes
+		// them.
+		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings", settingsH.Routes(auth.RequireSession("change account settings")))
+		// Each mode has its own Stripe connection. A key manages only its
+		// own mode's; the dashboard manages both. tenantstripe.Service
+		// enforces this, not a middleware, because the mode comes from the
+		// body or the path.
 		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/stripe", tenantStripeH.Routes())
 		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/email", emailSettingsH.Routes())
 		r.With(auth.Require(auth.PermInvoiceRead)).Mount("/analytics", analyticsH.Routes())

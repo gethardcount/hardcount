@@ -15,7 +15,7 @@ import type { StripeConnection } from './stripeConnection';
 
 export type ListStripeConnections200 = {
   /**
-     * One connection per connected mode, live first. Empty when Stripe is not connected.
+     * One connection per connected mode the caller manages, live first. Empty when none is connected.
      * @maxItems 2
      */
   data: StripeConnection[];

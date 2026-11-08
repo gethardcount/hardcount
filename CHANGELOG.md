@@ -23,6 +23,7 @@ original text.
 
 - Set `HOSTED_INVOICE_BASE_URL`, `CUSTOMER_PORTAL_URL` and `PAYMENT_UPDATE_RETURN_URL`, in every environment: none has a default any more. While one is unset, the flow it serves is refused instead of sending the customer to `http://localhost:5173`. The hosted invoice page shows no Pay button, setup links answer 409 `return_address_not_set`, and the "add a payment method" email is not sent. Saved-card charges and retries are unaffected. A quick-start `.env` made earlier lacks two of them: add the `HOSTED_INVOICE_BASE_URL` and `PAYMENT_UPDATE_RETURN_URL` lines `quickstart.sh` now writes ([settings](docs/settings.md)).
 - Webhook receivers under Stripe Tax: `invoice.finalized` for a finalized draft (by an operator, or after a tax retry) no longer carries the `tax_transaction_id` that finalize records. Hardcount records it just after the event, as it already did for invoices a subscription bills. Read it with `GET /v1/invoices/{id}`.
+- API callers: an API key now manages only its own mode's Stripe connection, and `PUT /v1/settings` takes only a dashboard session. A script that connects live Stripe with a test key, or changes settings with any key, gets `403`. Use a live key for live mode, and change settings in the dashboard.
 
 ### Changed
 
@@ -36,6 +37,10 @@ original text.
 - **Docs: the webhook guide no longer says every event is sent at least once.** 22 of the 41 event types are queued just after their change is saved, so a crash at that moment can drop one. The guide now points to the rule that says which, and ADR-040 lists the events saved with their change. ([#1606](https://github.com/gethardcount/hardcount/pull/1606))
 - **A customer is no longer sent to `http://localhost:5173` after paying or saving a card.** With one of the three return addresses unset, Stripe sent the customer to the local development address in every environment, so in production they landed on "site can't be reached". Each flow now refuses before calling Stripe, and the invoice notices say which setting to set. ([#1597](https://github.com/gethardcount/hardcount/pull/1597))
 - **Docs: 37 statements that were wrong are corrected.** The LiteLLM guide no longer has you create the customer on a test clock: the clock's time stands still, so a real proxy's calls were refused as in the future, while LiteLLM read the answer as delivered. "Bill for AI tokens by model" and the LiteLLM guide now save the plan ID their later steps use. The checks after a restore set `app.bypass_rls`, so on managed Postgres they no longer read zero rows and pass. ([#1584](https://github.com/gethardcount/hardcount/pull/1584))
+
+### Security
+
+- **An API key can change only its own mode's Stripe connection.** `/v1/settings/stripe` answers `403` when a key names the other mode, and a key's list holds only its own mode. The dashboard still manages both modes. Account settings, which both modes share, now change only from the dashboard ([authentication](docs/api/authentication.md)).
 
 ## [0.9.2] - 2026-11-02
 

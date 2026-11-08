@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -76,14 +77,69 @@ type ConnectInput struct {
 	WebhookSecret  string `json:"webhook_secret,omitempty"`
 }
 
+// modeScope is which modes' Stripe connections the caller manages.
+type modeScope struct {
+	bothModes bool
+	livemode  bool // the one mode, when bothModes is false
+}
+
+// scopeOf returns the caller's scope. A dashboard session manages both
+// modes, because Settings → Payments shows and edits both connections side
+// by side. Any other caller, an API key, manages only the mode it was made
+// in, as it does with all other data. A ctx with no mode returns
+// postgres.ErrLivemodeUnset: that is a bug at the entry point, and nothing
+// guesses a mode in its place.
+func scopeOf(ctx context.Context) (modeScope, error) {
+	if hardcountauth.GetKeyType(ctx) == hardcountauth.KeyTypeSession {
+		return modeScope{bothModes: true}, nil
+	}
+	own, err := postgres.Livemode(ctx)
+	if err != nil {
+		return modeScope{}, err
+	}
+	return modeScope{livemode: own}, nil
+}
+
+func (m modeScope) allows(livemode bool) bool {
+	return m.bothModes || m.livemode == livemode
+}
+
+// checkMode returns errs.ErrForbidden when the caller may not change the
+// Stripe connection of livemode. Every write this service takes from a
+// request calls it first, before it validates or writes anything.
+func checkMode(ctx context.Context, livemode bool) error {
+	scope, err := scopeOf(ctx)
+	if err != nil {
+		return err
+	}
+	if scope.allows(livemode) {
+		return nil
+	}
+	own, other := modeLabel(scope.livemode), modeLabel(livemode)
+	return errs.Forbidden(fmt.Sprintf(
+		"a %s-mode API key can manage only the %s-mode Stripe connection: use a %s-mode key or the dashboard for %s mode",
+		own, own, other, other))
+}
+
+func modeLabel(livemode bool) string {
+	if livemode {
+		return "live"
+	}
+	return "test"
+}
+
 // Connect validates key shapes, writes the credentials, then calls Stripe
 // with the supplied secret to confirm it works and capture account identity.
 // A verify failure does NOT roll back the write — the row is persisted so
 // the UI can show "connected but failing verify: <reason>" and the tenant
-// can retry without re-entering keys.
+// can retry without re-entering keys. A caller that may not manage the mode
+// gets errs.ErrForbidden, and nothing is written or sent to Stripe.
 func (s *Service) Connect(ctx context.Context, tenantID string, in ConnectInput) (domain.StripeProviderCredentials, error) {
 	if tenantID == "" {
 		return domain.StripeProviderCredentials{}, errs.Required("tenant_id")
+	}
+	if err := checkMode(ctx, in.Livemode); err != nil {
+		return domain.StripeProviderCredentials{}, err
 	}
 	in.SecretKey = strings.TrimSpace(in.SecretKey)
 	in.PublishableKey = strings.TrimSpace(in.PublishableKey)
@@ -180,20 +236,36 @@ func (s *Service) runPostConnectRetry(tenantID string, livemode bool, expected i
 		"duration_ms", time.Since(start).Milliseconds())
 }
 
-// List returns both modes' public views. Handlers enforce that the caller's
-// auth key tenant matches tenantID before calling.
+// List returns the public views of the connections the caller manages: both
+// modes for a dashboard session, and only its own mode for an API key.
+// Handlers enforce that the caller's auth key tenant matches tenantID before
+// calling.
 func (s *Service) List(ctx context.Context, tenantID string) ([]domain.StripeProviderCredentials, error) {
 	if tenantID == "" {
 		return nil, errs.Required("tenant_id")
 	}
-	return s.store.ListByTenant(ctx, tenantID)
+	scope, err := scopeOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	all, err := s.store.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(all, func(c domain.StripeProviderCredentials) bool {
+		return !scope.allows(c.Livemode)
+	}), nil
 }
 
 // Delete removes credentials for a single mode. Returns errs.ErrNotFound if
-// no row exists — handler translates to 404.
+// no row exists — handler translates to 404 — and errs.ErrForbidden when the
+// caller may not manage the mode.
 func (s *Service) Delete(ctx context.Context, tenantID string, livemode bool) error {
 	if tenantID == "" {
 		return errs.Required("tenant_id")
+	}
+	if err := checkMode(ctx, livemode); err != nil {
+		return err
 	}
 	return s.store.Delete(ctx, tenantID, livemode)
 }
@@ -203,10 +275,14 @@ func (s *Service) Delete(ctx context.Context, tenantID string, livemode bool) er
 // forcing the tenant to re-enter API keys. Stripe isn't re-probed: the key was
 // already verified on Connect, and the new secret is HMAC-validated per
 // incoming webhook rather than at save time. Returns errs.ErrNotFound if the
-// tenant hasn't connected API keys yet — caller must finish Connect first.
+// tenant hasn't connected API keys yet — caller must finish Connect first —
+// and errs.ErrForbidden when the caller may not manage the mode.
 func (s *Service) SetWebhookSecret(ctx context.Context, tenantID string, livemode bool, secret string) (domain.StripeProviderCredentials, error) {
 	if tenantID == "" {
 		return domain.StripeProviderCredentials{}, errs.Required("tenant_id")
+	}
+	if err := checkMode(ctx, livemode); err != nil {
+		return domain.StripeProviderCredentials{}, err
 	}
 	secret = strings.TrimSpace(secret)
 	if secret == "" {
