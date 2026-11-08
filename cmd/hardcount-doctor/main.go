@@ -22,6 +22,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/doctor"
 )
 
@@ -29,6 +30,10 @@ func main() {
 	dsn := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if dsn == "" {
 		fmt.Fprintln(os.Stderr, "hardcount-doctor: DATABASE_URL is required")
+		os.Exit(2)
+	}
+	if err := config.CheckDatabaseURL("DATABASE_URL", dsn); err != nil {
+		fmt.Fprintf(os.Stderr, "hardcount-doctor: %v\n", err)
 		os.Exit(2)
 	}
 	db, err := sql.Open("pgx", dsn)

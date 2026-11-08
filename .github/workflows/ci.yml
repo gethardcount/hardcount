@@ -233,8 +233,8 @@ jobs:
   # database, a second run has nothing to do, and the limited user has the
   # idle-transaction timeout. Also a restore drill (a HEAD backup restored
   # into an empty database with scripts/restore.sh) and an apply on
-  # Postgres 14. Each Postgres runs in its own container, so the job has no
-  # service.
+  # Postgres 15 and on 18. Each Postgres runs in its own container, so the
+  # job has no service.
   migrations:
     runs-on: ubuntu-24.04
     timeout-minutes: 20

@@ -2751,21 +2751,25 @@ const duePendingItemsWhere = `subscription_id = $2
 // ApplyDuePendingItemPlansAtomic swaps plan_id ← pending_plan_id for every
 // item under the given subscription whose pending change has come due
 // (pending_plan_effective_at <= now). All applicable items are updated in
-// one statement. Returns the swapped items only, as the swap left them.
-// Called by the billing engine at the cycle boundary.
+// one statement. Called by the billing engine at the cycle boundary.
+//
+// It returns every live item of the subscription, read on the swap's
+// transaction after the swap, and the changes it applied. The read runs
+// under the subscription row lock, which every item writer takes, so the
+// items are exactly the set the swap committed (#1620).
 //
 // In the same transaction it queues one subscription.pending_change.applied
 // per swapped item, carrying the subscription as the swap left it, the plan
 // the item left (read under the lock) and appliedAt. A stale caller that
 // finds nothing due swaps and sends nothing.
-func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, subscriptionID string, now, appliedAt time.Time) ([]domain.SubscriptionItem, error) {
+func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, subscriptionID string, now, appliedAt time.Time) (AppliedPlanChanges, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return nil, err
+		return AppliedPlanChanges{}, err
 	}
 	defer postgres.Rollback(tx)
 	if err := lockSubscriptionRow(ctx, tx, subscriptionID); err != nil {
-		return nil, err
+		return AppliedPlanChanges{}, err
 	}
 	// Each due item references its current plan (the change row's
 	// from_plan_id, and the event's old_plan_id) and its pending one. The
@@ -2793,10 +2797,10 @@ func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tena
 		}
 		return rows.Err()
 	}(); err != nil {
-		return nil, fmt.Errorf("read due plan changes: %w", err)
+		return AppliedPlanChanges{}, fmt.Errorf("read due plan changes: %w", err)
 	}
 	if err := lockPlansTx(ctx, tx, duePlans); err != nil {
-		return nil, err
+		return AppliedPlanChanges{}, err
 	}
 
 	// Swap every item under the subscription whose pending change is due.
@@ -2818,54 +2822,54 @@ func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tena
 		now, subscriptionID,
 	)
 	if err != nil {
-		return nil, err
+		return AppliedPlanChanges{}, err
 	}
 	defer func() { _ = rows.Close() }()
 
-	var updated []domain.SubscriptionItem
+	var swapped []AppliedPlanChange
 	for rows.Next() {
 		var it domain.SubscriptionItem
 		if err := rows.Scan(scanItemDest(&it)...); err != nil {
-			return nil, err
+			return AppliedPlanChanges{}, err
 		}
-		updated = append(updated, it)
+		swapped = append(swapped, AppliedPlanChange{ItemID: it.ID, OldPlanID: oldPlan[it.ID], NewPlanID: it.PlanID})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return AppliedPlanChanges{}, err
 	}
 	// ADR-101: each swap moves at the gate it was applied at ($now — the
 	// caller's period boundary during catch-up, NOT re-snapped). When a
 	// later-instant change already sealed past the gate (engine-down
 	// interleave), intervalTransition splices retroactively.
-	for _, it := range updated {
-		if err := intervalTransition(ctx, tx, it.ID, it.SubscriptionID, now, it.PlanID, nil, "plan_scheduled"); err != nil {
-			return nil, err
+	for _, ch := range swapped {
+		if err := intervalTransition(ctx, tx, ch.ItemID, subscriptionID, now, ch.NewPlanID, nil, "plan_scheduled"); err != nil {
+			return AppliedPlanChanges{}, err
 		}
 	}
-	if err := s.enqueuePlanChangesApplied(ctx, tx, subscriptionID, updated, oldPlan, appliedAt); err != nil {
-		return nil, err
+	after, err := readSubTx(ctx, tx, subscriptionID)
+	if err != nil {
+		return AppliedPlanChanges{}, fmt.Errorf("read the subscription after the swap: %w", err)
+	}
+	if err := s.enqueuePlanChangesApplied(ctx, tx, after, swapped, appliedAt); err != nil {
+		return AppliedPlanChanges{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return AppliedPlanChanges{}, err
 	}
-	return updated, nil
+	return AppliedPlanChanges{Items: after.Items, Swapped: swapped}, nil
 }
 
 // enqueuePlanChangesApplied queues one subscription.pending_change.applied
-// per applied item on tx. Each carries the subscription read once after the
-// swap: the item's plan_id is the new plan, and old_plan_id the one it left.
-func (s *PostgresStore) enqueuePlanChangesApplied(ctx context.Context, tx *sql.Tx, subscriptionID string, applied []domain.SubscriptionItem, oldPlan map[string]string, appliedAt time.Time) error {
-	if s.outbox == nil || len(applied) == 0 {
+// per applied change on tx. Each carries sub, read after the swap: the
+// item's plan_id is the new plan, and old_plan_id the one it left.
+func (s *PostgresStore) enqueuePlanChangesApplied(ctx context.Context, tx *sql.Tx, sub domain.Subscription, swapped []AppliedPlanChange, appliedAt time.Time) error {
+	if s.outbox == nil {
 		return nil
 	}
-	sub, err := readSubTx(ctx, tx, subscriptionID)
-	if err != nil {
-		return fmt.Errorf("read the subscription for %s: %w", domain.EventSubscriptionPendingChangeApplied, err)
-	}
-	for _, it := range applied {
+	for _, ch := range swapped {
 		if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionPendingChangeApplied, sub, map[string]any{
-			"item_id":     it.ID,
-			"old_plan_id": oldPlan[it.ID],
+			"item_id":     ch.ItemID,
+			"old_plan_id": ch.OldPlanID,
 			"applied_at":  appliedAt.UTC(),
 		}); err != nil {
 			return err
