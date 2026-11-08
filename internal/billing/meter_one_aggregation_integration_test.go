@@ -33,9 +33,6 @@ import (
 // the one place the change bills differently on purpose (the id breaks it on
 // every path; TestAggregateLast_TimestampTieBreaksByID).
 func TestOneAggregationPerMeter_EveryPathUnchanged(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	type event struct {
 		qty   string
 		model string

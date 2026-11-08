@@ -124,7 +124,6 @@ func (r *lagRig) planWith(code string, base int64, meters ...string) string {
 // the May event is flagged; count before the write → the replay is counted;
 // recompute billing_status on the replay → the 200 carries it.
 func TestUsageAfterClose_SingleIngestAndBackfillAreFlagged(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	api0, bf0 := afterCloseCount(t, "api"), afterCloseCount(t, "backfill")
 
@@ -186,7 +185,6 @@ func TestUsageAfterClose_SingleIngestAndBackfillAreFlagged(t *testing.T) {
 //
 // Mutation check: count prepared rows instead of inserted ones → 2.
 func TestUsageAfterClose_BatchCountsInsertedRowsOnly(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	r.postEvent("/v1/usage-events", "calls", "apr-1", lagP0.AddDate(0, 0, 19), lagP0.AddDate(0, 0, 19), 100, http.StatusCreated)
 	r.run(lagB.Add(2 * time.Hour))
@@ -246,7 +244,6 @@ func newTokensRig(t *testing.T) (*lagRig, string) {
 // April and arrives after April's invoice answers after_close 2 (its input
 // and output rows); its replay answers after_close 0. Neither row is billed.
 func TestUsageAfterClose_LiteLLMCountsAfterClose(t *testing.T) {
-	skipShort(t)
 	r, planT := newTokensRig(t)
 	r.newSub("llm", planT, lagP0, nil)
 	if s := r.sub(); !s.CurrentBillingPeriodStart.Equal(lagP0) || !s.CurrentBillingPeriodEnd.Equal(lagB) {
@@ -282,7 +279,6 @@ func TestUsageAfterClose_LiteLLMCountsAfterClose(t *testing.T) {
 // flagged. Both are billed: the April event on April's invoice, the May event
 // on May's.
 func TestUsageAfterClose_GraceIsNotFlagged(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	api0 := afterCloseCount(t, "api")
 	out := r.postEvent("/v1/usage-events", "calls", "apr-grace", lagB.Add(-10*time.Minute), lagB.Add(20*time.Minute), 40, http.StatusCreated)
@@ -316,7 +312,6 @@ func TestUsageAfterClose_GraceIsNotFlagged(t *testing.T) {
 // the trial end → the trial event after the first paid invoice is
 // after_close.
 func TestUsageAfterClose_TrialUsageIsNotFlagged(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.newTrialEndingAt(uwDay)
 	out := r.postEvent("/v1/usage-events", "calls", "trial-1", uwDay.Add(-14*time.Hour), uwDay.Add(-14*time.Hour+time.Minute), 5, http.StatusCreated)
@@ -340,7 +335,6 @@ func TestUsageAfterClose_TrialUsageIsNotFlagged(t *testing.T) {
 // Mutation check: classify a last meter as never after_close → the seats
 // reading is not flagged.
 func TestUsageAfterClose_LastMeterIsFlagged(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	seats := r.newMeter("seats", "last")
 	r.newSub("gauge", r.planWith("plan_g", 3000, r.meterID, seats), lagP0, nil)
@@ -408,7 +402,6 @@ func thresholdFiredWithCredit(t *testing.T, grantCents int64) (*lagRig, time.Tim
 // Mutation check: drop the sum/count-only condition → the max reading is
 // flagged.
 func TestUsageAfterClose_ThresholdWatermark(t *testing.T) {
-	skipShort(t)
 	r, fireAt, thr := thresholdFired(t)
 	r.must(http.MethodPost, "/v1/invoices/"+thr+"/record-payment", fireAt.Add(30*time.Minute), map[string]any{"note": "wire"}, http.StatusOK)
 
@@ -440,7 +433,6 @@ func TestUsageAfterClose_ThresholdWatermark(t *testing.T) {
 // Mutation check: flag before the watermark of any threshold invoice, paid
 // or not → the event is flagged in all three cases.
 func TestUsageAfterClose_ThresholdWatermark_Unpaid(t *testing.T) {
-	skipShort(t)
 	for _, tc := range []struct {
 		action    string
 		wantUsage int64 // on April's cycle invoice; the 5 peak is billed there either way
@@ -474,7 +466,6 @@ func TestUsageAfterClose_ThresholdWatermark_Unpaid(t *testing.T) {
 // Mutation check: read the watermark only for a subscription that still has
 // thresholds → the event is not flagged.
 func TestUsageAfterClose_ThresholdWatermark_ThresholdsCleared(t *testing.T) {
-	skipShort(t)
 	r, fireAt, thr := thresholdFired(t)
 	r.must(http.MethodPost, "/v1/invoices/"+thr+"/record-payment", fireAt.Add(10*time.Minute), map[string]any{"note": "wire"}, http.StatusOK)
 	r.must(http.MethodDelete, "/v1/subscriptions/"+r.subID+"/billing-thresholds", fireAt.Add(30*time.Minute), nil, http.StatusOK)
@@ -519,7 +510,6 @@ func (r *lagRig) heldReleaseVia(end, arrive, at time.Time) map[string]any {
 //
 // Mutation check: drop the grace branch from the classification → outside.
 func TestUsageAfterClose_HeldReleaseInTheGrace(t *testing.T) {
-	skipShort(t)
 	r, planT := newTokensRig(t)
 	r.newSub("held", planT, lagP0, nil)
 	out := r.heldRelease(lagB.Add(10*time.Minute), lagB.Add(20*time.Minute))
@@ -533,7 +523,6 @@ func TestUsageAfterClose_HeldReleaseInTheGrace(t *testing.T) {
 //
 // Mutation check: drop the cancel-at-period-end exclusion → in_open_period.
 func TestUsageAfterClose_HeldReleaseInTheGrace_CancelAtPeriodEnd(t *testing.T) {
-	skipShort(t)
 	r, planT := newTokensRig(t)
 	r.newSub("held", planT, lagP0, nil)
 	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagP0.AddDate(0, 0, 9), map[string]any{"at_period_end": true}, http.StatusOK)
@@ -550,7 +539,6 @@ func TestUsageAfterClose_HeldReleaseInTheGrace_CancelAtPeriodEnd(t *testing.T) {
 // Mutation checks: classify against the current plan only → not_on_plan;
 // don't load the pending plan in the release handler → not_on_plan.
 func TestUsageAfterClose_HeldReleaseInTheGrace_PendingPlan(t *testing.T) {
-	skipShort(t)
 	r, planT := newTokensRig(t)
 	r.newSub("held", r.planC, lagP0, nil)
 	item := r.sub().Items[0].ID
@@ -578,7 +566,6 @@ func TestUsageAfterClose_HeldReleaseInTheGrace_PendingPlan(t *testing.T) {
 // and 16 rows count in_open_period; flag before an unpaid watermark → the
 // April 15 rows count outside_open_period.
 func TestUsageAfterClose_HeldReleaseAroundThresholdWatermark(t *testing.T) {
-	skipShort(t)
 	r, planT := newTokensRig(t)
 	r.newSub("held", planT, lagP0, nil)
 	r.postEvent("/v1/usage-events", "tokens", "tokens-apr10", lagP0.AddDate(0, 0, 9), lagP0.AddDate(0, 0, 9), 100, http.StatusCreated)
@@ -622,7 +609,6 @@ func TestUsageAfterClose_HeldReleaseAroundThresholdWatermark(t *testing.T) {
 // Mutation check: put 'uncollectible' back in the watermark predicate → the
 // rows released after the write-off count in_open_period.
 func TestUsageAfterClose_HeldReleaseUnderWrittenOffThresholdInvoice(t *testing.T) {
-	skipShort(t)
 	r, planT := newTokensRig(t)
 	r.newSub("held", planT, lagP0, nil)
 	r.postEvent("/v1/usage-events", "tokens", "tokens-apr10", lagP0.AddDate(0, 0, 9), lagP0.AddDate(0, 0, 9), 100, http.StatusCreated)
@@ -683,7 +669,6 @@ func anthropicCall(t *testing.T, name, id, user string, end time.Time) map[strin
 // pre-split rows on top of the four written); count every after-close row
 // of the written mapping, written or deduplicated → the replay answers 4.
 func TestUsageAfterClose_LiteLLMCacheWritesFlaggedPerWrittenRow(t *testing.T) {
-	skipShort(t)
 	r, planT := newTokensRig(t)
 	r.newSub("llm", planT, lagP0, nil)
 	r.must(http.MethodPost, "/v1/integrations/litellm/spend", lagP0.AddDate(0, 0, 9),
@@ -725,7 +710,6 @@ func TestUsageAfterClose_LiteLLMCacheWritesFlaggedPerWrittenRow(t *testing.T) {
 // Mutation checks: count the after-close rows of both mappings → 2; count
 // every after-close row of the written mapping, written or deduplicated → 2.
 func TestUsageAfterClose_LiteLLMPreSplitCallCountsOldWayRows(t *testing.T) {
-	skipShort(t)
 	r, planT := newTokensRig(t)
 	r.newSub("llm", planT, lagP0, nil)
 	end := lagB.Add(-2 * time.Minute)
@@ -761,7 +745,6 @@ func TestUsageAfterClose_LiteLLMPreSplitCallCountsOldWayRows(t *testing.T) {
 //
 // Mutation check: bill cache hits in the mapper → accepted 2, after_close 2.
 func TestUsageAfterClose_LiteLLMCacheHitCountsNothing(t *testing.T) {
-	skipShort(t)
 	r, planT := newTokensRig(t)
 	r.newSub("llm", planT, lagP0, nil)
 	r.run(lagB.Add(2 * time.Hour))

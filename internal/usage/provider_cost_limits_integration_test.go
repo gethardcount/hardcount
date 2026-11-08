@@ -30,9 +30,6 @@ func costBody(raw string) string {
 }
 
 func TestProviderCostRate_ValidEdgesStoredAsSent(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newProviderCostAuditFixture(t)
 	for _, tc := range []struct{ raw, want string }{
 		{`"0"`, "0"},
@@ -75,9 +72,6 @@ func TestProviderCostRate_ValidEdgesStoredAsSent(t *testing.T) {
 }
 
 func TestProviderCostRate_OutOfRangeRefusedNamingTheField(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newProviderCostAuditFixture(t)
 	for _, raw := range []string{
 		``, // absent
@@ -107,9 +101,6 @@ func TestProviderCostRate_OutOfRangeRefusedNamingTheField(t *testing.T) {
 }
 
 func TestProviderCostRate_ExponentOutOfRangeIsNamed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newProviderCostAuditFixture(t)
 	for _, raw := range []string{`1e9999999999`, `"1e-9999999999"`, `0e9999999999`} {
 		rec, _ := f.serve(t, nil, http.MethodPut, "/", costBody(raw))
@@ -120,9 +111,6 @@ func TestProviderCostRate_ExponentOutOfRangeIsNamed(t *testing.T) {
 }
 
 func TestProviderCostRate_ExtremeExponents(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newProviderCostAuditFixture(t)
 	for _, tc := range []struct {
 		raw  string

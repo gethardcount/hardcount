@@ -19,9 +19,6 @@ import (
 // aggregation change past the has-usage lock. The other write is held open
 // on the meter row so it commits between the rename's read and its write.
 func TestMeterRename_DoesNotRevertAConcurrentChange(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	svc := pricing.NewService(pricing.NewPostgresStore(db))
 	tenantID := testutil.CreateTestTenant(t, db, "meter rename race")

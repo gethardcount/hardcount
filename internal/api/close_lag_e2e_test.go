@@ -341,13 +341,6 @@ func (r *lagRig) exec(query string, args ...any) {
 	}
 }
 
-func skipShort(t *testing.T) {
-	t.Helper()
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
-}
-
 // --- D1: cancel schedule ------------------------------------------------------
 
 // TestCloseLag_ScheduleCancelAtPeriodEnd_InGap: the operator schedules
@@ -359,7 +352,6 @@ func skipShort(t *testing.T) {
 // Mutation seam: drop the pre-close from Service.ScheduleCancel → the close
 // cancels the subscription retroactively at B and May is never billed.
 func TestCloseLag_ScheduleCancelAtPeriodEnd_InGap(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_advance", false)
 	r.ingest(lagP0.AddDate(0, 0, 19), 100)
 	r.ingest(lagB.Add(time.Hour), 50)
@@ -385,7 +377,6 @@ func TestCloseLag_ScheduleCancelAtPeriodEnd_InGap(t *testing.T) {
 // schedule. The cancel took effect at B; a clear after B cannot undo it. The
 // subscription is canceled at B and May is not billed.
 func TestCloseLag_ClearScheduledCancel_InGap(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_advance", false)
 	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagP0.AddDate(0, 0, 9), map[string]any{"at_period_end": true}, http.StatusOK)
 
@@ -414,7 +405,6 @@ func TestCloseLag_ClearScheduledCancel_InGap(t *testing.T) {
 // April was not paused at its end, so its invoice is finalized for
 // collection, not left as a draft.
 func TestCloseLag_PauseCollection_InGap(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_arrears", false)
 	r.ingest(lagP0.AddDate(0, 0, 19), 100)
 	r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/pause-collection", lagB.Add(2*time.Hour), map[string]any{"behavior": "keep_as_draft"}, http.StatusOK)
@@ -432,7 +422,6 @@ func TestCloseLag_PauseCollection_InGap(t *testing.T) {
 // is resumed two hours after B. April was paused at its end, so its invoice
 // stays a draft and is not collected.
 func TestCloseLag_ResumeCollection_InGap(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_arrears", false)
 	r.ingest(lagP0.AddDate(0, 0, 19), 100)
 	r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/pause-collection", lagP0.AddDate(0, 0, 9), map[string]any{"behavior": "keep_as_draft"}, http.StatusOK)
@@ -453,7 +442,6 @@ func TestCloseLag_ResumeCollection_InGap(t *testing.T) {
 // schedules a change to plan B "at period end". The period running is May,
 // so the change takes effect on Jun 1, and May's prepaid base is plan A's.
 func TestCloseLag_ScheduledPlanChange_InGap(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_advance", false)
 	r.must(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, lagB.Add(2*time.Hour),
 		map[string]any{"new_plan_id": r.planB, "immediate": false}, http.StatusOK)
@@ -475,7 +463,6 @@ func TestCloseLag_ScheduledPlanChange_InGap(t *testing.T) {
 // in April for the end of April. Two hours after B the operator cancels the
 // pending change. It took effect at B; May is billed on plan B.
 func TestCloseLag_CancelPendingPlanChange_InGap(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_advance", false)
 	r.must(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, lagP0.AddDate(0, 0, 9),
 		map[string]any{"new_plan_id": r.planB, "immediate": false}, http.StatusOK)
@@ -511,7 +498,6 @@ func mayBase(invs []lagInvoice) int64 {
 // saw the ended period (no proration: none of it was left) and the late close
 // billed the whole of May at the post-write items.
 func TestCloseLag_ItemWrites_InGap(t *testing.T) {
-	skipShort(t)
 	at := lagB.Add(36 * time.Hour)
 	cases := []struct {
 		name      string
@@ -596,7 +582,6 @@ func TestCloseLag_ItemWrites_InGap(t *testing.T) {
 // unbilled_period, and none of them is written: acting on the ended period
 // would decide what its close bills.
 func TestCloseLag_ItemWritesWhileBillingFails_Refused(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_advance", true)
 	// A second add-on with no meter, so the add is valid on its own merits.
 	planD := r.must(http.MethodPost, "/v1/plans", lagP0, map[string]any{
@@ -651,7 +636,6 @@ func TestCloseLag_ItemWritesWhileBillingFails_Refused(t *testing.T) {
 // Mutation seam: drop the no-items exemption from CloseEndedPeriodFirst → the
 // add answers 409 unbilled_period and the subscription can never be billed.
 func TestCloseLag_NoItemsFailure_AddItemRecovers(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_arrears", false)
 	r.ingest(lagP0.AddDate(0, 0, 19), 100)
 	r.exec(`UPDATE subscription_items SET deleted_at = $1 WHERE id = $2`, lagP0.AddDate(0, 0, 1), r.itemA)
@@ -684,7 +668,6 @@ func TestCloseLag_NoItemsFailure_AddItemRecovers(t *testing.T) {
 // the monthly plan for the yearly one, immediately. April's 100c of usage
 // must be billed: the swap must not re-anchor past an ended, unbilled period.
 func TestCloseLag_CrossIntervalSwap_InGap(t *testing.T) {
-	skipShort(t)
 	for _, timing := range []string{"in_advance", "in_arrears"} {
 		t.Run(timing, func(t *testing.T) {
 			r := newLagRig(t, timing, false)
@@ -733,7 +716,6 @@ func TestCloseLag_CrossIntervalSwap_InGap(t *testing.T) {
 // and the doctor flags it); start it at the swap (April's 100c is never
 // billed).
 func TestCrossIntervalSwap_InAdvance_BillsOldPeriodUsageOnce(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_advance", false)
 	r.ingest(time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC), 100)
 	swapAt := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
