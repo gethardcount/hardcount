@@ -13,6 +13,12 @@ for the period is below zero. Back to the [runbook index](index.md).
   `cycle`, `cancel` or `threshold`.
 - The invoice preview and the customer usage view warn that the meter's
   usage is below zero and counted as 0.
+- Or [the late-usage steps](invoice-timing-late-usage.md#usage-is-missing-from-a-built-invoice)
+  found a price whose usage is now lower than its invoices billed: a
+  correction arrived after the invoice. On this page, that quantity below
+  0 takes the place of the row's `quantity`, and the late-usage `FROM` and
+  `TO` take the place of its window. The period's invoices are the ones
+  that billed the corrected usage.
 
 ## Why
 
@@ -59,7 +65,7 @@ It does not carry the negative amount into a later period.
    curl -sS -G "$API/v1/usage-events" -H "Authorization: Bearer $KEY" \
      --data-urlencode "customer_id=$CUSTOMER" --data-urlencode "meter_id=$METER" \
      --data-urlencode "from=$FROM" --data-urlencode "to=$TO" \
-     | jq -c '.data[] | {quantity, dimensions, timestamp, idempotency_key}'
+     | jq -c '.data[] | {id, quantity, dimensions, timestamp, idempotency_key}'
    ```
 
    For a meter with several prices, `quantity` in the row adds up only the
@@ -71,43 +77,67 @@ It does not carry the negative amount into a later period.
 
 ## Fix
 
-- **The corrected usage was billed on an earlier invoice:** create a credit
-  note on that invoice (`POST /v1/credit-notes` with `invoice_id` and
-  `lines`), then issue it (`POST /v1/credit-notes/{id}/issue`).
-  - Credit the row's `quantity` (the part below zero, per price), priced
-    as the earlier invoice priced it. The rest of the correction already
-    cancelled out this period's usage.
-  - For example: usage 100, a correction of -150, and the row shows -50.
-    Credit 50 units.
-  - With no `refund_amount_cents`, no money moves. On a paid invoice the
-    credit goes to the customer's balance. On an unpaid one it lowers what
-    is due ([Credit notes](../../concepts/invoices.md#credit-notes)). Before you
-    set a refund, check the payment in Stripe: a refund made there already
-    is recorded instead ([A refund made in Stripe](refund-made-in-stripe.md)).
+Each fix ends with an event that makes the period's stored usage match
+what its invoices billed. Usage that arrives late for the period is billed
+by [the late-usage steps](invoice-timing-late-usage.md#usage-is-missing-from-a-built-invoice),
+which bill the stored usage less what the invoices billed. Without that
+event, they would bill it wrong by the amount of this fix.
+
+- **The corrected usage was billed on an earlier invoice:**
+  1. Create a credit note on that invoice (`POST /v1/credit-notes` with
+     `invoice_id`, a `reason` and `lines`), then issue it
+     (`POST /v1/credit-notes/{id}/issue`).
+     - Credit the row's `quantity` (the part below zero, per price),
+       priced as the earlier invoice priced it. The rest of the correction
+       already cancelled out this period's usage.
+     - For example: usage 100, a correction of -150, and the row shows
+       -50. Credit 50 units.
+     - With no `refund_amount_cents`, no money moves. On a paid invoice
+       the credit goes to the customer's balance. On an unpaid one it
+       lowers what is due ([Credit notes](../../concepts/invoices.md#credit-notes)).
+       Before you set a refund, check the payment in Stripe: a refund made
+       there already is recorded instead
+       ([A refund made in Stripe](refund-made-in-stripe.md)).
+  2. For each price you credited, [send an event](#send-the-matching-event)
+     of the quantity you credited. The period's stored usage for that
+     price is then what its invoice billed.
 - **The correction was sent by mistake:** nothing was charged for it, but
-  it cancelled out this period's real usage for that price. Bill that
-  usage, the period's usage for the price before the correction, on a
-  one-off invoice, as in steps 4 and 5 of
-  [Usage is missing from a built invoice](invoice-timing-late-usage.md#usage-is-missing-from-a-built-invoice).
-  - `INVOICE` and `NUMBER` are the row's `invoice_id` and
-    `invoice_number`. A row with no invoice has neither: use the
-    subscription ID and the row's `period_start` instead.
-  - `N` counts only such invoices for that invoice. Use this memo and
-    idempotency key, so the late-usage steps never count this invoice as
-    theirs:
+  it cancelled out this period's real usage for that price.
+  1. [Send an event](#send-the-matching-event) that reverses it: the
+     correction's quantity, without the minus.
+  2. Bill the usage the correction cancelled with
+     [the late-usage steps](invoice-timing-late-usage.md#usage-is-missing-from-a-built-invoice).
+  3. Fix the sender so it does not repeat.
 
-    ```bash
-    MEMO="Usage cancelled by a correction on $NUMBER ($N)"; IDEMPOTENCY_KEY="below-zero-$INVOICE-$N"
-    ```
+### Send the matching event
 
-  - Then fix the sender so it does not repeat. Do not also send an event
-    that reverses the correction: the late-usage steps would then bill
-    the same usage again.
+The event copies a correction's customer, meter, labels and time, so it
+falls in the same period and the same price. For a credit, copy the
+price's newest correction: the first one the Check's event list shows for
+it. Its idempotency key comes from that correction's `id`, so a second
+send stores nothing new. The backfill call takes an event for a period
+already invoiced.
+
+```bash
+EXTERNAL_ID=<the customer's external_id>; EVENT_NAME=<the meter's event_name>
+ID=<the correction's id>; TIMESTAMP=<its timestamp>; DIMENSIONS='<its dimensions>'
+QUANTITY=<the quantity, without a minus>
+jq -n --arg c "$EXTERNAL_ID" --arg e "$EVENT_NAME" --arg t "$TIMESTAMP" --arg k "below-zero-$ID" \
+  --argjson q "$QUANTITY" --argjson d "$DIMENSIONS" \
+  '{external_customer_id: $c, event_name: $e, quantity: $q, timestamp: $t, dimensions: $d, idempotency_key: $k}' \
+  | curl -sS -X POST "$API/v1/usage-events/backfill" -H "Authorization: Bearer $KEY" \
+    -H "Content-Type: application/json" -d @- | jq '{id, quantity, timestamp}'
+```
+
+**You see:** the stored event (`hc_evt_…`), dated at the correction's
+time.
 
 ## Verify
 
 The credit note is issued on the earlier invoice, and the customer's
-balance or refund shows it. For a correction sent by mistake, the one-off
-invoice is `finalized` or `paid`.
+balance or refund shows it. For a correction sent by mistake, the
+late-usage one-off invoice is `finalized` or `paid`. Either way, the
+event from [Send the matching event](#send-the-matching-event) is in the
+Check's event list.
 
 Related: [Invoice timing and late usage](invoice-timing-late-usage.md).

@@ -92,8 +92,8 @@ curl -sS "$API/metrics" -H "Authorization: Bearer $METRICS_TOKEN" | grep '^hardc
 ```
 
 **Fix:** bill the difference once, on a one-off invoice. These steps are
-for a customer with one subscription. With more, the usage call in step 3
-covers all of them: compare only the rows of this subscription's plan.
+for a customer with one subscription. With more, step 3 compares only the
+rows of `PLAN`, this subscription's plan.
 
 1. **List the customer's invoices,** and keep the ones that are not voided:
    - the period's own invoice: the one built when the period ended. For a
@@ -102,41 +102,48 @@ covers all of them: compare only the rows of this subscription's plan.
    - any spend-threshold invoice of the period (`billing_reason`
      `threshold`);
    - any one-off invoice (`billing_reason` `manual`) that step 4 made for
-     this period: its memo starts `Usage that arrived after` and the
-     period's invoice number. Keep also one you know billed this usage.
-     Never keep one made on another page, such as for
-     [usage with no price](usage-with-no-price.md) or
-     [usage below zero](usage-below-zero.md): that usage is not part of
-     the step 3 total.
+     this period: its memo starts `Late usage for` and the period's invoice
+     number. Keep also one you know billed this usage. Never keep one made
+     on another page, such as for
+     [usage with no price](usage-with-no-price.md): that usage is not part
+     of the step 3 total.
 
    Note also any voided spend-threshold invoice of the period: step 3
-   needs it.
-
-   If the period's own invoice is not there yet, it will bill this usage:
-   stop. The exception is usage stamped before a spend-threshold invoice of
-   the period that is not voided: come back once the period's own invoice
-   is built. If step 4 made a draft before, finalize that draft (step 5)
+   needs it. If step 4 made a draft before, finalize that draft (step 5)
    rather than make another.
 
    ```bash
    CUSTOMER=<customer id>
    # With more than 100 invoices, add &offset=100, 200, ...
    curl -sS "$API/v1/invoices?customer_id=$CUSTOMER&limit=100" -H "Authorization: Bearer $KEY" \
-     | jq -c '.data[] | {id, invoice_number, status, billing_reason, billing_period_start, billing_period_end, memo, subtotal_cents, total_amount_cents, created_at, voided_at}'
+     | jq -c '.data[] | {id, invoice_number, status, billing_reason, billing_period_start, billing_period_end, currency, memo, subtotal_cents, total_amount_cents, created_at, voided_at}'
    ```
 
-2. **Read the usage lines of the period's own and spend-threshold
+   If the period's own invoice is not there, read the subscription with the
+   check in [The invoice is not built yet](#the-invoice-is-not-built-yet):
+   - **Its current period still holds the usage:** the invoice is not
+     built yet. Stop, and come back once it is. It bills this usage,
+     except usage stamped before a spend-threshold invoice of the period
+     that is not voided.
+   - **Its current period starts after the usage:** the period ended with
+     nothing to bill, so it has no invoice. Go on. Step 3 takes the
+     period's start and end, and step 4 takes the subscription ID as
+     `INVOICE`, the period's start as `NUMBER` and the plan's currency.
+
+2. **Save the usage lines of the period's own and spend-threshold
    invoices:**
 
    ```bash
-   curl -sS "$API/v1/invoices/<invoice id>" -H "Authorization: Bearer $KEY" \
-     | jq -c '.line_items[] | select(.line_type == "usage")
-         | {price_id, quantity, amount_cents, billing_period_start, billing_period_end}'
+   for INV in <the invoice ids>; do
+     curl -sS "$API/v1/invoices/$INV" -H "Authorization: Bearer $KEY" \
+       | jq -c '.line_items[] | select(.line_type == "usage")
+           | {price_id, quantity, amount_cents, total_amount_cents, billing_period_start, billing_period_end}'
+   done | tee lines.ndjson
    ```
 
-3. **Price the usage stored for the period.** `FROM` is the earliest
-   `billing_period_start` of the step 2 lines, and `TO` the latest
-   `billing_period_end` (`from` inclusive, `to` exclusive).
+3. **Compare them with the usage stored for the period.** `FROM` is the
+   earliest `billing_period_start` of the step 2 lines, and `TO` the
+   latest `billing_period_end` (`from` inclusive, `to` exclusive).
    - If the invoices have no usage line: use the dates of the period's own
      invoice. For a plan billed in advance, use those of the invoice built
      one period earlier instead: they are this period's.
@@ -145,31 +152,82 @@ covers all of them: compare only the rows of this subscription's plan.
      invoice's `created_at`), its usage is billed nowhere. Set `FROM` to
      the voided invoice's `billing_period_start`, the period start: its
      usage is then part of the difference below. If you voided it to
-     forgive that usage, also subtract its `subtotal_cents` from the total.
+     forgive that usage, also subtract its usage lines from the total:
+     their `amount_cents`, or their `total_amount_cents` when `INCLUSIVE`
+     (below) is `true`. Read them with `GET /v1/invoices/<its id>`, not
+     with the step 2 loop, which would replace `lines.ndjson`.
+
+   The usage call prices the window at the plan's prices and the
+   customer's overrides as they are now, not as they were then. So first
+   list what changed since `FROM`:
 
    ```bash
    FROM=<earliest billing_period_start>; TO=<latest billing_period_end>
-   curl -sS -G "$API/v1/customers/$CUSTOMER/usage" -H "Authorization: Bearer $KEY" \
-     --data-urlencode "from=$FROM" --data-urlencode "to=$TO" \
-     | jq -c '.meters[] | .prices[] | {price_id, plan_id, quantity, amount_cents, no_price}'
+   PLAN=<the subscription's plan id>
+   # With more than 100 changes, add &offset=100, 200, ...
+   curl -sS -G "$API/v1/audit-log" -H "Authorization: Bearer $KEY" --data-urlencode "date_from=$FROM" \
+     --data-urlencode "resource_type=plan_price" --data-urlencode "limit=100" \
+     | jq -c --arg p "$PLAN" '.data[] | select(.metadata.plan_id == $p) | {created_at, action, meter_id: .metadata.meter_id}'
+   curl -sS -G "$API/v1/audit-log" -H "Authorization: Bearer $KEY" --data-urlencode "date_from=$FROM" \
+     --data-urlencode "resource_type=price_override" --data-urlencode "limit=100" \
+     | jq -c --arg c "$CUSTOMER" '.data[] | select(.metadata.customer_id == $c) | {created_at, action, price_id: .metadata.price_id}'
    ```
 
-   For each `price_id`, this `amount_cents` less the step 2 lines with that
-   `price_id` is what missed the invoices. Add up the differences above
-   zero, and subtract the `subtotal_cents` of the one-off invoices from
-   step 1 (their `total_amount_cents` if your prices include tax). The
-   rest is the total to bill. Hardcount works out its tax when you
-   finalize.
-   - A `no_price` row is usage no price took. It is not part of the total:
-     see [Usage with no price](usage-with-no-price.md).
-   - A difference below zero is a correction that arrived late. It is not
-     part of the total: see [Usage below zero](usage-below-zero.md).
-   - This call prices at the plan's prices now. If they changed since that
-     period, work out the difference in `quantity` at the old prices.
-   - It prices only active or trialing subscriptions. For a canceled one it
-     answers `meters: []`: list the events instead, with
-     `GET /v1/usage-events?customer_id=$CUSTOMER&meter_id=<meter id>&from=$FROM&to=$TO`,
-     and price them as the step 2 lines did.
+   **You see:** nothing, when no price of the plan and no override of the
+   customer changed. Otherwise, leave out of the total below every row of
+   each meter a price line names, and the row of each price an override
+   line names. These steps cannot price that usage at the period's
+   prices. Add it to the total only if you can work out its amount at
+   those prices; otherwise leave it unbilled.
+
+   Then compare. `INCLUSIVE` is `true` when your prices include tax
+   (tax-inclusive pricing, in **Settings → Tax**). An invoice line then
+   holds the price less its tax in `amount_cents`, and the whole price in
+   `total_amount_cents`:
+
+   ```bash
+   INCLUSIVE=$(curl -sS "$API/v1/settings" -H "Authorization: Bearer $KEY" | jq .tax_inclusive)
+   curl -sS -G "$API/v1/customers/$CUSTOMER/usage" -H "Authorization: Bearer $KEY" \
+     --data-urlencode "from=$FROM" --data-urlencode "to=$TO" > window.json
+   jq -r --slurpfile lines lines.ndjson --arg plan "$PLAN" --argjson inc "$INCLUSIVE" '
+     (.warnings[] | select(test("below zero")) | "warning: " + .),
+     (.meters[] | .event_name as $meter | .prices[]
+       | select(.plan_id == $plan and (.no_price | not)) | . as $row
+       | [$lines[] | select(.price_id == $row.price_id)] as $billed
+       | [$meter, .price_id,
+          (.quantity | tonumber) - ($billed | map(.quantity | tonumber) | add // 0),
+          .amount_cents - ($billed | map(if $inc then .total_amount_cents else .amount_cents end) | add // 0)]
+       | @tsv)' window.json
+   ```
+
+   **You see:** a line for each price of the plan with usage: its meter,
+   its `price_id`, the quantity the step 2 lines did not bill, and the
+   cents it adds.
+   - **Quantity 0:** nothing of that price is late. Leave its cents out:
+     each invoice line was rounded on its own.
+   - **Quantity above 0:** usage that missed the invoices. Its cents are
+     what to bill.
+   - **Quantity below 0, or a `warning` that a meter is below zero:** a
+     correction arrived after the invoice, so the invoice billed too much.
+     It is not part of the total: see [Usage below zero](usage-below-zero.md).
+   - Usage that no price took is left out:
+     [Usage with no price](usage-with-no-price.md).
+
+   Add up the cents to bill, and subtract the one-off invoices step 1
+   kept: their `subtotal_cents`, or their `total_amount_cents` when
+   `INCLUSIVE` is `true`. The rest is the total to bill. Hardcount works
+   out its tax when you finalize.
+
+   **A canceled subscription:** the usage call prices only active or
+   trialing subscriptions, so it answers `meters: []`. Read each price's
+   quantity instead: `total_units` from
+   `GET /v1/usage-events/aggregate?customer_id=$CUSTOMER&meter_id=<meter id>&from=$FROM&to=$TO&dimensions=<key>=<value>,...`,
+   with the labels of the price's `dimension_match`
+   (`GET /v1/plans/$PLAN/prices` lists them). Where one price's labels
+   include all of another's, take the other's quantity off. Compare it
+   with the price's step 2 lines, and price what is higher as the line
+   priced its quantity: for a price per unit, the extra quantity times
+   the line's `unit_amount_decimal` cents.
 
 4. **Create one one-off invoice for the total.** `N` goes into the memo
    (`MEMO`) and the idempotency key (`IDEMPOTENCY_KEY`), so each one-off
@@ -178,21 +236,20 @@ covers all of them: compare only the rows of this subscription's plan.
    draft. After that, start again from step 1.
 
    ```bash
-   INVOICE=<the period's invoice id>; NUMBER=<its invoice_number>
+   INVOICE=<the period's invoice id>; NUMBER=<its invoice_number>; CURRENCY=<its currency>
    N=<one-off invoices that step 1 kept, plus 1>; CENTS=<the total>
-   MEMO="Usage that arrived after $NUMBER was built ($N)"
+   MEMO="Late usage for $NUMBER ($N)"
    IDEMPOTENCY_KEY="late-usage-$INVOICE-$N"
-   jq -n --arg c "$CUSTOMER" --arg m "$MEMO" \
-     --argjson cents "$CENTS" '{customer_id: $c, memo: $m, line_items: [{description: $m,
+   jq -n --arg c "$CUSTOMER" --arg cur "$CURRENCY" --arg m "$MEMO" \
+     --argjson cents "$CENTS" '{customer_id: $c, currency: $cur, memo: $m, line_items: [{description: $m,
        line_type: "usage", quantity: 1, unit_amount_cents: $cents}]}' > late.json
    curl -sS -X POST "$API/v1/invoices" -H "Authorization: Bearer $KEY" \
      -H "Content-Type: application/json" -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
-     -d @late.json | jq '{id, status, total_amount_cents}'
+     -d @late.json | jq '{id, status, currency, total_amount_cents}'
    ```
 
-   **You see:** a `draft` (`hc_inv_…`) whose `total_amount_cents` is
-   `CENTS`. It is in the customer's currency: its billing profile's, else
-   its plan's.
+   **You see:** a `draft` (`hc_inv_…`) in `CURRENCY`, whose
+   `total_amount_cents` is `CENTS`.
 
 5. **Check the draft's amount, then finalize it.** Finalizing charges the
    customer at once: prepaid credit first, then the saved card.
