@@ -116,6 +116,15 @@ func (i Invoice) Parked() bool {
 	return i.PaymentStatus == PaymentUnknown && i.StripePaymentIntentID == ""
 }
 
+// OperatorComposed reports whether an operator made the invoice (POST
+// /v1/invoices), not billing for a subscription. BillingReasonManual is the
+// stamp Create writes; an empty reason is a draft written before the stamp
+// existed, and counts as an operator's too. An operator's draft takes lines
+// and computes its tax at finalize, and its lines keep the amounts entered.
+func (i Invoice) OperatorComposed() bool {
+	return i.BillingReason == "" || i.BillingReason == BillingReasonManual
+}
+
 // HasCardPayment reports whether this invoice's settled money is refundable to
 // a card: a Stripe PaymentIntent backs it. False for a never-charged invoice,
 // one paid by credits or with nothing due, and one paid out of band
@@ -486,8 +495,8 @@ const (
 
 // InvoiceTaxRetryUpdate is the snapshot UpdateTaxAtomic writes to a pending
 // invoice when an operator (or the retry worker) triggers a tax recompute.
-// It carries the new tax decision and the resulting headline totals. The
-// per-line tax stamps travel in the lineItems argument.
+// It carries the new tax decision and the resulting headline totals. Each
+// line's amount and tax stamps travel in the lineItems argument.
 //
 // An empty TaxCalculationID with TaxStatus=pending means the retry itself
 // failed. The row stays blocked from finalize, and the dashboard banner

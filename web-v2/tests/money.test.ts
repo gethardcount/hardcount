@@ -1,9 +1,8 @@
 // Pins "an invoice's amount is shown in the invoice's currency". The bug class
 // renders perfectly: a €1,200.00 invoice read "$1,200.00" in Record offline
 // payment, Dunning resolve and the credit-note dialog because the call sites
-// fell back to the workspace default. Every assertion here runs with the
-// default set to USD, so a fallback shows up as a "$".
-import { test, beforeEach } from 'vitest'
+// fell back to the workspace default.
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   amountsByCurrencyText,
@@ -14,12 +13,9 @@ import {
   getCurrencySymbol,
   outstandingText,
   prorationText,
-  setActiveCurrency,
   sumByCurrency,
 } from '../src/lib/money.ts'
 import { dunningRunAmount } from '../src/lib/invoiceTerminal.ts'
-
-beforeEach(() => setActiveCurrency('USD'))
 
 test('an explicit currency wins over the workspace default', () => {
   assert.equal(formatCents(120000, 'EUR'), '€1,200.00')
@@ -115,10 +111,8 @@ test('outstanding skips zero rows and says only the count when nothing is owed',
 })
 
 // The customer page and the Dunning card after the workspace default moved
-// from USD to CAD: USD invoices' amounts read CA$. These run with the default
-// set to CAD, so a fallback to the default shows up as "CA$".
+// from USD to CAD: USD invoices' amounts read CA$.
 test('an aggregate over invoices lists each currency, never the default', () => {
-  setActiveCurrency('CAD')
   assert.equal(amountsByCurrencyText([{ currency: 'USD', amount_cents: 73900 }]), '$739.00')
   assert.equal(
     amountsByCurrencyText([
@@ -143,7 +137,6 @@ test('an aggregate over invoices lists each currency, never the default', () => 
 })
 
 test('At risk shows every currency with runs, not the default-only figure', () => {
-  setActiveCurrency('CAD')
   assert.equal(
     atRiskText({ at_risk_cents: 0, currency: 'CAD', at_risk_by_currency: [{ currency: 'USD', amount_cents: 73900 }] }),
     '$739.00',
@@ -153,7 +146,6 @@ test('At risk shows every currency with runs, not the default-only figure', () =
 })
 
 test('proration toasts use the subscription currency', () => {
-  setActiveCurrency('CAD')
   assert.equal(prorationText({ type: 'invoice', amount_cents: 1200, credited_to_balance_cents: 0, reduced_open_invoices_cents: 0, held_on_draft_invoices_cents: 0 }, 'USD'), 'Proration invoice created for $12.00')
   assert.equal(prorationText({ type: 'adjustment', amount_cents: -1200, credited_to_balance_cents: 0, reduced_open_invoices_cents: 1200, held_on_draft_invoices_cents: 0 }, 'EUR'), 'Open invoice reduced by €12.00')
   assert.equal(prorationText({ type: 'credit', amount_cents: -1200, credited_to_balance_cents: 1200, reduced_open_invoices_cents: 0, held_on_draft_invoices_cents: 0 }, 'GBP'), '£12.00 credited to customer balance')

@@ -12,7 +12,7 @@ import { toast } from 'sonner'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { cn } from '@/lib/utils'
 import { CONTENT_BAND } from '@/lib/contentBand'
-import { api, setActiveCurrency } from '@/lib/api'
+import { api } from '@/lib/api'
 import { getLastRequestId } from '@/lib/lastRequestId'
 import { useAuth } from '@/contexts/AuthContext'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -218,8 +218,9 @@ export function Layout() {
     mainRef.current?.scrollTo({ top: 0 })
   }, [location.pathname])
   // A page change refreshes the data on screen that is older than its stale
-  // time: the sidebar counts, the setup checklist and the workspace currency
-  // below. The shell used to remount on every page change, which did this.
+  // time: the sidebar counts and the setup checklist below, and the
+  // workspace settings when the new page reads them. The shell used to
+  // remount on every page change, which did this.
   // It runs after the old page's queries have stopped, and joins a fetch the
   // new page has started instead of cancelling it.
   useEffect(() => {
@@ -300,19 +301,6 @@ export function Layout() {
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [])
-
-  // Tenant currency drives the formatCents/getCurrencySymbol helpers
-  // app-wide. Side-effect on success: push to the module-level
-  // setActiveCurrency so non-React call sites pick it up. React Query
-  // handles the StrictMode dedupe.
-  const settingsQuery = useQuery({
-    queryKey: ['layout', 'settings'],
-    queryFn: () => api.getSettings(),
-  })
-  useEffect(() => {
-    const cur = settingsQuery.data?.default_currency
-    if (cur) setActiveCurrency(cur)
-  }, [settingsQuery.data?.default_currency])
 
   // Sidebar nav badges (open invoices count, active dunning count).
   // Stale data is fine — these are background hints; the page-change

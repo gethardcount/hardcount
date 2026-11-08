@@ -2,12 +2,11 @@
 // formats (money, time, link), the four tones, the actor words, the day
 // headers and the zone header. The backend builds every word; these checks
 // cover only what the dashboard adds.
-import { test, beforeEach } from 'vitest'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   TONES, actorText, dayKey, groupByDay, lineTimes, linkRoute, money, partTime, recordedTime, timeOfDay, toneOf, zoneHeader,
 } from '../src/lib/activityLine.ts'
-import { setActiveCurrency } from '../src/lib/money.ts'
 import type { ActivityLine } from '../src/lib/gen/schemas/activityLine.ts'
 
 const KOLKATA = 'Asia/Kolkata'
@@ -16,8 +15,6 @@ const NEW_YORK = 'America/New_York'
 function line(id: string, occurredAt: string): ActivityLine {
   return { id, kind: 'invoice.finalized', title: 'Invoice finalized', detail: [], tone: 'neutral', occurred_at: occurredAt }
 }
-
-beforeEach(() => setActiveCurrency('USD'))
 
 test('money is shown in its own currency, never the workspace default', () => {
   assert.equal(money({ cents: 123450, currency: 'USD' }), '$1,234.50')

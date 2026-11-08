@@ -244,7 +244,7 @@ export default function CustomerDetailPage() {
   // ledger row carries its own currency (ADR-129). Undefined while it loads
   // or if a read failed: figures read "—" and New invoice stays disabled
   // rather than use a wrong currency.
-  const customerCurrency = useCustomerCurrency(id)
+  const customerCurrency = useCustomerCurrency(id).currency
   const creditCurrency = customerCurrency?.currency
 
   const { data: metersData } = useQuery({

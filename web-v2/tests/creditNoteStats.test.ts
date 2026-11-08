@@ -23,7 +23,7 @@ const usd = (over: Partial<CreditNoteStats['by_currency'][number]> = {}) => ({
 })
 
 test('counts come from the server, so every tab keeps its count', () => {
-  const f = creditNoteStatFigures({ draft_count: 3, issued_count: 140, voided_count: 2, by_currency: [] }, 'USD')
+  const f = creditNoteStatFigures({ draft_count: 3, issued_count: 140, voided_count: 2, by_currency: [] })
   assert.deepEqual(f.counts, { all: 145, draft: 3, issued: 140, voided: 2 })
 })
 
@@ -34,17 +34,19 @@ test('amounts in two currencies are shown side by side, never added together', (
       usd({ total_cents: 1000, refunded_cents: 1000 }),
       usd({ currency: 'EUR', total_cents: 700, credited_cents: 700 }),
     ],
-  }, 'USD')
+  })
   assert.equal(f.total, '$10.00 + €7.00')
   assert.equal(f.refunded, '$10.00')
   assert.equal(f.credited, '€7.00')
 })
 
-test('with no issued notes the money figures read zero in the default currency', () => {
-  const f = creditNoteStatFigures({ draft_count: 1, issued_count: 0, voided_count: 0, by_currency: [] }, 'EUR')
-  assert.equal(f.total, '€0.00')
-  assert.equal(f.refunded, '€0.00')
-  assert.equal(f.credited, '€0.00')
+// A zero has no currency of its own, so it is shown bare, never in a guessed
+// currency.
+test('with no issued notes the money figures read a bare zero', () => {
+  const f = creditNoteStatFigures({ draft_count: 1, issued_count: 0, voided_count: 0, by_currency: [] })
+  assert.equal(f.total, '0.00')
+  assert.equal(f.refunded, '0.00')
+  assert.equal(f.credited, '0.00')
   assert.equal(f.refundPending, null)
   assert.equal(f.refundFailed, null)
 })
@@ -53,7 +55,7 @@ test('pending and failed refund legs are named apart from money refunded', () =>
   const f = creditNoteStatFigures({
     draft_count: 0, issued_count: 3, voided_count: 0,
     by_currency: [usd({ total_cents: 3500, refunded_cents: 1000, refund_pending_cents: 500, refund_failed_cents: 2000 })],
-  }, 'USD')
+  })
   assert.equal(f.refunded, '$10.00')
   assert.equal(f.refundPending, '$5.00')
   assert.equal(f.refundFailed, '$20.00')

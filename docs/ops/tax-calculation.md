@@ -64,6 +64,58 @@ This happens only with Stripe Tax. The invoice waits: it is not issued, emailed 
 
 After 8 automatic tries, Hardcount stops and the notice says so. Click the notice's retry button to try again: **Retry now** when the provider could not be reached or Stripe is now connected, **Retry tax** otherwise.
 
+Stripe keeps a tax calculation for 24 hours, and Hardcount finalizes with one up to 23 hours old. When billing builds a subscription's invoice, a draft too, it records the calculation in Stripe's tax reports at once, so most drafts can wait. A draft whose calculation is not recorded cannot. That happens when Stripe failed at the moment billing built the draft, or when a retry worked the tax out. If such a draft waits more than 23 hours, for example because its subscription has collection paused, finalize answers `tax_calculation_expired`. Retry the tax (`POST /v1/invoices/{id}/retry-tax`), then finalize.
+
+With tax-inclusive pricing, the retry keeps the total at the sum of the line prices, and only the tax inside them follows the new calculation. A draft that v0.9.2 or earlier already refreshed is the exception: see the next section.
+
+### Invoices an earlier version under-billed
+
+**Who is affected:** accounts on Stripe Tax with tax-inclusive pricing that ran Hardcount v0.2.0 to v0.9.2.
+
+**Why.** With tax-inclusive pricing, billing stores each taxed line of a subscription's invoice at its price less the tax. On those versions, a retry that refreshed a draft's expired calculation taxed that lowered amount as if it were the price. The tax came out a second time, so the total fell by about the tax. If the draft was then finalized, the customer was charged that much less. Two more shapes come from the same cause:
+
+- A refresh that failed left the draft waiting for tax, with the lowered amounts.
+- On a draft whose tax had been retried before, a refresh at a new rate lowered the total with a discount (`discount_cents`) of about the old tax.
+
+Later versions tax the line prices. They do not restore a lowered draft: a retry taxes what the lines charge, and they already charge the lowered amounts.
+
+**Check.** Run this before you upgrade, in `psql` as the database owner ([why the first line](runbook/index.md#before-you-start)). After the upgrade, a retry changes the lines it looks for. So if you upgraded already, it still finds each invoice that no retry has touched since.
+
+```sql
+SET app.bypass_rls = 'on';
+SELECT i.tenant_id, i.livemode, i.invoice_number, i.status, i.tax_status,
+       i.discount_cents, i.total_amount_cents
+FROM invoices i
+JOIN tenant_settings s ON s.tenant_id = i.tenant_id
+WHERE s.tax_inclusive
+  AND i.tax_provider = 'stripe_tax'
+  AND i.billing_reason IS NOT NULL AND i.billing_reason <> 'manual'
+  AND i.status <> 'voided'
+  AND (
+    (i.status = 'draft' AND i.tax_status = 'pending')
+    OR EXISTS (
+      SELECT 1 FROM invoice_line_items li
+      WHERE li.invoice_id = i.id
+        AND li.tax_amount_cents <> 0
+        AND li.amount_cents = li.total_amount_cents))
+ORDER BY i.tenant_id, i.created_at;
+```
+
+**You see:** one row for each invoice to check: its account (`tenant_id`), mode, number, status and total. No rows means there is nothing to check.
+
+The query lists every invoice of the shapes above, and some that are right:
+
+- A draft whose tax failed when billing built it, and succeeded on a later retry, stores its lines the same way. Its total is right unless a refresh at a new rate followed.
+- A draft that waits for tax since billing built it is listed with the failed refreshes.
+- `s.tax_inclusive` is the account's setting today. If an account turned tax-inclusive pricing off since then, remove that condition to list its invoices too.
+
+**Fix.** For each row, work out what the invoice's lines should charge: the plan's base fee and the period's usage at the plan's prices. With tax-inclusive pricing, that sum is the right total. If the stored total is lower, the customer was under-billed by the difference.
+
+- A draft: void it (`POST /v1/invoices/{id}/void`) and bill the period on a [one-off invoice](../concepts/invoices.md#when-hardcount-makes-an-invoice). Or finalize it and bill the difference on a one-off invoice.
+- A finalized or paid invoice: bill the difference on a one-off invoice.
+
+A one-off invoice is taxed when you finalize it, so with tax-inclusive pricing the difference you bill includes its tax.
+
 ## What to watch
 
 Hardcount counts every tax calculation that fails on the metric `hardcount_tax_outcome_total`, with `outcome="deferred"` and a `reason`. It counts attempts, not invoices: an invoice whose tax keeps failing adds one for each automatic retry. Successful calculations are not counted, so any increase means something needs a look: alert when its rate is above zero.

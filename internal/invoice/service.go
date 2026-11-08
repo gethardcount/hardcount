@@ -2737,15 +2737,13 @@ func shouldAutoFinalizeAfterRetry(inv domain.Invoice) bool {
 
 // isOperatorComposed reports whether an invoice was created by an operator
 // (the one-off composer / ad-hoc charge path) rather than the billing
-// engine. billing_reason='manual' is the explicit marker Create stamps; the
-// empty string covers legacy drafts written before that stamp existed.
-// Engine invoices (subscription_cycle / create / cancel / threshold) return
-// false. Drives finalize-time tax computation (manual invoices have no tax
-// until finalize) and the auto-finalize-after-retry gate (manual drafts may
-// still be works-in-progress, so we don't finalize them out from under the
+// engine (domain.Invoice.OperatorComposed). Drives finalize-time tax
+// computation (manual invoices have no tax until finalize) and the
+// auto-finalize-after-retry gate (manual drafts may still be
+// works-in-progress, so we don't finalize them out from under the
 // operator).
 func isOperatorComposed(inv domain.Invoice) bool {
-	return inv.BillingReason == "" || inv.BillingReason == domain.BillingReasonManual
+	return inv.OperatorComposed()
 }
 
 // RetryProviderConfigErrors flushes every invoice in the (tenant,

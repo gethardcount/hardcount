@@ -2065,10 +2065,12 @@ func errLinesChanged() error {
 }
 
 // UpdateTaxAtomic re-stamps an invoice's tax decision, at finalize or on a
-// retry. It locks the invoice row and refuses unless the invoice is a draft,
-// rewrites the per-line tax stamps and the invoice-level tax columns, counts
-// the attempt in tax_retry_count (not the initial one), and recomputes total
-// + amount_due. Returns errs.InvalidState when the invoice is not a draft
+// retry. It locks the invoice row and refuses unless the invoice is a draft.
+// It rewrites each line's amount and tax stamps and the invoice-level tax
+// columns, counts the attempt in tax_retry_count (not the initial one), and
+// recomputes total + amount_due. The engine passes the amount each line
+// keeps: on billing's draft the net of the new calculation, on an
+// operator's the amount entered. Returns errs.InvalidState when the invoice is not a draft
 // (caller surfaces 409), invoice_lines_changed when a line was added after
 // the computation read the invoice, and errs.ErrNotFound when the invoice
 // doesn't exist (caller surfaces 404).
@@ -2137,7 +2139,8 @@ func (s *PostgresStore) UpdateTaxAtomic(
 		}
 		_, err = tx.ExecContext(ctx, `
 			UPDATE invoice_line_items
-			SET tax_rate = $3,
+			SET amount_cents = $9,
+			    tax_rate = $3,
 			    tax_amount_cents = $4,
 			    total_amount_cents = $5,
 			    tax_jurisdiction = $6,
@@ -2145,7 +2148,7 @@ func (s *PostgresStore) UpdateTaxAtomic(
 			    tax_reason = $8
 			WHERE invoice_id = $1 AND id = $2
 		`, invoiceID, li.ID, li.TaxRate, li.TaxAmountCents, li.TotalAmountCents,
-			li.TaxJurisdiction, li.TaxCode, li.TaxabilityReason)
+			li.TaxJurisdiction, li.TaxCode, li.TaxabilityReason, li.AmountCents)
 		if err != nil {
 			return domain.Invoice{}, fmt.Errorf("update line item tax stamp: %w", err)
 		}

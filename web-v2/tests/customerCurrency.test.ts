@@ -109,6 +109,21 @@ test('no currency while any read is loading or has failed', () => {
   assert.deepEqual(settledCustomerCurrency([ok, ok], input), { currency: 'USD', source: 'workspace' })
 })
 
+// Review of #1626: while the account settings load, or after they failed,
+// the workspace default is unknown. A customer with a currency of their own
+// still gets it; only one who would fall back to the default gets nothing.
+test('without the workspace default, only a customer with a currency of their own gets one', () => {
+  const ok = { isLoading: false, isError: false }
+  assert.deepEqual(settledCustomerCurrency([ok], () => ({ billingProfileCurrency: 'eur', workspaceDefault: undefined })),
+    { currency: 'EUR', source: 'billing_profile' })
+  assert.deepEqual(settledCustomerCurrency([ok], () => ({
+    subscriptions: [{ status: 'active', items: [{ plan_id: 'pln_eur' }] }], plans, workspaceDefault: undefined,
+  })), { currency: 'EUR', source: 'subscription' })
+  assert.deepEqual(settledCustomerCurrency([ok], () => ({ invoices: [{ currency: 'gbp' }], workspaceDefault: undefined })),
+    { currency: 'GBP', source: 'invoice' })
+  assert.equal(settledCustomerCurrency([ok], () => ({ workspaceDefault: undefined })), undefined)
+})
+
 // Review round 1 (#1361): the New invoice picker offered every currency for a
 // customer whose currency is fixed, and the server refused the other ones
 // only after submit (409 customer_currency_conflict).

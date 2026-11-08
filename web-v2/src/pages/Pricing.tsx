@@ -10,8 +10,8 @@ import {
   formatCents,
   formatDate,
   getCurrencySymbol,
-  getActiveCurrency,
 } from '@/lib/api'
+import { useTenantSettings } from '@/hooks/useTenantSettings'
 import { LoadError } from '@/components/LoadError'
 import { METER_AGGREGATIONS, meterAggregationHelp, meterAggregationLabel } from '@/lib/meterLabels'
 import { showApiError } from '@/lib/formErrors'
@@ -392,15 +392,18 @@ function CreatePlanDialog({ onClose, onCreated }: { onClose: () => void; onCreat
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState<{ name?: string; code?: string; basePrice?: string }>({})
 
-  // The plan's prices take its currency. The Base Price label reads the same
-  // value, so it names the currency the plan is created in.
-  const planCurrency = getActiveCurrency()
+  // A plan is created in the account's default currency, and its prices take
+  // it. Create waits for the settings, so the currency is never a guess. The
+  // Base Price label names the same value.
+  const settings = useTenantSettings()
+  const planCurrency = settings.isSuccess ? settings.data.default_currency : undefined
   // null while the box does not hold an amount; nothing is rounded or
   // filled in. A plan with no base fee is a typed 0.
   const baseCents = dollarsToWholeCents(basePrice)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!planCurrency) return
     const errs: typeof errors = {}
     if (!name.trim()) errs.name = 'Enter a plan name.'
     if (!code.trim()) errs.code = 'Enter a code.'
@@ -467,7 +470,7 @@ function CreatePlanDialog({ onClose, onCreated }: { onClose: () => void; onCreat
             </div>
           </div>
           <div>
-            <Label>Base Price ({getCurrencySymbol(planCurrency)})</Label>
+            <Label>{planCurrency ? `Base Price (${getCurrencySymbol(planCurrency).trim()})` : 'Base Price'}</Label>
             <Input type="text" inputMode="decimal" value={basePrice}
               aria-invalid={errors.basePrice ? true : undefined}
               onChange={e => { setBasePrice(e.target.value); setErrors(x => ({ ...x, basePrice: undefined })) }} placeholder="49.00" className="mt-1" />
@@ -496,9 +499,16 @@ function CreatePlanDialog({ onClose, onCreated }: { onClose: () => void; onCreat
             </div>
           )}
 
+          {settings.isPending && (
+            <p className="text-sm text-muted-foreground">Loading the account's currency…</p>
+          )}
+          {settings.isError && (
+            <LoadError what="the account's currency" error={settings.error} onRetry={() => { void settings.refetch() }} className="py-4" />
+          )}
+
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={saving}>
+            <Button type="submit" disabled={saving || !planCurrency}>
               {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : 'Create plan'}
             </Button>
           </DialogFooter>

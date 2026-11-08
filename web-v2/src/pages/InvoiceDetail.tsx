@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { StaleNotice } from '@/components/StaleNotice'
 import { usePageTitle } from '@/hooks/usePageTitle'
+import { useTenantSettings } from '@/hooks/useTenantSettings'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
@@ -371,10 +372,7 @@ export default function InvoiceDetailPage() {
     (dunningRunsData ?? []).find(r => r.state === 'active') ??
     (dunningRunsData ?? []).find(r => r.state === 'escalated')
 
-  const { data: settings, isSuccess: settingsLoaded } = useQuery({
-    queryKey: ['settings'],
-    queryFn: () => api.getSettings(),
-  })
+  const { data: settings, isSuccess: settingsLoaded } = useTenantSettings()
 
   // Server config (SMTP + PAYMENT_UPDATE_URL): whether "Email a payment-method
   // link" on a written-off invoice can really send, and whether the Finalize
