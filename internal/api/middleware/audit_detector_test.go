@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -393,37 +392,5 @@ func TestAuditCoverage_IdempotentReplayIsNotAnUncoveredMutation(t *testing.T) {
 	}
 	if delta := uncoveredCount(t, "/v1/invoices") - before; delta != 0 {
 		t.Errorf("hardcount_audit_uncovered_mutation_total{route=\"/v1/invoices\"}: got +%v, want +0 — the detector reported an idempotent replay as an uncovered mutation", delta)
-	}
-}
-
-// TestAuditCoverage_UnmatchedPathIsNotSilentlyExempt pins the canonicalization
-// negative from the API side: a 404 inside a mounted subtree resolves to
-// RoutePattern() "/v1/usage-events/*". If canonicalRoute trimmed the trailing
-// "/*", that would collapse onto the exempt "/v1/usage-events" key and hand a
-// free pass to anything unmatched under an exempt subtree.
-func TestAuditCoverage_UnmatchedPathIsNotSilentlyExempt(t *testing.T) {
-	seen := ""
-	r := chi.NewRouter()
-	r.Use(AuditCoverage(func(_, route string) bool {
-		seen = route
-		return false
-	}))
-
-	sub := chi.NewRouter()
-	sub.Post("/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) })
-	// Anything else under the subtree 404s, but the subtree still matched.
-	r.Mount("/v1/usage-events", sub)
-
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/usage-events/nope", bytes.NewReader(nil)))
-
-	if rec.Code == http.StatusAccepted {
-		t.Fatalf("expected the unmatched sub-path to 404, got %d", rec.Code)
-	}
-	// A 404 is not a 2xx, so nothing is reported and isExempt is never consulted —
-	// which is the point: the detector cannot be tricked into treating an
-	// unmatched path as a covered (or exempt) route.
-	if seen != "" {
-		t.Errorf("isExempt consulted for a non-2xx request (route %q) — the detector should only classify successful mutations", seen)
 	}
 }

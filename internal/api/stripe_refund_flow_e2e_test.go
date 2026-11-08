@@ -217,9 +217,13 @@ func (f *refundFlow) pay(invID, pi string, amount int64) flowResp {
 
 // useStripeTax switches the tenant to Stripe Tax, so a credit note's tax
 // reversal goes to the stub. Called after the test's invoices are finalized.
+// Only a dashboard session changes settings.
 func (f *refundFlow) useStripeTax() {
 	f.t.Helper()
-	f.call("PUT", "/v1/settings", map[string]any{"tax_provider": "stripe_tax"}).want(f.t, 200, "use Stripe Tax")
+	flowDo(f.t, f.ts, "PUT", "/v1/settings", flowReq{
+		cookie: flowSignIn(f.t, f.db, f.ts, f.tenantID),
+		body:   map[string]any{"tax_provider": "stripe_tax"},
+	}).want(f.t, 200, "use Stripe Tax")
 }
 
 // refundEvent is a refund webhook: data.object is a Stripe Refund, whose

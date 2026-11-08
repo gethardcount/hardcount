@@ -238,9 +238,6 @@ func (f *thresholdFixture) createPreview(t *testing.T, ctx context.Context, cust
 // path, partial unique index, and ListWithThresholds candidate query are
 // all exercised together.
 func TestThresholdScan_AmountCrossFiresEarly(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Amount Cross")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
@@ -302,9 +299,6 @@ func TestThresholdScan_AmountCrossFiresEarly(t *testing.T) {
 // Pre-probe, each re-tick allocated (and committed) a number in its own tx, then
 // bounced off the unique index — ~600 burned numbers + paid tax calls per cycle.
 func TestThresholdScan_Idempotent(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Idempotent")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
@@ -387,9 +381,6 @@ func seqOf(t *testing.T, invoiceNumber string) int {
 // Postgres — the per-meter aggregator wraps AggregateClaims, so this
 // proves the scan respects the same priority+claim resolution as the cycle.
 func TestThresholdScan_ItemUsageCross(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Item Cross")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
@@ -429,9 +420,6 @@ func TestThresholdScan_ItemUsageCross(t *testing.T) {
 // cycle reset there. The fire must hydrate the thresholds and keep the
 // period's anchor.
 func TestThresholdScan_ItemOnlyKeepsAnchor(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Item Keep Anchor")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
@@ -480,9 +468,6 @@ func TestThresholdScan_ItemOnlyKeepsAnchor(t *testing.T) {
 // emit nothing. Catches a regression where the threshold logic accidentally
 // fires on every tick.
 func TestThresholdScan_BelowThresholdNoFire(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Below Cap")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
@@ -514,9 +499,6 @@ func TestThresholdScan_BelowThresholdNoFire(t *testing.T) {
 // with no billing thresholds configured must not appear in
 // ListWithThresholds and thus must not be considered by the scan.
 func TestThresholdScan_NoConfigSkipped(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold No Config")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
@@ -539,9 +521,6 @@ func TestThresholdScan_NoConfigSkipped(t *testing.T) {
 // natural cycle invoice picks up where the original cycle ends — not where
 // the threshold fired.
 func TestThresholdScan_ResetCycleFalse(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Reset False")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
@@ -586,9 +565,6 @@ func TestThresholdScan_ResetCycleFalse(t *testing.T) {
 // `!now.Before(periodEnd)` guard in scanOneThreshold and the scan fires
 // (fired=1) — the zero-threshold-invoice assertion below fails.
 func TestThresholdScan_BoundaryDefersToCycle(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Boundary Cycle")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
@@ -723,9 +699,6 @@ func (f *thresholdFixture) seedThresholdFleet(t *testing.T, ctx context.Context,
 // cursored candidate query is index-servable (subscriptions_pkey provides
 // the `id > cursor ORDER BY id` contract without a sort).
 func TestThresholdScan_DrainsWholeFleet_RealStore(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Fleet Drain")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
@@ -811,9 +784,6 @@ func TestThresholdScan_DrainsWholeFleet_RealStore(t *testing.T) {
 // must hold at-most-one invoice, with the loser absorbing ErrAlreadyExists as
 // a silent skip, not an error.
 func TestThresholdScan_ConcurrentDoubleFire_IndexHolds(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Concurrent Fire")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
@@ -962,9 +932,6 @@ func (a *failableInvoiceAdapter) CreateInvoiceWithLineItemsTx(ctx context.Contex
 // fire-once probe. A failure on the CAS side trivially yields no invoice (it
 // runs first), so the injection sits on the insert.
 func TestThresholdFire_Atomic_RollsBackOnInsertFailure(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Atomic Fire")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
@@ -1020,9 +987,6 @@ func TestThresholdFire_Atomic_RollsBackOnInsertFailure(t *testing.T) {
 // config OFF between fire and close: the exemption must key on the watermark
 // invoice's lines (ground truth), not the mutable config.
 func TestThresholdCycle_DeferredMax_FullWindowOnce(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Deferred Max")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
@@ -1208,9 +1172,6 @@ func TestThresholdCycle_DeferredMax_FullWindowOnce(t *testing.T) {
 // deferred max bucket over the FULL window, and the in_arrears base prorated
 // to the cancel: a fire bills no base.
 func TestImmediateCancel_AfterThresholdFire_NoDoubleBill(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Cancel Double")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()

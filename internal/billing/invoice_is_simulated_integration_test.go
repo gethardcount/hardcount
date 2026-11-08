@@ -33,9 +33,6 @@ import (
 // Production wires both: router.go SetResolver + invoiceSvc.SetCustomerReader +
 // engine.SetCustomerReader + engine.SetTestClockReader.
 func TestManualInvoice_IsSimulatedFromCustomerPin(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test needs postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false) // test clocks are test-mode only
 

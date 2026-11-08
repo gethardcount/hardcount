@@ -85,16 +85,17 @@ func Require(perm Permission) func(http.Handler) http.Handler {
 	}
 }
 
-// RequireSession gates a subtree to dashboard-session principals only.
-// Used for surfaces that are inherently a human act (team membership):
-// API keys are machine credentials with no user identity to attribute
-// the action to, so they get a 403 with a pointer at the dashboard.
-func RequireSession() func(http.Handler) http.Handler {
+// RequireSession gates a route or subtree to dashboard-session principals
+// only. Use it for a human act (team membership), where an API key has no
+// user to attribute the action to, and for settings both modes share, which
+// a key, made in one mode, must not change. Any other principal gets a 403
+// that ends "sign in to the dashboard to <task>".
+func RequireSession(task string) func(http.Handler) http.Handler {
+	msg := "this endpoint requires a dashboard session — sign in to the dashboard to " + task
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if GetKeyType(r.Context()) != KeyTypeSession {
-				respond.Forbidden(w, r,
-					"this endpoint requires a dashboard session — sign in to the dashboard to manage team membership")
+				respond.Forbidden(w, r, msg)
 				return
 			}
 			next.ServeHTTP(w, r)

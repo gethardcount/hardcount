@@ -27,28 +27,12 @@ import (
 // a DIFFERENT user's live token must survive, or the fix is a denial-of-
 // service on every concurrent reset in the tenant.
 func TestConsumeResetToken_VoidsSiblingTokens(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test — requires postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	_ = testutil.CreateTestTenant(t, db, "Reset Siblings")
 	store := user.NewPostgresStore(db)
-
-	mk := func(email string) string {
-		t.Helper()
-		hash, err := user.HashPassword("original-pw-12ch")
-		if err != nil {
-			t.Fatalf("hash: %v", err)
-		}
-		u, err := store.Create(ctx, email, hash)
-		if err != nil {
-			t.Fatalf("create user %s: %v", email, err)
-		}
-		return u.ID
-	}
-	victim := mk("victim@reset.test")
-	bystander := mk("bystander@reset.test")
+	victim := mkResetUser(t, store, ctx, "victim@reset.test")
+	bystander := mkResetUser(t, store, ctx, "bystander@reset.test")
 
 	issue := func(userID, hash string) {
 		t.Helper()

@@ -38,9 +38,6 @@ func mkResetUser(t *testing.T, store *user.PostgresStore, ctx context.Context, e
 // Mutation check: delete the `sent >= ResetSendsPerWindow` branch in
 // CreateResetToken → the fourth issue succeeds → this fails.
 func TestCreateResetToken_CapsSendsPerAccount(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test — requires postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	_ = testutil.CreateTestTenant(t, db, "Reset Cap")
@@ -86,9 +83,6 @@ func TestCreateResetToken_CapsSendsPerAccount(t *testing.T) {
 // suggestion. Mutation check: drop the `SELECT 1 FROM users … FOR UPDATE` →
 // more than ResetSendsPerWindow rows land → this fails.
 func TestCreateResetToken_ConcurrentRacersRespectCap(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test — requires postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	_ = testutil.CreateTestTenant(t, db, "Reset Cap Race")

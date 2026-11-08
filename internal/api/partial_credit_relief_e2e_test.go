@@ -36,8 +36,6 @@ var reliefCancelAt = lagP0.AddDate(0, 0, 15) // Apr 16: 15 of 30 days unused
 // cancel on Apr 16 owes 2000c of unused time: it credits the 1000c that fits.
 // The control, with no earlier note, credits the full 2000c.
 func TestE2E_CancelAfterPartialCredit_GivesBackWhatFits(t *testing.T) {
-	skipShort(t)
-
 	t.Run("control: no earlier note, the full unused part", func(t *testing.T) {
 		r := newLagRig(t, "in_advance", true)
 		invID := r.firstInvoiceID()
@@ -80,8 +78,6 @@ func TestE2E_CancelAfterPartialCredit_GivesBackWhatFits(t *testing.T) {
 // The negative control is a full waive: nothing was paid for the invoice, so
 // the cancel gives no relief.
 func TestE2E_CancelAfterPartialWaive_ReturnsTheCredits(t *testing.T) {
-	skipShort(t)
-
 	t.Run("partial waive: the credits come back", func(t *testing.T) {
 		r := newLagRigGranted(t, "in_advance", true, 1000)
 		invID := r.firstInvoiceID()
@@ -127,7 +123,6 @@ func TestE2E_CancelAfterPartialWaive_ReturnsTheCredits(t *testing.T) {
 // add-on on Apr 11 owes 667c (1000c x 20/30): the removal goes through and
 // credits the 400c that fits. Before, it answered 500.
 func TestE2E_RemoveItemAfterPartialCredit_GivesBackWhatFits(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_advance", true)
 	invID := r.firstInvoiceID()
 	r.must(http.MethodPost, "/v1/invoices/"+invID+"/record-payment", lagP0.Add(time.Hour), map[string]any{"note": "fixture"}, http.StatusOK)
@@ -148,7 +143,6 @@ func TestE2E_RemoveItemAfterPartialCredit_GivesBackWhatFits(t *testing.T) {
 // unused time on April's invoice: it credits the 500c that fits. Before, it
 // credited nothing.
 func TestE2E_CrossIntervalSwapAfterPartialCredit_GivesBackWhatFits(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_advance", false)
 	invID := r.firstInvoiceID()
 	r.must(http.MethodPost, "/v1/invoices/"+invID+"/record-payment", lagP0.Add(time.Hour), map[string]any{"note": "fixture"}, http.StatusOK)

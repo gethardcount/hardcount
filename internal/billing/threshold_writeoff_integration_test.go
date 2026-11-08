@@ -55,9 +55,6 @@ func firedAndWrittenOff(t *testing.T, f *thresholdFixture, ctx context.Context) 
 // voided arm attempts an insert; probe with the pre-fix predicate (neither
 // written-off nor voided) → both arms do.
 func TestThresholdScan_FireOnceProbe_SeesWrittenOffAndVoided(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Probe Write-off")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
@@ -95,9 +92,6 @@ func TestThresholdScan_FireOnceProbe_SeesWrittenOffAndVoided(t *testing.T) {
 // Mutation check: put 'uncollectible' back in the watermark predicate → the
 // written-off arm reads nil.
 func TestThresholdBilledThroughTx_WriteOffKeepsVoidDrops(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Swap Guard Write-off")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()

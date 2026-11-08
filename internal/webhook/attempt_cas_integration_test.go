@@ -20,9 +20,6 @@ import (
 // attempters that both read N both wrote N+1 — reachable when a first attempt
 // outlives its born-lease and the retry worker claims the row underneath it.
 func TestUpdateDelivery_AttemptCountCAS(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test — requires postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	admin := testutil.AdminPool(t)
 	base := postgres.WithLivemode(context.Background(), false)

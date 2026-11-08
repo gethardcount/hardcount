@@ -19,9 +19,6 @@ import (
 // and a row must say which business fact it carried without a second
 // fetch.
 func TestListDeliveriesByEndpoint_ScopedAndHydrated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test — requires postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 15*time.Second)
 	defer cancel()

@@ -79,9 +79,6 @@ func execTenant(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, q 
 // controls: a lapsed unfilled claim, a session the sweep already resolved, a
 // row closed by an invoice exit, and a recorded session past the 24h cap.
 func TestChargeClaims_SkipInvoiceWithLiveHostedPage(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Hosted Exclusion")
@@ -140,9 +137,6 @@ func TestChargeClaims_SkipInvoiceWithLiveHostedPage(t *testing.T) {
 // (payment_status is still pending until the call returns), and no second
 // page once the customer has paid one whose payment is not recorded.
 func TestClaimOpen_RefusedWhileHardcountChargesOrAfterAnUnrecordedPayment(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Hosted Claim Refusals")
@@ -202,9 +196,6 @@ func TestClaimOpen_RefusedWhileHardcountChargesOrAfterAnUnrecordedPayment(t *tes
 // see the new session and refuse. As a single UPDATE it would proceed on its
 // pre-commit snapshot and take the lease: both payers live.
 func TestChargeClaim_SeesHostedClaimCommittedWhileItWaited(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Hosted Claim Interleave")
@@ -261,9 +252,6 @@ func TestChargeClaim_SeesHostedClaimCommittedWhileItWaited(t *testing.T) {
 // record it first; completed sessions only while their invoice is still
 // unpaid.
 func TestListHostedToReconcile_Selection(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Hosted Sweep Selection")
@@ -320,9 +308,6 @@ func TestListHostedToReconcile_Selection(t *testing.T) {
 // and expire it), but reports the claim's status so the caller does not hand
 // the URL out beside the newer claim's page.
 func TestFillSession_ReportsAReplacedClaim(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Fill Replaced Claim")

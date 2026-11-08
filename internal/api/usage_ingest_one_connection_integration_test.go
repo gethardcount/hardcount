@@ -37,14 +37,12 @@ func TestIngest_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 	const ext, eventName = "ext_ingest_one_conn", "tokens_ingest_one_conn"
 	now := time.Now().UTC()
 	at := now.Add(-time.Hour).Truncate(time.Second)
-	for _, key := range []string{"one-conn-call:input"} {
-		if _, err := usageSvc.HoldCall(ctx, tenantID, usage.HoldCallInput{
-			Source: domain.HeldUsageSourceLiteLLM, ExternalCustomerID: ext, EventName: eventName,
-			Reason: domain.HeldReasonCustomerNotFound,
-			Events: []usage.CallEvent{{Quantity: decimal.NewFromInt(5), IdempotencyKey: key, Timestamp: &at}},
-		}); err != nil {
-			t.Fatalf("hold %s: %v", key, err)
-		}
+	if _, err := usageSvc.HoldCall(ctx, tenantID, usage.HoldCallInput{
+		Source: domain.HeldUsageSourceLiteLLM, ExternalCustomerID: ext, EventName: eventName,
+		Reason: domain.HeldReasonCustomerNotFound,
+		Events: []usage.CallEvent{{Quantity: decimal.NewFromInt(5), IdempotencyKey: "one-conn-call:input", Timestamp: &at}},
+	}); err != nil {
+		t.Fatalf("hold one-conn-call:input: %v", err)
 	}
 	meter, err := pricing.NewService(pricingStore).CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
 		EventName: eventName, Name: eventName, Unit: "tokens", Aggregation: "sum",
@@ -66,7 +64,6 @@ func TestIngest_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 	}
 
 	db.Pool.SetMaxOpenConns(1)
-	t.Cleanup(func() { db.Pool.SetMaxOpenConns(5) })
 	// sum is additive, and every row is before the paid threshold invoice's
 	// end: the close does not count it, so each answer says after_close.
 	for _, door := range []struct {

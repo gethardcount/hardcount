@@ -43,7 +43,6 @@ var updateKeepAnchorGolden = flag.Bool("update-keep-anchor-golden", false, "rewr
 // (9000c), the threshold invoice carries no base (April was prepaid), and
 // the subscription's period is June.
 func TestThresholdInAdvanceBase_FireThenCloseBillsEveryMonth(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_advance", 0)
 	r.newSub("adv", r.planA, lagP0, nil)
 
@@ -98,7 +97,6 @@ func TestThresholdInAdvanceBase_FireThenCloseBillsEveryMonth(t *testing.T) {
 // Before the fix the fire billed the full month's base (3000c) and the
 // cancel billed none, so the threshold cost the customer 600c more.
 func TestThresholdInArrearsBase_FireThenCancelBillsTheUsedDays(t *testing.T) {
-	skipShort(t)
 	cancelAt := lagP0.AddDate(0, 0, 24)
 
 	control := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
@@ -134,7 +132,6 @@ func TestThresholdInArrearsBase_FireThenCancelBillsTheUsedDays(t *testing.T) {
 // the April close bills April's whole in_arrears base, once, and the preview
 // of April's invoice shows it. The threshold invoice bills usage only.
 func TestThresholdInArrearsBase_FireThenCloseBillsTheBaseOnClose(t *testing.T) {
-	skipShort(t)
 	r, fireAt, _ := keepAnchorFired(t)
 	if got := r.previewSum(fireAt.Add(time.Hour), "base_fee"); got != 3000 {
 		t.Errorf("preview of April's invoice after the fire shows base %dc, want 3000c", got)
@@ -164,7 +161,6 @@ func TestThresholdInArrearsBase_FireThenCloseBillsTheBaseOnClose(t *testing.T) {
 // the usage: written off, it stays billed on the threshold invoice and the
 // close does not bill it again; voided before the close, the close bills it.
 func TestThresholdInArrearsBase_LegacyFireWithBase_BilledOnce(t *testing.T) {
-	skipShort(t)
 	for _, tc := range []struct {
 		name  string
 		close func(r *lagRig, fireAt time.Time, thrID string)
@@ -220,7 +216,9 @@ func TestThresholdInArrearsBase_LegacyFireWithBase_BilledOnce(t *testing.T) {
 // TestThresholdKeepAnchor_InvoicesUnchanged -short=false
 // -update-keep-anchor-golden.
 func TestThresholdKeepAnchor_InvoicesUnchanged(t *testing.T) {
-	skipShort(t)
+	if testing.Short() {
+		t.Skip("the subtests build the DB; the golden compare runs in the parent")
+	}
 	var out strings.Builder
 	for _, tc := range []struct {
 		name string
