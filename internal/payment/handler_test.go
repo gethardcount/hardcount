@@ -596,14 +596,6 @@ func (m *mockInvoiceUpdaterHandler) SetPaymentCard(_ context.Context, _, _ strin
 	return nil
 }
 
-func (m *mockInvoiceUpdaterHandler) ApplyCreditNote(_ context.Context, _, id string, _ int64) (domain.Invoice, error) {
-	inv, ok := m.invoices[id]
-	if !ok {
-		return domain.Invoice{}, fmt.Errorf("not found")
-	}
-	return domain.Invoice{ID: id, TenantID: inv.tenantID}, nil
-}
-
 type mockWebhookStoreH struct {
 	seen map[string]bool
 }

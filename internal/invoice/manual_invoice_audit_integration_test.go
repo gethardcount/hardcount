@@ -9,7 +9,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
@@ -188,8 +187,8 @@ func TestInvoiceCreate_AuditsBothStorePathsAndSharesFate(t *testing.T) {
 			t.Fatalf("emitter ran %d times, want exactly 1 (the test is vacuous otherwise)", emitter.calls)
 		}
 
-		if _, err := store.GetByNumber(ctx, tenantID, "INV-BARE-FAIL"); !errors.Is(err, errs.ErrNotFound) {
-			t.Fatalf("the invoice must roll back with its failed audit emission; GetByNumber err = %v", err)
+		if _, total, err := store.List(ctx, invoice.ListFilter{TenantID: tenantID}); err != nil || total != 0 {
+			t.Fatalf("the invoice must roll back with its failed audit emission; tenant has %d invoices (err = %v), want 0", total, err)
 		}
 		if rows := invoiceAuditRows(t, logger, ctx, tenantID); len(rows) != 0 {
 			t.Errorf("audit row leaked from a rolled-back create: %+v", rows)
@@ -216,8 +215,8 @@ func TestInvoiceCreate_AuditsBothStorePathsAndSharesFate(t *testing.T) {
 			t.Fatalf("emitter ran %d times, want exactly 1", emitter.calls)
 		}
 
-		if _, err := store.GetByNumber(ctx, tenantID, "INV-LINES-FAIL"); !errors.Is(err, errs.ErrNotFound) {
-			t.Fatalf("the composed invoice (header + lines) must roll back with its failed audit emission; GetByNumber err = %v", err)
+		if _, total, err := store.List(ctx, invoice.ListFilter{TenantID: tenantID}); err != nil || total != 0 {
+			t.Fatalf("the composed invoice (header + lines) must roll back with its failed audit emission; tenant has %d invoices (err = %v), want 0", total, err)
 		}
 		if rows := invoiceAuditRows(t, logger, ctx, tenantID); len(rows) != 0 {
 			t.Errorf("audit row leaked from a rolled-back create: %+v", rows)

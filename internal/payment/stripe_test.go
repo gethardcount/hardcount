@@ -350,19 +350,6 @@ func (m *mockInvoiceUpdater) SetPaymentCard(_ context.Context, _, id, brand, las
 	return nil
 }
 
-func (m *mockInvoiceUpdater) ApplyCreditNote(_ context.Context, _, id string, amountCents int64) (domain.Invoice, error) {
-	inv, ok := m.invoices[id]
-	if !ok {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	inv.AmountDueCents -= amountCents
-	if inv.AmountDueCents < 0 {
-		inv.AmountDueCents = 0
-	}
-	m.invoices[id] = inv
-	return inv, nil
-}
-
 type mockWebhookStore struct {
 	events      map[string]bool // stripe_event_id -> ingested (dedup row present)
 	ingestCalls int             // number of IngestEvent invocations

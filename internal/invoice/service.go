@@ -260,7 +260,7 @@ func (s *Service) SetDunningResolver(d DunningResolver) { s.dunningResolver = d 
 type AuditLogger interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 	// LogInTx is the ADR-090 in-tx emission: Void uses it inside
-	// UpdateStatusWithReversal so the status flip, the credit reversal,
+	// UpdateStatusWithReversalPrior so the status flip, the credit reversal,
 	// the commit-grant retirement, and the audit row share one fate.
 	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
 }
@@ -2479,7 +2479,7 @@ type AddLineItemInput struct {
 
 func (s *Service) AddLineItem(ctx context.Context, tenantID, invoiceID string, input AddLineItemInput) (domain.InvoiceLineItem, error) {
 	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
-	// Currency is left empty here — AddLineItemAtomic stamps it from the
+	// Currency is left empty here — AddLineItemAtomicAudited stamps it from the
 	// invoice row it locks. The atomic-create path passes the resolved
 	// currency instead, since the header isn't persisted yet.
 	li, err := buildLineItem(input, "")
@@ -2569,8 +2569,8 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 	// Commit purchase lines (ADR-078): line-local rules here; the
 	// invoice-level rules (manual invoices only, at most one commit line
 	// per invoice) are enforced in the store under the invoice row lock,
-	// covering both this path's consumers (AddLineItemAtomic and
-	// CreateWithLineItems).
+	// covering both this path's consumers (AddLineItemAtomicAudited and
+	// CreateWithLineItemsAudited).
 	if input.CommitGrantedCents != nil {
 		if *input.CommitGrantedCents <= 0 {
 			return domain.InvoiceLineItem{}, errs.Invalid("commit_granted_cents", "must be greater than 0")

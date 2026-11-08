@@ -73,7 +73,7 @@ func TestUpdateTaxAtomic_RefusesWhenALineWasAddedMeanwhile(t *testing.T) {
 	}
 
 	// The operator adds a line while the provider answers.
-	if _, _, err := r.store.AddLineItemAtomic(r.ctx, r.tenantID, d.ID, raceLine("Extra seats", 2500)); err != nil {
+	if _, _, err := r.store.AddLineItemAtomicAudited(r.ctx, r.tenantID, d.ID, raceLine("Extra seats", 2500), nil); err != nil {
 		t.Fatalf("add line: %v", err)
 	}
 
@@ -122,7 +122,7 @@ func (f *addingTaxRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, inv
 func (f *addingTaxRetrier) ComputeTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
 	if f.add {
 		f.add = false
-		if _, _, err := f.store.AddLineItemAtomic(ctx, tenantID, invoiceID, raceLine("Added during finalize", 2500)); err != nil {
+		if _, _, err := f.store.AddLineItemAtomicAudited(ctx, tenantID, invoiceID, raceLine("Added during finalize", 2500), nil); err != nil {
 			return domain.Invoice{}, err
 		}
 	}
@@ -164,7 +164,7 @@ func TestFinalizeWithDates_RefusesAnUnreadLine(t *testing.T) {
 		t.Fatalf("list lines: %v", err)
 	}
 	read := []string{lines[0].ID}
-	added, _, err := r.store.AddLineItemAtomic(r.ctx, r.tenantID, d.ID, raceLine("Extra", 2500))
+	added, _, err := r.store.AddLineItemAtomicAudited(r.ctx, r.tenantID, d.ID, raceLine("Extra", 2500), nil)
 	if err != nil {
 		t.Fatalf("add line: %v", err)
 	}

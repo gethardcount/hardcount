@@ -23,18 +23,6 @@ type memStore struct {
 	failNotedPI map[string]string // invoice ID -> PI whose failure notifications fired
 }
 
-func (m *memStore) ActionRequiredObsolete(_ context.Context, _, invoiceNumber string) (bool, error) {
-	for _, inv := range m.invoices {
-		if inv.InvoiceNumber == invoiceNumber {
-			settled := inv.PaymentStatus == domain.PaymentSucceeded ||
-				inv.Status == domain.InvoicePaid || inv.Status == domain.InvoiceVoided ||
-				inv.Status == domain.InvoiceUncollectible
-			return settled, nil
-		}
-	}
-	return true, nil
-}
-
 func newMemStore() *memStore {
 	return &memStore{
 		invoices:    make(map[string]domain.Invoice),
@@ -86,15 +74,6 @@ func (m *memStore) GetByProrationSource(_ context.Context, tenantID, subscriptio
 			inv.SourceSubscriptionItemID == subscriptionItemID &&
 			inv.SourceChangeType == changeType &&
 			inv.SourcePlanChangedAt != nil && inv.SourcePlanChangedAt.Equal(changeAt) {
-			return inv, nil
-		}
-	}
-	return domain.Invoice{}, errs.ErrNotFound
-}
-
-func (m *memStore) GetByNumber(_ context.Context, tenantID, number string) (domain.Invoice, error) {
-	for _, inv := range m.invoices {
-		if inv.TenantID == tenantID && inv.InvoiceNumber == number {
 			return inv, nil
 		}
 	}
@@ -267,26 +246,6 @@ func (m *memStore) UpdateStatusWithReversalPriorTx(ctx context.Context, _ *sql.T
 	return inv, nil
 }
 
-func (m *memStore) UpdateStatusWithReversal(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, reverseFn func(tx *sql.Tx) error) (domain.Invoice, error) {
-	prev, ok := m.invoices[id]
-	if !ok || prev.TenantID != tenantID {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	inv, err := m.UpdateStatus(ctx, tenantID, id, status)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	if reverseFn != nil {
-		// In-memory: no real tx — pass nil and, on error, restore the pre-flip
-		// invoice so the test store mirrors the all-or-nothing store contract.
-		if err := reverseFn(nil); err != nil {
-			m.invoices[id] = prev
-			return domain.Invoice{}, err
-		}
-	}
-	return inv, nil
-}
-
 func (m *memStore) FinalizeWithDates(_ context.Context, tenantID, id string, issuedAt, dueAt time.Time, taxedLineIDs []string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
 	inv, ok := m.invoices[id]
 	if !ok || inv.TenantID != tenantID {
@@ -422,61 +381,8 @@ func (m *memStore) MarkPaid(_ context.Context, tenantID, id, stripeID string, pa
 	return inv, nil
 }
 
-func (m *memStore) ApplyCreditNote(_ context.Context, tenantID, id string, amountCents int64) (domain.Invoice, error) {
-	inv, ok := m.invoices[id]
-	if !ok || inv.TenantID != tenantID {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	if amountCents > inv.AmountDueCents {
-		return domain.Invoice{}, errs.InvalidState("credit note exceeds invoice").WithCode("credit_note_exceeds_invoice")
-	}
-	inv.AmountDueCents -= amountCents
-	m.invoices[id] = inv
-	return inv, nil
-}
-
-func (m *memStore) CreateLineItem(_ context.Context, tenantID string, item domain.InvoiceLineItem) (domain.InvoiceLineItem, error) {
-	item.ID = fmt.Sprintf("hc_ili_%d", len(m.lineItems[item.InvoiceID])+1)
-	item.TenantID = tenantID
-	m.lineItems[item.InvoiceID] = append(m.lineItems[item.InvoiceID], item)
-	return item, nil
-}
-
 func (m *memStore) ListLineItems(_ context.Context, _, invoiceID string) ([]domain.InvoiceLineItem, error) {
 	return m.lineItems[invoiceID], nil
-}
-
-func (m *memStore) AddLineItemAtomic(_ context.Context, tenantID, invoiceID string, item domain.InvoiceLineItem) (domain.InvoiceLineItem, domain.Invoice, error) {
-	inv, ok := m.invoices[invoiceID]
-	if !ok || inv.TenantID != tenantID {
-		return domain.InvoiceLineItem{}, domain.Invoice{}, errs.ErrNotFound
-	}
-	if inv.Status != domain.InvoiceDraft {
-		return domain.InvoiceLineItem{}, domain.Invoice{},
-			fmt.Errorf("can only add line items to draft invoices, current status: %s", inv.Status)
-	}
-
-	item.InvoiceID = invoiceID
-	item.TenantID = tenantID
-	item.Currency = inv.Currency
-	item.ID = fmt.Sprintf("hc_ili_%d", len(m.lineItems[invoiceID])+1)
-	m.lineItems[invoiceID] = append(m.lineItems[invoiceID], item)
-
-	var subtotal int64
-	for _, li := range m.lineItems[invoiceID] {
-		subtotal += li.AmountCents
-	}
-	total := subtotal + inv.TaxAmountCents - inv.DiscountCents
-	amountDue := total - inv.AmountPaidCents - inv.CreditsAppliedCents
-	if amountDue < 0 {
-		amountDue = 0
-	}
-	inv.SubtotalCents = subtotal
-	inv.TotalAmountCents = total
-	inv.AmountDueCents = amountDue
-	inv.UpdatedAt = time.Now().UTC()
-	m.invoices[invoiceID] = inv
-	return item, inv, nil
 }
 
 func (m *memStore) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem) (domain.Invoice, error) {
@@ -811,22 +717,48 @@ func (m *memStore) CreateWithLineItemsAudited(ctx context.Context, tenantID stri
 	return out, nil
 }
 
-func (m *memStore) AddLineItemAtomicAudited(ctx context.Context, tenantID, invoiceID string, item domain.InvoiceLineItem, emit func(tx *sql.Tx, item domain.InvoiceLineItem, inv domain.Invoice) error) (domain.InvoiceLineItem, domain.Invoice, error) {
-	before := m.invoices[invoiceID]
-	beforeItems := len(m.lineItems[invoiceID])
-	out, inv, err := m.AddLineItemAtomic(ctx, tenantID, invoiceID, item)
-	if err != nil {
-		return domain.InvoiceLineItem{}, domain.Invoice{}, err
+func (m *memStore) AddLineItemAtomicAudited(_ context.Context, tenantID, invoiceID string, item domain.InvoiceLineItem, emit func(tx *sql.Tx, item domain.InvoiceLineItem, inv domain.Invoice) error) (domain.InvoiceLineItem, domain.Invoice, error) {
+	inv, ok := m.invoices[invoiceID]
+	if !ok || inv.TenantID != tenantID {
+		return domain.InvoiceLineItem{}, domain.Invoice{}, errs.ErrNotFound
 	}
+	if inv.Status != domain.InvoiceDraft {
+		return domain.InvoiceLineItem{}, domain.Invoice{},
+			fmt.Errorf("can only add line items to draft invoices, current status: %s", inv.Status)
+	}
+	before := inv
+	beforeItems := len(m.lineItems[invoiceID])
+
+	item.InvoiceID = invoiceID
+	item.TenantID = tenantID
+	item.Currency = inv.Currency
+	item.ID = fmt.Sprintf("hc_ili_%d", len(m.lineItems[invoiceID])+1)
+	m.lineItems[invoiceID] = append(m.lineItems[invoiceID], item)
+
+	var subtotal int64
+	for _, li := range m.lineItems[invoiceID] {
+		subtotal += li.AmountCents
+	}
+	total := subtotal + inv.TaxAmountCents - inv.DiscountCents
+	amountDue := total - inv.AmountPaidCents - inv.CreditsAppliedCents
+	if amountDue < 0 {
+		amountDue = 0
+	}
+	inv.SubtotalCents = subtotal
+	inv.TotalAmountCents = total
+	inv.AmountDueCents = amountDue
+	inv.UpdatedAt = time.Now().UTC()
+	m.invoices[invoiceID] = inv
+
 	if emit != nil {
-		if err := emit(nil, out, inv); err != nil {
+		if err := emit(nil, item, inv); err != nil {
 			// shared fate: undo the line insert AND the totals rewrite
 			m.lineItems[invoiceID] = m.lineItems[invoiceID][:beforeItems]
 			m.invoices[invoiceID] = before
 			return domain.InvoiceLineItem{}, domain.Invoice{}, fmt.Errorf("audit emission: %w", err)
 		}
 	}
-	return out, inv, nil
+	return item, inv, nil
 }
 
 // memHold is the token memStore's claims hand out: the fake does not model

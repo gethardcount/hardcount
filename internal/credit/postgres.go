@@ -1180,7 +1180,7 @@ func (s *PostgresStore) retireCommitSliceTx(ctx context.Context, tx *sql.Tx, ten
 
 // RetireCommitGrantForInvoiceTx retires the REMAINING balance of the commit
 // grant funded by `invoiceID`, on the caller's tx — the VOID leg of ADR-078
-// (invoice.Service.Void runs it inside the UpdateStatusWithReversal
+// (invoice.Service.Void runs it inside the UpdateStatusWithReversalPrior
 // coordinator tx, after the status flip). Clean no-op (0, nil) when the
 // invoice funded no grant (gate never granted / not a commit invoice) or the
 // grant is already fully consumed or retired. Void-retire never bumps

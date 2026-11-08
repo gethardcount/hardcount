@@ -9,12 +9,6 @@ import (
 )
 
 type Store interface {
-	// ActionRequiredObsolete reports whether an action-required email
-	// referencing this invoice is moot: the invoice is settled (paid /
-	// voided / uncollectible) or no longer exists (test-clock teardown).
-	// Consumed by the email dispatcher's staleness gate via the
-	// composition root — email never imports invoice.
-	ActionRequiredObsolete(ctx context.Context, tenantID, invoiceNumber string) (bool, error)
 	Create(ctx context.Context, tenantID string, inv domain.Invoice) (domain.Invoice, error)
 	CreateWithLineItems(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error)
 	// CreateAudited / CreateWithLineItemsAudited / AddLineItemAtomicAudited run
@@ -30,18 +24,16 @@ type Store interface {
 	CreateAudited(ctx context.Context, tenantID string, inv domain.Invoice, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error)
 	CreateWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error)
 	Get(ctx context.Context, tenantID, id string) (domain.Invoice, error)
-	GetByNumber(ctx context.Context, tenantID, number string) (domain.Invoice, error)
 	GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.Invoice, error)
 	List(ctx context.Context, filter ListFilter) ([]domain.Invoice, int, error)
 	UpdateStatus(ctx context.Context, tenantID, id string, status domain.InvoiceStatus) (domain.Invoice, error)
-	// UpdateStatusWithReversal flips the status AND runs reverseFn (the
-	// consumed-credit reversal on void) on the SAME tx — either both commit or
-	// neither, so a void never strands the customer's applied credits unrestored.
-	UpdateStatusWithReversal(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, reverseFn func(tx *sql.Tx) error) (domain.Invoice, error)
-	// UpdateStatusWithReversalPrior additionally hands the closure the invoice
-	// as read under the row lock (ADR-090: audit rows must not stamp
-	// status_before from a racy pre-tx snapshot; #975: refusals re-run there).
-	// A closure error rolls the flip back.
+	// UpdateStatusWithReversalPrior flips the status AND runs fn on the SAME
+	// tx — either both commit or neither, so a void never strands the
+	// customer's applied credits unrestored (Void runs the consumed-credit
+	// reversal in fn). fn gets the invoice as read under the row lock
+	// (ADR-090: audit rows must not stamp status_before from a racy pre-tx
+	// snapshot; #975: refusals re-run there). A closure error rolls the flip
+	// back.
 	UpdateStatusWithReversalPrior(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, fn func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error)
 	// UpdateStatusWithReversalPriorTx is the same flip on the caller's tx; the
 	// closure receives the invoice as read under the row lock.
@@ -90,7 +82,6 @@ type Store interface {
 	ChargeHeldTx(ctx context.Context, tx *sql.Tx, id string) (domain.ChargeHoldState, domain.ChargeHold, error)
 	// ChargeHoldStateOf reads the hold outside any lock, to word a refusal.
 	ChargeHoldStateOf(ctx context.Context, tenantID, id string) (domain.ChargeHoldState, error)
-	ApplyCreditNote(ctx context.Context, tenantID, id string, amountCents int64) (domain.Invoice, error)
 
 	SetAutoChargePending(ctx context.Context, tenantID, id string, pending bool) error
 	// SetNoPMNotifiedAt stamps the send-once marker for the no-PM setup-link
@@ -108,22 +99,22 @@ type Store interface {
 	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
 	ListAutoChargePending(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error)
 
-	CreateLineItem(ctx context.Context, tenantID string, item domain.InvoiceLineItem) (domain.InvoiceLineItem, error)
 	ListLineItems(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceLineItem, error)
 
-	// AddLineItemAtomic inserts a line item and recomputes the invoice totals
-	// in one transaction. It locks the invoice row FOR UPDATE, verifies draft
-	// status and that the operator made the invoice (a subscription's draft is
-	// refused with invoice_not_manual), inserts the line item (filling InvoiceID, TenantID, and Currency
-	// from the locked invoice), recomputes the subtotal from all line items,
-	// and rewrites subtotal/total/amount_due. The lock prevents lost updates
-	// when two clients append lines concurrently. Returns the inserted line
-	// item and the updated invoice.
-	AddLineItemAtomic(ctx context.Context, tenantID, invoiceID string, item domain.InvoiceLineItem) (domain.InvoiceLineItem, domain.Invoice, error)
-	// AddLineItemAtomicAudited is AddLineItemAtomic with an in-tx audit
-	// emission (see CreateAudited). emit receives the persisted line item and
-	// the rewritten invoice — the invoice number it labels the row with is
-	// therefore read INSIDE the tx, under the same row lock as the mutation.
+	// AddLineItemAtomicAudited inserts a line item and recomputes the invoice
+	// totals in one transaction. It locks the invoice row FOR UPDATE, verifies
+	// draft status and that the operator made the invoice (a subscription's
+	// draft is refused with invoice_not_manual), inserts the line item
+	// (filling InvoiceID, TenantID, and Currency from the locked invoice),
+	// recomputes the subtotal from all line items, and rewrites
+	// subtotal/total/amount_due. The lock prevents lost updates when two
+	// clients append lines concurrently. Returns the inserted line item and
+	// the updated invoice.
+	//
+	// emit is the in-tx audit emission (see CreateAudited). It receives the
+	// persisted line item and the rewritten invoice — the invoice number it
+	// labels the row with is therefore read INSIDE the tx, under the same row
+	// lock as the mutation.
 	AddLineItemAtomicAudited(ctx context.Context, tenantID, invoiceID string, item domain.InvoiceLineItem, emit func(tx *sql.Tx, item domain.InvoiceLineItem, inv domain.Invoice) error) (domain.InvoiceLineItem, domain.Invoice, error)
 
 	// UpdateTaxAtomic re-stamps an invoice's tax decision after a manual

@@ -37,7 +37,6 @@ func withoutEmpty(md map[string]any) map[string]any {
 type InvoiceReader interface {
 	Get(ctx context.Context, tenantID, id string) (domain.Invoice, error)
 	ListLineItems(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceLineItem, error)
-	ApplyCreditNote(ctx context.Context, tenantID, id string, amountCents int64) (domain.Invoice, error)
 	// LockForCreditNoteTx locks the invoice row on Issue()'s coordinator tx and
 	// returns it as it is under the lock; Issue() decides from that row.
 	LockForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, id string) (domain.Invoice, error)
@@ -1697,7 +1696,7 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 	// impossible without a second CAS win, which cannot happen. (This is why
 	// PR2 carries NO source-dedup row; ADR-061 records it as the deferred first
 	// brick of the amount_due-derived-ledger. A reviewer adding a second caller
-	// of ApplyCreditNote/GrantForCreditNoteTx MUST reintroduce the dedup.)
+	// of ApplyCreditNoteTx/GrantForCreditNoteTx MUST reintroduce the dedup.)
 	// External effects (Stripe refund, upstream tax reversal) cannot share a DB
 	// tx, so they run POST-commit, idempotency-keyed and recoverable.
 	tx, err := s.store.BeginTx(ctx, tenantID)

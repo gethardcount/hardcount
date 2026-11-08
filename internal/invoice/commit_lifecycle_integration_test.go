@@ -378,7 +378,7 @@ func TestUpdateStatus_CAS_RejectsPaidToVoid(t *testing.T) {
 
 	// Direct store-level flip, simulating a Void whose service guard passed
 	// BEFORE the payment landed.
-	_, err := h.invStore.UpdateStatusWithReversal(ctx, h.tenantID, inv.ID, domain.InvoiceVoided, nil)
+	_, err := h.invStore.UpdateStatusWithReversalPrior(ctx, h.tenantID, inv.ID, domain.InvoiceVoided, nil)
 	if err == nil {
 		t.Fatal("paid→voided must be rejected by the in-tx CAS")
 	}

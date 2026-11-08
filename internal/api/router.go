@@ -1420,7 +1420,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		EmailOutboxStore: emailOutboxStore,
 		EmailSender:      emailSender,
 		// The invoice store satisfies email.InvoiceSettledChecker directly,
-		// with ActionRequiredObsolete. The interface is defined by its consumer
+		// with InvoiceTerminalState. The interface is defined by its consumer
 		// and wired here, at the composition root.
 		EmailSettledChecker: invoiceStore,
 		CreditSvc:           creditSvc,
