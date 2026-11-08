@@ -97,13 +97,13 @@ func (h *commitHarness) newCustomer(t *testing.T, ctx context.Context, round int
 // seedPayable inserts a finalized non-commit invoice as a drain target.
 func (h *commitHarness) seedPayable(t *testing.T, ctx context.Context, custID string, dueCents int64, round int) string {
 	t.Helper()
-	inv, err := invoice.NewPostgresStore(h.db).Create(ctx, h.tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(h.db).CreateWithLineItems(ctx, h.tenantID, domain.Invoice{
 		CustomerID: custID, InvoiceNumber: fmt.Sprintf("HC-CONC-%d", round),
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", SubtotalCents: dueCents, TotalAmountCents: dueCents, AmountDueCents: dueCents,
 		BillingPeriodStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
 		BillingPeriodEnd:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed payable: %v", err)
 	}
@@ -285,13 +285,13 @@ func TestCommitVoid_RetiresRemaining(t *testing.T) {
 	}
 
 	// Customer draws $40 against a normal invoice before the commit is paid.
-	target, err := invoice.NewPostgresStore(h.db).Create(ctx, h.tenantID, domain.Invoice{
+	target, err := invoice.NewPostgresStore(h.db).CreateWithLineItems(ctx, h.tenantID, domain.Invoice{
 		CustomerID: h.custID, InvoiceNumber: "HC-VOIDRETIRE-DRAW",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", SubtotalCents: 4000, TotalAmountCents: 4000, AmountDueCents: 4000,
 		BillingPeriodStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
 		BillingPeriodEnd:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed drawdown invoice: %v", err)
 	}
@@ -361,11 +361,12 @@ func TestCommitUncollectible_NoRetire_ThenVoidRetiresOnce(t *testing.T) {
 	}
 }
 
-// TestUpdateStatus_CAS_RejectsPaidToVoid pins ADR-078 D5 at the STORE level:
-// the void flip carries an in-SQL allowed-source predicate, so a pay-vs-void
-// race (service guard read a stale pre-paid snapshot) cannot flip a PAID
-// invoice to voided — which would retire credits the customer just paid for.
-func TestUpdateStatus_CAS_RejectsPaidToVoid(t *testing.T) {
+// TestUpdateStatusWithReversalPrior_CAS_RejectsPaidToVoid pins ADR-078 D5 at
+// the STORE level: the void flip carries an in-SQL allowed-source predicate,
+// so a pay-vs-void race (service guard read a stale pre-paid snapshot) cannot
+// flip a PAID invoice to voided — which would retire credits the customer just
+// paid for.
+func TestUpdateStatusWithReversalPrior_CAS_RejectsPaidToVoid(t *testing.T) {
 	h, ctx := newCommitHarness(t, "CAS Paid To Void")
 
 	inv := h.createCommitInvoice(t, ctx, 10000, 10000, nil)
@@ -378,7 +379,7 @@ func TestUpdateStatus_CAS_RejectsPaidToVoid(t *testing.T) {
 
 	// Direct store-level flip, simulating a Void whose service guard passed
 	// BEFORE the payment landed.
-	_, err := h.invStore.UpdateStatusWithReversal(ctx, h.tenantID, inv.ID, domain.InvoiceVoided, nil)
+	_, err := h.invStore.UpdateStatusWithReversalPrior(ctx, h.tenantID, inv.ID, domain.InvoiceVoided, nil)
 	if err == nil {
 		t.Fatal("paid→voided must be rejected by the in-tx CAS")
 	}

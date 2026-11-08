@@ -32,7 +32,7 @@ func TestList_CustomerIDFilter(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create customer %s: %v", ext, err)
 		}
-		inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID:         cust.ID,
 			InvoiceNumber:      invNum,
 			Status:             domain.InvoiceFinalized,
@@ -44,7 +44,7 @@ func TestList_CustomerIDFilter(t *testing.T) {
 			BillingPeriodStart: now.Add(-30 * 24 * time.Hour),
 			BillingPeriodEnd:   now,
 			IssuedAt:           &now,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice %s: %v", invNum, err)
 		}

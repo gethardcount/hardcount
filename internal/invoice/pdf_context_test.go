@@ -131,7 +131,7 @@ func TestBuildPDFContext_OneBuilderForAllSurfaces(t *testing.T) {
 	end := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	inv := domain.Invoice{ID: "inv_1", CustomerID: "cus_1", BillingPeriodStart: start, BillingPeriodEnd: end}
 
-	bt, ci, cns := BuildPDFContext(context.Background(), customers, settings, creditNotes, "t1", &inv)
+	bt, ci, cns := BuildPDFContext(context.Background(), customers, settings, creditNotes, "t1", inv)
 
 	if bt.Name != "Acme Incorporated" {
 		t.Errorf("legal name precedence: got %q", bt.Name)
@@ -151,20 +151,9 @@ func TestBuildPDFContext_OneBuilderForAllSurfaces(t *testing.T) {
 	if len(cns) != 1 || cns[0].Number != "CN-1" {
 		t.Errorf("credit notes: got %+v, want only the ISSUED one", cns)
 	}
-	if inv.BillingPeriodDisplay == "" {
-		t.Error("BillingPeriodDisplay not stamped for a bare-fetched invoice")
-	}
-
-	// A display already set by the service read decorator is preserved.
-	inv2 := domain.Invoice{ID: "inv_2", CustomerID: "cus_1", BillingPeriodStart: start, BillingPeriodEnd: end, BillingPeriodDisplay: "preset"}
-	_, _, _ = BuildPDFContext(context.Background(), customers, settings, nil, "t1", &inv2)
-	if inv2.BillingPeriodDisplay != "preset" {
-		t.Errorf("BillingPeriodDisplay overwritten: got %q", inv2.BillingPeriodDisplay)
-	}
-
 	// Nil deps degrade gracefully (thin context, never a panic).
 	inv3 := domain.Invoice{ID: "inv_3", CustomerID: "cus_9"}
-	bt3, ci3, cns3 := BuildPDFContext(context.Background(), nil, nil, nil, "t1", &inv3)
+	bt3, ci3, cns3 := BuildPDFContext(context.Background(), nil, nil, nil, "t1", inv3)
 	if bt3.Name != "cus_9" || ci3.Name != "" || cns3 != nil {
 		t.Errorf("nil-dep context: got %+v %+v %+v", bt3, ci3, cns3)
 	}

@@ -44,12 +44,12 @@ func TestListDueRuns_ExcludesSimulatedInvoiceRun(t *testing.T) {
 	// the run due (next_action_at in the past), and for the simulated case stamps
 	// the invoice's durable is_simulated flag directly.
 	mkDueRun := func(num string, simulated bool) string {
-		inv, err := istore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := istore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: num, Status: domain.InvoiceFinalized,
 			PaymentStatus: domain.PaymentFailed, Currency: "USD", SubtotalCents: 5000,
 			TotalAmountCents: 5000, AmountDueCents: 5000,
 			BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice %s: %v", num, err)
 		}

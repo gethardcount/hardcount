@@ -31,12 +31,12 @@ func TestNeedsAttention_UnrecordedRefundOutcome(t *testing.T) {
 		t.Fatalf("create customer: %v", err)
 	}
 	mk := func(num string, refund int64, age time.Duration) string {
-		inv, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, domain.Invoice{
+		inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: "INV-" + num,
 			Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded, Currency: "USD",
 			SubtotalCents: 5000, TotalAmountCents: 5000, AmountPaidCents: 5000,
 			BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice: %v", err)
 		}

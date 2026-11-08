@@ -677,7 +677,7 @@ func TestItemWriters_SubscriptionRowFirst_NoDeadlock(t *testing.T) {
 	// ... while the billing run applies the scheduled change.
 	applied := make(chan error, 1)
 	go func() {
-		_, err := r.store.ApplyDuePendingItemPlansAtomic(ctx, r.tenantID, r.subID, proPeriodEnd)
+		_, err := r.store.ApplyDuePendingItemPlansAtomic(ctx, r.tenantID, r.subID, proPeriodEnd, proPeriodEnd)
 		applied <- err
 	}()
 	testutil.WaitForLockWaiter(t, r.ctx, testutil.AdminPool(t), "subscription")

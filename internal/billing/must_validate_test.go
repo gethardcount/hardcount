@@ -24,7 +24,7 @@ func TestMustValidate_NamesEveryNilCollaborator(t *testing.T) {
 		}
 		msg, _ := r.(string)
 		// The deliberately-unwired deps must ALL be named.
-		for _, want := range []string{"credits", "paymentSetups", "charger", "events", "auditLogger"} {
+		for _, want := range []string{"credits", "paymentSetups", "charger", "auditLogger"} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("panic must name nil collaborator %q, got: %s", want, msg)
 			}
@@ -69,7 +69,10 @@ func TestMustValidate_CoversEveryCollaborator(t *testing.T) {
 		// cancel relief credits through CreditNoteAdjuster).
 		// 28 at the ADR-060 amendment (2026-10-30): StripeReadiness and
 		// InvoiceEmailer, the collector's no-Stripe arm.
-		const collaborators = 28
+		// Back to 27 at P1-01 part B: the event dispatcher is gone. The
+		// subscription store queues the engine's subscription events in
+		// their transactions (SubscriptionReader).
+		const collaborators = 27
 		if nilCount != collaborators {
 			t.Errorf("zero engine names %d nil collaborators, expected %d — Engine's dep set changed; update router wiring + this count deliberately", nilCount, collaborators)
 		}

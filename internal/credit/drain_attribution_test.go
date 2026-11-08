@@ -89,10 +89,10 @@ func TestDrainAttribution_PersistedInMetadata(t *testing.T) {
 	// (1) Invoice apply spanning both blocks: $70 = all of g1 ($40) +
 	// $30 of g2.
 	invoiceStore := invoice.NewPostgresStore(db)
-	inv, err := invoiceStore.Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoiceStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		AmountDueCents: 7000, TotalAmountCents: 7000, SubtotalCents: 7000, Currency: "USD",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

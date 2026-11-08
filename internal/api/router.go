@@ -368,12 +368,13 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// credit.balance_low, _depleted and _recovered are queued in every
 	// transaction that writes the ledger, through the same outbox (ADR-078).
 	creditStore.SetOutboxEnqueuer(outboxStore)
-	// subscription.created, .activated, .canceled and .trial_ended are queued
-	// in the transaction of their transition. The store's transition writers
-	// are the one place that emits them, which covers the operator API, the
-	// engine's schedule paths and the trial sweeps. Because the event commits
-	// with its transition, a crash after commit cannot drop a lifecycle event
-	// that a provisioning webhook consumer depends on.
+	// Every subscription.* event is queued in the transaction of its change:
+	// the store's transition writers emit the lifecycle events for the
+	// operator API, the engine's schedule paths and the trial sweeps, and
+	// the item changes and the billing engine's threshold fire and
+	// scheduled plan changes queue theirs through the same store. Because
+	// the event commits with its change, a crash after the commit cannot
+	// drop an event that a provisioning webhook consumer depends on.
 	subStore.SetOutboxEnqueuer(outboxStore)
 	// Prepaid commits are funded at finalize (ADR-078 D2). FinalizeWithDates
 	// grants the commit block through credit.Service, in the finalize
@@ -382,7 +383,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// When the invoice that a dunning pause was set for is paid, the paid
 	// transaction lifts the pause (ADR-036 amendment 2026-10-22).
 	invoiceStore.SetDunningPauseReleaser(subStore)
-	subH.SetEventDispatcher(eventDispatcher)
 	auditLogger := audit.NewLogger(db)
 	// The audit logger decrypts actor names. actor_name comes from a LEFT
 	// JOIN at read time, and customers.display_name is encrypted at rest.
@@ -883,7 +883,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	engine.SetIntervalReader(subStore)
 	engine.SetInvoiceGrace(o.invoiceGrace)
 	engine.SetTestClockReader(testClockStore)
-	engine.SetEventDispatcher(eventDispatcher)
 	// The engine writes audit_log rows for lifecycle events it fires in the
 	// background (currently a scheduled cancellation firing at period end).
 	// Without it, the subscription's Activity timeline shows "Cancellation
@@ -1420,7 +1419,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		EmailOutboxStore: emailOutboxStore,
 		EmailSender:      emailSender,
 		// The invoice store satisfies email.InvoiceSettledChecker directly,
-		// with ActionRequiredObsolete. The interface is defined by its consumer
+		// with InvoiceTerminalState. The interface is defined by its consumer
 		// and wired here, at the composition root.
 		EmailSettledChecker: invoiceStore,
 		CreditSvc:           creditSvc,
@@ -1816,7 +1815,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// Team membership is for dashboard sessions only. An API key is a
 		// machine credential with no user to attribute an invite or removal
 		// to, so it gets 403 here. The service checks again on invite.
-		r.With(auth.RequireSession()).Mount("/members", membersH.Routes())
+		r.With(auth.RequireSession("manage team membership")).Mount("/members", membersH.Routes())
 		// The /customers subtree mixes reads (GET list, get, billing-profile)
 		// and writes (POST create, PATCH update, PUT billing-profile, GDPR
 		// delete-data). RequireMethod picks the permission by HTTP method,
@@ -1892,7 +1891,14 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// was already emitted.
 		r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/webhook_events", webhookOutH.EventRoutes())
 		r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/audit-log", auditH.Routes())
-		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings", settingsH.Routes())
+		// Test and live mode share the account settings, and a key belongs
+		// to one mode, so a key may read them but only the dashboard changes
+		// them.
+		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings", settingsH.Routes(auth.RequireSession("change account settings")))
+		// Each mode has its own Stripe connection, and a caller manages only
+		// its own mode's: a key the mode it was made in, a dashboard session
+		// the mode it is in. tenantstripe.Service enforces this, not a
+		// middleware, because the mode comes from the body or the path.
 		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/stripe", tenantStripeH.Routes())
 		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/email", emailSettingsH.Routes())
 		r.With(auth.Require(auth.PermInvoiceRead)).Mount("/analytics", analyticsH.Routes())

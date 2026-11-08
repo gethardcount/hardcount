@@ -27,17 +27,15 @@ import (
 //
 // Every dependency is optional (nil-tolerant) and every lookup is
 // best-effort: a missing profile or settings row degrades that block,
-// never the render. inv is a pointer so the builder can stamp
-// BillingPeriodDisplay when the caller's fetch path bypassed the
-// service read decorator that normally sets it (the hosted
-// GetByPublicToken path) — it never overwrites a non-empty value.
+// never the render. inv comes from a Service read (GetWithLineItems or
+// GetByPublicToken), which has already set BillingPeriodDisplay.
 func BuildPDFContext(
 	ctx context.Context,
 	customers CustomerGetter,
-	settings SettingsGetter,
+	settings TenantSettingsReader,
 	creditNotes IssuedCreditNoteLister,
 	tenantID string,
-	inv *domain.Invoice,
+	inv domain.Invoice,
 ) (BillToInfo, CompanyInfo, []CreditNoteInfo) {
 	var bt BillToInfo
 	if inv.BillToSnapshot != nil {
@@ -77,19 +75,6 @@ func BuildPDFContext(
 			}
 			ci.BrandColor = ts.BrandColor
 			ci.SupportURL = ts.SupportURL
-			// Inclusive-last-day period string (ADR-058): fetch paths that
-			// bypass the service read decorator (hosted GetByPublicToken)
-			// arrive without it — author it here from the same domain helper.
-			// Anchored in the invoice's own denormalized billing TZ (ADR-077),
-			// falling back to the tenant TZ for ad-hoc/legacy invoices — the
-			// same resolution the service decorator (invoiceDisplayLoc) uses.
-			if inv.BillingPeriodDisplay == "" {
-				periodLoc := domain.LoadLocationOrUTC(ts.Timezone)
-				if inv.BillingTimezone != "" {
-					periodLoc = domain.LoadLocationOrUTC(inv.BillingTimezone)
-				}
-				inv.BillingPeriodDisplay = domain.FormatInclusivePeriod(inv.BillingPeriodStart, inv.BillingPeriodEnd, periodLoc)
-			}
 		}
 	}
 

@@ -55,9 +55,9 @@ func TestListFailedWithoutDunningRun_CandidateSet(t *testing.T) {
 		t.Fatalf("create subscription: %v", err)
 	}
 
-	// seed creates a finalized invoice, then forces its terminal columns + age via
-	// raw SQL (Create only makes drafts). ageMinutes backdates updated_at for the
-	// cool-off dimension.
+	// seed creates a draft invoice, then forces its status, terminal columns
+	// and age via raw SQL. ageMinutes backdates updated_at for the cool-off
+	// dimension.
 	n := 0
 	seed := func(t *testing.T, status domain.InvoiceStatus, pay domain.InvoicePaymentStatus, amountDue int64, ageMinutes int) string {
 		t.Helper()
@@ -67,13 +67,13 @@ func TestListFailedWithoutDunningRun_CandidateSet(t *testing.T) {
 		periodStart := ps.AddDate(0, n, 0)
 		periodEnd := periodStart.AddDate(0, 1, 0)
 		due := periodStart.AddDate(0, 0, 30)
-		inv, err := store.Create(ctx, tenantID, domain.Invoice{
+		inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, SubscriptionID: sub.ID,
 			InvoiceNumber: fmt.Sprintf("HC-BACKFILL-%03d", n),
 			Status:        domain.InvoiceDraft, PaymentStatus: domain.PaymentPending, Currency: "USD",
 			BillingPeriodStart: periodStart, BillingPeriodEnd: periodEnd,
 			IssuedAt: &periodStart, DueAt: &due, NetPaymentTermDays: 30,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice: %v", err)
 		}

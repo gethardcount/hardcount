@@ -838,8 +838,20 @@ type failableSubAdapter struct {
 	// afterTx runs as each transaction returns, committed or not: the seam
 	// where a crash or a cancelled request lands right after the commit.
 	afterTx func()
+	// afterApply runs as ApplyDuePendingItemPlansAtomic returns: the same
+	// seam for the scheduled plan changes a close applies in a transaction
+	// of their own.
+	afterApply func()
 	// moved counts ClosePeriodTx calls that lost the ADR-115 CAS.
 	moved atomic.Int32
+}
+
+func (a *failableSubAdapter) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, id string, now, appliedAt time.Time) ([]domain.SubscriptionItem, error) {
+	items, err := a.subStoreAdapter.ApplyDuePendingItemPlansAtomic(ctx, tenantID, id, now, appliedAt)
+	if a.afterApply != nil {
+		a.afterApply()
+	}
+	return items, err
 }
 
 func (a *failableSubAdapter) WithTenantTx(ctx context.Context, tenantID string, fn func(tx *sql.Tx) error) error {

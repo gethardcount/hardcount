@@ -52,7 +52,7 @@ func TestIssue_GrantFailure_RollsBackCAS(t *testing.T) {
 
 	now := time.Now().UTC()
 	issued := now
-	inv, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID:         cust.ID,
 		InvoiceNumber:      "INV-ISSUEATOM-1",
 		Status:             domain.InvoicePaid,
@@ -65,7 +65,7 @@ func TestIssue_GrantFailure_RollsBackCAS(t *testing.T) {
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour),
 		BillingPeriodEnd:   now,
 		IssuedAt:           &issued,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestListPendingCreditNoteTaxReversal_FindsMarkerlessOrphan(t *testing.T) {
 	now := time.Now().UTC()
 	issuedAt := now
 	mkInvoice := func(num string) domain.Invoice {
-		inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: num,
 			Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
 			Currency: "USD", SubtotalCents: 10000,
@@ -163,11 +163,11 @@ func TestListPendingCreditNoteTaxReversal_FindsMarkerlessOrphan(t *testing.T) {
 			TotalAmountCents: 11000, AmountPaidCents: 11000,
 			BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now,
 			IssuedAt: &issuedAt,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice %s: %v", num, err)
 		}
-		// Stamp the upstream tax transaction (Create doesn't set it).
+		// Stamp the upstream tax transaction (CreateWithLineItems doesn't set it).
 		if err := invStore.SetTaxTransaction(ctx, tenantID, inv.ID, "tx_upstream_"+num); err != nil {
 			t.Fatalf("stamp tax tx %s: %v", num, err)
 		}
@@ -251,7 +251,7 @@ func TestCreditNoteTaxReversal_PromotedOrphanOutlivesTheWindow(t *testing.T) {
 	invStore := invoice.NewPostgresStore(db)
 	now := time.Now().UTC()
 	issuedAt := now
-	inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+	inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-PROMOTE",
 		Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
 		Currency: "USD", SubtotalCents: 10000,
@@ -259,7 +259,7 @@ func TestCreditNoteTaxReversal_PromotedOrphanOutlivesTheWindow(t *testing.T) {
 		TotalAmountCents: 11000, AmountPaidCents: 11000,
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now,
 		IssuedAt: &issuedAt,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

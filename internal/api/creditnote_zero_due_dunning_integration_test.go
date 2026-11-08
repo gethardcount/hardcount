@@ -156,11 +156,11 @@ func newZeroDueDunningRig(t *testing.T, name string) *zeroDueDunningRig {
 		t.Fatalf("create customer: %v", err)
 	}
 	now := time.Now().UTC()
-	r.inv, err = r.invoices.Create(ctx, r.tenantID, domain.Invoice{
+	r.inv, err = r.invoices.CreateWithLineItems(ctx, r.tenantID, domain.Invoice{
 		CustomerID: r.cust.ID, InvoiceNumber: "INV-G3-WAIVED", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
 		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
