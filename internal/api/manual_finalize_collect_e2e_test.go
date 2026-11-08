@@ -51,11 +51,6 @@ func TestE2E_ManualFinalize_CollectsThroughEngine(t *testing.T) {
 	inv := call(http.MethodPost, "/v1/invoices", `{"customer_id":"`+cust["id"].(string)+`"}`, http.StatusCreated)
 	id, _ := inv["id"].(string)
 	if id == "" {
-		if nested, ok := inv["invoice"].(map[string]any); ok {
-			id, _ = nested["id"].(string)
-		}
-	}
-	if id == "" {
 		t.Fatalf("no invoice id in create response: %v", inv)
 	}
 

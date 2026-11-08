@@ -16,9 +16,6 @@ import (
 // refuse (so the note is re-applied against the paid invoice and credits the
 // balance) instead of zeroing the amount due of an invoice already paid.
 func TestApplyCreditNoteTx_RefusesAPaidInvoice(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Apply CN Guard")

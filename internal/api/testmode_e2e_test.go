@@ -226,42 +226,14 @@ func createAPIKeyWithMode(t *testing.T, db *postgres.DB, tenantID string, livemo
 	return rawKey
 }
 
-// extractListIDs pulls the "id" field from each element of a chi list
-// response body. The current list handlers return a JSON object with "data"
-// or "items" or "customers" arrays depending on the handler — the helper
-// tries the common keys and also handles the bare-array shape.
+// extractListIDs returns the id of each item in a list response. Both lists
+// read here (customers and webhook endpoints) answer through respond.List:
+// {"data": [...], "total": n}.
 func extractListIDs(t *testing.T, resp *http.Response) []string {
 	t.Helper()
 	var out []string
-	body := readJSON(t, resp)
-	list, ok := findListField(body)
-	if !ok {
-		t.Fatalf("list response has no recognisable array field: %v", body)
-	}
-	for _, item := range list {
-		m, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		id, _ := m["id"].(string)
-		if id == "" {
-			// webhook-endpoints nests the endpoint under "endpoint"
-			if inner, ok := m["endpoint"].(map[string]any); ok {
-				id, _ = inner["id"].(string)
-			}
-		}
-		if id != "" {
-			out = append(out, id)
-		}
+	for _, item := range flowList(readJSON(t, resp), "data") {
+		out = append(out, flowStr(item, "id"))
 	}
 	return out
-}
-
-func findListField(body map[string]any) ([]any, bool) {
-	for _, key := range []string{"data", "items", "customers", "endpoints", "results"} {
-		if v, ok := body[key].([]any); ok {
-			return v, true
-		}
-	}
-	return nil, false
 }

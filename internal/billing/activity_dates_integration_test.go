@@ -124,9 +124,6 @@ func TestTrialExpiry_TestClock_ChargeNotBeforeIssue(t *testing.T) {
 // threshold: the invoice a crossed threshold issues is created finalized, so
 // its finalize audit row carries born_finalized: true.
 func TestThresholdFire_FinalizeRowIsBornFinalized(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Born Finalized")
 	f.engine.SetAuditLogger(audit.NewLogger(f.db))
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)

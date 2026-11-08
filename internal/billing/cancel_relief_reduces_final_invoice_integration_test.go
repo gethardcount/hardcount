@@ -305,9 +305,6 @@ func (r *reliefCancelRig) noPMNotified(invoiceID string) []int64 {
 }
 
 func TestCancel_ReliefReducesFinalInvoice_CardOrNoCard(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 
 	cancels := []struct {

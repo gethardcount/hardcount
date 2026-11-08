@@ -87,8 +87,8 @@ components:
 
         - `hc_secret_test_…` and `hc_secret_live_…`: a secret key. It has full
           access to one account's test or live data, except the team-member
-          routes and the test email, which need a dashboard sign-in. Keep it
-          on your server.
+          routes, the test email and changing the account settings, which
+          need a dashboard sign-in. Keep it on your server.
         - `hc_ingest_test_…` and `hc_ingest_live_…`: a usage-only key, for a
           gateway such as LiteLLM. It can call `POST /v1/usage-events`,
           `POST /v1/usage-events/batch`, `POST /v1/integrations/litellm/spend`
@@ -287,6 +287,24 @@ components:
               type: authentication_error
               code: forbidden
               message: "insufficient permissions: this key type does not have customer:read access"
+              request_id: req_dbjg652q3gpgqfoq5cd0
+    StripeConnectionForbidden:
+      description: |
+        The request names the Stripe connection of the other mode than the
+        caller's own. A test key manages only the test-mode connection, and
+        a live key only the live-mode one. A dashboard session manages the
+        connection of the mode it is in. The same 403 answers a usage-only
+        key (`hc_ingest_…`), which lacks `apikey:write`, and a browser
+        request from a page on another site (`cross-site request blocked`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              type: authentication_error
+              code: forbidden
+              message: "a test-mode request can manage only the test-mode Stripe connection: for live mode, use a live-mode key or switch the dashboard to live mode"
               request_id: req_dbjg652q3gpgqfoq5cd0
     BodyNotAllowed:
       description: |
@@ -17545,13 +17563,13 @@ paths:
       summary: Cancel a scheduled plan change
       operationId: cancelSubscriptionItemPendingChange
       description: |
-        Cancels the plan change scheduled on an item. Calling it on an item
-        with no scheduled change returns the item unchanged. Sends the
-        `subscription.pending_change.canceled` webhook event, and writes an
-        audit log entry, also when no change was scheduled.
+        Cancels the plan change scheduled on an item, sends the
+        `subscription.pending_change.canceled` webhook event and writes an
+        audit log entry. Calling it on an item with no scheduled change
+        returns the item unchanged, sends no event and records nothing.
 
-        If the period has already ended, the change has taken effect and
-        the request answers 409.
+        If the period has already ended, or the change took effect while the
+        request ran, the request answers 409.
       parameters:
         - name: id
           in: path
@@ -27603,6 +27621,8 @@ paths:
     put:
       tags: [Dashboard]
       x-internal: true
+      security:
+        - SessionCookie: []
       summary: Update account settings
       operationId: updateTenantSettings
       description: |
@@ -27626,6 +27646,9 @@ paths:
 
         A save that changes a field writes one audit row listing each
         change. The row is filed in test mode, whichever mode you save from.
+
+        Takes only a dashboard session. Test and live mode share these
+        settings, and an API key belongs to one mode, so a key gets 403.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -27680,8 +27703,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: |
-            The caller lacks the `apikey:write` permission (a usage-only key), or
-            a browser page on another site sent the request
+            The caller is an API key, not a dashboard session, or a browser
+            page on another site sent the request
             (`cross-site request blocked`).
           content:
             application/json:
@@ -27691,7 +27714,7 @@ paths:
                 error:
                   type: authentication_error
                   code: forbidden
-                  message: "insufficient permissions: this key type does not have apikey:write access"
+                  message: this endpoint requires a dashboard session — sign in to the dashboard to change account settings
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "422":
           description: A field failed validation, the body sends a field the server sets, or it has an unknown field. `error.param` names the field.
@@ -27874,8 +27897,10 @@ paths:
       summary: Connect a Stripe account
       operationId: connectStripe
       description: |
-        Saves your own Stripe keys for one mode (`livemode` in the body
-        picks the mode, not the caller's mode). Calling it again for the
+        Saves your own Stripe keys for one mode, the one `livemode` in the
+        body picks. The caller can connect only its own mode: a test key
+        test mode, a live key live mode, and a dashboard session the mode
+        it is in. Calling it again for the
         same mode replaces the keys; a webhook secret saved before is kept
         when the body sends none. Key prefixes must match the mode:
         `sk_test_`/`rk_test_` and `pk_test_` for test, `sk_live_`/`rk_live_`
@@ -27945,7 +27970,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/StripeConnectionForbidden"
         "422":
           description: |
             A key is missing or has the wrong prefix for the mode,
@@ -27972,9 +27997,10 @@ paths:
       description: |
         Used by the dashboard; not part of the integration API.
 
-        Returns the account's Stripe connections for both modes in one list
-        (at most two rows, live first), whatever the caller's mode. No
-        secret values are returned, only prefixes and last four characters.
+        Returns the Stripe connection of the caller's own mode: a key's
+        mode, or the mode a dashboard session is in. The list is empty
+        when that mode is not connected. No secret values are returned,
+        only prefixes and last four characters.
       responses:
         "200":
           description: Connections
@@ -27986,8 +28012,8 @@ paths:
                 properties:
                   data:
                     type: array
-                    maxItems: 2
-                    description: One connection per connected mode, live first. Empty when Stripe is not connected.
+                    maxItems: 1
+                    description: The caller's own mode's connection. Empty when that mode is not connected.
                     items:
                       $ref: "#/components/schemas/StripeConnection"
               example:
@@ -28019,7 +28045,9 @@ paths:
       operationId: setStripeWebhookSecret
       description: |
         Saves the `whsec_` signing secret for a mode that is already
-        connected, without entering the API keys again. Hardcount does not call
+        connected, without entering the API keys again. The caller can set
+        it only for its own mode: a key's mode, or the mode a dashboard
+        session is in. Hardcount does not call
         Stripe here; the secret is checked on each incoming webhook.
         Until a secret is saved, Stripe webhooks for the mode are refused.
         Writes an audit row (never the secret).
@@ -28081,7 +28109,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/StripeConnectionForbidden"
         "404":
           description: Stripe is not connected for this mode. Connect it first.
           content:
@@ -28119,7 +28147,9 @@ paths:
       description: |
         Used by the dashboard; not part of the integration API.
 
-        Deletes the saved Stripe keys and webhook secret for the mode.
+        Deletes the saved Stripe keys and webhook secret for the mode. The
+        caller can disconnect only its own mode: a key's mode, or the mode
+        a dashboard session is in.
         Hardcount cannot reach Stripe in that mode until you connect again,
         and Stripe webhooks for it are refused. Connecting again creates a
         connection with a new `id`, so the webhook URL in Stripe must change
@@ -28152,7 +28182,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/StripeConnectionForbidden"
         "404":
           description: Stripe is not connected for this mode
           content:

@@ -72,7 +72,7 @@ the API has one.
 
 | `code` | When | What to do |
 |---|---|---|
-| `forbidden` | The key's type may not call this route. A route that takes only a dashboard session. A browser request from another site. A test clock used with a live key. | Use the right key; see [Authentication](authentication.md) |
+| `forbidden` | The key's type may not call this route. A route that takes only a dashboard session. A browser request from another site. A test clock used with a live key. The other mode's Stripe connection. | Use the right key; see [Authentication](authentication.md) |
 
 ### 404 Not Found
 

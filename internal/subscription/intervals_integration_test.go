@@ -312,7 +312,7 @@ func TestIntervals_ScheduledPlanApply_RetroactiveSplice(t *testing.T) {
 	if _, err := store.UpdateItemQuantity(clock.WithEffectiveNow(ctx, t3), tenantID, itemID, 7); err != nil {
 		t.Fatalf("qty change: %v", err)
 	}
-	applied, err := store.ApplyDuePendingItemPlansAtomic(ctx, tenantID, sub.ID, t2)
+	applied, err := store.ApplyDuePendingItemPlansAtomic(ctx, tenantID, sub.ID, t2, t2)
 	if err != nil {
 		t.Fatalf("apply due pendings: %v", err)
 	}

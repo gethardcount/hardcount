@@ -70,28 +70,16 @@ var standaloneSinkNames = map[string]bool{"Dispatch": true, "EnqueueStandalone":
 // type leaves the list, mark it "Always sent" in docs/api/webhook-events.md
 // (TestAlwaysSentMarksMatchTheBacklog checks the two agree).
 var standaloneWebhookBacklog = map[string]int{
-	"billing.Engine.applyDueScheduledPlanChanges subscription.pending_change.applied":   1,
-	"billing.Engine.fireThreshold subscription.threshold_crossed":                       1,
-	"customer.Service.MarkEmailBounced customer.email_bounced":                          1,
-	"customer.Service.MarkEmailComplained customer.email_complained":                    1,
-	"dunning.Service.exhaustRun dunning.escalated":                                      1,
-	"dunning.Service.resolveRunAt dunning.resolved":                                     1,
-	"payment.Stripe.RecordCheckoutCard payment_method.updated":                          1,
-	"payment.Stripe.SettleSucceeded payment.amount_mismatch":                            1,
-	"payment.Stripe.SettleSucceeded payment.duplicate_charge":                           2,
-	"payment.Stripe.SettleSucceeded payment.received_on_voided_invoice":                 1,
-	"payment.Stripe.handlePaymentSucceeded payment.currency_mismatch":                   1,
-	"payment.Stripe.handleSetupIntentSucceeded payment_method.attached":                 1,
-	"subscription.Handler.addItem subscription.item.added":                              1,
-	"subscription.Handler.cancelPendingItemChange subscription.pending_change.canceled": 1,
-	"subscription.Handler.clearScheduledCancel subscription.cancel_cleared":             1,
-	"subscription.Handler.extendTrial subscription.trial_extended":                      1,
-	"subscription.Handler.pauseCollection subscription.collection_paused":               1,
-	"subscription.Handler.removeItem subscription.item.removed":                         1,
-	"subscription.Handler.resumeCollection subscription.collection_resumed":             1,
-	"subscription.Handler.scheduleCancel subscription.cancel_scheduled":                 1,
-	"subscription.Handler.updateItem subscription.item.updated":                         1,
-	"subscription.Handler.updateItem subscription.pending_change.scheduled":             1,
+	"customer.Service.MarkEmailBounced customer.email_bounced":          1,
+	"customer.Service.MarkEmailComplained customer.email_complained":    1,
+	"dunning.Service.exhaustRun dunning.escalated":                      1,
+	"dunning.Service.resolveRunAt dunning.resolved":                     1,
+	"payment.Stripe.RecordCheckoutCard payment_method.updated":          1,
+	"payment.Stripe.SettleSucceeded payment.amount_mismatch":            1,
+	"payment.Stripe.SettleSucceeded payment.duplicate_charge":           2,
+	"payment.Stripe.SettleSucceeded payment.received_on_voided_invoice": 1,
+	"payment.Stripe.handlePaymentSucceeded payment.currency_mismatch":   1,
+	"payment.Stripe.handleSetupIntentSucceeded payment_method.attached": 1,
 }
 
 // webhookDynamicEmitAllowlist names the functions that hand the webhook

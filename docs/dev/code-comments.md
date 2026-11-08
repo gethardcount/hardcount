@@ -1,8 +1,16 @@
 # Code comments
 
-These rules are for anyone who writes or changes a comment in Go code. A
-comment's reader is a contributor, a maintainer or an AI agent with the code
-open, so a comment adds only what the code cannot say. The
+These rules are for anyone who writes or changes a comment in code: Go,
+TypeScript, shell scripts, Makefiles, Dockerfiles and CI YAML. Each comment
+serves two readers with the code open:
+
+- **A developer who knows the language but is new to this codebase.** They
+  understand the comment on the first read, without opening another file.
+- **A maintainer about to change the code.** The comment gives them the rules,
+  invariants and traps they would otherwise break, with the reason.
+
+Making a comment easier for the first reader never removes what the second
+needs. A comment adds only what the code cannot say. The
 [writing style](writing-style.md) rules still apply: one idea per sentence,
 plain words and quiet emphasis.
 
@@ -20,6 +28,9 @@ plain words and quiet emphasis.
    - How the function works goes in comments inside its body.
    - Each package has one package comment (`// Package billing …`), in
      `doc.go` or the package's main file.
+   - In TypeScript, an exported function, hook or component gets a `/** */`
+     comment ([TSDoc](https://tsdoc.org)) when its name and types do not say
+     what a caller must know. The types already give the shapes.
 3. **Rule first, then the reason.** Write the rule in one sentence and the
    reason in the next: "Allocate the number on the caller's transaction.
    Otherwise a second connection waits on the row this transaction holds."
@@ -50,8 +61,10 @@ plain words and quiet emphasis.
    while doing other work gets its own PR or an issue. Do not fix it in a PR
    that only rewords comments.
 
-Keep the markers that tools read: `//go:` directives, and
-`//nolint:<linter> // <reason>` waivers (golangci-lint requires the reason).
+Keep the markers that tools read, with their syntax unchanged: `//go:`
+directives, `//nolint:<linter> // <reason>` waivers (golangci-lint requires
+the reason), `eslint-disable` and `@ts-expect-error` comments, and
+`# shellcheck` directives.
 
 ## Before and after
 
@@ -125,6 +138,13 @@ sites and the design of a superseded ADR. A caller needs these 16:
   ```
 
   A comment at the end of a code line shows up here. Check each one by hand.
+  For TypeScript, run the same check on `'*.ts' '*.tsx'` with
+  `(//|/\*|\*)` as the comment marker. For scripts and YAML, use `#`.
+- **A shipped migration is a record.** Leave the comments in a migration that
+  has been released as they are. New migrations follow these rules.
+- **Review with both readers.** One reviewer reads the new comments cold, as
+  a developer new to the codebase. Another reads them as the maintainer,
+  next to the old text, and checks that no rule or trap was lost.
 - **Rewording and fact fixes stay apart.** A rewording PR changes only how
   comments are written, and keeps every fact. A truth PR fixes comments that
   disagree with the code, and re-checks each claim against the code. Docs

@@ -64,8 +64,12 @@ func (a *subStoreAdapter) ClosePeriod(ctx context.Context, tenantID, id string, 
 	return a.store.ClosePeriod(ctx, tenantID, id, expected, start, end, next, anchorDay)
 }
 
-func (a *subStoreAdapter) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, id string, now time.Time) ([]domain.SubscriptionItem, error) {
-	return a.store.ApplyDuePendingItemPlansAtomic(ctx, tenantID, id, now)
+func (a *subStoreAdapter) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, id string, now, appliedAt time.Time) ([]domain.SubscriptionItem, error) {
+	return a.store.ApplyDuePendingItemPlansAtomic(ctx, tenantID, id, now, appliedAt)
+}
+
+func (a *subStoreAdapter) EnqueueEventTx(ctx context.Context, tx *sql.Tx, tenantID, id, eventType string, extra map[string]any) error {
+	return a.store.EnqueueEventTx(ctx, tx, tenantID, id, eventType, extra)
 }
 
 func (a *subStoreAdapter) FireScheduledCancellationTx(ctx context.Context, tx *sql.Tx, tenantID, id string, expected subscription.PeriodSnapshot, at time.Time) (domain.Subscription, error) {
