@@ -24,8 +24,10 @@ temp.txt
 
 # Binaries that `go build` drops at the repo root, under the current name and
 # the name before the rename to Hardcount.
-/hardcount*
-/velox*
+/hardcount
+/hardcount-*
+/velox
+/velox-*
 
 # k6 writes its run summary into whatever directory it runs from.
 summary.json
