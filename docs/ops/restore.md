@@ -4,6 +4,8 @@ This page brings Hardcount's database back from a backup, after data loss or a l
 
 A restore takes the database back to the moment of the backup, so everything written after it is gone from Hardcount. Stripe still holds the payments and refunds made since, so Hardcount's background jobs, such as billing, stay paused until this page has matched the two. The match cannot prevent every second charge: billing builds again an invoice that the restore lost, and charges it. [Handle the payments you noted](#handle-the-payments-you-noted) gives the earlier payment back.
 
+**Matching the payments is manual for now.** A planned restore mode will replace these steps: after a restore, Hardcount will refuse to start until it has read from Stripe what happened since the backup.
+
 **How to run the commands.** On one VM (the [Docker Compose install](../production-one-vm.md)), run the `docker compose` commands in `/opt/hardcount/deploy/compose`, and the SQL in the database shell: `docker compose exec postgres psql -U hardcount -d hardcount`. Elsewhere, run the SQL in `psql` as the database owner, the user in `DATABASE_URL`. Keep the `SET app.bypass_rls = 'on';` that starts some blocks. Without it, an owner that is not a superuser, as on a managed database, sees no rows and changes none, with no error ([why](runbook/index.md#before-you-start)).
 
 ## The steps in order
@@ -36,7 +38,7 @@ A restore takes the database back to the moment of the backup, so everything wri
 
      Hold every other write to a subscription or an invoice too. Hold every refund and credit note: the restored invoices do not show the refunds made after the backup, so Hardcount can refund that money again.
    - **Tell your team to stay out of the dashboard.** Its buttons, such as **Collect payment** and **Charge now**, make the same requests.
-   - **Close the customer payment pages.** A customer who paid after the backup sees the invoice unpaid, and can pay it again. Block the paths that start with `/v1/public/` at your proxy. With the one-VM Caddy, add the line `respond /v1/public/* 503` inside the site block of `/etc/caddy/Caddyfile`, above `reverse_proxy`, and run `sudo systemctl reload caddy`. If you cannot close them, watch the logs for `payment anomaly: second successful charge on an already-paid invoice`, and refund the payment from your list of [Match Hardcount with Stripe](#match-hardcount-with-stripe), step 4.
+   - **Close the customer payment pages.** A customer who paid after the backup sees the invoice unpaid, and can pay it again. Block the paths that start with `/v1/public/` at your proxy. With the one-VM Caddy, add the line `respond /v1/public/* 503` inside the site block of `/etc/caddy/Caddyfile`, above `reverse_proxy`, and run `sudo systemctl reload caddy`. If you cannot close them, watch the logs for `payment anomaly: second successful charge on an already-paid invoice`. If neither payment it names has a refund or a dispute in Stripe, refund the `incoming_payment_intent_id` one.
 2. **Pick the backup, and note its time.** A backup made by Velox, Hardcount's name before v0.9.0, cannot be restored ([Coming from Velox](../upgrades.md#coming-from-velox)).
    - **A dump:** pick the newest dump from before the data loss. `latest.dump` may already hold the damage. List them with `sudo ls -l /var/backups/hardcount/`. A dump's name holds the time it started, in UTC: `hardcount_20261019_030000.dump` started at 03:00:00 UTC on 19 October 2026. On one VM, stop the nightly backup until the restore is done: `sudo mv /etc/cron.d/hardcount-backup ~/`.
    - **A point in time** is the time you restore to. **A snapshot** is the time it was made.
@@ -224,7 +226,7 @@ The restored database does not know about the payments Stripe took after the bac
      --query "status:'succeeded' AND created>=1792292400"
    ```
 
-   The extra day catches a payment that started before the backup and finished after it, and the time zone gap. The extra rows do no harm: a payment that the backup already holds falls in the first row of the table in step 5. If the answer says `"has_more": true`, run it again with `--page` set to its `next_page`. Each payment Hardcount made names its invoice in its metadata, as `hardcount_invoice_id`. A payment without it was not made by Hardcount: skip it.
+   The extra day catches a payment that started before the backup and finished after it, and the time zone gap. A payment that the backup already holds falls in the first row of the table in step 5. If the answer says `"has_more": true`, run it again with `--page` set to its `next_page`. Each payment Hardcount made names its invoice in its metadata, as `hardcount_invoice_id`. A payment without it was not made by Hardcount: skip it.
 5. **Look up each payment's invoice in the restored database.**
 
    ```sql
@@ -235,9 +237,9 @@ The restored database does not know about the payments Stripe took after the bac
    | You see | Do |
    |---|---|
    | `paid`, and `stripe_payment_intent_id` is this payment's ID | Nothing |
-   | `paid` another way: another payment's ID, or none | The customer paid this invoice twice. Refund this payment in Stripe, the one from your list, not the one the invoice records. |
+   | `paid` another way: another payment's ID, or none | The customer paid this invoice twice. In Stripe, look at this payment and the one the invoice records. If neither has a refund or a dispute, refund this one in full. Otherwise refund nothing. |
    | `finalized` or `uncollectible` | Resend the payment's event (step 6) |
-   | `draft`, any other status, or no row | Note the payment's ID, amount, currency, date and `hardcount_customer_id` for [Handle the payments you noted](#handle-the-payments-you-noted). Do not resend it: Hardcount records a card payment only on a finalized or uncollectible invoice. |
+   | `draft`, any other status, or no row | Note the payment's ID, amount, currency, date, `hardcount_invoice_id` and `hardcount_customer_id` for [Handle the payments you noted](#handle-the-payments-you-noted). Do not resend it: Hardcount records a card payment only on a finalized or uncollectible invoice. |
 
 6. **Resend each payment's `payment_intent.succeeded` event to Hardcount.** In the Stripe Dashboard, open the event from the **Events** tab in Workbench and click **Resend**. Or run `stripe events resend evt_… --webhook-endpoint we_… --api-key sk_live_…`, where `we_…` is Hardcount's endpoint in the **Webhooks** tab.
 
@@ -256,7 +258,9 @@ The restored database does not know about the payments Stripe took after the bac
      -d "types[]=setup_intent.succeeded" -d "types[]=checkout.session.completed"
    ```
 
-   The list starts with the newest event. If the answer says `"has_more": true`, run it again with `--starting-after` set to the last event's ID. What Hardcount does with each:
+   The list starts with the newest event. If the answer says `"has_more": true`, run it again with `--starting-after` set to the last event's ID.
+
+   Skip the events of a payment you noted, and note them with the payment. No invoice holds that payment yet, so Hardcount cannot record them. A dispute event resent now is lost: Hardcount ignores any later resend of it. What Hardcount does with the other events:
    - **A refund made in the Stripe Dashboard, a dispute or a saved card:** Hardcount records it, or flags it on the invoice for you to finish ([A refund made in Stripe](runbook/refund-made-in-stripe.md), [Card disputes](runbook/card-disputes.md)).
    - **A refund made through Hardcount** has its credit note's ID, `hardcount_cn_id`, in its metadata. Look up the credit note, and the invoice by the refund's payment:
 
@@ -266,9 +270,10 @@ The restored database does not know about the payments Stripe took after the bac
      SELECT id, tax_transaction_id FROM invoices WHERE stripe_payment_intent_id = 'pi_…';
      ```
 
-     If the credit note is there, but its `refund_status` still differs from the refund's status in Stripe after the resend, click **Retry refund** on it. Hardcount finds the refund by its metadata and records it, without refunding again. If the credit note is gone, the invoice shows that money as refundable again. When the invoice's `tax_transaction_id` is empty, record the refund with a credit note, as in step 1 of [A refund made in Stripe](runbook/refund-made-in-stripe.md#fix). Send the amount as `out_of_band_amount_cents`, in place of `refund_amount_cents` and `stripe_refund_id`, and put the refund's ID in the reason. When it is set, a new credit note would reverse the invoice's tax in Stripe Tax a second time. So record the refund in your own books only, and do not refund that money again.
-
-   A refund or a dispute of a payment you noted is not recorded: note it with the payment.
+     Then, by what you see:
+     - **The credit note is `issued`**, but its `refund_status` still differs from the refund's status in Stripe after the resend: click **Retry refund** on it. Hardcount finds the refund by its metadata and records it, without refunding again.
+     - **It is a `draft`:** do not issue it, because issuing can refund the customer a second time. Click **Void** on it, and go on as if it were gone.
+     - **It is gone:** the invoice shows that money as refundable again. When the invoice's `tax_transaction_id` is empty, record the refund with a credit note, as in step 1 of [A refund made in Stripe](runbook/refund-made-in-stripe.md#fix). Send the amount as `out_of_band_amount_cents`, in place of `refund_amount_cents` and `stripe_refund_id`, and put the refund's ID in the reason. When it is set, a new credit note would reverse the invoice's tax in Stripe Tax a second time. So record the refund in your own books only, and do not refund that money again.
 
 ## Queued emails and webhooks
 
@@ -287,7 +292,7 @@ Resume billing alone first. It builds again the invoices the restore lost, and c
    ```
 
    **You see:** `t`.
-2. **Wait for its first run to end.** It runs at once if its last run in the backup is older than its interval ([When invoices are made](../api/timing-and-limits.md#when-invoices-are-made)), and otherwise when the interval ends. Then count the live subscriptions still past their billing date:
+2. **Wait for its first run to end.** It runs at once if its last run in the backup is older than its interval ([When invoices are made](../api/timing-and-limits.md#when-invoices-are-made)), and otherwise when the interval ends. Then count the live subscriptions still past their billing date or their cancel date:
 
    ```sql
    SET app.bypass_rls = 'on';
@@ -295,27 +300,32 @@ Resume billing alone first. It builds again the invoices the restore lost, and c
    SELECT count(*) AS due, min(next_billing_at) AS oldest
    FROM subscriptions
    WHERE livemode AND test_clock_id IS NULL AND status IN ('active', 'trialing')
-     AND next_billing_at <= now() - interval '1 hour';
+     AND (next_billing_at <= now() - interval '1 hour'
+          OR (status = 'active' AND cancel_at <= now() - interval '1 hour'));
    ```
 
    **You see:** `last_tick_age_s` starts again from a few seconds when the run ends, and `due` falls to 0. `1 hour` is the default invoice grace, `INVOICE_GRACE_PERIOD`: use your value if you set one. A subscription whose billing fails stays counted: see [Subscriptions whose billing is failing](runbook/billing-failing.md). If nothing changes, see [A background job is stuck](runbook/background-job-stuck.md).
 
 ## Handle the payments you noted
 
-Do this for each payment you noted at [Match Hardcount with Stripe](#match-hardcount-with-stripe). List the customer's newest invoices:
+Do this for each payment you noted at [Match Hardcount with Stripe](#match-hardcount-with-stripe). List the payment's invoice, if the backup holds it, and the customer's invoices made since the backup. Put in the payment's `hardcount_invoice_id` and `hardcount_customer_id`, and your backup time:
 
 ```sql
 SET app.bypass_rls = 'on';
 SELECT id, status, payment_status, stripe_payment_intent_id, currency, total_amount_cents,
-       billing_reason, billing_period_end, created_at
-FROM invoices WHERE customer_id = 'hc_cus_…' ORDER BY created_at DESC LIMIT 5;
+       amount_due_cents, billing_reason, billing_period_end, created_at
+FROM invoices
+WHERE id = 'hc_inv_…' OR (customer_id = 'hc_cus_…' AND created_at >= '2026-10-19 03:00:00+00')
+ORDER BY created_at DESC;
 ```
 
-Find the invoice that matches the payment. If the backup holds the payment's invoice, it is that invoice. Otherwise, it is an invoice created after you resumed billing, in the payment's currency, for about the payment's amount. Do not match on the billing period. An invoice billed in advance covers the coming period, and a `threshold` invoice's period ends when it was made, so both can end after the payment. Then:
+Find the invoice that matches the payment. If the backup holds the payment's invoice, it is that invoice. Otherwise, it is an invoice created after you resumed billing, in the payment's currency, for about the payment's amount. Do not match on the billing period. An invoice billed in advance covers the coming period, and a `threshold` invoice's period ends when it was made, so both can end after the payment.
 
-- **It holds this payment** (`stripe_payment_intent_id` is the payment you noted): nothing to do. This happens to a draft that the backup held: its charge sent the same request as before the restore. Stripe keeps its answer to a request for 24 hours, so it returned the first payment and charged nothing new.
-- **It is paid with another payment:** the customer paid twice. Refund the earlier payment, the one from your list, in the Stripe Dashboard. If part of it was refunded since, refund what is left. The invoice then matches the one payment left. No invoice holds the refunded payment, so for up to three days Hardcount logs a warning each time Stripe resends that refund's event. That is expected.
-- **Its charge failed, or it waits for the customer to pay** (`payment_status` `failed` or `pending`): record the earlier payment on it now ([Mark an invoice paid](runbook/manual-interventions.md#mark-an-invoice-paid-offline-payment-received)). Put the payment's ID in the note.
+What is left of the payment is its amount less the refunds you noted with it. Nothing is left while a dispute you noted is open, or after you lost it. Then:
+
+- **It holds this payment** (`stripe_payment_intent_id` is the payment you noted): resend the refund and dispute events you noted with it, as in step 7 of [Match Hardcount with Stripe](#match-hardcount-with-stripe). For a refund with `hardcount_cn_id`, follow the rule there for a credit note that is gone. A draft that the backup held usually ends here: its charge sent the same request as before the restore. Stripe keeps its answer to a request for 24 hours, so it returned the first payment. The invoice can show `unknown` first: wait, as for a charge that is still running.
+- **It is paid with another payment:** the customer paid twice. Refund what is left of the earlier payment, the one from your list, in the Stripe Dashboard. The invoice then matches the one payment left. No invoice holds the refunded payment, so for up to three days Hardcount logs a warning each time Stripe resends that refund's event. That is expected.
+- **Its charge failed, or it waits for the customer to pay** (`payment_status` `failed` or `pending`): look at the earlier payment. If you noted no refund and no dispute with it, and its amount equals the invoice's `amount_due_cents`, record it on the invoice now ([Mark an invoice paid](runbook/manual-interventions.md#mark-an-invoice-paid-offline-payment-received)). Put the payment's ID in the note. Hardcount then counts the invoice as paid outside Stripe, so a later credit note cannot refund it to the card. Otherwise, refund what is left of the payment in Stripe, and let the invoice be collected as usual.
 - **Its charge is still running** (`payment_status` `processing` or `unknown`): wait for the result, then follow one of the cases above. Hardcount refuses to record a payment while a charge runs.
 - **It is still a draft:** it is charged when it is finalized, by billing or by you. Come back to it then.
 - **No invoice matches:** the subscription or invoice behind the payment was lost too, and perhaps its customer. Nothing charges it again for now. Keep the payment's ID for your accounts, and see [Redo the changes made after the backup](#redo-the-changes-made-after-the-backup).

@@ -164,22 +164,7 @@ On one VM:
    **You see:** files such as `hardcount_20261019_143000.dump`, a backup
    started at 14:30:00 UTC on 19 October 2026.
 
-3. List the invoices created or changed since that time, and keep the list.
-   Run this in the database shell
-   (`docker compose exec postgres psql -U hardcount -d hardcount`), with your
-   backup's time:
-
-   ```sql
-   SELECT id, livemode, status, payment_status, total_amount_cents, updated_at
-   FROM invoices
-   WHERE updated_at >= '2026-10-19 14:30:00+00'
-   ORDER BY updated_at;
-   ```
-
-   **You see:** one row for each invoice that the restore removes, or takes
-   back to how it was at the backup.
-
-4. Empty the database and restore the backup into it. `dropdb` deletes the
+3. Empty the database and restore the backup into it. `dropdb` deletes the
    database Hardcount runs on, so check first that step 2 found the right file. Use your
    backup's file name in the last line.
 
@@ -202,7 +187,7 @@ On one VM:
    carries its access rights, including the rights to tables that a later
    upgrade creates.
 
-5. Pause the background jobs, check the restored database, and start the
+4. Pause the background jobs, check the restored database, and start the
    old release. The pause keeps billing from charging again for an invoice
    paid after the backup.
    - Run the five `leader_pause` lines of
@@ -240,18 +225,20 @@ On one VM:
      `curl -fsS http://localhost:8080/health/ready` answers
      `"status":"ok"`.
 
-6. Put back what the restore removed. Follow
+5. Put back what the restore removed. Follow
    [Match Hardcount with Stripe](ops/restore.md#match-hardcount-with-stripe)
    and the sections after it, to the end of that page. Hardcount already runs
-   since step 5, so skip its step 2: the time you noted in step 5 is the one
+   since step 4, so skip its step 2: the time you noted in step 4 is the one
    it asks for. The last sections resume the background jobs.
 
 With a managed Postgres, stop every copy and put the holds in place. Restore
-the snapshot or the point in time you noted into the database,
-[pause the background jobs](ops/restore.md#pause-the-background-jobs), and
-run the [checks of the restored database](ops/restore.md#check-the-restored-database).
-Note the database's time, then start the old release on every copy, and do
-step 6. How a restore works, and what to check before you start:
+the snapshot or the point in time you noted into the database, and
+[pause the background jobs](ops/restore.md#pause-the-background-jobs). Put
+the old release's image or binary in place on every copy. Then run the
+[checks of the restored database](ops/restore.md#check-the-restored-database)
+with that release: its `migrate status` says `up to date`. Note the
+database's time, then start the old release on every copy, and do step 5.
+How a restore works, and what to check before you start:
 [Restore Hardcount](ops/restore.md).
 
 **Next:** [Versioning](versioning.md): what a release may change, and where
