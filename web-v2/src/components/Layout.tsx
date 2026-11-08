@@ -12,7 +12,7 @@ import { toast } from 'sonner'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { cn } from '@/lib/utils'
 import { CONTENT_BAND } from '@/lib/contentBand'
-import { api, setActiveCurrency } from '@/lib/api'
+import { api } from '@/lib/api'
 import { getLastRequestId } from '@/lib/lastRequestId'
 import { useAuth } from '@/contexts/AuthContext'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -275,20 +275,6 @@ export function Layout({ children }: { children: ReactNode }) {
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [])
-
-  // Tenant currency drives the formatCents/getCurrencySymbol helpers
-  // app-wide. Side-effect on success: push to the module-level
-  // setActiveCurrency so non-React call sites pick it up. React Query
-  // handles the StrictMode dedupe + cache across Layout remounts on
-  // route navigation.
-  const settingsQuery = useQuery({
-    queryKey: ['layout', 'settings'],
-    queryFn: () => api.getSettings(),
-  })
-  useEffect(() => {
-    const cur = settingsQuery.data?.default_currency
-    if (cur) setActiveCurrency(cur)
-  }, [settingsQuery.data?.default_currency])
 
   // Sidebar nav badges (open invoices count, active dunning count).
   // Stale data is fine — these are background hints; RQ's

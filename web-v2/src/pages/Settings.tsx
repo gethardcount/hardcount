@@ -6,7 +6,9 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ApiError, api, setActiveCurrency, setTenantTimezone, formatTaxRate, type StripeProviderCredentials } from '@/lib/api'
+import { ApiError, api, setTenantTimezone, formatTaxRate, type StripeProviderCredentials } from '@/lib/api'
+import { updateTenantSettings } from '@/lib/gen/queries.gen'
+import { tenantSettingsQuery } from '@/hooks/useTenantSettings'
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { taxExampleAmounts } from '@/lib/taxExample'
 import { dollarsToWholeCents, percentRate } from '@/lib/priceInput'
@@ -174,6 +176,7 @@ export default function SettingsPage() {
   const { user } = useAuth()
   const livemode = user?.livemode ?? false
   const sharedNotice = sharedSettingsNotice(livemode)
+  const queryClient = useQueryClient()
 
   const formMethods = useForm<SettingsFormData>({
     resolver: zodResolver(settingsSchema),
@@ -197,9 +200,11 @@ export default function SettingsPage() {
   // the form's rate. The form holds the rate the text reads as, or NaN.
   const [taxRateText, setTaxRateText] = useState<string | null>(null)
 
+  // The form loads through the shared settings query, always from the
+  // server, so every other page reads what this page shows.
   const loadSettings = () => {
     setLoading(true); setError(null)
-    api.getSettings().then(s => {
+    queryClient.fetchQuery({ ...tenantSettingsQuery, staleTime: 0 }).then(s => {
       const f = {
         company_name: s.company_name || '', company_email: s.company_email || '',
         company_phone: s.company_phone || '',
@@ -261,7 +266,7 @@ export default function SettingsPage() {
     try {
       // Dollar string -> cents (null clears the threshold: alerts off).
       const { credit_balance_low_threshold, ...rest } = data
-      const updated = await api.updateSettings({
+      const updated = await updateTenantSettings({
         ...rest,
         // The schema took only an amount with at most two decimals, so
         // this reads it exactly (string math, no float rounding).
@@ -294,13 +299,14 @@ export default function SettingsPage() {
       reset(f)
       setTaxRateText(null)
       setNextInvoiceSeq(updated.next_invoice_sequence)
-      if (updated.default_currency) setActiveCurrency(updated.default_currency)
-      // Synchronously reseed the module-scoped tenant TZ so the very
-      // next render of any page (including a navigation that happens
-      // before any async refetch could land) uses the new value.
-      // TenantTimezoneBootstrap is the only consumer of the shared
-      // ['settings'] query, so the module-state write is the single
-      // authoritative path — no parallel cache invalidation needed.
+      // Every page reads the settings query, so the saved values reach
+      // them at once: the currency a new plan is created in, the zone of
+      // date filters, the seller on a draft invoice.
+      queryClient.setQueryData(tenantSettingsQuery.queryKey, updated)
+      // formatDate and formatDateTime read the zone from a module value.
+      // TenantTimezoneBootstrap sets it from its own copy of the settings,
+      // which this save does not reach (it mounts before sign-in, so its
+      // query lives in the signed-out query client). Set it here.
       setTenantTimezone(updated.timezone ? normalizeTimezone(updated.timezone) : null)
       toast.success('Settings saved')
     } catch (err) {

@@ -6,8 +6,9 @@
 // no default: formatCents and getCurrencySymbol require a currency, so the
 // type checker lists any call that would guess. A figure the server scoped
 // to the workspace default (the Home KPIs) passes the currency the server
-// returned with it. An amount whose currency was never recorded (a credit
-// row in the audit log) is shown bare, with formatCentsBare.
+// returned with it. An amount with no currency of its own (a credit row in
+// the audit log, a zero total over no records) is shown bare, with
+// formatCentsBare.
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$', EUR: '€', GBP: '£', JPY: '¥', CNY: '¥',
@@ -17,16 +18,6 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   CZK: 'Kč ', HUF: 'Ft ', ILS: '₪', AED: 'AED ', SAR: 'SAR ',
   THB: '฿', MYR: 'RM ', IDR: 'Rp ', PHP: '₱', VND: '₫',
   CLP: 'CL$', COP: 'CO$', PEN: 'S/', ARS: 'AR$', TWD: 'NT$',
-}
-
-let _activeCurrency = 'USD'
-
-export function setActiveCurrency(code: string) {
-  _activeCurrency = code.toUpperCase()
-}
-
-export function getActiveCurrency(): string {
-  return _activeCurrency
 }
 
 export function getCurrencySymbol(code: string): string {

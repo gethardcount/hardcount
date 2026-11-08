@@ -468,11 +468,6 @@ export const api = {
   upsertBillingProfile: (customerId: string, data: Partial<BillingProfile>) =>
     apiRequest<BillingProfile>('PUT', `/customers/${customerId}/billing-profile`, data),
 
-  // Settings
-  getSettings: () =>
-    apiRequest<TenantSettings>('GET', '/settings'),
-  updateSettings: (data: Partial<TenantSettings>) =>
-    apiRequest<TenantSettings>('PUT', '/settings', data),
   // Settings → Email: read-only server email setup, and a test send to the
   // signed-in member (dashboard session only).
   getEmailSettings: () =>
@@ -1474,40 +1469,6 @@ export interface BillingProfile {
   profile_status: string
 }
 
-export interface TenantSettings {
-  tenant_id: string
-  default_currency: string
-  timezone: string
-  invoice_prefix: string
-  credit_note_prefix: string
-  net_payment_terms: number
-  tax_provider: 'none' | 'manual' | 'stripe_tax'
-  tax_rate: number
-  tax_name: string
-  tax_inclusive: boolean
-  default_product_tax_code: string
-  company_name: string
-  company_address_line1: string
-  company_address_line2: string
-  company_city: string
-  company_state: string
-  company_postal_code: string
-  company_country: string
-  company_email: string
-  company_phone: string
-  logo_url: string
-  brand_color: string
-  tax_id: string
-  support_url: string
-  invoice_footer: string
-  // ADR-078: arms the credit.balance_low webhook — a customer's balance
-  // crossing below this many cents fires the event. null/absent = off.
-  credit_balance_low_threshold_cents?: number | null
-  // The number the next invoice in the current mode gets, before the
-  // prefix. Returned by GET and PUT; not a setting, so sending it does nothing.
-  next_invoice_sequence: number
-}
-
 export interface StripeProviderCredentials {
   id: string
   tenant_id: string
@@ -1974,7 +1935,7 @@ export async function downloadCreditNotePDF(creditNoteId: string, creditNoteNumb
 
 // Money formatting lives in lib/money (dependency-free, so the unit tests can
 // import it); re-exported here so every existing call site keeps working.
-export { setActiveCurrency, getActiveCurrency, getCurrencySymbol, formatCents, formatCentsBare, amountsByCurrencyText, prorationText } from './money'
+export { getCurrencySymbol, formatCents, formatCentsBare, amountsByCurrencyText, prorationText } from './money'
 
 // formatTaxRate renders a tax-rate percent (without the % sign) at up to 4
 // decimal places, trailing zeros trimmed: 8.875 → "8.875", 18 → "18",
