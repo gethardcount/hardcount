@@ -181,6 +181,10 @@ you do with that invoice, and when:
   step 3). A void that arrives while that invoice is being saved waits for
   it, and then counts as after.
 
+A spend-threshold invoice made before version 0.9.0 can also carry the base
+fee of a plan billed in arrears. These rules apply to that fee as to the
+usage.
+
 Usage of a `sum` or `count` meter
 ([aggregation](meters-and-prices.md#meters)) that is stamped before a
 spend-threshold invoice but arrives after it is on neither invoice. While

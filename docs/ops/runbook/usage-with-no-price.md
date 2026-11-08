@@ -66,8 +66,9 @@ curl -sS "$API/v1/usage-events?customer_id=$CUSTOMER&meter_id=$METER" -H "Author
   usage-events call with the same `from` and `to`. See
   [Invoice timing and late usage](invoice-timing-late-usage.md) for details.
 - The customer page shows the same "No price matches this usage — not
-  billed" row. The `subscription_id` and `quantity` in the WARN tell you
-  which invoice left it out.
+  billed" row.
+- The WARN names no invoice. Match its `subscription_id` and log time with
+  that subscription's invoice built at that time.
 
 ## Fix
 

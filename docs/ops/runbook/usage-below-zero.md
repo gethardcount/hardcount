@@ -79,9 +79,9 @@ It does not carry the negative amount into a later period.
     cancelled out this period's usage.
   - For example: usage 100, a correction of -150, and the row shows -50.
     Credit 50 units.
-  - With no `refund_amount_cents`, the credit goes to the customer's
-    balance and no money moves
-    ([Credit notes](../../concepts/invoices.md#credit-notes)). Before you
+  - With no `refund_amount_cents`, no money moves. On a paid invoice the
+    credit goes to the customer's balance. On an unpaid one it lowers what
+    is due ([Credit notes](../../concepts/invoices.md#credit-notes)). Before you
     set a refund, check the payment in Stripe: a refund made there already
     is recorded instead ([A refund made in Stripe](refund-made-in-stripe.md)).
 - **The correction was sent by mistake:** nothing was charged for it, but

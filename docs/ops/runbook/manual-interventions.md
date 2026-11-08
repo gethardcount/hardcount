@@ -12,7 +12,9 @@ Resolve it on the run's invoice in the dashboard (the Dunning page's
 uncollectible** each close the run. Or call
 `POST /v1/dunning/runs/{id}/resolve` with a `resolution` (one of the three
 below). Both make the matching change to the invoice and send
-`dunning.resolved`. Use the SQL below only when neither is available.
+`dunning.resolved`. Use the SQL below only when the run must stop before
+you can reach the dashboard or the API: for example, when its next retry
+would charge a customer who has already paid.
 
 1. **Pick the resolution that says what actually happened to the invoice.**
    Finance later reads this column to answer "why did we stop collecting
@@ -134,8 +136,10 @@ refused. Do not record a payment on it: the money would be counted twice.
 
 - Schedule a plan change for the period's end.
 - A cancel or downgrade lowers what the written-off invoice asks for,
-  instead of crediting the customer. Grant the customer the unused time as
-  credit (`POST /v1/credits/grant`).
+  instead of crediting the customer. It does so with a credit note on that
+  invoice. Grant the customer that credit note's `total_cents` as credit
+  (`POST /v1/credits/grant`). List it with
+  `GET /v1/credit-notes?invoice_id=<written-off invoice id>`.
 - An added item or seat increase has no way round yet.
 
 ## A customer has no usable payment method on file

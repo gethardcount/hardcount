@@ -2,7 +2,9 @@
 
 When Hardcount cannot bill a subscription at the end of its period, it saves
 the failure on the subscription and tries again later, waiting longer each
-time. Back to the [runbook index](index.md).
+time. Its commands use `API` and `KEY` from
+[Before you start](index.md#before-you-start). Back to the
+[runbook index](index.md).
 
 ## Symptom
 
@@ -16,8 +18,10 @@ the subscription and now waits before each new attempt.
 
 - **`state="retrying"`**: the billing run will try again on its own. The
   waits after each failed attempt are 15 minutes, 1 hour, 4 hours,
-  12 hours, then 24 hours three times. On the hourly production tick, an
-  attempt happens on the first tick at or after the wait ends.
+  12 hours, then 24 hours three times. Each scheduled billing run is a
+  tick: hourly in production
+  ([Timing and limits](../../api/timing-and-limits.md#when-invoices-are-made)).
+  An attempt happens on the first tick at or after the wait ends.
 - **`state="parked"`**: eight attempts failed. Nothing retries the
   subscription until someone calls retry-billing
   (`POST /v1/subscriptions/{id}/retry-billing`, see [Fix](#fix)). The
@@ -48,7 +52,7 @@ from a real failure:
   failover (SQLSTATE 25006).
 
 After such an outage, retry the affected subscriptions
-([Fix](#fix), step 3); do not wait out the ladder.
+([Fix](#fix), step 3) instead of waiting for their next attempt.
 
 ### Changes while billing is failing
 
@@ -69,7 +73,7 @@ After such an outage, retry the affected subscriptions
 
 `hardcount_billing_cycle_errors_total` falls once a fault has lasted a few
 ticks, because a subscription that failed is not attempted again until its
-wait has passed. On the hourly production tick, the first three ticks each
+wait has passed. With an hourly tick, the first three ticks each
 retry everything (the waits are 15 minutes, then 1 hour). From the fourth
 tick the waits are longer than the tick. So a low error rate is not an
 all-clear: alert on `hardcount_billing_failing_subscriptions` too.

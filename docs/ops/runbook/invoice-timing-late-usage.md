@@ -85,7 +85,7 @@ hand, can bill it.
 `docker compose logs hardcount-api`.
 
 ```bash
-# How many events arrived after their period's invoice, by their origin label:
+# How many events arrived after their period's invoice, one line per origin (api or backfill):
 curl -sS "$API/metrics" -H "Authorization: Bearer $METRICS_TOKEN" | grep '^hardcount_usage_unbilled_total{' | grep 'reason="after_close"'
 # Which ones: the WARN line per event.
 #   {"level":"WARN","msg":"usage event arrived after its period was invoiced — stored, billed on no invoice","customer_id":...,"meter_id":...,"timestamp":...}
@@ -191,7 +191,8 @@ covers all of them: compare only the rows of this subscription's plan.
    ```
 
    **You see:** a `draft` (`hc_inv_…`) whose `total_amount_cents` is
-   `CENTS`.
+   `CENTS`. It is in the customer's currency: its billing profile's, else
+   its plan's.
 
 5. **Check the draft's amount, then finalize it.** Finalizing charges the
    customer at once: prepaid credit first, then the saved card.
@@ -201,7 +202,8 @@ covers all of them: compare only the rows of this subscription's plan.
      | jq '{status, payment_status, amount_due_cents}'
    ```
 
-   **You see:** `"status": "finalized"`, and the amount due.
+   **You see:** `"status": "finalized"`, or `"paid"` when credit or the
+   card paid it at once, and the amount due.
 
 **To stop it happening again:** if a pipeline often delivers later than
 the grace, raise `INVOICE_GRACE_PERIOD` above its worst delay (a duration
@@ -217,6 +219,7 @@ with its memo.
   payment. When the retries run out while a period's grace is running, the
   final pause or cancel waits until that grace ends. The invoice page shows
   that time as "Final step", and the Dunning page as "Final step in …".
+  No charge is retried then: the pause or cancel runs.
 - **A cancel or plan change scheduled for a date.** It takes effect when
   Hardcount builds that period's invoice, up to one grace period after the
   date. Until then the subscription is `active` on its old plan.

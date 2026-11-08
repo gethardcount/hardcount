@@ -76,22 +76,33 @@ write the window in UTC, ending in `Z`.
    events per call: input, cache reads, cache writes (two kinds) and
    output. Their sum is LiteLLM's prompt tokens plus completion tokens. The
    window works the same way: `from` inclusive, `to` exclusive, by the time
-   each event is dated.
+   each event is dated. This runs step 1 again and looks up each customer
+   it lists:
 
    ```bash
-   EXTERNAL_ID=<end_user>
    TOKENS=$(curl -sS "$API/v1/meters" -H "Authorization: Bearer $KEY" \
      | jq -r '.data[] | select(.event_name == "tokens") | .id')
-   CUSTOMER=$(curl -sS -G "$API/v1/customers" -H "Authorization: Bearer $KEY" \
-     --data-urlencode "external_id=$EXTERNAL_ID" | jq -r '.data[0].id')
-   curl -sS -G "$API/v1/usage-events/aggregate" -H "Authorization: Bearer $KEY" \
-     --data-urlencode "customer_id=$CUSTOMER" --data-urlencode "meter_id=$TOKENS" \
-     --data-urlencode "from=$FROM" --data-urlencode "to=$TO" | jq .total_units
+   psql "$LITELLM_DATABASE_URL" -At -v from="$FROM" -v to="$TO" -f compare.sql |
+   while IFS='|' read -r EXTERNAL_ID LITELLM; do
+     CUSTOMER=
+     [ -n "$EXTERNAL_ID" ] && CUSTOMER=$(curl -sS -G "$API/v1/customers" -H "Authorization: Bearer $KEY" \
+       --data-urlencode "external_id=$EXTERNAL_ID" | jq -r '.data[0].id // empty')
+     if [ -z "$CUSTOMER" ]; then echo "'$EXTERNAL_ID' litellm=$LITELLM no customer"; continue; fi
+     HARDCOUNT=$(curl -sS -G "$API/v1/usage-events/aggregate" -H "Authorization: Bearer $KEY" \
+       --data-urlencode "customer_id=$CUSTOMER" --data-urlencode "meter_id=$TOKENS" \
+       --data-urlencode "from=$FROM" --data-urlencode "to=$TO" | jq -r .total_units)
+     echo "$EXTERNAL_ID litellm=$LITELLM hardcount=$HARDCOUNT"
+   done
    ```
 
-   **You see:** the same number as step 1 when nothing is lost. A lower
-   one means lost calls. A higher one means something else sends `tokens`
-   events for that customer, such as your own app.
+   **You see:** one line per customer, such as
+   `acme-1 litellm=430600 hardcount=430600`. The same two numbers mean
+   nothing is lost. A lower `hardcount` means lost calls. A higher one
+   means something else sends `tokens` events for that customer, such as
+   your own app.
+   - `no customer` means Hardcount has no customer with that external ID,
+     or the calls have no `end_user`. Sending such calls again holds them
+     (`held` in step 3 of the Fix), or lists them in `errors`.
    - Calls of a kind Hardcount does not bill, such as image calls, also
      make Hardcount's number lower. Sending them again changes nothing:
      the answer counts each such call in `skipped`.
@@ -248,6 +259,9 @@ does.
    - A call stamped before a spend-threshold invoice that is not paid yet
      is not counted at all
      ([Spend thresholds](../../concepts/invoices.md#spend-thresholds-an-invoice-made-early)).
+   - `hardcount_usage_late_event_total` counts only events more than 24
+     hours old when they arrive, so it does not show which calls missed an
+     invoice either.
 
 ## Verify
 
