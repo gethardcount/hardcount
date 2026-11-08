@@ -12,7 +12,6 @@ import { usageNoneYet } from '@/lib/homeNotices'
 import { formatYMDInTZ, startOfDayInTZ, endOfDayInTZ } from '@/lib/dates'
 import { wallClockNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
-import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { toast } from 'sonner'
 import { TestClockBadge } from '@/components/TestClockBadge'
@@ -256,7 +255,7 @@ export default function UsageEventsPage() {
   const scopeCaption = rangeCaption(range, activeWindow)
 
   return (
-    <Layout>
+    <>
       {/* Header */}
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div className="min-w-0 flex-1 basis-72">
@@ -523,7 +522,7 @@ export default function UsageEventsPage() {
           </Card>
         </>
       )}
-    </Layout>
+    </>
   )
 }
 

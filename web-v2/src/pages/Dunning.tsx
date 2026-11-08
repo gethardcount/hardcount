@@ -14,7 +14,6 @@ import {
   type Customer,
 } from '@/lib/api'
 import { effectiveNow, sinceMs, untilMs, type EffectiveNow } from '@/lib/effectiveNow'
-import { Layout } from '@/components/Layout'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { dunningReasonLabel } from '@/lib/dunningReasons'
 import { retriesOffNotice } from '@/lib/dunningCoverage'
@@ -107,7 +106,7 @@ export default function DunningPage() {
   })
   const retriesOff = !policiesLoading && !policiesError ? retriesOffNotice(policiesData?.data ?? []) : null
   return (
-    <Layout>
+    <>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-3xl">
           <h1 className="text-2xl font-semibold text-foreground">Dunning</h1>
@@ -137,7 +136,7 @@ export default function DunningPage() {
       <div className="mt-6">
         <RunsTab />
       </div>
-    </Layout>
+    </>
   )
 }
 

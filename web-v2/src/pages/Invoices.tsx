@@ -8,7 +8,6 @@ import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import type { Customer, Invoice } from '@/lib/api'
 import { showApiError } from '@/lib/formErrors'
 import { downloadServerCSV } from '@/lib/csv'
-import { Layout } from '@/components/Layout'
 import { useSortable, type SortDir } from '@/hooks/useSortable'
 import { useUrlState } from '@/hooks/useUrlState'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
@@ -231,7 +230,7 @@ export default function InvoicesPage() {
   }
 
   return (
-    <Layout>
+    <>
       {/* Page header. Wraps on a phone so the actions stay on screen. */}
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div className="min-w-0 flex-1 basis-72">
@@ -592,7 +591,7 @@ export default function InvoicesPage() {
           )}
         </CardContent>
       </Card>
-    </Layout>
+    </>
   )
 }
 

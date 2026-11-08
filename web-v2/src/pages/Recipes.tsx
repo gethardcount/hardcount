@@ -11,7 +11,6 @@ import type { RecipeOverride } from '@/lib/gen/schemas/recipeOverride'
 import type { RecipePreviewResult } from '@/lib/gen/schemas/recipePreviewResult'
 import { money, priceRate } from '@/lib/priceDisplay'
 import { showApiError } from '@/lib/formErrors'
-import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 
 import { Button } from '@/components/ui/button'
@@ -47,7 +46,7 @@ export default function RecipesPage() {
   const recipes = data?.data ?? []
 
   return (
-    <Layout>
+    <>
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -94,7 +93,7 @@ export default function RecipesPage() {
           onClose={() => setSelected(null)}
         />
       )}
-    </Layout>
+    </>
   )
 }
 

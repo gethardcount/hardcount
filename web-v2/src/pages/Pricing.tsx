@@ -12,7 +12,6 @@ import {
   getCurrencySymbol,
   getActiveCurrency,
 } from '@/lib/api'
-import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { METER_AGGREGATIONS, meterAggregationHelp, meterAggregationLabel } from '@/lib/meterLabels'
 import { showApiError } from '@/lib/formErrors'
@@ -107,7 +106,7 @@ export default function PricingPage() {
     (tab === 'meters' && meters.length > 0)
 
   return (
-    <Layout>
+    <>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-3xl">
           <h1 className="text-2xl font-semibold text-foreground">Pricing</h1>
@@ -300,7 +299,7 @@ export default function PricingPage() {
           }}
         />
       )}
-    </Layout>
+    </>
   )
 }
 
