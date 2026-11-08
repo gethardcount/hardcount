@@ -26,6 +26,7 @@ Stripe troubleshooting is out of scope.
 | A replica will not boot and names Redis | [A replica will not start](replica-will-not-start.md) |
 | Someone cannot sign in: "Too many sign-in attempts", or `hardcount_auth_login_total{outcome="throttled"}` rising | [Sign-in says "Too many sign-in attempts"](sign-in-throttled.md) |
 | `hardcount migrate` or the start-up stops with `migration … failed`, `goose_db_version`, `no migration record` or `another Hardcount process is migrating` | [A database upgrade stopped](migration-failed-midway.md) |
+| Data is lost or the database server is gone, and you must restore a backup | [Restore Hardcount](../restore.md) |
 | `hardcount migrate` or the start-up stops with `this database was made by Velox` | [The database was made by Velox](migration-failed-midway.md#the-database-was-made-by-velox) |
 | An upgrade stops with `waited 5s for a table lock` | [A database upgrade stopped: table lock](migration-failed-midway.md#it-waited-5s-for-a-table-lock) |
 | `hardcount_stripe_key_unusable_total` rising, or "Stripe refused this tenant's API key" in the logs: charges paused until the key is fixed in Settings → Payments | [Health checks, alerts and logs](monitoring.md) |
@@ -40,6 +41,7 @@ Stripe troubleshooting is out of scope.
 | `hardcount_audit_uncovered_mutation_total` rising | [Audit log gaps](audit-log-gaps.md#a-change-with-no-audit-row) |
 | `hardcount_billing_failing_subscriptions` above zero, or a subscription is not being invoiced | [Subscriptions whose billing is failing](billing-failing.md) |
 | A period ended but its invoice is not built yet, or usage is missing from an invoice | [Invoice timing and late usage](invoice-timing-late-usage.md) |
+| A period invoice billed less than usual after a scheduled plan change: base fee lines only for the items whose plan changed | [Base fees missed at a scheduled plan change](plan-change-missed-base-fees.md) |
 | `hardcount_usage_unpriced_quantity_total` rising, or a WARN with "matched no price" and "not billed" | [Usage with no price](usage-with-no-price.md) |
 | "Usage below zero billed as zero" on a subscription's timeline, or a WARN with "usage below zero" | [Usage below zero](usage-below-zero.md) |
 | Write I/O high for minutes after a bulk load | [Write I/O after a large backfill](write-io-after-backfill.md) |

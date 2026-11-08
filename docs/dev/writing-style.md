@@ -32,6 +32,9 @@ most are short of time.
 The effort a reader spends should go into the ideas, never into untangling
 the sentences.
 
+A page serves its reader both when they are new to Hardcount and when they
+know it well. Plain words for the first never cost the second a fact.
+
 ## One reader, one job
 
 Every page names its one reader and its one job in its first lines
@@ -221,6 +224,9 @@ record. The results doc links both
   repointed link or a deleted history line. To see which lines moved, run
   `git diff --color-moved origin/main -- <files>`. Check that no link or
   `#anchor` broke ([Checks](#checks)).
+- **A task check for a runbook that moves money.** Before merge, someone does
+  its steps as the page's reader, against the code, and reports any step that
+  could charge, refund or bill twice.
 - **A cold-reader check for a rewritten or restructured page.** Before merge,
   a reader who has not seen the old page reads the new one, in the role of
   the reader it names. The reader can be a teammate or a fresh AI agent. They

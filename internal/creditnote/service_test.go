@@ -507,14 +507,6 @@ func (m *memInvoiceReader) ListLineItems(_ context.Context, _, invoiceID string)
 	return m.lineItems[invoiceID], nil
 }
 
-func (m *memInvoiceReader) ApplyCreditNote(_ context.Context, tenantID, id string, amountCents int64) (domain.Invoice, error) {
-	inv, ok := m.invoices[id]
-	if !ok || inv.TenantID != tenantID {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	return m.ApplyCreditNoteTx(context.Background(), nil, tenantID, id, amountCents, 0)
-}
-
 func (m *memInvoiceReader) LockForCreditNoteTx(ctx context.Context, _ *sql.Tx, tenantID, id string) (domain.Invoice, error) {
 	return m.Get(ctx, tenantID, id)
 }

@@ -72,12 +72,12 @@ func (r *pauseRig) openInvoice(subID, number string, cents int64) string {
 	r.t.Helper()
 	sub := r.call("GET", "/v1/subscriptions/"+subID, flowReq{}).want(r.t, 200, "read subscription").body
 	now := time.Now().UTC()
-	inv, err := r.invs.Create(r.ctx, r.tenantID, domain.Invoice{
+	inv, err := r.invs.CreateWithLineItems(r.ctx, r.tenantID, domain.Invoice{
 		CustomerID: flowStr(sub, "customer_id"), SubscriptionID: subID, InvoiceNumber: number,
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
 		SubtotalCents: cents, TotalAmountCents: cents, AmountDueCents: cents,
 		BillingPeriodStart: now.Add(-24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-	})
+	}, nil)
 	if err != nil {
 		r.t.Fatalf("create invoice %s: %v", number, err)
 	}

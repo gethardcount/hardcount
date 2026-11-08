@@ -31,7 +31,7 @@ func seedCustomer(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, 
 // target (ApplyToInvoiceAtomic now locks + re-reads the invoice row, ADR-078).
 func seedPayableInvoice(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, customerID string, dueCents int64, number string) string {
 	t.Helper()
-	inv, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID:    customerID,
 		InvoiceNumber: number,
 		Status:        domain.InvoiceFinalized,
@@ -40,7 +40,7 @@ func seedPayableInvoice(t *testing.T, db *postgres.DB, ctx context.Context, tena
 		SubtotalCents: dueCents, TotalAmountCents: dueCents, AmountDueCents: dueCents,
 		BillingPeriodStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
 		BillingPeriodEnd:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed invoice: %v", err)
 	}

@@ -13,7 +13,6 @@ import { useAuth } from '@/contexts/AuthContext'
 import { NoticeRow } from '@/components/NoticeRow'
 import { CUSTOMERS_DEFINITION, FAILED_PAYMENTS_DEFINITION, MRR_DEFINITION, currencyScopedHint, customersTrend, failedPaymentsTrend, subscriptionsHint } from '@/lib/homeKpis'
 import { SIMULATED_TOTALS_SENTENCE, SIMULATED_TOTALS_TITLE, showSimulatedTotalsNote } from '@/lib/homeNotices'
-import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { FeedSkeleton } from '@/components/ui/TableSkeleton'
 import { SimulatedBadge } from '@/components/TestClockBadge'
@@ -116,7 +115,7 @@ export default function DashboardPage() {
   }), [failedOpen, retrying, openTotal, overview])
 
   return (
-    <Layout>
+    <>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Home</h1>
@@ -358,7 +357,7 @@ export default function DashboardPage() {
 
         </>
       )}
-    </Layout>
+    </>
   )
 }
 

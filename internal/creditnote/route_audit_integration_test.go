@@ -103,7 +103,7 @@ func seedInvoiceForCN(t *testing.T, db *postgres.DB, tenantID, suffix string, st
 	} else {
 		inv.AmountDueCents = 10000
 	}
-	created, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, inv)
+	created, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, inv, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

@@ -39,7 +39,8 @@ the [quick start](quick-start.md).
   [The Compose files](../deploy/compose/README.md) ·
   [High availability](ops/high-availability.md) ·
   [Settings](settings.md) · [Postgres](ops/postgres-requirements.md) ·
-  [Backups](ops/backup-considerations.md) · [Upgrades](upgrades.md) ·
+  [Backups](ops/backup-considerations.md) · [Restore](ops/restore.md) ·
+  [Upgrades](upgrades.md) ·
   [How much it handles](scale.md) ·
   [Monitoring](ops/runbook/monitoring.md) ·
   [Set up email](ops/email-setup.md) ·

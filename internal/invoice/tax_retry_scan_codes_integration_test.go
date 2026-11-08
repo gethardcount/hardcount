@@ -57,7 +57,7 @@ func TestRetryPendingTax_ScansTheDeclaredSingleSource(t *testing.T) {
 	now := time.Now().UTC()
 	want := map[string]string{} // invoice id → code
 	for i, code := range domain.TaxRetryableErrorCodes() {
-		inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID:         cust.ID,
 			InvoiceNumber:      "HC-SCAN-" + string(rune('A'+i)),
 			Status:             domain.InvoiceDraft,
@@ -70,7 +70,7 @@ func TestRetryPendingTax_ScansTheDeclaredSingleSource(t *testing.T) {
 			BillingPeriodEnd:   now,
 			BillingReason:      domain.BillingReasonSubscriptionCycle,
 			TaxFacts:           domain.TaxFacts{TaxStatus: domain.InvoiceTaxPending, TaxErrorCode: code},
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice for code %s: %v", code, err)
 		}

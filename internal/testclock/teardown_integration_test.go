@@ -58,12 +58,12 @@ func TestDelete_TearsDownSimulatedGraph_KeepsEverythingElse(t *testing.T) {
 		return ok
 	}
 	seedInvoice := func(custID, num string) string {
-		inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: custID, InvoiceNumber: num, Status: domain.InvoiceFinalized,
 			PaymentStatus: domain.PaymentPending, Currency: "USD", SubtotalCents: 100,
 			TotalAmountCents: 100, AmountDueCents: 100,
 			BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice %s: %v", num, err)
 		}

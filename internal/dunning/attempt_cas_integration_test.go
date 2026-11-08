@@ -38,12 +38,12 @@ func TestUpdateRunIfActive_AttemptCountCAS(t *testing.T) {
 		t.Fatalf("upsert policy: %v", err)
 	}
 	now := time.Now().UTC()
-	inv, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-ACAS", Status: domain.InvoiceFinalized,
 		PaymentStatus: domain.PaymentFailed, Currency: "USD", SubtotalCents: 5000,
 		TotalAmountCents: 5000, AmountDueCents: 5000, BillingPeriodStart: now.Add(-time.Hour),
 		BillingPeriodEnd: now, IssuedAt: &now,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

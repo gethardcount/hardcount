@@ -37,7 +37,7 @@ func TestPostgresStore_BillingTimezone_RoundTrips(t *testing.T) {
 	start := time.Date(2026, 5, 1, 18, 30, 0, 0, time.UTC)
 	end := time.Date(2026, 5, 31, 18, 30, 0, 0, time.UTC)
 
-	created, err := invStore.Create(ctx, tenantID, domain.Invoice{
+	created, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID:         cust.ID,
 		InvoiceNumber:      "HC-TZ-1",
 		Status:             domain.InvoiceDraft,
@@ -46,7 +46,7 @@ func TestPostgresStore_BillingTimezone_RoundTrips(t *testing.T) {
 		BillingPeriodStart: start,
 		BillingPeriodEnd:   end,
 		BillingTimezone:    "Asia/Kolkata",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
@@ -68,13 +68,13 @@ func TestPostgresStore_BillingTimezone_RoundTrips(t *testing.T) {
 
 	// An ad-hoc invoice with no snapshot persists an empty string (NULL → '' via
 	// the COALESCE in invCols), so the read path falls back to the live tenant TZ.
-	adhoc, err := invStore.Create(ctx, tenantID, domain.Invoice{
+	adhoc, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID:    cust.ID,
 		InvoiceNumber: "HC-TZ-ADHOC",
 		Status:        domain.InvoiceDraft,
 		PaymentStatus: domain.PaymentPending,
 		Currency:      "USD",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create ad-hoc invoice: %v", err)
 	}
