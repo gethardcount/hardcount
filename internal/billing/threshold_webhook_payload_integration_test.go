@@ -11,7 +11,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/testutil"
-	"github.com/gethardcount/hardcount/internal/webhook"
 )
 
 // TestThresholdFire_WebhookCarriesTheSubscription: the outbox row a crossed
@@ -22,7 +21,7 @@ func TestThresholdFire_WebhookCarriesTheSubscription(t *testing.T) {
 		t.Skip("integration: skipped in -short mode")
 	}
 	f := newThresholdFixture(t, "Threshold Webhook Payload")
-	f.engine.SetEventDispatcher(webhook.NewOutboxDispatcher(webhook.NewOutboxStore(f.db)))
+	f.wireEvents()
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
 

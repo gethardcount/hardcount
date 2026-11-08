@@ -132,23 +132,6 @@ func (e *Engine) SetAuditLogger(a AuditWriter) {
 // root to forget (the silent-un-audit failure mode ADR-090 exists to kill).
 func (e *Engine) auditWriter() AuditWriter { return e.auditLogger }
 
-// dispatchEvent queues an outbound webhook event after the business
-// transaction has committed, and logs when the queue insert fails. Nothing
-// sends the event again: an insert failure, a crash or a cancelled ctx
-// between the commit and this insert loses it. An event queued on the
-// change's own transaction (OutboxStore.Enqueue, ADR-040) cannot be lost
-// that way; internal/arch/webhook_emit_catalog_test.go lists the sites that
-// still come through here.
-func (e *Engine) dispatchEvent(ctx context.Context, tenantID, eventType string, payload map[string]any) {
-	if e.events == nil {
-		return
-	}
-	if err := e.events.Dispatch(ctx, tenantID, eventType, payload); err != nil {
-		slog.ErrorContext(ctx, "failed to enqueue webhook event",
-			"event_type", eventType, "tenant_id", tenantID, "error", err)
-	}
-}
-
 // finalizeAuditEntry builds the finalize audit row for an invoice the engine
 // created already-finalized (cycle close, subscription create, cancel-final,
 // threshold), or returns ok=false for a draft.
@@ -220,37 +203,6 @@ func (e *Engine) EmitFinalizeAuditTx(ctx context.Context, tx *sql.Tx, inv domain
 func (e *Engine) finalizeAuditEmit(ctx context.Context) func(tx *sql.Tx, out domain.Invoice) error {
 	return func(tx *sql.Tx, out domain.Invoice) error {
 		return e.emitFinalizeAuditTx(ctx, tx, out)
-	}
-}
-
-// dispatchInvoiceFinalized sends the invoice.finalized webhook for an
-// engine-born invoice, after the transaction that created it committed. The
-// finalize audit row is written in that transaction (ADR-090); the webhook is
-// not, so a crash between the commit and this call loses the event (see
-// dispatchEvent). A draft sends nothing here.
-//
-// Engine-born invoices never pass service.Finalize, so until 2026-06-13 the normal
-// billing path (cycle / create / cancel-final / threshold) emitted NO
-// invoice.finalized at all — integrators only ever saw operator-clicked finalizes.
-func (e *Engine) dispatchInvoiceFinalized(ctx context.Context, sub domain.Subscription, inv domain.Invoice) {
-	e.DispatchInvoiceFinalized(ctx, sub.TenantID, inv)
-}
-
-// DispatchInvoiceFinalized sends invoice.finalized for an invoice born
-// finalized, after the transaction that created it committed. Exported for
-// the subscription handler's proration invoice, so it sends the payload the
-// engine sends for its own invoices (#1279). Drafts send nothing: they send
-// it from invoice.Service.Finalize when they finalize.
-//
-// It carries the invoice as the create returned it (ADR-131). It is sent
-// before the collector applies the customer's credit (ADR-116), so the
-// invoice's amount_due_cents is the amount before that credit.
-func (e *Engine) DispatchInvoiceFinalized(ctx context.Context, tenantID string, inv domain.Invoice) {
-	if inv.Status != domain.InvoiceFinalized {
-		return
-	}
-	if e.events != nil {
-		e.dispatchEvent(ctx, tenantID, domain.EventInvoiceFinalized, domain.InvoiceWebhookData(inv, nil))
 	}
 }
 
@@ -418,11 +370,12 @@ type CreditApplier interface {
 
 // InvoiceVoider annuls a finalized, unpaid invoice inside a cancel or plan-swap
 // transaction: the relief for an in_advance prebill the customer never used any
-// of (#22). VoidUnchangedTx voids on the caller's tx and refuses if the invoice
-// changed since the engine read it; AfterVoid runs every void's post-commit
-// legs (stop collection at Stripe, tax reversal, webhook, close the dunning
-// run). Implemented by *invoice.Service. Narrow on purpose so billing
-// keeps coordinating through a domain-typed interface, not an invoice import.
+// of (#22). VoidUnchangedTx voids on the caller's tx, with its invoice.voided
+// event, and refuses if the invoice changed since the engine read it;
+// AfterVoid runs every void's post-commit legs (stop collection at Stripe,
+// tax reversal, close the dunning run). Implemented by *invoice.Service.
+// Narrow on purpose so billing keeps coordinating through a domain-typed
+// interface, not an invoice import.
 type InvoiceVoider interface {
 	VoidUnchangedTx(ctx context.Context, tx *sql.Tx, tenantID string, snapshot domain.Invoice) (domain.Invoice, error)
 	AfterVoid(ctx context.Context, tenantID string, voided domain.Invoice)
@@ -988,10 +941,13 @@ func (e *Engine) SetTestClockReader(r TestClockReader) {
 	e.testClocks = r
 }
 
-// SetEventDispatcher wires the outbound webhook dispatcher. The engine emits
-// subscription.pending_change.applied at the cycle boundary when a scheduled
-// item plan change rolls into effect; without a dispatcher that event is
-// dropped (acceptable for narrow billing unit tests).
+// SetEventDispatcher wires the outbound webhook dispatcher. The engine sends
+// subscription.pending_change.applied at the cycle boundary, when a
+// scheduled item plan change takes effect, and
+// subscription.threshold_crossed when a spend threshold fires. Both are
+// queued after their transaction commits. Without a dispatcher neither is
+// sent (narrow billing unit tests). An invoice the engine creates queues
+// its invoice.finalized itself, in the invoice store.
 func (e *Engine) SetEventDispatcher(d domain.EventDispatcher) {
 	e.events = d
 }
@@ -1478,8 +1434,9 @@ type periodCloseOutcome struct {
 //     was below zero (net_negative.go), with or without an invoice.
 //
 // Steps 3-4 run only when lines != nil (an empty close advances without an
-// invoice). No network I/O inside: tax ran before, webhook / CommitTax /
-// credits / charge run after. Error contract: subscription.ErrWatermarkMoved
+// invoice). No network I/O inside: tax ran before, CommitTax / credits /
+// charge run after. The invoice store queues the invoice's invoice.finalized
+// on this tx. Error contract: subscription.ErrWatermarkMoved
 // → errPeriodMoved (nothing written); errs.ErrAlreadyExists (the cycle
 // index — reachable only for a pre-cutover row whose invoice exists while
 // the sub is still due, since the CAS now runs before the insert) propagates
@@ -3405,17 +3362,13 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	// counted nothing, and the retry that wins counts once.
 	unpriced.record(live, sub)
 	// The period is closed (or the sub terminated). Every leg from here runs
-	// after the commit. A crash before the invoice.finalized webhook below is
-	// queued loses that event.
+	// after the commit. The closer tx above already holds the invoice's
+	// finalize audit row (emitFinalizeAuditTx, ADR-090) and its
+	// invoice.finalized event (the invoice store), so a crash from here on
+	// loses neither.
 	if out.canceled != nil {
 		e.afterScheduledCancel(ctx, sub, *out.canceled, now)
 	}
-
-	// The finalize AUDIT row already committed inside the closer tx above
-	// (emitFinalizeAuditTx → LogInTx, ADR-090 shared fate): a finalized invoice
-	// cannot exist without it. The invoice.finalized webhook is queued here,
-	// after that commit, so it can be lost (see dispatchEvent).
-	e.dispatchInvoiceFinalized(ctx, sub, inv)
 
 	// Stripe Tax: once the invoice is durably persisted, commit the
 	// tax_calculation into a tax_transaction so Stripe can report the
@@ -3514,8 +3467,9 @@ func (e *Engine) BillOnCreate(ctx context.Context, sub domain.Subscription) (dom
 		return domain.Invoice{}, fmt.Errorf("create invoice: %w", err)
 	}
 
-	// Post-persist external/best-effort steps (webhook, tax commit, auto-charge).
-	// The finalize AUDIT row already committed inside the create tx above.
+	// Post-persist external/best-effort steps (tax commit, auto-charge). The
+	// finalize AUDIT row and invoice.finalized already committed inside the
+	// create tx above.
 	e.FinalizeOnCreateInvoice(ctx, sub, created)
 
 	slog.Info("subscription_create invoice generated",
@@ -3589,10 +3543,11 @@ func (e *Engine) BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subs
 		// duplicate-retry case, which SHOULD fail loud.
 		return domain.Invoice{}, false, fmt.Errorf("create new-period invoice (tx): %w", err)
 	}
-	// The finalize audit row rides the coordinator tx (ADR-090 shared fate): it
-	// commits atomically with the plan write + watermark advance, or the whole
-	// swap rolls back. The post-commit webhook/tax/auto-charge fire later via
-	// FinalizeOnCreateInvoice, which the swap caller invokes after commit.
+	// The finalize audit row rides the coordinator tx (ADR-090 shared fate), as
+	// does the invoice's invoice.finalized (queued by the invoice store): both
+	// commit atomically with the plan write + watermark advance, or the whole
+	// change rolls back. The post-commit tax commit and auto-charge run later
+	// via FinalizeOnCreateInvoice, which the caller invokes after commit.
 	if err := e.emitFinalizeAuditTx(ctx, tx, created); err != nil {
 		return domain.Invoice{}, false, fmt.Errorf("finalize audit (swap tx): %w", err)
 	}
@@ -3904,20 +3859,21 @@ func onCreateBaseLines(sub domain.Subscription, plans map[string]domain.Plan, ad
 	return out, nil
 }
 
-// FinalizeOnCreateInvoice runs the post-persist steps for a day-1 in_advance
-// invoice: the engine audit row, the Stripe Tax commit, and auto-charge (or
-// enroll-for-retry + no-PM notify). These are external / best-effort and MUST
-// run AFTER the invoice is durably committed — never inside a DB tx. BillOnCreate
-// calls it inline; the atomic cross-interval swap calls it post-commit.
+// FinalizeOnCreateInvoice runs the post-persist steps for an invoice the
+// engine created finalized on a first invoice, a plan swap or a cancel: the
+// Stripe Tax commit, and auto-charge (or enroll-for-retry + no-PM notify).
+// These are external / best-effort and MUST run AFTER the invoice is durably
+// committed — never inside a DB tx. BillOnCreate calls it inline; the
+// coordinator-tx callers call it post-commit.
 func (e *Engine) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscription, inv domain.Invoice) {
-	// The finalize AUDIT row rode the invoice-create tx (ADR-090 shared fate):
-	// the own-tx callers (BillOnCreate) emit it via finalizeAuditEmit, and the
-	// coordinator-tx callers (BillOnCreateTx, the cross-interval swap through
-	// BillOnPlanSwapTx, the cancel through BillFinalOnImmediateCancelTx) emit it
-	// on the coordinator tx. So this post-commit path fires only the external,
-	// best-effort effects — WEBHOOK, tax commit, auto-charge — none of which may
-	// ride a DB tx.
-	e.dispatchInvoiceFinalized(ctx, sub, inv)
+	// The finalize AUDIT row and invoice.finalized rode the invoice-create tx
+	// (ADR-090, ADR-040): the own-tx callers (BillOnCreate) emit the row via
+	// finalizeAuditEmit, and the coordinator-tx callers (BillOnCreateTx, the
+	// cross-interval swap through BillOnPlanSwapTx, the cancel through
+	// BillFinalOnImmediateCancelTx) emit it on the coordinator tx; the invoice
+	// store queues the event on the same tx. So this post-commit path runs
+	// only the external, best-effort effects — tax commit, auto-charge — none
+	// of which may ride a DB tx.
 
 	// Commit tax if a provider produced a calculation (same pattern
 	// as the cycle path; ManualProvider / NoneProvider no-op).
@@ -4364,9 +4320,10 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		// Atomic path (CancelAtomicWithBill): insert on the caller's coordinator
 		// tx. No idempotent-skip — a unique violation poisons the caller's tx, so
 		// surface it and let the cancel roll back (same contract as the swap
-		// path's BillOnPlanSwapTx). The external finalize (webhook + tax commit +
+		// path's BillOnPlanSwapTx). The external finalize (tax commit +
 		// auto-charge) runs post-commit via FinalizeOnCreateInvoice; the AUDIT row
-		// rides THIS coordinator tx so it commits atomically with the cancel.
+		// and invoice.finalized ride THIS coordinator tx, so they commit
+		// atomically with the cancel.
 		created, err := e.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, sub.TenantID, invToCreate, lineItems)
 		if err != nil {
 			return domain.Invoice{}, err
@@ -4399,10 +4356,8 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	}
 	unpriced.record(live, sub)
 
-	// The finalize AUDIT row already committed inside the create tx above; here
-	// only the post-commit WEBHOOK fires.
-	e.dispatchInvoiceFinalized(ctx, sub, inv)
-
+	// The finalize AUDIT row and invoice.finalized already committed inside
+	// the create tx above.
 	if inv.TaxProvider != "" && inv.TaxCalculationID != "" {
 		if err := e.CommitTax(ctx, sub.TenantID, inv.ID, inv.TaxCalculationID); err != nil {
 			slog.Warn("tax: commit failed after final-on-cancel invoice",
@@ -4789,8 +4744,9 @@ func (e *Engine) onlyPrepaidBase(ctx context.Context, tenantID string, src domai
 // FinishRelief runs a committed Relief's post-commit legs: issue the
 // credit-note drafts (Stripe tax reversal + customer-balance grant, or the
 // amount_due reduction) and each void's AfterVoid, the same legs an operator
-// void runs (stop collection at Stripe, tax reversal, webhook, close the
-// dunning run). Best-effort:
+// void runs (stop collection at Stripe, tax reversal, close the dunning run).
+// Each void's invoice.voided already committed with the relief's
+// transaction. Best-effort:
 // every leg is already durable and recovered by its own sweep, so a failure
 // here is logged, never returned.
 func (e *Engine) FinishRelief(ctx context.Context, sub domain.Subscription, r domain.Relief) {
