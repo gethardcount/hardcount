@@ -20,7 +20,6 @@ import { showApiError } from '@/lib/formErrors'
 import { replayToast } from '@/lib/webhookNotices'
 import { useSingleFlight } from '@/hooks/useSingleFlight'
 import { useNavigate } from 'react-router-dom'
-import { Layout } from '@/components/Layout'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -176,7 +175,7 @@ export default function WebhookEventsPage() {
   })
 
   return (
-    <Layout>
+    <>
       {/* Same header + tab strip as /webhooks: Endpoints and Events are two
           tabs of ONE surface, not two products. This page owns the Events
           tab; selecting Endpoints navigates back. The duplicate plain list
@@ -245,7 +244,7 @@ export default function WebhookEventsPage() {
           )}
         </CardContent>
       </Card>
-    </Layout>
+    </>
   )
 }
 

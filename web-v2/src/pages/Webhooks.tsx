@@ -13,7 +13,6 @@ import { untilMs, wallClockNow } from '@/lib/effectiveNow'
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { endpointSaveErrorTarget, isAllEvents } from '@/lib/webhookNotices'
 import { cn } from '@/lib/utils'
-import { Layout } from '@/components/Layout'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
@@ -80,7 +79,7 @@ export default function WebhooksPage() {
   }, [searchParams, navigate])
 
   return (
-    <Layout>
+    <>
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Webhooks</h1>
         <p className="text-sm text-muted-foreground mt-1">Hardcount calls a URL in your app when something happens, such as an invoice paid or a payment failed, so your app can react.</p>
@@ -96,7 +95,7 @@ export default function WebhooksPage() {
           <EndpointsTab />
         </TabsContent>
       </Tabs>
-    </Layout>
+    </>
   )
 }
 

@@ -4,15 +4,29 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { allNavItems, isNavActive, isTestMode, NAV_SECTIONS, visibleNav } from '../src/lib/navigation.ts'
 
-test('every routed operator page is in the navigation', () => {
+// The paths with no :param inside main.tsx's signed-in layout route: the
+// pages an operator opens in the sidebar.
+function signedInPaths(): string[] {
   const main = readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8')
-  const routed = [...main.matchAll(/<Route path="(\/[a-z-]+)" element=\{<ProtectedRoute>/g)].map(m => m[1])
+  const start = main.indexOf('<Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>')
+  assert.ok(start >= 0, 'main.tsx has no signed-in layout route')
+  const end = main.indexOf('</Route>', start)
+  return [...main.slice(start, end).matchAll(/<Route path="(\/[a-z/-]*)"/g)].map(m => m[1])
+}
+
+test('every signed-in page is in the navigation, and every menu item opens one', () => {
+  const routed = signedInPaths()
+  // A parse that finds no routes would make the loop below check nothing.
+  assert.ok(routed.length > 0, 'found no signed-in routes in main.tsx')
   const nav = new Set(allNavItems(true).map(i => i.to))
   // Sub-pages reached from their parent page, not the menu.
   const reachedFromParent = new Set(['/webhooks/events'])
   for (const r of routed) {
     if (reachedFromParent.has(r)) continue
     assert.ok(nav.has(r), `route ${r} is not in the navigation`)
+  }
+  for (const to of nav) {
+    assert.ok(routed.includes(to), `menu item ${to} has no signed-in route`)
   }
 })
 

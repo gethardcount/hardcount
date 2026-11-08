@@ -161,6 +161,8 @@ the built dashboard (`vite preview`, which forwards `/v1` to the API).
   `dunning.spec.ts` bills a customer with no card so payment retries start,
   closes a retry run by hand, and checks that a policy that has run cannot
   be deleted.
+  `layout.spec.ts` checks that the sidebar stays on screen as pages change
+  and while a page's code downloads.
 - **Activity screenshots:** `activity.spec.ts` screenshots the invoice and
   subscription Activity cards, a Dunning run and Sent emails, each on the
   real clock and on a test clock. They are for comparing a PR with main by

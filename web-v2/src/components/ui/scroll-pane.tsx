@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { cn } from '@/lib/utils'
 import { scrollEdges, scrollEdgeShadow, type ScrollEdges } from '@/lib/scrollAffordance'
 
@@ -33,20 +33,24 @@ export function ScrollPane({
   children,
   className,
   as: Tag = 'div',
+  ref: callerRef,
   ...rest
 }: {
   children: ReactNode
   className?: string
   /** Element to render. Panes carry real semantics — nav, ul, pre, main — keep them. */
   as?: 'div' | 'nav' | 'ul' | 'pre' | 'main'
+  /** The pane's element, for a caller that scrolls it (Layout's <main>). */
+  ref?: RefObject<HTMLElement | null>
 } & React.HTMLAttributes<HTMLElement>) {
-  const ref = useRef<HTMLElement | null>(null)
+  const ownRef = useRef<HTMLElement | null>(null)
+  const ref = callerRef ?? ownRef
   const [edges, setEdges] = useState<ScrollEdges>({ top: false, bottom: false })
   const sync = useCallback(() => {
     const el = ref.current
     if (!el) return
     setEdges(scrollEdges(el))
-  }, [])
+  }, [ref])
 
   useEffect(() => {
     sync()
@@ -60,7 +64,7 @@ export function ScrollPane({
     ro.observe(el)
     for (const child of Array.from(el.children)) ro.observe(child)
     return () => ro.disconnect()
-  }, [sync, children])
+  }, [sync, children, ref])
 
   const shadow = scrollEdgeShadow(edges)
 

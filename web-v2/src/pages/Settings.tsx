@@ -11,7 +11,6 @@ import { applyApiError, showApiError } from '@/lib/formErrors'
 import { taxExampleAmounts } from '@/lib/taxExample'
 import { dollarsToWholeCents, percentRate } from '@/lib/priceInput'
 import { SETTINGS_FIELDS, firstInvalidSettingsField, invalidSettingsToast } from '@/lib/settingsFields'
-import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { useAuth } from '@/contexts/AuthContext'
 import { toast } from 'sonner'
@@ -327,19 +326,19 @@ export default function SettingsPage() {
   }, errors => { showInvalidField(errors) })
 
   if (loading) return (
-    <Layout>
+    <>
       <h1 className="text-2xl font-semibold text-foreground">Settings</h1>
       <div className="mt-6 flex justify-center p-8">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
-    </Layout>
+    </>
   )
 
   if (error) return (
-    <Layout>
+    <>
       <h1 className="text-2xl font-semibold text-foreground">Settings</h1>
       <LoadError what="settings" error={error} onRetry={loadSettings} className="mt-6" />
-    </Layout>
+    </>
   )
 
   const statesList = statesForCountry(form.company_country)
@@ -368,7 +367,7 @@ export default function SettingsPage() {
     : null
 
   return (
-    <Layout>
+    <>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Settings</h1>
@@ -984,7 +983,7 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
-    </Layout>
+    </>
   )
 }
 

@@ -17,7 +17,6 @@ import {
   DEFAULT_ACTIONS,
   DEFAULT_RESOURCE_TYPES,
 } from '@/lib/auditVocabulary'
-import { Layout } from '@/components/Layout'
 import { EmptyState } from '@/components/EmptyState'
 import { useUrlState } from '@/hooks/useUrlState'
 import { cn } from '@/lib/utils'
@@ -345,7 +344,7 @@ export default function AuditLogPage() {
   const hasFilters = resourceType || action || actorFilter || resourceIdFilter || dateFrom || dateTo || testClockFilter
 
   return (
-    <Layout>
+    <>
       {/* Header */}
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div className="min-w-0 flex-1 basis-72">
@@ -605,6 +604,6 @@ export default function AuditLogPage() {
           )}
         </CardContent>
       </Card>
-    </Layout>
+    </>
   )
 }
