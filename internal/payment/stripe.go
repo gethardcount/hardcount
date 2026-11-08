@@ -276,6 +276,11 @@ type PaymentIntentResult struct {
 	// carries (the off-session charge and the hosted page alike). The
 	// stale-hold sweep matches on it. Populated by the read paths.
 	InvoiceID string
+	// TenantID is the hardcount_tenant_id metadata, which every Hardcount
+	// PaymentIntent carries beside InvoiceID. Populated by the read paths.
+	// A refund of another tenant's payment on a shared Stripe account is
+	// told apart by it (unmatchedRefund).
+	TenantID string
 	// FullyRefunded is set when the PaymentIntent's latest charge was
 	// refunded in full (list with expand[]=data.latest_charge). The
 	// stale-hold sweep does not count such a payment as paying the invoice.
@@ -1911,14 +1916,16 @@ func (s *Stripe) handleRefundUpdated(ctx context.Context, tenantID string, event
 }
 
 // unmatchedRefund decides what an old refund whose PaymentIntent no invoice
-// holds does. A payment Hardcount made carries hardcount_invoice_id on its
-// PaymentIntent, and its record can still be on its way (a hosted-page
-// payment whose settle has not landed): the delivery fails, so Stripe sends
-// it again for up to three days, instead of the refund being dropped for
-// good. A PaymentIntent with no Hardcount metadata is a charge the tenant made
-// outside Hardcount on the same Stripe account: acknowledged. When Stripe
-// cannot be asked, the delivery fails too. Logged at Warn either way.
-func (s *Stripe) unmatchedRefund(ctx context.Context, event domain.StripeWebhookEvent, refundID, pi, status string) error {
+// holds does. A payment Hardcount made for this tenant carries
+// hardcount_invoice_id on its PaymentIntent, and its record can still be on
+// its way (a hosted-page payment whose settle has not landed): the delivery
+// fails, so Stripe sends it again for up to three days, instead of the
+// refund being dropped for good. A PaymentIntent with no Hardcount metadata
+// is a charge the tenant made outside Hardcount on the same Stripe account,
+// and one whose hardcount_tenant_id names another tenant is that tenant's
+// payment on a Stripe account the two share: both are acknowledged. When
+// Stripe cannot be asked, the delivery fails too. Logged at Warn either way.
+func (s *Stripe) unmatchedRefund(ctx context.Context, tenantID string, event domain.StripeWebhookEvent, refundID, pi, status string) error {
 	if s.client == nil {
 		slog.WarnContext(ctx, "refund webhook names a payment no Hardcount invoice holds, and Stripe cannot be asked whose it is — acknowledged",
 			"stripe_event_id", event.StripeEventID, "stripe_refund_id", refundID, "stripe_payment_intent_id", pi, "status", status)
@@ -1929,6 +1936,12 @@ func (s *Stripe) unmatchedRefund(ctx context.Context, event domain.StripeWebhook
 		slog.WarnContext(ctx, "refund webhook names a payment no Hardcount invoice holds, and reading the payment from Stripe failed — Stripe will send it again",
 			"stripe_event_id", event.StripeEventID, "stripe_refund_id", refundID, "stripe_payment_intent_id", pi, "error", err)
 		return fmt.Errorf("%s: refund %s: read payment %s: %w", event.EventType, refundID, pi, err)
+	}
+	if got.TenantID != "" && got.TenantID != tenantID {
+		slog.WarnContext(ctx, "refund webhook names another tenant's Hardcount payment on a shared Stripe account — acknowledged",
+			"stripe_event_id", event.StripeEventID, "stripe_refund_id", refundID, "stripe_payment_intent_id", pi,
+			"payment_tenant_id", got.TenantID, "status", status)
+		return nil
 	}
 	if got.InvoiceID != "" {
 		slog.WarnContext(ctx, "refund webhook names a Hardcount payment no invoice holds yet — Stripe will send it again; if it keeps failing, find invoice hardcount_invoice_id and its payment",
@@ -1981,7 +1994,7 @@ func (s *Stripe) recordExternalRefund(ctx context.Context, tenantID string, even
 		if young {
 			return fmt.Errorf("%s: refund %s: no invoice holds payment %s yet (recent refund — retry)", event.EventType, refundID, pi)
 		}
-		return s.unmatchedRefund(ctx, event, refundID, pi, status)
+		return s.unmatchedRefund(ctx, tenantID, event, refundID, pi, status)
 	}
 	if err != nil {
 		return fmt.Errorf("%s: record refund %s: %w", event.EventType, refundID, err)

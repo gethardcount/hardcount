@@ -189,7 +189,8 @@ On one VM:
 
 4. Put back the old release, catch the database up with Stripe, and start
    the release. The restore marked the database as restored and paused
-   billing, so the old release will not start until the catch-up has run.
+   billing and dunning, so the old release will not start until the
+   catch-up has run.
    - Put back the old release's files and images, and see its plan. This
      example goes back to `v0.9.1`.
 
@@ -207,7 +208,7 @@ On one VM:
      [Run the catch-up](ops/restore.md#run-the-catch-up), which also lists
      its exit codes:
      `docker compose run --rm hardcount-api restore catch-up`.
-     **You see:** `catch-up complete; billing is still paused`.
+     **You see:** `catch-up complete; billing and dunning are still paused`.
 
      A release from before the catch-up answers `unknown command: restore`,
      and it does not wait for the marker. For it, remove the marker table in
@@ -231,9 +232,10 @@ On one VM:
      `curl -fsS http://localhost:8080/health/ready` answers
      `"status":"ok"`.
 
-5. Put back what the restore removed, and resume billing. Follow
+5. Put back what the restore removed, and resume billing and dunning.
+   Follow
    [Redo the changes made after the backup](ops/restore.md#redo-the-changes-made-after-the-backup)
-   and [Resume billing](ops/restore.md#resume-billing).
+   and the sections after it, to the end of that page.
 
 With a managed Postgres, stop every copy. Restore the snapshot or the point
 in time you noted into the database, and mark it as restored with the old

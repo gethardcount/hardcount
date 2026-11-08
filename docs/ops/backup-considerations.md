@@ -117,7 +117,7 @@ PGOPTIONS='-c app.bypass_rls=on' \
 
 Do not start Hardcount on a copy of your live database. The copy holds your live Stripe keys and your customers' email addresses, and Hardcount has no setting that makes it safe to start. Its background jobs would bill your customers, charge their cards a second time, and email them.
 
-If you must start it, first pause its five background jobs, and never resume them on the copy. Billing returns an empty value on a copy `restore.sh` made, which has paused it already:
+If you must start it, first pause its five background jobs, and never resume them on the copy. Billing and dunning return an empty value on a copy `restore.sh` made, which has paused them already:
 
 ```sql
 SELECT leader_pause('billing',          'your-name', 'copy');
@@ -127,7 +127,7 @@ SELECT leader_pause('webhook_outbox',   'your-name', 'copy');
 SELECT leader_pause('webhook_delivery', 'your-name', 'copy');
 ```
 
-A copy `restore.sh` made is also marked as restored, so Hardcount refuses to start on it: remove the marker with `DELETE FROM restore_catchup;`. Do not run `hardcount restore catch-up` on a copy: it closes your live customers' open payment pages at Stripe. Do not charge, refund or change anything through the copy's dashboard or API, and do not open its payment pages: they charge real cards. A test clock that was moving forward resumes at start, but it bills test customers only.
+A copy `restore.sh` made is also marked as restored, so Hardcount refuses to start on it: remove the marker with `DELETE FROM restore_catchup;`. Do not run `hardcount restore catch-up` on a copy: it writes to your live Stripe account. It closes your customers' open payment pages, and the events it applies set customers' default cards and reverse tax in Stripe Tax. Do not charge, refund or change anything through the copy's dashboard or API, and do not open its payment pages: they charge real cards. A test clock that was moving forward resumes at start, but it bills test customers only.
 
 ## What is in the database
 

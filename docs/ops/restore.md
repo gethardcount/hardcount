@@ -2,26 +2,28 @@
 
 This page brings Hardcount's database back from a backup, after data loss or a lost server. It is for whoever runs Hardcount. Setting up the backups, and testing that they restore, is on [Back up Hardcount](backup-considerations.md).
 
-A restore takes the database back to the moment of the backup, so everything written after it is gone from Hardcount. Stripe still holds the payments, refunds, disputes and saved cards made since. So a restored database is marked, and Hardcount refuses to start on it until `hardcount restore catch-up` has applied what Stripe did since the backup. Billing stays paused after that, until you have redone the changes made after the backup.
+A restore takes the database back to the moment of the backup, so everything written after it is gone from Hardcount. Stripe still holds the payments, refunds, disputes and saved cards made since. So a restored database is marked, and Hardcount refuses to start on it until `hardcount restore catch-up` has applied what Stripe did since the backup. The two jobs that charge cards stay paused after that: billing, which makes and charges invoices, and dunning, which retries failed payments. They wait until you have redone the changes made after the backup.
 
 **How to run the commands.** On one VM (the [Docker Compose install](../production-one-vm.md)), run the `docker compose` commands in `/opt/hardcount/deploy/compose`, and the SQL in the database shell: `docker compose exec postgres psql -U hardcount -d hardcount`. Elsewhere, run `hardcount` with the same settings as the server, and the SQL in `psql` as the database owner, the user in `DATABASE_URL`. Keep the `SET app.bypass_rls = 'on';` that starts some blocks. Without it, an owner that is not a superuser, as on a managed database, sees no rows and changes none, with no error ([why](runbook/index.md#before-you-start)).
 
 ## The steps in order
 
 1. Stop Hardcount, pick the backup, and get the server ready ([Before you restore](#before-you-restore)).
-2. [Restore](#restore) the backup. This marks the database as restored and pauses billing.
+2. [Restore](#restore) the backup. This marks the database as restored and pauses billing and dunning.
 3. [Bring the schema up to date](#bring-the-schema-up-to-date).
-4. [Run the catch-up](#run-the-catch-up).
+4. [Run the catch-up](#run-the-catch-up), and acknowledge what it lists.
 5. [Check the restored database](#check-the-restored-database).
 6. [Start Hardcount](#start-hardcount).
-7. [Redo the changes made after the backup](#redo-the-changes-made-after-the-backup), including the payments the catch-up listed.
-8. [Resume billing](#resume-billing).
+7. [Redo the changes made after the backup](#redo-the-changes-made-after-the-backup), and [handle what the catch-up listed](#handle-what-the-catch-up-listed).
+8. [Resume billing, then dunning](#resume-billing-then-dunning).
+
+A backup more than 29 days old cannot be caught up: follow [Restore a backup older than 29 days](runbook/restore-old-backup.md) from step 4.
 
 ## Before you restore
 
 **Restoring a snapshot or a point in time** (a managed Postgres, pgbackrest or WAL-G)? Do items 1 and 2, then go to [From a snapshot or point in time](#from-a-snapshot-or-point-in-time). **Restoring a dump?** Do every item that applies.
 
-1. **Stop every copy of Hardcount.** On one VM, run `docker compose stop hardcount-api`. Elsewhere, scale every copy to zero. You need not hold requests or close the payment pages: Hardcount will not start until the catch-up has run.
+1. **Stop every copy of Hardcount.** On one VM, run `docker compose stop hardcount-api`. Elsewhere, scale every copy to zero. Hardcount checks the restore mark only when it starts, so a copy still running would keep charging. You need not hold requests or close the payment pages.
 2. **Pick the backup.** A backup made by Velox, Hardcount's name before v0.9.0, cannot be restored ([Coming from Velox](../upgrades.md#coming-from-velox)).
    - **A dump:** pick the newest dump from before the data loss. `latest.dump` may already hold the damage. List them with `sudo ls -l /var/backups/hardcount/`. A dump's name holds the time it started, in UTC: `hardcount_20261019_030000.dump` started at 03:00:00 UTC on 19 October 2026. On one VM, stop the nightly backup until the restore is done: `sudo mv /etc/cron.d/hardcount-backup ~/`.
    - **A snapshot or a point in time:** note its time.
@@ -64,7 +66,7 @@ A restore takes the database back to the moment of the backup, so everything wri
 
 ### From a dump
 
-`scripts/restore.sh` restores the dump in one transaction: either all of it is restored, or nothing changes. The same transaction marks the database as restored and pauses billing. It needs `pg_restore` and `psql` on the machine that runs it.
+`scripts/restore.sh` restores the dump in one transaction: either all of it is restored, or nothing changes. The same transaction marks the database as restored and pauses billing and dunning. It needs `pg_restore` and `psql` on the machine that runs it.
 
 1. Run it against the target database. Put your file's name in the last line.
 
@@ -100,7 +102,9 @@ A restore takes the database back to the moment of the backup, so everything wri
 
 Restore with your provider's or your tool's own restore command. If it made a new instance, change `DATABASE_URL` and `APP_DATABASE_URL` to its address. Then, before anything else, mark the database as restored. On one VM, run `docker compose run --rm hardcount-api restore begin`; elsewhere, `hardcount restore begin`.
 
-**You see:** `Marked as restored at … by hardcount restore begin.`, the anchor line, and `Billing is paused. Hardcount will not start until you run 'hardcount restore catch-up'.` The anchor is the last time the restored data shows Hardcount running, a few seconds before the snapshot.
+**You see:** `Marked as restored at … by hardcount restore begin.`, the anchor line, and `Billing and dunning are paused. Hardcount will not start until you run 'hardcount restore catch-up'.` The anchor is the last time the restored data shows Hardcount running, a few seconds before the snapshot.
+
+It refuses, with exit code `2`, when a background job wrote to the database in the last minute: a copy of Hardcount still runs on it. Stop it (item 1), and run `restore begin` again. A copy that ran on the restored database also moved the anchor past the backup: pass the catch-up `--since` with a time three days before the backup. If the restore itself finished less than a minute ago, wait a minute and run it again.
 
 ## Bring the schema up to date
 
@@ -128,22 +132,30 @@ Elsewhere, run `hardcount restore catch-up` with the server's settings, which in
 
 1. closes Hardcount's open payment pages at Stripe, so no payment can arrive after the next step;
 2. reads every Stripe payment, refund, dispute and saved card from 72 hours before the anchor, and applies them, oldest first, as Stripe's webhooks would have;
-3. lists each payment whose invoice the restore lost, or left as a draft, instead of applying it.
+3. lists what it must not apply. That is a payment whose invoice the restore lost or left as a draft, a refund that would refund or reverse tax a second time, and an event it could not apply.
 
-**You see:** the anchor and the time it read events from, a line for each account, such as `hc_ten_… live: payment pages closed 1; events 37 (…): applied 12, already recorded 23, not this account's 2, held with a listed payment 0`, and then `catch-up complete; billing is still paused`. Hardcount can start now.
+**You see:** the anchor and the time it read events from, a line for each account, such as `hc_ten_… live: payment pages closed 1; events 37 (…): applied 12, already recorded 23, not this account's 2, held with a listed payment or refund 0`, and then `catch-up complete; billing and dunning are still paused`. Hardcount can start now.
 
-If it stops, its exit code says what to do. Running it again is always safe: an event already applied is not applied twice.
+If it stops, its exit code says what to do. Running it again is safe: an event already applied is not applied twice.
 
 | Exit | What it means | Do |
 |---|---|---|
-| `1` | A temporary error, such as Stripe or the database not answering. The `stopped:` line names it. | Run it again. |
-| `2` | It did not start. The message says why. | Fix what it names: a database not marked as restored needs `restore begin`, a schema behind needs `migrate`, and a backup older than 29 days needs [the appendix](#a-backup-older-than-29-days). |
-| `3` | It listed payments whose invoice the restore lost or left as a draft. | Copy the lines under `Payments whose invoice the restore lost`. You handle each one at step 7. Then run it again with `--acknowledge pi_…` for each payment. |
-| `4` | Stripe refused a live key, for example one rolled since the backup. | Run it again with the account's current secret key, as below. |
+| `1` | A temporary error, such as Stripe or the database not answering. The `stopped:` line names it. | Run it again. If the same `stopped:` line comes back, a rerun will not fix it. `decrypt` means a wrong `HARDCOUNT_ENCRYPTION_KEY` (item 4 of [Before you restore](#before-you-restore)). For anything else, do not start Hardcount, and get help with the `stopped:` line. |
+| `2` | It did not start. The message says why. | Fix what it names: a database not marked as restored needs `restore begin`, and a schema behind needs `migrate`. A `--stripe-key` for an account the database does not hold needs the right tenant ID. A backup older than 29 days needs [Restore a backup older than 29 days](runbook/restore-old-backup.md). |
+| `3` | It listed payments, refunds or events, under three headings. | Acknowledge each now, as below. You handle them at step 7, once Hardcount runs and while billing is still paused. |
+| `4` | A live key does not work: Stripe refused it, for example one rolled since the backup, or it is a test-mode key. | Run it again with the account's current live secret key, as below. |
 
 Test-mode accounts never stop it: their problems are reported only.
 
-**A key for this run only.** `--stripe-key <account>:<live|test>=@<file>` reads a Stripe secret key from a file and uses it for this run, without saving it. Use it for exit `4`. Use it too for an account that connected Stripe, or changed its key, after the backup. The catch-up reads only the accounts the restored database has keys for, and prints a line for each one it read. On one VM, the file must be readable inside the container:
+**Acknowledge what it listed (exit `3`).** Copy the lines under the three headings first: you need them at step 7. Then:
+
+1. Refund now, in the Stripe Dashboard, each listed payment you will give back rather than keep as credit ([how to choose](#payments-whose-invoice-the-restore-lost)). Its refund is then held with it and recorded with it.
+2. For an event listed as `failed:`, run the catch-up again first: one that failed for a moment applies then. A `payment_intent.succeeded` that fails on every run is a payment Hardcount did not record: handle it as a listed payment before you acknowledge it.
+3. Run it again with `--acknowledge` and the id of each listed payment (`pi_…`), refund (`re_…`) and event (`evt_…`), such as `restore catch-up --acknowledge pi_… --acknowledge re_…`. An acknowledged payment or refund is recorded with no change. An acknowledged event is tried once more, and recorded without being applied only if it fails again.
+
+**You see:** each listed line ends with `acknowledged`, then `catch-up complete; billing and dunning are still paused`.
+
+**A key for this run only.** `--stripe-key <account>:<live|test>=@<file>` reads a Stripe secret key of that mode from a file, and uses it for this run without saving it. Use it for exit `4`, and for an account that connected Stripe, or changed its key, after the backup: the catch-up reads only the accounts the restored database has keys for. On one VM, the file must be readable inside the container:
 
 ```bash
 read -rs STRIPE_KEY   # paste the key, then press Enter
@@ -154,7 +166,7 @@ docker compose run --rm -v /opt/hardcount/stripe-key:/stripe-key:ro hardcount-ap
 sudo rm /opt/hardcount/stripe-key
 ```
 
-Never run the catch-up on a copy of your live database, such as a restore you test: it would close your live customers' payment pages at Stripe ([starting a copy](backup-considerations.md#4-run-the-restore-drill)).
+**Never run the catch-up on a copy of your live database,** such as a restore you test. It writes to your live Stripe account: it closes your customers' open payment pages, and the events it applies set customers' default cards and reverse tax in Stripe Tax ([starting a copy](backup-considerations.md#4-run-the-restore-drill)).
 
 ## Check the restored database
 
@@ -188,9 +200,7 @@ SELECT tenant_id, currency, sum(total_amount_cents) FROM invoices
   GROUP BY tenant_id, currency;
 ```
 
-**You see:** first, `newest_change`, the time of the newest row in the audit log, Hardcount's record of changes. On an install in use, it is a little before the backup time. Then a row for each account, and each account's paid totals of the last 90 days in live mode, per currency.
-
-Hardcount keeps no copy of these numbers outside the database. Compare them with what you have: the old database if you kept it, your accounting, or Stripe's payments for the same days. If `newest_change` is much older than the backup time, or an account is missing, you restored the wrong file or the wrong point in time. Restore again before you go on.
+**You see:** `newest_change`, the time of the newest row in the audit log, a little before the backup time on an install in use. Then a row for each account, and each account's paid totals of the last 90 days in live mode, per currency. Hardcount keeps no copy of these numbers outside the database: compare them with the old database if you kept it, your accounting, or Stripe's payments for the same days. If `newest_change` is much older than the backup time, or an account is missing, you restored the wrong file or the wrong point in time. Restore again before you go on.
 
 ## Start Hardcount
 
@@ -205,7 +215,7 @@ Hardcount keeps no copy of these numbers outside the database. Compare them with
 
    Elsewhere, use your Hardcount address followed by `/health/ready`.
 
-   **You see:** perhaps a few `502` lines while it starts, then `"status":"ok"`. Billing is still paused: `SELECT role, paused_by FROM leader_status WHERE role = 'billing';` shows `restore`.
+   **You see:** perhaps a few `502` lines while it starts, then `"status":"ok"`. Billing and dunning are still paused: `SELECT role, paused_by FROM leader_status WHERE role IN ('billing', 'dunning');` shows `restore` on both.
 
 ### Queued emails and webhooks
 
@@ -215,8 +225,9 @@ The safe default: leave the rows `pending`, and accept a few duplicates. Webhook
 
 ## Redo the changes made after the backup
 
-The restore removed every change made after the backup time. Make them again while billing is paused:
+The restore removed every change made after the backup time. Make them again while billing and dunning are paused:
 
+- **First, what stops a payment:** an invoice voided, written off or marked paid outside Stripe after the backup. Until you redo it, its payment link takes payment again, and dunning would retry it.
 - **Your app's calls.** Have your app send again every usage event it sent after the backup time, with the same `idempotency_key`: Hardcount counts each key once, and an event that is not sent again is not billed. Then have it repeat its other calls. The IDs it saved for objects created after the backup no longer exist.
 - **Dashboard changes.** If you kept the old database (item 5 of [Before you restore](#before-you-restore)), its audit log lists them. Run this in it, with your backup time:
 
@@ -226,37 +237,32 @@ The restore removed every change made after the backup time. Make them again whi
   WHERE created_at >= '2026-10-19 03:00:00+00' ORDER BY created_at;
   ```
 
-- **The payments the catch-up listed,** below. Creating a subscription or an invoice again bills it and charges the card, so handle the customer's listed payment first.
-- **The refunds Hardcount made after the backup,** below.
+- **What the catch-up listed,** below. Creating a subscription or an invoice again bills it and charges the card, so handle the customer's listed payment first.
 
-### Handle the payments the catch-up listed
+## Handle what the catch-up listed
 
-Each line names a payment Stripe took after the backup whose invoice the restore lost (`not in the database`) or left as a draft (`still a draft`). When billing resumes, it builds that invoice again, or finalizes the draft, and charges the card a second time, unless the money is already on the customer's balance. Do this for each line, before you resume billing:
+Do this for each line you copied, before you resume billing. Amounts are in the currency's smallest unit, such as cents.
 
-1. **Find what is left of the payment.** Open it in the Stripe Dashboard (search for its `pi_…`). What is left is its amount less its refunds. Nothing is left while a dispute on it is open, or after you lost one. The line's amount is in the currency's smallest unit, such as cents.
-2. **Make sure the customer exists.** The line names the Hardcount customer, `hc_cus_…`. If the restore lost the customer too, create it again first, as your app or team did after the backup.
-3. **Then choose one:**
-   - **Keep the money as credit.** Grant the customer credit for what is left, in the payment's currency, with the payment's `pi_…` in the description: **Grant credits** on the customer's page, or `POST /v1/credits/grant` ([Adding credit](../concepts/credits.md#adding-credit)). Hardcount uses credit before it charges a card, so the invoice billing builds again is paid from it.
-   - **Give the money back.** Refund what is left in the Stripe Dashboard. Billing then charges the invoice it builds again as usual.
+### Payments whose invoice the restore lost
 
-### Check the refunds Hardcount made after the backup
+Each line names a payment Stripe took after the backup whose invoice the restore lost (`not in the database`) or left as a draft (`still a draft`). When billing resumes, it builds that invoice again, or finalizes the draft, and charges the card a second time, unless the money is already on the customer's balance.
 
-A refund Hardcount made after the backup belongs to a credit note that the restored database does not have, or holds only as a draft. The catch-up applies the refund's status but cannot bring the note back, so the invoice shows that money as refundable again. Until you have checked each one, issue no credit note that refunds its invoice.
+1. **Find what is left of the payment.** Open it in the Stripe Dashboard (search for its `pi_…`). What is left is its amount less its refunds. Nothing is left while a dispute on it is open, or after you lost one.
+2. **Make sure the customer exists.** The line names the Hardcount customer, `hc_cus_…`. If the restore lost the customer too, create it again first, as your app or team did after the backup. Its saved card stays on the old Stripe customer: send it a new card link with **Send setup link**.
+3. **Keep the money as credit,** if you did not refund it before you acknowledged it. Grant the customer credit for what is left, in the payment's currency, with the payment's `pi_…` in the description: **Grant credits** on the customer's page, or `POST /v1/credits/grant` ([Adding credit](../concepts/credits.md#adding-credit)). Hardcount uses credit before it charges a card, so the invoice billing builds again is paid from it. If you refunded it, billing charges that invoice as usual.
 
-1. **List them.** In each Stripe account, list the refunds created since the anchor the catch-up printed, in Unix seconds (`date -u -d '2026-10-19T03:00:02Z' +%s`):
+A refund event of a listed payment that reaches Hardcount after you acknowledged it, such as a later update of a refund held with it, finds no invoice. Stripe sends it again for up to three days, and the logs show `webhook processing failed` with `no invoice holds it yet`. That is expected, and safe to ignore.
 
-   ```bash
-   stripe refunds list --api-key sk_live_… --limit 100 -d "created[gte]=1792378802"
-   ```
+### Refunds not applied
 
-   Keep the refunds whose `metadata` has `hardcount_cn_id`: Hardcount made those. If the answer says `"has_more": true`, run it again with `--starting-after` set to the last refund's ID.
-2. **Look up each one's credit note:** `SET app.bypass_rls = 'on'; SELECT id, status, stripe_refund_id FROM credit_notes WHERE id = 'hc_cn_…';`
-   - **`issued`, with this refund's ID:** nothing to do.
-   - **`issued`, without it:** click **Retry refund** on it. Hardcount finds the refund by its metadata and records it, without refunding again.
-   - **`draft`:** click **Void** on it. Issuing it can refund the customer a second time.
-   - **No row:** record the refund on its invoice. When the invoice's `tax_transaction_id` is empty, create a credit note as in step 1 of [A refund made in Stripe](runbook/refund-made-in-stripe.md#fix), with the amount as `out_of_band_amount_cents` in place of `refund_amount_cents` and `stripe_refund_id`, and the refund's ID in the reason. When it is set, a new credit note would reverse the invoice's tax in Stripe Tax a second time, so record the refund in your own books only.
+Each line names a refund made after the backup, of a payment the restored database holds. Hardcount made it for a credit note the restore lost, or someone made it in Stripe on an invoice reported to Stripe Tax. Until you have handled it, issue no credit note that refunds its invoice: the invoice shows that money as refundable again. Handle each as [Refunds a restore's catch-up did not apply](runbook/restore-listed-refunds.md) says.
 
-## Resume billing
+### Events not applied
+
+- **`customer hc_cus_… is not in the database`:** a card saved after the backup by a customer the restore lost, with no listed payment to hold it. Once you have created the customer again, send it **Send setup link**.
+- **`failed: …`:** the error says why. An event acknowledged after it failed again was recorded without being applied: do by hand what it would have done. For a dispute, see [Card disputes](runbook/card-disputes.md).
+
+## Resume billing, then dunning
 
 1. **Resume billing.** If it was paused before the backup for another reason, leave it paused until you know why someone paused it.
 
@@ -278,28 +284,14 @@ A refund Hardcount made after the backup belongs to a credit note that the resto
    ```
 
    **You see:** `last_tick_age_s` starts again from a few seconds when the run ends, and `due` falls to 0. `1 hour` is the default invoice grace, `INVOICE_GRACE_PERIOD`: use your value if you set one. A subscription whose billing fails stays counted: see [Subscriptions whose billing is failing](runbook/billing-failing.md). If nothing changes, see [A background job is stuck](runbook/background-job-stuck.md).
-3. **Turn the nightly backup on again**, if you turned it off: `sudo mv ~/hardcount-backup /etc/cron.d/`.
+3. **Resume dunning,** which retries the failed payments that are due. Leave it paused if it was paused before the backup for another reason.
 
-## A backup older than 29 days
+   ```sql
+   SELECT leader_unpause('dunning');
+   SELECT role, paused_at IS NOT NULL AS paused FROM leader_status WHERE role IN ('billing', 'dunning');
+   ```
 
-Stripe lists events for 30 days only, so the catch-up refuses a backup this old, and you match Stripe's history by hand. Until you finish, keep Hardcount from charging on the restored data:
-
-- billing stays paused;
-- block the payment pages, the paths that start with `/v1/public/`, at your proxy. With the one-VM Caddy, add `respond /v1/public/* 503` inside the site block of `/etc/caddy/Caddyfile`, above `reverse_proxy`, and run `sudo systemctl reload caddy`;
-- keep your team out of the dashboard, whose buttons, such as **Charge now**, charge cards.
-
-1. **Remove the marker,** so Hardcount can start: `DELETE FROM restore_catchup;`. Then [check the database](#check-the-restored-database) and [start Hardcount](#start-hardcount).
-2. **List the payments Stripe took since a day before the backup,** in each Stripe account your Hardcount accounts use (`SET app.bypass_rls = 'on'; SELECT tenant_id, stripe_account_id FROM stripe_provider_credentials WHERE livemode;`). In the Stripe Dashboard, open **Payments** and filter by **Succeeded** and date. Skip a payment whose metadata has no `hardcount_invoice_id`: Hardcount did not make it.
-3. **Look up each payment's invoice:** `SET app.bypass_rls = 'on'; SELECT id, status, stripe_payment_intent_id FROM invoices WHERE id = 'hc_inv_…';`
-
-   | You see | Do |
-   |---|---|
-   | `paid`, and `stripe_payment_intent_id` is this payment's ID | Nothing |
-   | `paid` another way: another payment's ID, or none | The customer paid twice. If neither payment has a refund or a dispute, refund this one in full. |
-   | `finalized` or `uncollectible` | Record the payment on the invoice ([Mark an invoice paid](runbook/manual-interventions.md#mark-an-invoice-paid-offline-payment-received)), with the payment's ID in the note. |
-   | `draft`, any other status, or no row | Handle it as a [listed payment](#handle-the-payments-the-catch-up-listed). |
-
-4. **Record the refunds made since the backup** on their invoices, as in [A refund made in Stripe](runbook/refund-made-in-stripe.md). A refund whose metadata has `hardcount_cn_id` came from a credit note: if that note is still `issued`, click **Retry refund** on it, and do not refund again.
-5. Remove the `respond` line, then go on with [Redo the changes made after the backup](#redo-the-changes-made-after-the-backup).
+   **You see:** `t`, then `paused` is `f` on both rows.
+4. **Turn the nightly backup on again**, if you turned it off: `sudo mv ~/hardcount-backup /etc/cron.d/`.
 
 **Next:** [Health checks, alerts and logs](runbook/monitoring.md).

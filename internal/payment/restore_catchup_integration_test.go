@@ -2,6 +2,7 @@ package payment_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,12 +16,14 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/creditnote"
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/email"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/payment"
+	"github.com/gethardcount/hardcount/internal/paymentmethods"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenantstripe"
 	"github.com/gethardcount/hardcount/internal/testutil"
@@ -29,9 +32,11 @@ import (
 
 // The restore catch-up (ADR-135) on a real database: Stripe's events since
 // the backup are applied once through HandleWebhook, a payment whose invoice
-// the restore lost is listed instead of dropped, and the refunds of such a
-// payment do not stall the run. Stripe is a fake HTTP API behind the real
-// stripe-go client, so the catch-up's own requests and decoding are real.
+// the restore lost is listed instead of dropped, and what HandleWebhook
+// cannot apply, or would apply wrongly, is listed or held and does not stall
+// the run. Stripe is a fake HTTP API behind the real stripe-go client, so
+// the catch-up's own requests and decoding are real. The saved-card path
+// runs through the real payment-methods service and customer store.
 
 const catchUpDue = int64(5000)
 
@@ -45,9 +50,9 @@ type catchUpSession struct {
 }
 
 // catchUpStripe answers, per secret key, the requests the catch-up and the
-// webhook handlers make: List Events (newest first, paged), List, Expire and
-// Retrieve Checkout sessions, and Retrieve PaymentIntent. It records every
-// request in order.
+// webhook handlers make: List Events and List Checkout sessions (newest
+// first, paged), Expire and Retrieve a session, Retrieve a PaymentIntent and
+// a PaymentMethod, and Update a customer. It records every request in order.
 type catchUpStripe struct {
 	mu       sync.Mutex
 	refused  map[string]bool
@@ -114,6 +119,11 @@ func (f *catchUpStripe) RoundTrip(req *http.Request) (*http.Response, error) {
 			return reply(req, http.StatusNotFound, `{"error":{"type":"invalid_request_error","code":"resource_missing","message":"No such payment_intent"}}`), nil
 		}
 		return reply(req, http.StatusOK, pi), nil
+	case req.Method == http.MethodGet && strings.HasPrefix(path, "/v1/payment_methods/"):
+		id := strings.TrimPrefix(path, "/v1/payment_methods/")
+		return reply(req, http.StatusOK, fmt.Sprintf(`{"id":%q,"object":"payment_method","type":"card","card":{"brand":"visa","last4":"4242","exp_month":12,"exp_year":2030,"fingerprint":"fp_%s"}}`, id, id)), nil
+	case req.Method == http.MethodPost && strings.HasPrefix(path, "/v1/customers/"):
+		return reply(req, http.StatusOK, fmt.Sprintf(`{"id":%q,"object":"customer"}`, strings.TrimPrefix(path, "/v1/customers/"))), nil
 	}
 	return reply(req, http.StatusNotFound, `{"error":{"type":"invalid_request_error","message":"unrouted in the fake"}}`), nil
 }
@@ -132,15 +142,40 @@ func sessionJSON(s *catchUpSession) string {
 		s.id, s.status, s.created, s.tenant, s.purpose)
 }
 
-func (f *catchUpStripe) listSessions(key string, q url.Values) string {
-	gte, _ := strconv.ParseInt(q.Get("created[gte]"), 10, 64) // absent reads as 0: every session
-	var data []string
-	for _, s := range f.sessions[key] {
-		if (q.Get("status") == "" || s.status == q.Get("status")) && s.created >= gte {
-			data = append(data, sessionJSON(s))
+// page returns one page of items, each with its id, as Stripe pages a list:
+// the items after starting_after, at most limit of them (10 when unset).
+func page(q url.Values, ids, items []string) (data []string, more bool) {
+	from := 0
+	if after := q.Get("starting_after"); after != "" {
+		for i, id := range ids {
+			if id == after {
+				from = i + 1
+				break
+			}
 		}
 	}
-	return `{"object":"list","url":"/v1/checkout/sessions","has_more":false,"data":[` + strings.Join(data, ",") + `]}`
+	items = items[from:]
+	limit, _ := strconv.Atoi(q.Get("limit")) // absent reads as 0: Stripe's default of 10
+	if limit == 0 {
+		limit = 10
+	}
+	if len(items) > limit {
+		return items[:limit], true
+	}
+	return items, false
+}
+
+func (f *catchUpStripe) listSessions(key string, q url.Values) string {
+	gte, _ := strconv.ParseInt(q.Get("created[gte]"), 10, 64) // absent reads as 0: every session
+	var ids, match []string
+	for _, s := range f.sessions[key] {
+		if (q.Get("status") == "" || s.status == q.Get("status")) && s.created >= gte {
+			ids = append(ids, s.id)
+			match = append(match, sessionJSON(s))
+		}
+	}
+	data, more := page(q, ids, match)
+	return fmt.Sprintf(`{"object":"list","url":"/v1/checkout/sessions","has_more":%t,"data":[%s]}`, more, strings.Join(data, ","))
 }
 
 // listEvents filters by created[gte] and types[], and pages with limit and
@@ -155,7 +190,7 @@ func (f *catchUpStripe) listEvents(key string, q url.Values) string {
 			}
 		}
 	}
-	var match []string
+	var ids, match []string
 	for _, ev := range f.events[key] {
 		var head struct {
 			ID      string `json:"id"`
@@ -166,26 +201,12 @@ func (f *catchUpStripe) listEvents(key string, q url.Values) string {
 			panic(err)
 		}
 		if head.Created >= gte && (len(types) == 0 || types[head.Type]) {
+			ids = append(ids, head.ID)
 			match = append(match, ev)
 		}
 	}
-	if after := q.Get("starting_after"); after != "" {
-		for i, ev := range match {
-			if strings.Contains(ev, `"id":"`+after+`"`) {
-				match = match[i+1:]
-				break
-			}
-		}
-	}
-	limit, _ := strconv.Atoi(q.Get("limit")) // absent reads as 0: Stripe's default of 10
-	if limit == 0 {
-		limit = 10
-	}
-	more := len(match) > limit
-	if more {
-		match = match[:limit]
-	}
-	return fmt.Sprintf(`{"object":"list","url":"/v1/events","has_more":%t,"data":[%s]}`, more, strings.Join(match, ","))
+	data, more := page(q, ids, match)
+	return fmt.Sprintf(`{"object":"list","url":"/v1/events","has_more":%t,"data":[%s]}`, more, strings.Join(data, ","))
 }
 
 // accountCreds is the stored keys of each account, and the account list.
@@ -235,20 +256,85 @@ func (r *refundBook) ApplyRefundWebhook(context.Context, string, string, domain.
 	return errs.ErrNotFound
 }
 
+// catchUpCards answers FetchCardDetails as the live client does when the
+// Stripe customer holds a saved card: the card, with its PaymentMethod id.
+type catchUpCards struct{}
+
+func (catchUpCards) FetchCardDetails(_ context.Context, stripeCustomerID string) (payment.CardDetails, error) {
+	return payment.CardDetails{PaymentMethodID: "pm_of_" + stripeCustomerID, Brand: "visa", Last4: "4242", ExpMonth: 12, ExpYear: 2030}, nil
+}
+
+func (catchUpCards) FetchCardForPaymentIntent(context.Context, string) (payment.CardDetails, error) {
+	return payment.CardDetails{Brand: "visa", Last4: "4242"}, nil
+}
+
+// catchUpCustomerResolver maps a Stripe customer to the Hardcount customer
+// that holds it, as router.go's stripeCustomerResolverAdapter does.
+type catchUpCustomerResolver struct{ customers *customer.PostgresStore }
+
+func (r catchUpCustomerResolver) CustomerIDByStripeID(ctx context.Context, tenantID, stripeCustomerID string) (string, error) {
+	c, err := r.customers.GetByStripeCustomerID(ctx, tenantID, stripeCustomerID)
+	if err != nil {
+		return "", err
+	}
+	return c.ID, nil
+}
+
+// catchUpPaymentSetups writes the customer's Stripe customer id, the one
+// write router.go's compositePaymentSetupStore makes, and reads the
+// customer's default card from the payment-methods service.
+type catchUpPaymentSetups struct {
+	customers *customer.PostgresStore
+	pms       *paymentmethods.Service
+}
+
+func (p catchUpPaymentSetups) GetPaymentSetup(ctx context.Context, tenantID, customerID string) (domain.CustomerPaymentSetup, error) {
+	cust, err := p.customers.Get(ctx, tenantID, customerID)
+	if err != nil {
+		return domain.CustomerPaymentSetup{}, err
+	}
+	ps := domain.CustomerPaymentSetup{CustomerID: customerID, TenantID: tenantID, StripeCustomerID: cust.StripeCustomerID}
+	pms, err := p.pms.List(ctx, tenantID, customerID)
+	if err != nil {
+		return domain.CustomerPaymentSetup{}, err
+	}
+	for _, pm := range pms {
+		if pm.IsDefault {
+			ps.SetupStatus, ps.StripePaymentMethodID = domain.PaymentSetupReady, pm.StripePaymentMethodID
+		}
+	}
+	return ps, nil
+}
+
+func (p catchUpPaymentSetups) UpsertPaymentSetup(ctx context.Context, tenantID string, ps domain.CustomerPaymentSetup) (domain.CustomerPaymentSetup, error) {
+	return p.UpsertPaymentSetupAudited(ctx, tenantID, ps, nil)
+}
+
+func (p catchUpPaymentSetups) UpsertPaymentSetupAudited(ctx context.Context, tenantID string, ps domain.CustomerPaymentSetup, emit func(tx *sql.Tx) error) (domain.CustomerPaymentSetup, error) {
+	if ps.StripeCustomerID != "" && ps.CustomerID != "" {
+		if err := p.customers.SetStripeCustomerIDAudited(ctx, tenantID, ps.CustomerID, ps.StripeCustomerID, emit); err != nil {
+			return domain.CustomerPaymentSetup{}, err
+		}
+	}
+	return p.GetPaymentSetup(ctx, tenantID, ps.CustomerID)
+}
+
 type catchUpRig struct {
 	db        *postgres.DB
 	stripe    *catchUpStripe
 	creds     accountCreds
+	clients   *payment.StripeClients
 	invoices  *invoice.PostgresStore
 	customers *customer.PostgresStore
 	refunds   *refundBook
+	notes     *creditnote.PostgresStore
 	adapter   *payment.Stripe
 	catchUp   *payment.CatchUp
 	since     time.Time
 }
 
 // newCatchUpRig wires the adapter as router.go does for the parts the events
-// reach, with the real stores and outboxes.
+// reach, with the real stores, outboxes and payment-methods service.
 func newCatchUpRig(t *testing.T) *catchUpRig {
 	t.Helper()
 	db := testutil.SetupTestDB(t)
@@ -263,17 +349,21 @@ func newCatchUpRig(t *testing.T) *catchUpRig {
 	clients := payment.NewStripeClientsWithHTTPClient(creds, &http.Client{Transport: api})
 	client := payment.NewLiveStripeClient(clients)
 	refunds := &refundBook{invoices: invStore}
+	notes := creditnote.NewPostgresStore(db)
+	pms := paymentmethods.NewService(paymentmethods.NewPostgresStore(db), paymentmethods.NewStripeAdapter(clients, customers), customers)
 
-	s := payment.NewStripe(client, invStore, payment.NewPostgresWebhookStore(db), nil)
-	s.SetCardFetcher(settleRaceCard{})
+	s := payment.NewStripe(client, invStore, payment.NewPostgresWebhookStore(db), catchUpPaymentSetups{customers: customers, pms: pms})
+	s.SetCardFetcher(catchUpCards{})
 	s.SetEventDispatcher(webhook.NewOutboxDispatcher(outbox))
 	s.SetAnomalyRecorder(invStore)
 	s.SetEmailReceipt(sender, settleRaceEmails{store: customers})
 	s.SetRefundStatusUpdater(refunds)
 	s.SetExternalRefundRecorder(refunds)
+	s.SetPaymentMethodAttacher(pms)
+	s.SetCustomerResolver(catchUpCustomerResolver{customers: customers})
 
-	return &catchUpRig{db: db, stripe: api, creds: creds, invoices: invStore, customers: customers,
-		refunds: refunds, adapter: s, catchUp: payment.NewCatchUp(s, clients, creds),
+	return &catchUpRig{db: db, stripe: api, creds: creds, clients: clients, invoices: invStore, customers: customers,
+		refunds: refunds, notes: notes, adapter: s, catchUp: payment.NewCatchUp(s, clients, creds, customers, notes),
 		since: time.Now().UTC().Add(-96 * time.Hour)}
 }
 
@@ -323,8 +413,12 @@ func paymentIntentJSON(id, tenantID, invoiceID, customerID string, created int64
 }
 
 func refundJSON(id, piID string, amount, created int64) string {
-	return fmt.Sprintf(`{"id":%q,"object":"refund","amount":%d,"currency":"usd","charge":"ch_%s","payment_intent":%q,"status":"succeeded","reason":null,"created":%d,"metadata":{}}`,
-		id, amount, piID, piID, created)
+	return refundWith(id, piID, amount, created, "succeeded", `{}`)
+}
+
+func refundWith(id, piID string, amount, created int64, status, metadata string) string {
+	return fmt.Sprintf(`{"id":%q,"object":"refund","amount":%d,"currency":"usd","charge":"ch_%s","payment_intent":%q,"status":%q,"reason":null,"created":%d,"metadata":%s}`,
+		id, amount, piID, piID, status, created, metadata)
 }
 
 // addPayment puts a succeeded PaymentIntent at the fake and its event.
@@ -332,6 +426,11 @@ func (r *catchUpRig) addPayment(key, evtID, piID, tenantID, invoiceID, customerI
 	pi := paymentIntentJSON(piID, tenantID, invoiceID, customerID, created)
 	r.stripe.pis[piID] = pi
 	r.stripe.events[key] = append(r.stripe.events[key], stripeEventJSON(evtID, "payment_intent.succeeded", created, strings.HasPrefix(key, "sk_live"), pi))
+}
+
+// addEvent puts an event at the fake, after the ones already there.
+func (r *catchUpRig) addEvent(key, evtID, eventType string, created int64, object string) {
+	r.stripe.events[key] = append(r.stripe.events[key], stripeEventJSON(evtID, eventType, created, strings.HasPrefix(key, "sk_live"), object))
 }
 
 func (r *catchUpRig) count(t *testing.T, q string, args ...any) int {
@@ -346,6 +445,31 @@ func (r *catchUpRig) count(t *testing.T, q string, args ...any) int {
 		t.Fatalf("count %q: %v", q, err)
 	}
 	return n
+}
+
+// exec runs a live-mode write across tenants.
+func (r *catchUpRig) exec(t *testing.T, q string, args ...any) {
+	t.Helper()
+	tx, err := r.db.BeginTx(context.Background(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(context.Background(), `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(context.Background(), q, args...); err != nil {
+		t.Fatalf("%s: %v", q, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// recorded reports whether the event has its dedup row.
+func (r *catchUpRig) recorded(t *testing.T, tenantID, eventID string) bool {
+	t.Helper()
+	return r.count(t, `SELECT count(*) FROM stripe_webhook_events WHERE tenant_id = $1 AND stripe_event_id = $2`, tenantID, eventID) == 1
 }
 
 func (r *catchUpRig) run(t *testing.T, acks ...string) payment.CatchUpReport {
@@ -367,6 +491,15 @@ func onlyAccount(t *testing.T, rep payment.CatchUpReport) payment.AccountCatchUp
 		t.Fatalf("report has %d accounts, want 1: %+v", len(rep.Accounts), rep)
 	}
 	return rep.Accounts[0]
+}
+
+func (r *catchUpRig) invoiceStatus(t *testing.T, tenantID, id string) domain.Invoice {
+	t.Helper()
+	got, err := r.invoices.Get(modeCtx(tenantID, true), tenantID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
 }
 
 // A payment Stripe took after the backup is recorded on its invoice once:
@@ -392,19 +525,11 @@ func TestCatchUp_AppliesEachEventOnce(t *testing.T) {
 	if acct.Err != nil || acct.Applied != 1 || acct.AlreadyRecorded != 1 || len(acct.Lost) != 0 {
 		t.Fatalf("first run: %+v, want 1 applied, 1 already recorded, nothing lost", acct)
 	}
-	got, err := r.invoices.Get(modeCtx(tenantID, true), tenantID, inv.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Status != domain.InvoicePaid || got.StripePaymentIntentID != "pi_once" {
+	if got := r.invoiceStatus(t, tenantID, inv.ID); got.Status != domain.InvoicePaid || got.StripePaymentIntentID != "pi_once" {
 		t.Fatalf("invoice %s with %q, want paid with pi_once", got.Status, got.StripePaymentIntentID)
 	}
-	gotOld, err := r.invoices.Get(modeCtx(tenantID, true), tenantID, old.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotOld.Status != domain.InvoiceFinalized {
-		t.Fatalf("the event the backup held was applied again: invoice %s", gotOld.Status)
+	if got := r.invoiceStatus(t, tenantID, old.ID); got.Status != domain.InvoiceFinalized {
+		t.Fatalf("the event the backup held was applied again: invoice %s", got.Status)
 	}
 
 	receipts := func() int {
@@ -426,10 +551,11 @@ func TestCatchUp_AppliesEachEventOnce(t *testing.T) {
 	}
 }
 
-// Events are applied oldest first, and events of the same second in id
-// order, whatever order Stripe lists them in. A refund applied before its
-// payment is recorded would find no invoice and stop the run.
-func TestCatchUp_AppliesInCreatedThenIDOrder(t *testing.T) {
+// Events are applied oldest first. Stripe's event ids carry no order, so in
+// the same second a payment goes before its refund, whatever their ids. A
+// refund applied before its payment is recorded would find no invoice for it
+// and be listed as failed. Here the refund's id sorts before the payment's.
+func TestCatchUp_AppliesInCreatedThenTypeOrder(t *testing.T) {
 	r := newCatchUpRig(t)
 	tenantID := testutil.CreateTestTenant(t, r.db, "catchup-order")
 	r.connect(tenantID, true, "sk_live_order")
@@ -438,18 +564,77 @@ func TestCatchUp_AppliesInCreatedThenIDOrder(t *testing.T) {
 
 	// Stripe lists newest first, and the order of a same-second tie is not
 	// defined: here a later refund comes first, then a refund in the same
-	// second as the payment, then the payment.
-	r.stripe.events["sk_live_order"] = append(r.stripe.events["sk_live_order"],
-		stripeEventJSON("evt_0z", "refund.created", created+120, true, refundJSON("re_later", "pi_order", 500, created+120)),
-		stripeEventJSON("evt_1b", "refund.created", created, true, refundJSON("re_same", "pi_order", 1000, created)))
-	r.addPayment("sk_live_order", "evt_1a", "pi_order", tenantID, inv.ID, inv.CustomerID, created)
+	// second as the payment, whose id sorts first, then the payment.
+	r.addEvent("sk_live_order", "evt_0z", "refund.created", created+120, refundJSON("re_later", "pi_order", 500, created+120))
+	r.addEvent("sk_live_order", "evt_1a", "refund.created", created, refundJSON("re_same", "pi_order", 1000, created))
+	r.addPayment("sk_live_order", "evt_1b", "pi_order", tenantID, inv.ID, inv.CustomerID, created)
 
 	acct := onlyAccount(t, r.run(t))
-	if acct.Err != nil || acct.Applied != 3 {
+	if acct.Err != nil || acct.Applied != 3 || len(acct.Unapplied) != 0 {
 		t.Fatalf("report %+v, want all three events applied", acct)
 	}
 	if strings.Join(r.refunds.recorded, ",") != "re_same,re_later" {
 		t.Fatalf("refunds recorded %v, want re_same then re_later on the paid invoice", r.refunds.recorded)
+	}
+}
+
+// More events and open payment pages than one page of Stripe's list: each
+// event is applied exactly once and each page is closed, with two events of
+// the same second on either side of the page boundary.
+func TestCatchUp_ReadsEveryPage(t *testing.T) {
+	r := newCatchUpRig(t)
+	tenantID := testutil.CreateTestTenant(t, r.db, "catchup-pages")
+	r.connect(tenantID, true, "sk_live_pages")
+	first := r.seedInvoice(t, tenantID, true, "page-a", domain.InvoiceFinalized)
+	second := r.seedInvoice(t, tenantID, true, "page-b", domain.InvoiceFinalized)
+	now := time.Now().Add(-20 * time.Hour).Unix()
+
+	// Newest first, as Stripe lists them: 150 events, the 100th and 101st
+	// two payments of the same second.
+	const total = 150
+	for i := range total {
+		created := now - int64(i)
+		switch i {
+		case 99:
+			r.addPayment("sk_live_pages", "evt_page_pay_a", "pi_page_a", tenantID, first.ID, first.CustomerID, now-99)
+		case 100:
+			r.addPayment("sk_live_pages", "evt_page_pay_b", "pi_page_b", tenantID, second.ID, second.CustomerID, now-99)
+		default:
+			r.addEvent("sk_live_pages", fmt.Sprintf("evt_page_%03d", i), "setup_intent.setup_failed", created,
+				fmt.Sprintf(`{"id":"seti_page_%03d","object":"setup_intent","customer":"cus_x","payment_method":null,"status":"requires_payment_method","created":%d,"metadata":{}}`, i, created))
+		}
+	}
+	var sessions []*catchUpSession
+	for i := range 130 {
+		sessions = append(sessions, &catchUpSession{id: fmt.Sprintf("cs_page_%03d", i), status: "open", tenant: tenantID,
+			purpose: payment.PurposeHostedInvoicePay, created: now - int64(i)})
+	}
+	r.stripe.sessions["sk_live_pages"] = sessions
+
+	acct := onlyAccount(t, r.run(t))
+	if acct.Err != nil || acct.Events != total || acct.Applied != total || acct.AlreadyRecorded != 0 || len(acct.Unapplied) != 0 {
+		t.Fatalf("report %+v, want %d events listed and applied once each", acct, total)
+	}
+	if n := r.count(t, `SELECT count(DISTINCT stripe_event_id) FROM stripe_webhook_events WHERE tenant_id = $1`, tenantID); n != total {
+		t.Fatalf("%d events recorded, want %d", n, total)
+	}
+	for _, inv := range []domain.Invoice{first, second} {
+		if got := r.invoiceStatus(t, tenantID, inv.ID); got.Status != domain.InvoicePaid {
+			t.Fatalf("invoice %s is %s: the payment at the page boundary was not applied", inv.ID, got.Status)
+		}
+	}
+	if acct.SessionsExpired != len(sessions) {
+		t.Fatalf("%d payment pages closed, want all %d", acct.SessionsExpired, len(sessions))
+	}
+	for _, s := range sessions {
+		if s.status != "expired" {
+			t.Fatalf("session %s is %s, want expired", s.id, s.status)
+		}
+	}
+
+	again := onlyAccount(t, r.run(t))
+	if again.Err != nil || again.Events != total || again.Applied != 0 || again.AlreadyRecorded != total {
+		t.Fatalf("second run %+v, want every event already recorded", again)
 	}
 }
 
@@ -481,11 +666,7 @@ func TestCatchUp_ListsPaymentsWhoseInvoiceIsLostOrDraft(t *testing.T) {
 	if n := r.count(t, `SELECT count(*) FROM stripe_webhook_events WHERE tenant_id = $1`, tenantID); n != 0 {
 		t.Fatalf("%d events recorded, want 0: a listed payment stays unrecorded until acknowledged", n)
 	}
-	got, err := r.invoices.Get(modeCtx(tenantID, true), tenantID, draft.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Status != domain.InvoiceDraft {
+	if got := r.invoiceStatus(t, tenantID, draft.ID); got.Status != domain.InvoiceDraft {
 		t.Fatalf("the draft is %s, want it untouched", got.Status)
 	}
 
@@ -523,8 +704,8 @@ func TestCatchUp_RefundOfListedPaymentDoesNotStall(t *testing.T) {
 	}
 
 	acct := onlyAccount(t, r.run(t))
-	if acct.Err != nil {
-		t.Fatalf("the refund stalled the catch-up: %v", acct.Err)
+	if acct.Err != nil || len(acct.Unapplied) != 0 {
+		t.Fatalf("the refund stalled the catch-up: %+v", acct)
 	}
 	if len(acct.Lost) != 1 || acct.Lost[0].PaymentIntentID != "pi_refunded" || acct.Lost[0].Held != 1 {
 		t.Fatalf("lost %+v, want pi_refunded with its refund held", acct.Lost)
@@ -542,6 +723,219 @@ func TestCatchUp_RefundOfListedPaymentDoesNotStall(t *testing.T) {
 	}
 	if len(r.refunds.recorded) != 0 {
 		t.Fatalf("refunds recorded %v, want none: no invoice holds the payment", r.refunds.recorded)
+	}
+}
+
+// A customer created after the backup is lost with it. Its hosted payment's
+// Checkout session and its saved card cannot be recorded: the card's row
+// needs the customer's. They are held with the customer's listed payment,
+// and a card event of a lost customer with no listed payment is listed by
+// itself. The run finishes, and each is recorded once acknowledged.
+func TestCatchUp_CardEventsOfALostCustomerAreHeld(t *testing.T) {
+	r := newCatchUpRig(t)
+	tenantID := testutil.CreateTestTenant(t, r.db, "catchup-lost-customer")
+	r.connect(tenantID, true, "sk_live_lostcust")
+	created := time.Now().Add(-30 * time.Hour).Unix()
+	// The hosted payment and its session complete in the same second.
+	r.addEvent("sk_live_lostcust", "evt_0_session", "checkout.session.completed", created,
+		fmt.Sprintf(`{"id":"cs_lost","object":"checkout.session","mode":"payment","status":"complete","payment_status":"paid","customer":"cus_lost","payment_intent":"pi_lost","amount_total":5000,"currency":"usd","created":%d,"metadata":{"hardcount_tenant_id":%q,"hardcount_invoice_id":"hc_inv_lost","hardcount_customer_id":"hc_cus_lost","hardcount_purpose":"hosted_invoice_pay"}}`, created, tenantID))
+	r.addPayment("sk_live_lostcust", "evt_1_payment", "pi_lost", tenantID, "hc_inv_lost", "hc_cus_lost", created)
+	r.addEvent("sk_live_lostcust", "evt_2_card", "setup_intent.succeeded", created+30,
+		fmt.Sprintf(`{"id":"seti_lost","object":"setup_intent","customer":"cus_lost","payment_method":"pm_lost","status":"succeeded","usage":"off_session","created":%d,"metadata":{"hardcount_customer_id":"hc_cus_lost"}}`, created+30))
+	// Another lost customer saved a card, and paid nothing.
+	r.addEvent("sk_live_lostcust", "evt_3_card_only", "setup_intent.succeeded", created+60,
+		fmt.Sprintf(`{"id":"seti_lost_only","object":"setup_intent","customer":"cus_lost_only","payment_method":"pm_lost_only","status":"succeeded","usage":"off_session","created":%d,"metadata":{"hardcount_customer_id":"hc_cus_lost_only"}}`, created+60))
+
+	acct := onlyAccount(t, r.run(t))
+	if acct.Err != nil {
+		t.Fatalf("a card event of a lost customer stopped the catch-up: %v", acct.Err)
+	}
+	if len(acct.Lost) != 1 || acct.Lost[0].PaymentIntentID != "pi_lost" || acct.Lost[0].Held != 2 {
+		t.Fatalf("lost %+v, want pi_lost with its session and card held", acct.Lost)
+	}
+	if len(acct.Unapplied) != 1 || acct.Unapplied[0].EventID != "evt_3_card_only" || acct.Unapplied[0].CustomerID != "hc_cus_lost_only" ||
+		acct.Unapplied[0].Err != nil || acct.Unapplied[0].Acknowledged {
+		t.Fatalf("unapplied %+v, want the card of hc_cus_lost_only listed, not acknowledged", acct.Unapplied)
+	}
+	if n := r.count(t, `SELECT count(*) FROM stripe_webhook_events WHERE tenant_id = $1`, tenantID); n != 0 {
+		t.Fatalf("%d events recorded before the acknowledgement, want 0", n)
+	}
+
+	acked := onlyAccount(t, r.run(t, "pi_lost", "evt_3_card_only"))
+	if acked.Err != nil || !acked.Lost[0].Acknowledged || len(acked.Unapplied) != 1 || !acked.Unapplied[0].Acknowledged {
+		t.Fatalf("acknowledged run %+v", acked)
+	}
+	for _, id := range []string{"evt_0_session", "evt_1_payment", "evt_2_card", "evt_3_card_only"} {
+		if !r.recorded(t, tenantID, id) {
+			t.Errorf("%s was not recorded after the acknowledgement", id)
+		}
+	}
+	if n := r.count(t, `SELECT count(*) FROM payment_methods WHERE tenant_id = $1`, tenantID); n != 0 {
+		t.Fatalf("%d payment methods saved, want none: their customers are lost", n)
+	}
+}
+
+// A SetupIntent with no hardcount_customer_id whose Stripe customer no
+// Hardcount customer holds is the tenant's own: skipped, as the live handler
+// would after Stripe stopped redelivering. One whose Stripe customer a
+// Hardcount customer holds saves the card on it.
+func TestCatchUp_SetupIntentHardcountDidNotCreateIsSkipped(t *testing.T) {
+	r := newCatchUpRig(t)
+	tenantID := testutil.CreateTestTenant(t, r.db, "catchup-foreign-seti")
+	r.connect(tenantID, true, "sk_live_seti")
+	ctx := modeCtx(tenantID, true)
+	cust, err := r.customers.Create(ctx, tenantID, domain.Customer{ExternalID: "cus_known_ext", DisplayName: "known", Email: "billing@known.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.customers.SetStripeCustomerID(ctx, tenantID, cust.ID, "cus_known"); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Now().Add(-10 * time.Hour).Unix()
+	r.addEvent("sk_live_seti", "evt_theirs", "setup_intent.succeeded", created,
+		fmt.Sprintf(`{"id":"seti_theirs","object":"setup_intent","customer":"cus_tenants_own","payment_method":"pm_theirs","status":"succeeded","created":%d,"metadata":{}}`, created))
+	r.addEvent("sk_live_seti", "evt_ours", "setup_intent.succeeded", created+1,
+		fmt.Sprintf(`{"id":"seti_ours","object":"setup_intent","customer":"cus_known","payment_method":"pm_ours","status":"succeeded","created":%d,"metadata":{}}`, created+1))
+
+	acct := onlyAccount(t, r.run(t))
+	if acct.Err != nil || acct.Skipped != 1 || acct.Applied != 1 || len(acct.Unapplied) != 0 {
+		t.Fatalf("report %+v, want the tenant's own SetupIntent skipped and Hardcount's applied", acct)
+	}
+	if r.recorded(t, tenantID, "evt_theirs") {
+		t.Fatal("the skipped SetupIntent was recorded")
+	}
+	if n := r.count(t, `SELECT count(*) FROM payment_methods WHERE tenant_id = $1 AND customer_id = $2 AND stripe_payment_method_id = 'pm_ours'`, tenantID, cust.ID); n != 1 {
+		t.Fatalf("%d payment methods pm_ours on the known customer, want 1", n)
+	}
+}
+
+// On a Stripe account two tenants share, a refund of the other tenant's
+// Hardcount payment is that tenant's: acknowledged, not asked for again.
+func TestCatchUp_RefundOfAnotherTenantsPaymentIsAcknowledged(t *testing.T) {
+	r := newCatchUpRig(t)
+	tenantID := testutil.CreateTestTenant(t, r.db, "catchup-shared-refund")
+	r.connect(tenantID, true, "sk_live_sharedref")
+	created := time.Now().Add(-10 * time.Hour).Unix()
+	r.stripe.pis["pi_other"] = paymentIntentJSON("pi_other", "hc_ten_other", "hc_inv_other", "hc_cus_other", created)
+	r.addEvent("sk_live_sharedref", "evt_other_refund", "refund.created", created, refundJSON("re_other", "pi_other", 1000, created))
+
+	acct := onlyAccount(t, r.run(t))
+	if acct.Err != nil || acct.Applied != 1 || len(acct.Unapplied) != 0 {
+		t.Fatalf("report %+v, want the other tenant's refund acknowledged", acct)
+	}
+	if !r.recorded(t, tenantID, "evt_other_refund") || len(r.refunds.recorded) != 0 {
+		t.Fatalf("recorded %v, refunds %v: want the event acknowledged and no refund recorded", r.recorded(t, tenantID, "evt_other_refund"), r.refunds.recorded)
+	}
+}
+
+// An event whose handler fails on every try is listed, and the events after
+// it are still applied. Acknowledged, it is tried once more and, failing
+// again, recorded without being applied.
+func TestCatchUp_FailingEventIsListedAndTheRunGoesOn(t *testing.T) {
+	r := newCatchUpRig(t)
+	tenantID := testutil.CreateTestTenant(t, r.db, "catchup-failing")
+	r.connect(tenantID, true, "sk_live_failing")
+	paid := r.seedInvoice(t, tenantID, true, "failing-paid", domain.InvoiceFinalized)
+	later := r.seedInvoice(t, tenantID, true, "failing-later", domain.InvoiceFinalized)
+	created := time.Now().Add(-30 * time.Hour).Unix()
+	// Newest first: a later payment, a refund with a status Hardcount does
+	// not know (its handler fails every time), the paid invoice's payment.
+	r.addPayment("sk_live_failing", "evt_later", "pi_later", tenantID, later.ID, later.CustomerID, created+600)
+	r.addEvent("sk_live_failing", "evt_bad_refund", "refund.updated", created+60, refundWith("re_bad", "pi_paid", 1000, created+60, "not_a_status", `{}`))
+	r.addPayment("sk_live_failing", "evt_paid", "pi_paid", tenantID, paid.ID, paid.CustomerID, created)
+
+	acct := onlyAccount(t, r.run(t))
+	if acct.Err != nil || acct.Applied != 2 {
+		t.Fatalf("report %+v, want the two payments applied", acct)
+	}
+	if len(acct.Unapplied) != 1 || acct.Unapplied[0].EventID != "evt_bad_refund" || acct.Unapplied[0].Err == nil || acct.Unapplied[0].Acknowledged {
+		t.Fatalf("unapplied %+v, want evt_bad_refund listed with its error", acct.Unapplied)
+	}
+	if got := r.invoiceStatus(t, tenantID, later.ID); got.Status != domain.InvoicePaid {
+		t.Fatalf("the payment after the failing event is %s, want paid", got.Status)
+	}
+	if r.recorded(t, tenantID, "evt_bad_refund") {
+		t.Fatal("the failing event was recorded before it was acknowledged")
+	}
+
+	acked := onlyAccount(t, r.run(t, "evt_bad_refund"))
+	if acked.Err != nil || len(acked.Unapplied) != 1 || !acked.Unapplied[0].Acknowledged {
+		t.Fatalf("acknowledged run %+v, want evt_bad_refund failed again and acknowledged", acked)
+	}
+	if !r.recorded(t, tenantID, "evt_bad_refund") {
+		t.Fatal("the acknowledged event was not recorded")
+	}
+	if again := onlyAccount(t, r.run(t)); again.Err != nil || len(again.Unapplied) != 0 || again.AlreadyRecorded != 3 {
+		t.Fatalf("later run %+v, want every event already recorded", again)
+	}
+}
+
+// Two refunds of payments the restored database holds are listed instead of
+// applied, each until acknowledged:
+//   - a refund Hardcount made whose credit note the restore lost: applied,
+//     it would be acknowledged with no record, and the invoice would show
+//     the money as refundable again;
+//   - a refund made in Stripe on an invoice reported to Stripe Tax, which
+//     the restored database does not hold: the old server may have reversed
+//     its tax already, and applying it would reverse the tax again.
+//
+// A refund Hardcount made whose credit note the database holds is applied.
+func TestCatchUp_ListsRefundsItWouldApplyWrongly(t *testing.T) {
+	r := newCatchUpRig(t)
+	tenantID := testutil.CreateTestTenant(t, r.db, "catchup-refunds")
+	r.connect(tenantID, true, "sk_live_refunds")
+	plain := r.seedInvoice(t, tenantID, true, "refunds-plain", domain.InvoiceFinalized)
+	taxed := r.seedInvoice(t, tenantID, true, "refunds-taxed", domain.InvoiceFinalized)
+	r.exec(t, `UPDATE invoices SET tax_transaction_id = 'tax_txn_1' WHERE id = $1`, taxed.ID)
+	r.exec(t, `INSERT INTO credit_notes (tenant_id, invoice_id, customer_id, credit_note_number, status, reason, stripe_refund_id, refund_status, issued_at, livemode)
+		VALUES ($1, $2, $3, 'CN-KEPT', 'issued', 'refund', 're_kept', 'succeeded', now(), true)`, tenantID, plain.ID, plain.CustomerID)
+	created := time.Now().Add(-30 * time.Hour).Unix()
+	r.addEvent("sk_live_refunds", "evt_tax_refund", "refund.created", created+300, refundJSON("re_tax", "pi_taxed", 1500, created+300))
+	r.addEvent("sk_live_refunds", "evt_kept_refund", "refund.updated", created+200, refundWith("re_kept", "pi_plain", 1000, created+200, "succeeded", `{"hardcount_cn_id":"hc_cn_kept"}`))
+	r.addEvent("sk_live_refunds", "evt_lost_refund_2", "refund.updated", created+101, refundWith("re_lostcn", "pi_plain", 2000, created+100, "succeeded", `{"hardcount_cn_id":"hc_cn_gone"}`))
+	r.addEvent("sk_live_refunds", "evt_lost_refund_1", "refund.created", created+100, refundWith("re_lostcn", "pi_plain", 2000, created+100, "pending", `{"hardcount_cn_id":"hc_cn_gone"}`))
+	r.addPayment("sk_live_refunds", "evt_taxed_paid", "pi_taxed", tenantID, taxed.ID, taxed.CustomerID, created+1)
+	r.addPayment("sk_live_refunds", "evt_plain_paid", "pi_plain", tenantID, plain.ID, plain.CustomerID, created)
+
+	acct := onlyAccount(t, r.run(t))
+	if acct.Err != nil || acct.Applied != 3 || acct.Held != 3 || len(acct.Unapplied) != 0 {
+		t.Fatalf("report %+v, want the payments and re_kept applied, and three refund events held", acct)
+	}
+	if len(acct.Refunds) != 2 {
+		t.Fatalf("refunds %+v, want re_lostcn and re_tax listed", acct.Refunds)
+	}
+	lost, tax := acct.Refunds[0], acct.Refunds[1]
+	if lost.RefundID != "re_lostcn" || lost.Reason != payment.RefundCreditNoteLost || lost.CreditNoteID != "hc_cn_gone" ||
+		lost.InvoiceID != plain.ID || lost.PaymentIntentID != "pi_plain" || lost.AmountCents != 2000 || lost.Currency != "USD" ||
+		lost.Status != "succeeded" || lost.Events != 2 || lost.Acknowledged {
+		t.Errorf("listed refund %+v, want re_lostcn of hc_cn_gone on %s, 2000 USD, succeeded, 2 events", lost, plain.ID)
+	}
+	if tax.RefundID != "re_tax" || tax.Reason != payment.RefundStripeTax || tax.InvoiceID != taxed.ID || tax.Events != 1 || tax.Acknowledged {
+		t.Errorf("listed refund %+v, want re_tax on the Stripe Tax invoice %s", tax, taxed.ID)
+	}
+	if len(r.refunds.recorded) != 0 {
+		t.Fatalf("refunds recorded %v, want none: re_tax is listed", r.refunds.recorded)
+	}
+	for _, id := range []string{"evt_tax_refund", "evt_lost_refund_1", "evt_lost_refund_2"} {
+		if r.recorded(t, tenantID, id) {
+			t.Fatalf("%s was recorded before its refund was acknowledged", id)
+		}
+	}
+	if !r.recorded(t, tenantID, "evt_kept_refund") {
+		t.Fatal("the refund whose credit note the database holds was not applied")
+	}
+
+	acked := onlyAccount(t, r.run(t, "re_lostcn", "re_tax"))
+	if acked.Err != nil || len(acked.Refunds) != 2 || !acked.Refunds[0].Acknowledged || !acked.Refunds[1].Acknowledged {
+		t.Fatalf("acknowledged run %+v", acked)
+	}
+	for _, id := range []string{"evt_tax_refund", "evt_lost_refund_1", "evt_lost_refund_2"} {
+		if !r.recorded(t, tenantID, id) {
+			t.Errorf("%s was not recorded after the acknowledgement", id)
+		}
+	}
+	if len(r.refunds.recorded) != 0 {
+		t.Fatalf("refunds recorded %v after the acknowledgement, want none", r.refunds.recorded)
 	}
 }
 
@@ -613,7 +1007,7 @@ func TestCatchUp_RefusedKeyAndRunOnlyKey(t *testing.T) {
 	// The current key, for this run only.
 	override := payment.KeyOverrides(r.creds, map[tenantstripe.Account]string{{TenantID: tenantID, Livemode: true}: "sk_live_current"})
 	clients := payment.NewStripeClientsWithHTTPClient(override, &http.Client{Transport: r.stripe})
-	cu := payment.NewCatchUp(r.adapter, clients, r.creds)
+	cu := payment.NewCatchUp(r.adapter, clients, r.creds, r.customers, r.notes)
 	rep, err := cu.Run(context.Background(), payment.CatchUpRun{Since: r.since, Acknowledged: map[string]bool{}})
 	if err != nil {
 		t.Fatal(err)
@@ -635,7 +1029,7 @@ func TestCatchUp_RefusedKeyAndRunOnlyKey(t *testing.T) {
 	r.addPayment("sk_live_new_account", "evt_new", "pi_new", newTenant, newInv.ID, newInv.CustomerID, created)
 	added := tenantstripe.Account{TenantID: newTenant, Livemode: true}
 	override = payment.KeyOverrides(r.creds, map[tenantstripe.Account]string{added: "sk_live_new_account"})
-	cu = payment.NewCatchUp(r.adapter, payment.NewStripeClientsWithHTTPClient(override, &http.Client{Transport: r.stripe}), r.creds)
+	cu = payment.NewCatchUp(r.adapter, payment.NewStripeClientsWithHTTPClient(override, &http.Client{Transport: r.stripe}), r.creds, r.customers, r.notes)
 	rep, err = cu.Run(context.Background(), payment.CatchUpRun{Since: r.since, Extra: []tenantstripe.Account{added}, Acknowledged: map[string]bool{}})
 	if err != nil {
 		t.Fatal(err)
@@ -654,6 +1048,23 @@ func TestCatchUp_RefusedKeyAndRunOnlyKey(t *testing.T) {
 	}
 }
 
+// A key of the other mode lists only the other mode's events. The catch-up
+// reports the key for the account instead of skipping every event and
+// finishing with nothing applied.
+func TestCatchUp_KeyOfTheOtherModeIsRefused(t *testing.T) {
+	r := newCatchUpRig(t)
+	tenantID := testutil.CreateTestTenant(t, r.db, "catchup-mode")
+	r.connect(tenantID, true, "sk_live_but_test_events")
+	created := time.Now().Add(-20 * time.Hour).Unix()
+	pi := paymentIntentJSON("pi_testmode", tenantID, "hc_inv_testmode", "hc_cus_testmode", created)
+	r.stripe.events["sk_live_but_test_events"] = []string{stripeEventJSON("evt_testmode", "payment_intent.succeeded", created, false, pi)}
+
+	acct := onlyAccount(t, r.run(t))
+	if acct.KeyRefused == "" || acct.Skipped != 0 || acct.Applied != 0 {
+		t.Fatalf("report %+v, want the key reported as of the other mode", acct)
+	}
+}
+
 // On a Stripe account that two tenants share, each tenant's catch-up applies
 // only its own events, as the webhook endpoint does.
 func TestCatchUp_SkipsAnotherTenantsEvents(t *testing.T) {
@@ -662,8 +1073,8 @@ func TestCatchUp_SkipsAnotherTenantsEvents(t *testing.T) {
 	r.connect(tenantID, true, "sk_live_shared")
 	created := time.Now().Add(-10 * time.Hour).Unix()
 	r.addPayment("sk_live_shared", "evt_theirs", "pi_theirs", "hc_ten_someone_else", "hc_inv_theirs", "hc_cus_theirs", created)
-	r.stripe.events["sk_live_shared"] = append(r.stripe.events["sk_live_shared"], stripeEventJSON("evt_own_charge", "payment_intent.succeeded", created,
-		true, `{"id":"pi_own","object":"payment_intent","amount":100,"currency":"usd","status":"succeeded","metadata":{}}`))
+	r.addEvent("sk_live_shared", "evt_own_charge", "payment_intent.succeeded", created,
+		`{"id":"pi_own","object":"payment_intent","amount":100,"currency":"usd","status":"succeeded","metadata":{}}`)
 
 	acct := onlyAccount(t, r.run(t))
 	if acct.Err != nil || acct.Skipped != 2 || acct.Applied != 0 || len(acct.Lost) != 0 {

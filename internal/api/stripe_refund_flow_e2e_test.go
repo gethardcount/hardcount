@@ -135,8 +135,13 @@ func (f *refundFlow) answer(call string, form url.Values) (int, string, bool) {
 		}
 		return 200, body, true
 	case call == "GET /v1/payment_intents/pi_hc_unheld":
-		// A Hardcount payment whose record has not reached any invoice.
-		return 200, `{"id":"pi_hc_unheld","object":"payment_intent","status":"succeeded","metadata":{"hardcount_invoice_id":"hc_inv_elsewhere","hardcount_tenant_id":"t"}}`, true
+		// A Hardcount payment of this tenant whose record has not reached
+		// any invoice.
+		return 200, fmt.Sprintf(`{"id":"pi_hc_unheld","object":"payment_intent","status":"succeeded","metadata":{"hardcount_invoice_id":"hc_inv_elsewhere","hardcount_tenant_id":%q}}`, f.tenantID), true
+	case call == "GET /v1/payment_intents/pi_hc_other_tenant":
+		// Another tenant's Hardcount payment, on a Stripe account the two
+		// share.
+		return 200, `{"id":"pi_hc_other_tenant","object":"payment_intent","status":"succeeded","metadata":{"hardcount_invoice_id":"hc_inv_other","hardcount_tenant_id":"hc_ten_other"}}`, true
 	case call == "POST /v1/tax/transactions/create_reversal":
 		return 200, fmt.Sprintf(`{"id":"tax_rev_%s","object":"tax.transaction","type":"reversal"}`, form.Get("reference")), true
 	}
@@ -1008,7 +1013,14 @@ func TestE2E_StripeRefund_InvoiceNotPaidYet(t *testing.T) {
 	if n := flowCount(t, db, `SELECT count(*) FROM stripe_webhook_events WHERE stripe_event_id = 'evt_rf_unheld_old'`); n != 0 {
 		t.Errorf("dedup rows for a refund Stripe must redeliver: %d, want 0", n)
 	}
-	if n := flowCount(t, db, `SELECT count(*) FROM invoice_stripe_refunds WHERE stripe_refund_id LIKE 're_foreign_%'`); n != 0 {
+	// An old refund of another tenant's Hardcount payment, on a Stripe
+	// account the two share, is that tenant's: acknowledged, not sent again
+	// for three days.
+	f.deliver(refundEvent("evt_rf_other_tenant", "refund.created", refundSpec{id: "re_other_tenant", pi: "pi_hc_other_tenant", status: "succeeded", amount: 700, created: old}, old)).want(t, 200, "old refund of another tenant's payment")
+	if n := flowCount(t, db, `SELECT count(*) FROM stripe_webhook_events WHERE stripe_event_id = 'evt_rf_other_tenant'`); n != 1 {
+		t.Errorf("dedup rows for another tenant's refund: %d, want 1", n)
+	}
+	if n := flowCount(t, db, `SELECT count(*) FROM invoice_stripe_refunds WHERE stripe_refund_id LIKE 're_foreign_%' OR stripe_refund_id = 're_other_tenant'`); n != 0 {
 		t.Errorf("rows for refunds of a payment no invoice holds: %d, want 0", n)
 	}
 }

@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,11 +34,22 @@ func insertWebhookEvent(t *testing.T, admin *sql.DB, tenantID, eventID string, a
 	}
 }
 
+// pausedBy returns who paused the role, and "" when it is not paused.
+func pausedBy(t *testing.T, admin *sql.DB, role string) string {
+	t.Helper()
+	var by sql.NullString
+	if err := admin.QueryRow(`SELECT paused_by FROM leader_leases WHERE role = $1`, role).Scan(&by); err != nil {
+		t.Fatalf("read the %s lease: %v", role, err)
+	}
+	return by.String
+}
+
 // `hardcount restore begin` marks the database with its anchor, the newest
-// instant the restored data shows Hardcount running, and pauses billing. The
-// anchor is read before the pause, which clears billing's heartbeat. A
-// second begin keeps the first marker, even after newer rows arrive, and the
-// catch-up's clear lets serve start.
+// instant the restored data shows Hardcount running, and pauses the two
+// jobs that charge cards, billing and dunning. The anchor is read before
+// the pauses, which clear the heartbeats. A second begin keeps the first
+// marker, even after newer rows arrive, and the catch-up's clear lets
+// serve start.
 func TestRestoreBegin_AnchorPauseAndClear(t *testing.T) {
 	testutil.SetupTestDB(t)
 	admin := testutil.AdminPool(t)
@@ -52,21 +65,22 @@ func TestRestoreBegin_AnchorPauseAndClear(t *testing.T) {
 	insertWebhookEvent(t, admin, tenantID, "evt_old", base.Add(-10*time.Minute))
 
 	owner := postgres.NewDB(admin, 5*time.Second)
-	m, err := markRestored(ctx, owner, "hardcount restore begin")
+	m, err := markRestored(ctx, owner, "hardcount restore begin", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !m.Anchor.Valid || !m.Anchor.Time.Equal(base.Add(-2*time.Second)) || m.SetBy != "hardcount restore begin" {
 		t.Fatalf("marker %+v, want anchor %s (billing's heartbeat) set by hardcount restore begin", m, base.Add(-2*time.Second))
 	}
-	var pausedBy string
-	if err := admin.QueryRow(`SELECT paused_by FROM leader_leases WHERE role = 'billing' AND paused_at IS NOT NULL`).Scan(&pausedBy); err != nil {
-		t.Fatalf("billing is not paused: %v", err)
+	for _, role := range []string{"billing", "dunning"} {
+		if by := pausedBy(t, admin, role); by != "restore" {
+			t.Fatalf("%s paused by %q, want restore", role, by)
+		}
 	}
 
 	// A newer webhook, then begin again: the first marker stays.
 	insertWebhookEvent(t, admin, tenantID, "evt_new", base.Add(time.Hour))
-	again, err := markRestored(ctx, owner, "restore.sh")
+	again, err := markRestored(ctx, owner, "restore.sh", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,6 +97,56 @@ func TestRestoreBegin_AnchorPauseAndClear(t *testing.T) {
 	}
 	if _, restored, err := readRestoreMarker(ctx, admin); err != nil || restored {
 		t.Fatalf("after the clear: restored=%v err=%v, want no marker", restored, err)
+	}
+}
+
+// serve checks the marker only when it starts. So `restore begin` refuses a
+// database a copy of Hardcount is running on: the copy would keep charging,
+// and its lease writes would move the anchor past the backup. A lease
+// written a few seconds ago shows the copy. --force marks it anyway.
+func TestRestoreBegin_RefusesADatabaseACopyRunsOn(t *testing.T) {
+	testutil.SetupTestDB(t)
+	admin := testutil.AdminPool(t)
+	ctx := context.Background()
+	mustExec(t, admin, `INSERT INTO leader_leases (role, holder_token, last_tick_ended_at) VALUES ('webhook_outbox', 1, now() - interval '3 seconds')`)
+	mustExec(t, admin, `INSERT INTO leader_leases (role, holder_token) VALUES ('billing', 1), ('dunning', 1)`)
+	owner := postgres.NewDB(admin, 5*time.Second)
+
+	if _, err := markRestored(ctx, owner, "hardcount restore begin", false); !errors.Is(err, errDatabaseServed) {
+		t.Fatalf("begin on a database a copy runs on: %v, want errDatabaseServed", err)
+	}
+	if _, restored, err := readRestoreMarker(ctx, admin); err != nil || restored {
+		t.Fatalf("after the refusal: restored=%v err=%v, want no marker", restored, err)
+	}
+	if by := pausedBy(t, admin, "billing"); by != "" {
+		t.Fatalf("billing paused by %q after the refusal, want not paused", by)
+	}
+
+	m, err := markRestored(ctx, owner, "hardcount restore begin", true)
+	if err != nil || m.SetBy != "hardcount restore begin" {
+		t.Fatalf("begin --force: %+v, %v, want the database marked", m, err)
+	}
+}
+
+// --stripe-key for a tenant the restored database does not hold is refused:
+// every event names the real tenant, so each would be skipped and the run
+// would end with nothing applied.
+func TestUnknownTenants(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	admin := testutil.AdminPool(t)
+	known := testutil.CreateTestTenant(t, db, "restore-known")
+	keys := stripeKeyFlag{
+		{TenantID: known, Livemode: true}:                 "sk_live_a",
+		{TenantID: known, Livemode: false}:                "sk_test_a",
+		{TenantID: "hc_ten_typo", Livemode: true}:         "sk_live_b",
+		{TenantID: "hc_ten_after_backup", Livemode: true}: "sk_live_c",
+	}
+	got, err := unknownTenants(context.Background(), admin, keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "hc_ten_after_backup,hc_ten_typo" {
+		t.Fatalf("unknown tenants %v, want hc_ten_after_backup and hc_ten_typo", got)
 	}
 }
 

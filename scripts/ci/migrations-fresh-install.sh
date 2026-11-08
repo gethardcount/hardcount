@@ -220,12 +220,15 @@ fresh_install() {
 }
 
 # check_marker CONTAINER LABEL: the restore marked the database as restored
-# and paused billing.
+# and paused the two jobs that charge cards, billing and dunning.
 check_marker() {
+  local role
   [ "$(q "$1" compose "SELECT set_by FROM public.restore_catchup")" = restore.sh ] \
     || fail "$2: scripts/restore.sh wrote no restore marker"
-  [ "$(q "$1" compose "SELECT paused_by FROM public.leader_leases WHERE role = 'billing'")" = restore ] \
-    || fail "$2: scripts/restore.sh did not pause billing"
+  for role in billing dunning; do
+    [ "$(q "$1" compose "SELECT paused_by FROM public.leader_leases WHERE role = '$role'")" = restore ] \
+      || fail "$2: scripts/restore.sh did not pause $role"
+  done
 }
 
 # expect_serve_refused URL LABEL NAME [VAR=value ...]: HEAD's serve, on a
@@ -279,12 +282,13 @@ restore_drill() {
     || fail "restore drill: scripts/restore.sh failed to restore the backup into an empty database"
   grep -q 'Restore complete' "$OUT/restore.txt" \
     || fail "restore drill: scripts/restore.sh did not report a complete restore"
-  # The restore marked the database as restored and paused billing, and
-  # serve refuses to start until the catch-up has run (ADR-135). Clear both
-  # so the dumps below compare the restored data with the source.
+  # The restore marked the database as restored and paused billing and
+  # dunning, and serve refuses to start until the catch-up has run
+  # (ADR-135). Clear the marker and the pauses so the dumps below compare
+  # the restored data with the source.
   check_marker "$e" "restore drill"
   expect_serve_refused "$eurl" "restore drill" restored
-  q "$e" compose "DELETE FROM public.restore_catchup; SELECT public.leader_unpause('billing')" >/dev/null
+  q "$e" compose "DELETE FROM public.restore_catchup; SELECT public.leader_unpause('billing'); SELECT public.leader_unpause('dunning')" >/dev/null
   for kind in schema data; do
     dump "$e" compose "$kind" > "$OUT/restore-$kind.sql"
     if ! diff -u "$OUT/restore-source-$kind.sql" "$OUT/restore-$kind.sql" > "$OUT/restore-$kind.diff"; then

@@ -47,7 +47,7 @@ Each item waits until someone using Hardcount needs it:
 - After a restore, turning a payment whose invoice the restore lost into
   credit for its customer. Today the catch-up lists such a payment, and the
   operator grants the credit or refunds it by hand
-  ([restore](ops/restore.md#handle-the-payments-the-catch-up-listed)).
+  ([restore](ops/restore.md#payments-whose-invoice-the-restore-lost)).
 - Automatic credit top-ups.
 - Importing LLM prices from a public price list.
 - Two-factor sign-in.

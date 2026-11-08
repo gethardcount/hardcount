@@ -3,9 +3,10 @@
 #
 # Restores a database from a pg_dump backup file, in one transaction, with
 # each restored object's privileges as the backup holds them. The same
-# transaction marks the database as restored and pauses billing: Hardcount
-# then refuses to start until `hardcount restore catch-up` has applied what
-# Stripe did since the backup (docs/ops/restore.md).
+# transaction marks the database as restored and pauses billing and
+# dunning: Hardcount then refuses to start until `hardcount restore
+# catch-up` has applied what Stripe did since the backup
+# (docs/ops/restore.md).
 #
 # A custom-format backup (what scripts/backup.sh writes) goes through
 # pg_restore into psql, so psql must be at least as recent as pg_restore. A
@@ -113,7 +114,7 @@ privilege_sql() {
 # two agree). The two set_config lines come first: pg_restore's SQL empties
 # search_path, and the anchor reads stripe_webhook_events, whose row-level
 # security binds an owner that is not a superuser. The anchor is read before
-# the pause, which clears billing's lease heartbeat.
+# the pauses, which clear the heartbeats of the billing and dunning leases.
 MARK_SQL=$(cat <<'SQL'
 SELECT pg_catalog.set_config('search_path', 'public', true);
 SELECT pg_catalog.set_config('app.bypass_rls', 'on', true);
@@ -129,6 +130,7 @@ SELECT 'restore.sh'::text, GREATEST(
     (SELECT max(received_at) FROM public.stripe_webhook_events))
 ON CONFLICT (id) DO NOTHING;
 SELECT public.leader_pause('billing', 'restore', 'database restored: run hardcount restore catch-up, then resume billing');
+SELECT public.leader_pause('dunning', 'restore', 'database restored: run hardcount restore catch-up, then resume dunning after billing');
 SQL
 )
 
@@ -405,7 +407,7 @@ log "  Duration:  ${DURATION}s"
 log "  Rows:      ${PRE_COUNTS} (before) -> ${POST_COUNTS} (after)"
 log "  Tables:    All critical tables present"
 log "  Migration: ${LATEST_MIGRATION:-check manually}"
-log "  Marker:    restored, billing paused"
+log "  Marker:    restored, billing and dunning paused"
 log "========================================"
 echo ""
 log "Restore complete. Hardcount will not start until you run 'hardcount restore catch-up'."

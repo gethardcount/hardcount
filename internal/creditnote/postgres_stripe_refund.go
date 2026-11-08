@@ -269,6 +269,26 @@ func (s *PostgresStore) ApplyRefundWebhookStatusTx(ctx context.Context, tx *sql.
 	return domain.CreditNote{}, false, exists, nil
 }
 
+// StripeRefundRecorded reports whether the database holds the Stripe refund:
+// a credit note carries its id, or it is recorded as a refund made in
+// Stripe. The restore catch-up (ADR-135) lists a refund the restored
+// database does not hold, instead of applying it.
+func (s *PostgresStore) StripeRefundRecorded(ctx context.Context, tenantID, stripeRefundID string) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return false, err
+	}
+	defer postgres.Rollback(tx)
+	_, err = s.InvoiceForStripeRefundTx(ctx, tx, stripeRefundID)
+	switch {
+	case errors.Is(err, errs.ErrNotFound):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *PostgresStore) ListStripeRefundsByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceStripeRefund, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {

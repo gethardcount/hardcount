@@ -88,6 +88,15 @@ func withoutPayload(ev domain.StripeWebhookEvent) domain.StripeWebhookEvent {
 	return ev
 }
 
+// The catch-up lists from Stripe exactly the event types processEvent
+// handles. A type added to processEvent and not here would be missed by
+// every restore, with no error.
+func TestCatchUpEventTypesMatchProcessEvent(t *testing.T) {
+	if got, want := sortedCopy(catchUpEventTypes), processEventCases(t); !reflect.DeepEqual(got, want) {
+		t.Fatalf("the catch-up lists %v\nprocessEvent handles %v", got, want)
+	}
+}
+
 func TestCatchUpParse_EveryHandledTypeMatchesItsWebhookBody(t *testing.T) {
 	var types []string
 	for typ := range fidelityObjects {

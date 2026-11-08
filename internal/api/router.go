@@ -1448,7 +1448,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		PaymentReconciler:   paymentReconciler,
 		LoginThrottle:       loginThrottle,
 		TestClockSvc:        testClockSvc,
-		RestoreCatchUp:      payment.NewCatchUp(stripeAdapter, stripeClients, tenantStripeSvc),
+		RestoreCatchUp:      payment.NewCatchUp(stripeAdapter, stripeClients, tenantStripeSvc, customerStore, creditNoteStore),
 	}
 
 	// Redis is for distributed rate limiting. cmd/hardcount/main.go opens and

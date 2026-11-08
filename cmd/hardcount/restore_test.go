@@ -92,6 +92,10 @@ func TestCatchUpExitCode(t *testing.T) {
 		{"a refused live key", []payment.AccountCatchUp{{Account: live, KeyRefused: "Invalid API Key"}, {Account: test, Lost: lost}}, catchUpKeyRejected},
 		{"a temporary error first", []payment.AccountCatchUp{{Account: live, KeyRefused: "x", Lost: lost}, {Account: tenantstripe.Account{TenantID: "hc_ten_b", Livemode: true}, Err: errors.New("timeout")}}, catchUpRetry},
 		{"test mode never holds the database", []payment.AccountCatchUp{{Account: live}, {Account: test, Err: errors.New("x"), KeyRefused: "y", Lost: lost}}, catchUpDone},
+		{"a listed refund to handle", []payment.AccountCatchUp{{Account: live, Refunds: []payment.ListedRefund{{RefundID: "re_1"}}}}, catchUpUnmatched},
+		{"an acknowledged refund", []payment.AccountCatchUp{{Account: live, Refunds: []payment.ListedRefund{{RefundID: "re_1", Acknowledged: true}}}}, catchUpDone},
+		{"an event not applied", []payment.AccountCatchUp{{Account: live, Unapplied: []payment.UnappliedEvent{{EventID: "evt_1", Err: errors.New("x")}}}}, catchUpUnmatched},
+		{"an acknowledged event", []payment.AccountCatchUp{{Account: live, Unapplied: []payment.UnappliedEvent{{EventID: "evt_1", Acknowledged: true}}}}, catchUpDone},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -102,26 +106,55 @@ func TestCatchUpExitCode(t *testing.T) {
 	}
 }
 
+// --stripe-key reads a key of the mode it names. A key of the other mode
+// would list only the other mode's events, so a live account would finish
+// with nothing applied.
 func TestStripeKeyFlag(t *testing.T) {
 	dir := t.TempDir()
-	good := filepath.Join(dir, "key")
-	if err := os.WriteFile(good, []byte("sk_live_current\n"), 0o600); err != nil {
-		t.Fatal(err)
+	write := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
 	}
-	bad := filepath.Join(dir, "not-a-key")
-	if err := os.WriteFile(bad, []byte("whsec_x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	live := write("live", "sk_live_current\n")
+	restricted := write("restricted", "rk_live_current")
+	testKey := write("test", "sk_test_current")
+	bad := write("not-a-key", "whsec_x")
 	f := stripeKeyFlag{}
-	if err := f.Set("hc_ten_a:live=@" + good); err != nil {
-		t.Fatal(err)
+	for _, v := range []string{"hc_ten_a:live=@" + live, "hc_ten_b:live=@" + restricted, "hc_ten_a:test=@" + testKey} {
+		if err := f.Set(v); err != nil {
+			t.Fatalf("--stripe-key %s: %v", v, err)
+		}
 	}
 	if got := f[tenantstripe.Account{TenantID: "hc_ten_a", Livemode: true}]; got != "sk_live_current" {
 		t.Fatalf("key %q, want sk_live_current", got)
 	}
-	for _, v := range []string{"hc_ten_a:live=" + good, "hc_ten_a=@" + good, "hc_ten_a:prod=@" + good, ":live=@" + good, "hc_ten_a:test=@" + bad, "hc_ten_a:test=@" + filepath.Join(dir, "missing")} {
+	if got := f[tenantstripe.Account{TenantID: "hc_ten_a", Livemode: false}]; got != "sk_test_current" {
+		t.Fatalf("key %q, want sk_test_current", got)
+	}
+	for _, v := range []string{
+		"hc_ten_a:live=" + live, "hc_ten_a=@" + live, "hc_ten_a:prod=@" + live, ":live=@" + live,
+		"hc_ten_a:test=@" + bad, "hc_ten_a:test=@" + filepath.Join(dir, "missing"),
+		"hc_ten_a:live=@" + testKey, "hc_ten_a:test=@" + live, "hc_ten_a:test=@" + restricted,
+	} {
 		if err := f.Set(v); err == nil {
 			t.Errorf("--stripe-key %s was accepted", v)
+		}
+	}
+}
+
+func TestAckFlag(t *testing.T) {
+	f := ackFlag{}
+	for _, v := range []string{"pi_1", "re_1", "evt_1"} {
+		if err := f.Set(v); err != nil {
+			t.Errorf("--acknowledge %s: %v", v, err)
+		}
+	}
+	for _, v := range []string{"cs_1", "hc_inv_1", ""} {
+		if err := f.Set(v); err == nil {
+			t.Errorf("--acknowledge %q was accepted", v)
 		}
 	}
 }

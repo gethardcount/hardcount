@@ -517,13 +517,17 @@ Commands:
   migrate rollback     Undo the latest migration (APP_ENV=local only; never
                        below 180, the baseline)
   restore begin        Mark a database restored from a snapshot or to a point
-                       in time, and pause billing. scripts/restore.sh does
-                       this for a dump. serve refuses to start until the
-                       catch-up finishes.
+                       in time, and pause billing and dunning.
+                       scripts/restore.sh does this for a dump. serve
+                       refuses to start until the catch-up finishes.
+                       Refused while a copy of Hardcount runs on the
+                       database, unless --force.
   restore catch-up     Apply what Stripe did since the backup, then let serve
-                       start. Flags: --acknowledge pi_…, --stripe-key
-                       <tenant>:<live|test>=@<file>, --since <time>
-  restore status       Show whether the database is marked as restored
+                       start. Flags: --acknowledge pi_…|re_…|evt_…,
+                       --stripe-key <tenant>:<live|test>=@<file>,
+                       --since <time>
+  restore status       Show whether the database is marked as restored, and
+                       whether billing and dunning are paused
   version              Print version
   help                 Show this help
 
