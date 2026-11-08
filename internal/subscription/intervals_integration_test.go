@@ -316,8 +316,8 @@ func TestIntervals_ScheduledPlanApply_RetroactiveSplice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply due pendings: %v", err)
 	}
-	if len(applied) != 1 || applied[0].PlanID != planB.ID {
-		t.Fatalf("apply must swap to planB: %+v", applied)
+	if len(applied.Swapped) != 1 || applied.Swapped[0].NewPlanID != planB.ID {
+		t.Fatalf("apply must swap to planB: %+v", applied.Swapped)
 	}
 
 	ivs := readItemIntervals(t, db, ctx, tenantID, itemID)
