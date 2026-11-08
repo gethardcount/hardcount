@@ -2511,8 +2511,9 @@ func usageLineDescription(meter domain.Meter, price domain.PlanPrice) string {
 // applyDueScheduledPlanChanges applies any item plan changes scheduled
 // to take effect at or before this cycle's close, BEFORE the caller
 // reads plans — so the new cycle bills on the new plans. Extracted from
-// billOnePeriod (behavior-preserving); returns the subscription with its
-// item set refreshed when a swap applied, else unchanged.
+// billOnePeriod (behavior-preserving). When a swap applied, it returns the
+// subscription with only the swapped items, so the close leaves the other
+// items unbilled (#1620); otherwise it returns sub unchanged.
 func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Subscription, now time.Time) (domain.Subscription, error) {
 	// If any item has a scheduled plan change whose effective_at falls
 	// within (or at) the cycle being processed, apply them all BEFORE
@@ -2568,6 +2569,8 @@ func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Su
 			return sub, fmt.Errorf("apply pending item plans: %w", err)
 		}
 		if applied != nil {
+			// applied holds only the swapped items: the other items of
+			// the subscription drop out of this close (#1620).
 			sub.Items = applied
 			slog.Info("applied scheduled item plan changes",
 				"subscription_id", sub.ID,
