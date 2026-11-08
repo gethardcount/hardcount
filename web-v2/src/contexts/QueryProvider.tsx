@@ -2,6 +2,7 @@ import { useMemo, type ReactNode } from 'react'
 import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuth } from '@/contexts/AuthContext'
 import { retryQuery, scheduleRateLimitRefetch } from '@/lib/rateLimitRetry'
+import { ModeQueryClientsContext } from '@/contexts/modeQueryClients'
 
 // Refetch posture (2026-06-02): operator billing data changes on the order of
 // minutes and is refreshed explicitly via invalidateQueries after mutations,
@@ -64,13 +65,11 @@ export function ModeAwareQueryProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const userKey = user ? `${user.tenant_id}:${user.user_id}` : 'anon'
 
-  const { testClient, liveClient } = useMemo(
-    () => ({
-      testClient: newQueryClient(),
-      liveClient: newQueryClient(),
-    }),
-    [userKey],
-  )
+  const { testClient, liveClient, both } = useMemo(() => {
+    const testClient = newQueryClient()
+    const liveClient = newQueryClient()
+    return { testClient, liveClient, both: [testClient, liveClient] as const }
+  }, [userKey])
 
   const livemode = user?.livemode ?? false
   const active = livemode ? liveClient : testClient
@@ -79,9 +78,14 @@ export function ModeAwareQueryProvider({ children }: { children: ReactNode }) {
   // open) resets — correct for mode toggle since those are mode-scoped
   // contexts. The QueryClient instances themselves are stored in the
   // parent's useMemo, so caches survive the remount.
+  //
+  // Both clients are offered too (useBothModeQueryClients), for a write of
+  // data both modes share: a Settings save goes into both caches.
   return (
-    <QueryClientProvider client={active} key={livemode ? 'live' : 'test'}>
-      {children}
-    </QueryClientProvider>
+    <ModeQueryClientsContext.Provider value={both}>
+      <QueryClientProvider client={active} key={livemode ? 'live' : 'test'}>
+        {children}
+      </QueryClientProvider>
+    </ModeQueryClientsContext.Provider>
   )
 }

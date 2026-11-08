@@ -14,7 +14,7 @@
 // over-refund ceiling mirrors the server cap and errs toward counting; a
 // "money returned" figure must be true.
 
-import { amountsByCurrencyText, formatCents } from './money'
+import { amountsByCurrencyText, formatCentsBare } from './money'
 import type { CreditNoteStats } from './gen/schemas/creditNoteStats'
 import type { CreditNoteStatsByCurrencyItem } from './gen/schemas/creditNoteStatsByCurrencyItem'
 
@@ -37,10 +37,12 @@ export interface CreditNoteStatFigures {
 
 // creditNoteStatFigures words the server's totals for the page. Amounts in
 // several currencies are shown side by side ("$10.00 + €7.00"), never added.
-export function creditNoteStatFigures(stats: CreditNoteStats, defaultCurrency: string): CreditNoteStatFigures {
+// A figure with no amount in any currency reads a bare "0.00": the zero has
+// no currency of its own.
+export function creditNoteStatFigures(stats: CreditNoteStats): CreditNoteStatFigures {
   const text = (field: MoneyField) =>
     amountsByCurrencyText(stats.by_currency.map(c => ({ currency: c.currency, amount_cents: c[field] })))
-  const money = (field: MoneyField) => text(field) ?? formatCents(0, defaultCurrency)
+  const money = (field: MoneyField) => text(field) ?? formatCentsBare(0)
   return {
     counts: {
       all: stats.draft_count + stats.issued_count + stats.voided_count,

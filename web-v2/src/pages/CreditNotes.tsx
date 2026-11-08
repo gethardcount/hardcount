@@ -6,7 +6,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
-import { api, downloadCreditNotePDF, formatCents, formatDate, formatDateTime, getActiveCurrency } from '@/lib/api'
+import { api, downloadCreditNotePDF, formatCents, formatDate, formatDateTime } from '@/lib/api'
 import type { CreditNote, Invoice, Customer } from '@/lib/api'
 import { wallClockNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
@@ -243,7 +243,7 @@ export default function CreditNotesPage() {
     queryKey: ['credit-notes', 'stats'],
     queryFn: () => api.getCreditNoteStats(),
   })
-  const stats = statsData ? creditNoteStatFigures(statsData, getActiveCurrency()) : null
+  const stats = statsData ? creditNoteStatFigures(statsData) : null
   const counts = stats?.counts
 
   // Filter + search

@@ -1,12 +1,9 @@
 // The Settings → Tax worked example. Every amount is formatted the same way
 // in the workspace currency; the base used to take its symbol from another
 // list, so a CAD workspace read "$100.00 … = CA$118.00".
-import { test, beforeEach } from 'vitest'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { setActiveCurrency } from '../src/lib/money.ts'
 import { taxExampleAmounts } from '../src/lib/taxExample.ts'
-
-beforeEach(() => setActiveCurrency('USD'))
 
 test('exclusive: tax added on top, all in the workspace currency', () => {
   assert.deepEqual(taxExampleAmounts(18, false, 'CAD'), { base: 'CA$100.00', net: 'CA$100.00', total: 'CA$118.00' })

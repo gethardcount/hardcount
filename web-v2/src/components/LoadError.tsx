@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { AlertCircle } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -13,18 +14,21 @@ import { cn } from '@/lib/utils'
 // same words an error toast would use, except a 429, which says the load
 // will try again by itself); Retry runs the load again. The raw
 // error and a server fault's request id sit in a collapsed Details, so a
-// screenshot sent to support still carries them.
+// screenshot sent to support still carries them. Children, when given, are a
+// line under the sentence that says what the operator can do meanwhile.
 export function LoadError({
   what,
   error,
   onRetry,
   className,
+  children,
 }: {
   // Fills "Couldn't load {what}", e.g. "recipes", "this plan".
   what: string
   error: unknown
   onRetry?: () => void
   className?: string
+  children?: ReactNode
 }) {
   const raw = rawErrorDetail(error)
   const requestId = errorRequestId(error)
@@ -33,6 +37,7 @@ export function LoadError({
       <AlertCircle size={20} className="mb-2 text-destructive" aria-hidden />
       <p className="text-sm font-medium text-foreground">Couldn't load {what}</p>
       <p className="mt-1 max-w-md text-sm text-muted-foreground">{loadErrorSentence(error)}</p>
+      {children && <p className="mt-1 max-w-md text-sm text-muted-foreground">{children}</p>}
       {onRetry && (
         <Button variant="outline" size="sm" className="mt-3" onClick={onRetry}>
           Retry

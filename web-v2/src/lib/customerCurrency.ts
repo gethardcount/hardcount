@@ -49,6 +49,12 @@ export interface CurrencyInput {
 }
 
 export function resolveCustomerCurrency(input: CurrencyInput): CustomerCurrency {
+  return customerOwnCurrency(input) ?? { currency: input.workspaceDefault.toUpperCase(), source: 'workspace' }
+}
+
+// customerOwnCurrency is steps 1 to 3: the customer's own currency, or
+// undefined when only the workspace default can answer.
+function customerOwnCurrency(input: Omit<CurrencyInput, 'workspaceDefault'>): CustomerCurrency | undefined {
   if (input.billingProfileCurrency) {
     return { currency: input.billingProfileCurrency.toUpperCase(), source: 'billing_profile' }
   }
@@ -67,7 +73,7 @@ export function resolveCustomerCurrency(input: CurrencyInput): CustomerCurrency 
     .filter(i => i.currency)
     .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))[0]
   if (newest?.currency) return { currency: newest.currency.toUpperCase(), source: 'invoice' }
-  return { currency: input.workspaceDefault.toUpperCase(), source: 'workspace' }
+  return undefined
 }
 
 // The state of one query feeding the answer (a react-query result fits).
@@ -83,12 +89,18 @@ export interface CurrencyQueryState {
 // profile's currency, and a New invoice dialog would open in a currency the
 // engine then refuses. Undefined makes the page show "—" and keep New invoice
 // disabled.
+//
+// The workspace default is undefined while the account settings load or after
+// they failed. Then only a customer with a currency of their own gets an
+// answer, because the settings decide nothing for them.
 export function settledCustomerCurrency(
   queries: readonly CurrencyQueryState[],
-  input: () => CurrencyInput,
+  input: () => Omit<CurrencyInput, 'workspaceDefault'> & { workspaceDefault: string | undefined },
 ): CustomerCurrency | undefined {
   if (queries.some(q => q.isLoading || q.isError)) return undefined
-  return resolveCustomerCurrency(input())
+  const i = input()
+  if (i.workspaceDefault === undefined) return customerOwnCurrency(i)
+  return resolveCustomerCurrency({ ...i, workspaceDefault: i.workspaceDefault })
 }
 
 // invoiceCurrencyPin is why a manual invoice can only be in the customer's

@@ -165,6 +165,37 @@ period's own invoice bills the rest. A threshold fires at most once a
 period. Usage of a `max` or `last` meter waits for the period's own
 invoice. `DELETE /v1/subscriptions/{id}/billing-thresholds` removes them.
 
+What happens to the usage a spend-threshold invoice billed depends on what
+you do with that invoice, and when:
+
+- **Write it off** (mark it uncollectible): the usage stays billed on it.
+  The period's own invoice does not bill it again. If the customer pays the
+  written-off invoice later, it simply reads paid.
+- **Void it before the period's own invoice is built:** that invoice bills
+  the usage instead, from the period start. Do not also bill it on a
+  one-off invoice.
+- **Void it after the period's own invoice is built:** the usage is billed
+  nowhere, because that invoice does not change. To charge it, bill it on a
+  one-off invoice
+  ([Usage is missing from a built invoice](../ops/runbook/invoice-timing-late-usage.md#usage-is-missing-from-a-built-invoice),
+  step 3). A void that arrives while that invoice is being saved waits for
+  it, and then counts as after.
+
+A spend-threshold invoice made before version 0.9.0 can also carry the base
+fee of a plan billed in arrears. These rules apply to that fee as to the
+usage.
+
+Usage of a `sum` or `count` meter
+([aggregation](meters-and-prices.md#meters)) that is stamped before a
+spend-threshold invoice but arrives after it is on neither invoice. While
+the spend-threshold invoice can still be voided, such usage is not flagged
+`after_close` ([late usage](usage-events.md#late-usage)): a void would give
+its window back. A written-off invoice can still be voided, so usage behind
+it is not flagged either. Such usage that arrives once that invoice is paid
+is flagged. The
+[late-usage steps](../ops/runbook/invoice-timing-late-usage.md#usage-is-missing-from-a-built-invoice)
+find it either way.
+
 ## Credit notes
 
 A credit note lowers what a customer owes on an invoice. Create one with

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { StaleNotice } from '@/components/StaleNotice'
 import { usePageTitle } from '@/hooks/usePageTitle'
+import { useTenantSettings } from '@/hooks/useTenantSettings'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
@@ -371,10 +372,7 @@ export default function InvoiceDetailPage() {
     (dunningRunsData ?? []).find(r => r.state === 'active') ??
     (dunningRunsData ?? []).find(r => r.state === 'escalated')
 
-  const { data: settings, isSuccess: settingsLoaded } = useQuery({
-    queryKey: ['settings'],
-    queryFn: () => api.getSettings(),
-  })
+  const { data: settings, isSuccess: settingsLoaded } = useTenantSettings()
 
   // Server config (SMTP + PAYMENT_UPDATE_URL): whether "Email a payment-method
   // link" on a written-off invoice can really send, and whether the Finalize
@@ -1686,8 +1684,8 @@ export default function InvoiceDetailPage() {
         )}
         {/* Whether a later invoice bills a voided threshold invoice's
             charges depends on when the void lands (before or after the
-            period's invoice is built), which this page does not know; the runbook
-            (invoice-timing-late-usage.md) and ADR-066's 2026-10-23
+            period's invoice is built), which this page does not know; the Invoices
+            concept page (docs/concepts/invoices.md, Spend thresholds) and ADR-066's 2026-10-23
             amendment give each case. This line is true in all of them. */}
         {invoice.billing_reason === 'threshold' && (
           <p className="text-xs text-muted-foreground">

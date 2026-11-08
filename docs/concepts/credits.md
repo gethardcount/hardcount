@@ -83,6 +83,13 @@ A block with an `expires_at` cannot be spent after that time. Hardcount's
 billing run writes an `expiry` entry for its unspent part. A block past its
 date is never spent, even before that entry is written.
 
+One exception: a block still valid when a period ends, or one that expires
+at that moment, pays that period's invoice, even when the invoice is built
+after the block expires. It
+is retired once the period's invoice has drawn on it, and it stays in the
+ledger balance until then. No later invoice draws from it
+([ADR-071 §2](../adr/071-credit-expiry-retires-the-block.md)).
+
 ## Credit given back
 
 When a void, or a credit note on an unpaid invoice, gives back credit the
