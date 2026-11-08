@@ -358,54 +358,36 @@ func simColumns(ctx context.Context, metadata map[string]any) (simAt, clockID an
 	return sim.At.UTC(), sim.TestClockID, m
 }
 
-// LogInTx writes an audit row on the CALLER's transaction — the business
-// mutation and its audit row commit or roll back together (ADR-090 in-tx
-// emission, shared fate). This is what makes "mutation committed but audit
-// row missing" unrepresentable on covered paths; callers must propagate the
-// error (which aborts their tx), never discard it.
+// LogInTx writes an audit row on the caller's transaction, so the caller's
+// change and its audit row commit or roll back together (shared fate; see
+// ADR-090). It returns an error only when the insert fails. The caller must
+// return that error, which rolls its change back. Never discard it.
 //
-// LogInTx is TOTAL by construction (design-panel amendment A2): tenant_id is
-// taken from the transaction's own app.tenant_id GUC — it cannot disagree
-// with RLS, and a missing GUC fails loudly: NULLIF(…, ”) maps BOTH the
-// virgin-connection NULL and the pooled-connection empty string (a reverted
-// is_local set_config placeholder — the dominant case in a warm pool) onto
-// the NOT NULL constraint, so the guard does not silently depend on the
-// tenants FK. A metadata bag that cannot marshal degrades to a
-// {"marshal_error": …} payload instead of aborting a money transaction on a
-// telemetry bug; a partial clock binding is treated as absent rather than
-// polluting the partial clock index with a half-truth; the sim axis is
-// derived from ctx, never supplied by the caller (simColumns);
-// livemode is stamped by the table trigger from the same tx session. The
-// vocabulary round-trip integration test INSERTs every declared action
-// constant so a value the schema rejects cannot ship.
+// The transaction must set the app.tenant_id and app.livemode settings
+// (GUCs), or the insert fails. postgres.BeginTx sets both on a TxTenant
+// transaction. A bypass transaction must set them itself. The row's tenant
+// is that app.tenant_id value, so it always matches row-level security. A
+// table trigger sets the row's livemode from app.livemode.
 //
-// LogInTx marks the request as having produced audit evidence (ADR-090 §4,
-// amended by the uninstall PR — the ADR's "LogInTx does NOT mark the request
-// handled" rule was written for the catch-all WRITER, where suppression cost a
-// route its only row; it does not carry to a pure OBSERVER):
+// No Entry may make the insert fail (LogInTx is total by construction).
+// Otherwise a bug in audit data, such as telemetry metadata, would roll back
+// a money change. Metadata that cannot be encoded as JSON is stored as
+// {"marshal_error": ...} instead. The simulated-time columns,
+// sim_effective_at and test_clock_id (the sim axis), come from the clock
+// binding in ctx, never from the caller (simColumns). The integration test
+// TestLogInTx_TotalityAndVocabulary lists every domain.AuditAction* constant
+// and inserts each one, so an action the schema rejects fails CI.
 //
-//   - Rolled back after we return? Then the mutation failed and the handler
-//     answers non-2xx, and the detector only inspects 2xx — so a rolled-back
-//     emission can never make an uncovered mutation look covered.
-//   - A secondary emission deep inside another route's flow (the
-//     proration-fallback grant inside a change-plan request) marks that request
-//     too. That costs nothing REAL — the detector is a runtime backstop, and the
-//     thing that actually holds a route to its own emission is the route-audit
-//     registry + its arch test (internal/api/audit_routes.go), which forces every
-//     mutating route to declare explicit or exempt(reason) in review. The blind
-//     spot is bounded and named: a route that emits nothing of its own but nests
-//     someone else's emission reads as covered at runtime.
-//
-// Self-marking is also load-bearing: both public checkout
-// routes emit ONLY in-tx, and nothing else would account for them.
+// After the insert succeeds, LogInTx also marks the request as audited for
+// the mw.AuditCoverage detector.
 func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 	simAt, clockID, metadata := simColumns(ctx, e.Metadata)
 	metaJSON, err := json.Marshal(metadata)
 	if err != nil {
-		// Totality: never let an unmarshalable telemetry bag abort the
-		// business tx (a nil metaJSON would violate the JSONB NOT NULL and
-		// do exactly that). The row still lands, carrying the failure it
-		// represents.
+		// Keep LogInTx total: store the marshal error as the row's metadata,
+		// so the row is still written. A nil metaJSON would violate the NOT
+		// NULL constraint on the JSONB metadata column, fail the insert and
+		// roll back the caller's change.
 		metaJSON, _ = json.Marshal(map[string]string{"marshal_error": err.Error()})
 	}
 	if metadata == nil {
@@ -414,11 +396,14 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 
 	actorType, actorID := ResolveActor(ctx)
 
-	// created_at stays wall-clock (ADR-030); tenant_id comes from the tx
-	// GUC so the row is authoritative for the transaction it rides in.
-	// NULLIF folds the pooled-connection empty-string placeholder into
-	// NULL so the NOT NULL constraint — not the incidental tenants FK —
-	// is what rejects a GUC-less transaction.
+	// created_at is wall-clock time, even under a test clock (ADR-030). The
+	// tenant comes from the transaction's app.tenant_id setting.
+	// current_setting returns NULL on a connection that never set it. It
+	// returns an empty string on a connection where an earlier transaction
+	// set it with is_local, the usual case in a warm pool. NULLIF turns both
+	// into NULL, so the NOT NULL constraint rejects a transaction with no
+	// tenant. Without NULLIF, only the foreign key to tenants would catch the
+	// empty string.
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO audit_log (id, tenant_id, actor_type, actor_id, action,
 			resource_type, resource_id, resource_label, metadata, ip_address,
@@ -429,20 +414,25 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 		nullIfEmpty(ClientIP(ctx)), nullIfEmpty(chimw.GetReqID(ctx)),
 		simAt, clockID, time.Now().UTC())
 	if err != nil {
-		// In-tx path: returning this error ABORTS the caller's business transaction
-		// (ADR-090 shared fate), so the mutation is refused and rolls back with the
-		// row. No evidence is missing — nothing happened. That is the OPPOSITE
-		// incident from the own-tx path's lost row, and the on-call runbook needs to
-		// be able to tell them apart from the metric alone.
+		// Count this as OutcomeMutationRefused, not OutcomeRowLost. Returning
+		// this error refuses the caller's change, which rolls back with the
+		// row. Nothing committed, so no evidence is missing. Log is the
+		// opposite case: it writes after the change commits, so its failure
+		// loses the row. The on-call runbook must tell the two apart from the
+		// metric alone, so each gets its own outcome label.
 		auditWriteErrors.WithLabelValues(OutcomeMutationRefused).Inc()
 		return fmt.Errorf("audit log (in-tx): insert: %w", err)
 	}
 
-	// This request produced audit evidence. Marked only AFTER a successful
-	// INSERT: a failed emission must leave the request unaccounted-for, so the
-	// caller's tx aborts (shared fate) and — if some caller were to swallow that
-	// and still answer 2xx — the detector reports it rather than trusting a row
-	// that isn't there.
+	// Mark only after the insert succeeds. If a caller ignored a failed
+	// insert's error and still answered 2xx, the AuditCoverage detector
+	// reports the request, because no row exists. Marking before the caller
+	// commits is safe: a change that rolls back answers non-2xx, and the
+	// detector reads only 2xx answers. The public checkout routes write audit
+	// rows only through LogInTx, so nothing else marks them. One case looks
+	// covered but is not: a route that writes no row of its own but runs
+	// another flow's write, such as the proration-fallback grant inside a
+	// change-plan request. See the amendments in ADR-090, section 4.
 	markEmitted(ctx)
 	return nil
 }
