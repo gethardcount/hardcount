@@ -24,6 +24,7 @@ original text.
 - Set `HOSTED_INVOICE_BASE_URL`, `CUSTOMER_PORTAL_URL` and `PAYMENT_UPDATE_RETURN_URL`, in every environment: none has a default any more. While one is unset, the flow it serves is refused instead of sending the customer to `http://localhost:5173`. The hosted invoice page shows no Pay button, setup links answer 409 `return_address_not_set`, and the "add a payment method" email is not sent. Saved-card charges and retries are unaffected. A quick-start `.env` made earlier lacks two of them: add the `HOSTED_INVOICE_BASE_URL` and `PAYMENT_UPDATE_RETURN_URL` lines `quickstart.sh` now writes ([settings](docs/settings.md)).
 - Webhook receivers under Stripe Tax: `invoice.finalized` for a finalized draft (by an operator, or after a tax retry) no longer carries the `tax_transaction_id` that finalize records. Hardcount records it just after the event, as it already did for invoices a subscription bills. Read it with `GET /v1/invoices/{id}`.
 - API callers: an API key now manages only its own mode's Stripe connection, and `PUT /v1/settings` takes only a dashboard session. A script that connects live Stripe with a test key, or changes settings with any key, gets `403`. Use a live key for live mode, and change settings in the dashboard ([#1618](https://github.com/gethardcount/hardcount/pull/1618)).
+- `DATABASE_URL` and `APP_DATABASE_URL` are now read the way `psql` reads them. Percent-encode special characters in the user name and password, such as `@` as `%40`. An unencoded `@` in the password used to work and now stops start-up. Also, a repeated URL parameter takes its last value, a `+` is no longer read as a space, and an IPv6 host needs brackets: `@[::1]:5432`. On a Compose install, keep `POSTGRES_PASSWORD` to letters and digits: it goes into the URL as written ([settings](docs/settings.md#database)).
 
 ### Changed
 
@@ -43,6 +44,7 @@ original text.
 ### Security
 
 - **An API key can change only its own mode's Stripe connection.** `/v1/settings/stripe` answers `403` when a key names the other mode, and a key lists only its own. A dashboard session follows the mode it is in. Account settings, which both modes share, now change only from the dashboard ([authentication](docs/api/authentication.md), [#1618](https://github.com/gethardcount/hardcount/pull/1618)).
+- **The Postgres driver pgx is v5.12.0.** It fixes GHSA-95fj-3fxw-g62g (high). With `channel_binding=require` in a database URL and no certificate check (`sslmode=require`, as in Neon's default URLs), Hardcount connected to a server that skipped authentication. Whoever answered could read every query and return made-up results. Now that connection is refused. It also fixes GHSA-j38q-h3ph-jjpq, which Hardcount does not reach: it sends no query batches. ([#PR](https://github.com/gethardcount/hardcount/pull/PR))
 - **`golang.org/x/net` is v0.62.0.** It fixes CVE-2026-78661, a denial of service in its HTML parser. Hardcount never calls that parser, so it was not exposed, but image scanners flag the old version. ([#1614](https://github.com/gethardcount/hardcount/pull/1614))
 
 ## [0.9.2] - 2026-11-02
