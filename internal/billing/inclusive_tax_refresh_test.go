@@ -220,9 +220,9 @@ func TestRetryTax_TaxInclusiveDraft_TaxesTheGross(t *testing.T) {
 			// The zero rate is 5% by the refresh. Both are taxed at their
 			// price, and both store their new net.
 			name: "engine draft, a zero-rated line taxed at the refresh", inclusive: true,
-			setup: func(f *stripeTaxFake) { f.SetCodeRate(zeroRatedCode, 0) },
-			build: engineDraft(cycle, grossLine("li_base", linePrice), codedLine("li_usage", 6000, zeroRatedCode)),
-			change: func(f *stripeTaxFake) { f.SetCodeRate(zeroRatedCode, 500) },
+			setup:       func(f *stripeTaxFake) { f.SetCodeRate(zeroRatedCode, 0) },
+			build:       engineDraft(cycle, grossLine("li_base", linePrice), codedLine("li_usage", 6000, zeroRatedCode)),
+			change:      func(f *stripeTaxFake) { f.SetCodeRate(zeroRatedCode, 500) },
 			wantRequest: []int64{linePrice, 6000}, wantStatus: domain.InvoiceTaxOK,
 			wantSubtotal: 15714, wantTax: 2286, wantTotal: 18000,
 			wantLines: []lineWant{{10000, 2000, linePrice}, {5714, 286, 6000}},

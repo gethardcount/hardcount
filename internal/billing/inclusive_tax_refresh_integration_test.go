@@ -30,7 +30,10 @@ import (
 // included calls at no charge. June had 6000 calls and 50 included calls, so
 // the draft charges $180.00 in three lines: the July base fee ($100.00 net
 // + $20.00 VAT), the calls ($50.00 + $10.00) and the included calls ($0).
-// The lines are stored at their net.
+// The lines are stored at their net. The fake serves no tax transactions,
+// so the close cannot record the calculation in Stripe's tax reports, as
+// when Stripe fails at that moment. (A draft whose calculation is recorded
+// finalizes without a refresh.)
 //
 // A day later the Stripe Tax calculation has expired, finalize refuses it,
 // and the operator clicks Retry tax to refresh it. The refresh must tax the
