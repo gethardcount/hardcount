@@ -22,8 +22,8 @@ var errInjectedAuditEmit = errors.New("injected audit emission failure")
 
 // seedVoidableInvoice creates a customer + FINALIZED invoice — the prior
 // status the void's audit row must record. Column set mirrors
-// postgres_void_reversal_rollback_integration_test.go's seed path (no
-// subscription needed: the store-level flip doesn't read one).
+// seedDraftInvoice (postgres_add_line_item_test.go), without the subscription:
+// the store-level flip doesn't read one.
 func seedVoidableInvoice(t *testing.T, db *postgres.DB, tenantID, suffix string) domain.Invoice {
 	t.Helper()
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -37,7 +37,7 @@ func seedVoidableInvoice(t *testing.T, db *postgres.DB, tenantID, suffix string)
 
 	now := time.Now().UTC()
 	issued := now
-	inv, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID:         cust.ID,
 		InvoiceNumber:      "INV-PRIOR-" + suffix,
 		Status:             domain.InvoiceFinalized,
@@ -49,7 +49,7 @@ func seedVoidableInvoice(t *testing.T, db *postgres.DB, tenantID, suffix string)
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour),
 		BillingPeriodEnd:   now,
 		IssuedAt:           &issued,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

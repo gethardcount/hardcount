@@ -36,7 +36,7 @@ func TestListPendingClawbackDrafts_DefersInFlightSource(t *testing.T) {
 	invStore := invoice.NewPostgresStore(db)
 	now := time.Now().UTC()
 	issued := now
-	inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+	inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID:         cust.ID,
 		InvoiceNumber:      "INV-DEFER-1",
 		Status:             domain.InvoiceFinalized,
@@ -48,7 +48,7 @@ func TestListPendingClawbackDrafts_DefersInFlightSource(t *testing.T) {
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour),
 		BillingPeriodEnd:   now,
 		IssuedAt:           &issued,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestListPendingClawbackDrafts_ParkedWrittenOffSourceWaitsThenIssues(t *test
 	invStore := invoice.NewPostgresStore(db)
 	now := time.Now().UTC()
 	issued := now
-	inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+	inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID:            cust.ID,
 		InvoiceNumber:         "INV-PARKED-1",
 		Status:                domain.InvoiceFinalized,
@@ -145,7 +145,7 @@ func TestListPendingClawbackDrafts_ParkedWrittenOffSourceWaitsThenIssues(t *test
 		BillingPeriodStart:    now.Add(-30 * 24 * time.Hour),
 		BillingPeriodEnd:      now,
 		IssuedAt:              &issued,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create parked invoice: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestListPendingClawbackDrafts_ParkedWrittenOffSourceWaitsThenIssues(t *test
 	// 2. Written off, still parked: the draft still waits. The write-off leaves
 	//    payment_status 'unknown' (it does not answer whether the card was
 	//    charged), and a written-off invoice can still be paid.
-	if _, err := invStore.UpdateStatus(ctx, tenantID, inv.ID, domain.InvoiceUncollectible); err != nil {
+	if _, err := invStore.UpdateStatusWithReversalPrior(ctx, tenantID, inv.ID, domain.InvoiceUncollectible, nil); err != nil {
 		t.Fatalf("write off parked invoice: %v", err)
 	}
 	if after, err := invStore.Get(ctx, tenantID, inv.ID); err != nil || after.PaymentStatus != domain.PaymentUnknown {
@@ -256,16 +256,16 @@ func TestListPendingClawbackDrafts_ParkedWrittenOffSource_CardSucceeded_CreditsT
 	}
 	invStore := invoice.NewPostgresStore(db)
 	now := time.Now().UTC()
-	inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+	inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-PARKED-PAID-1",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentUnknown,
 		Currency: "USD", SubtotalCents: 10000, TotalAmountCents: 10000, AmountDueCents: 10000,
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create parked invoice: %v", err)
 	}
-	if _, err := invStore.UpdateStatus(ctx, tenantID, inv.ID, domain.InvoiceUncollectible); err != nil {
+	if _, err := invStore.UpdateStatusWithReversalPrior(ctx, tenantID, inv.ID, domain.InvoiceUncollectible, nil); err != nil {
 		t.Fatalf("write off parked invoice: %v", err)
 	}
 	cnStore := creditnote.NewPostgresStore(db)

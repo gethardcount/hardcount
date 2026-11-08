@@ -106,12 +106,12 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 			// The card was declined at t0. A period invoice, as almost every
 			// invoice in dunning is, so its retries test grant expiry at its
 			// issued_at (t0).
-			inv, err := r.invoices.Create(r.ctx, r.tenantID, domain.Invoice{
+			inv, err := r.invoices.CreateWithLineItems(r.ctx, r.tenantID, domain.Invoice{
 				CustomerID: cust.ID, InvoiceNumber: "INV-TC-GOODWILL",
 				Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, BillingReason: domain.BillingReasonSubscriptionCycle,
 				Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 				IssuedAt: &t0,
-			})
+			}, nil)
 			if err != nil {
 				t.Fatalf("create invoice: %v", err)
 			}

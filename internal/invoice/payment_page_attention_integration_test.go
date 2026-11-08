@@ -92,12 +92,12 @@ func TestGet_SimulatedFailureBannerDatesFromTheCharge_RealStore(t *testing.T) {
 	declined := time.Date(2028, 2, 10, 9, 0, 0, 0, time.UTC)
 	retried := time.Date(2028, 2, 13, 9, 0, 0, 0, time.UTC)
 	store := invoice.NewPostgresStore(db)
-	inv, err := store.Create(ctx, tenantID, domain.Invoice{
+	inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-SIM-SINCE",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
 		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		IssuedAt: &issued, IsSimulated: true,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

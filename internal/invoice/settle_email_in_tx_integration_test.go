@@ -30,12 +30,12 @@ func settleFixture(t *testing.T, db *postgres.DB, ctx context.Context, name stri
 	}
 	store = invoice.NewPostgresStore(db)
 	now := time.Now().UTC()
-	inv, err := store.Create(ctx, tenantID, domain.Invoice{
+	inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-" + name, Status: domain.InvoiceFinalized,
 		PaymentStatus: domain.PaymentPending, Currency: "USD", SubtotalCents: 5000,
 		TotalAmountCents: 5000, AmountDueCents: 5000, BillingPeriodStart: now.Add(-time.Hour),
 		BillingPeriodEnd: now, IssuedAt: &now,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

@@ -31,13 +31,13 @@ func TestCommitRelief_RetireCarriesTheGrantCurrency(t *testing.T) {
 		t.Fatalf("finalize: %v", err)
 	}
 	payOffline(t, h, ctx, inv.ID)
-	target, err := invoice.NewPostgresStore(h.db).Create(ctx, h.tenantID, domain.Invoice{
+	target, err := invoice.NewPostgresStore(h.db).CreateWithLineItems(ctx, h.tenantID, domain.Invoice{
 		CustomerID: h.custID, InvoiceNumber: "HC-RELIEF-EUR-DRAIN",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "EUR", SubtotalCents: 4000, TotalAmountCents: 4000, AmountDueCents: 4000,
 		BillingPeriodStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
 		BillingPeriodEnd:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed EUR drain target: %v", err)
 	}

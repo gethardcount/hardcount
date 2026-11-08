@@ -33,12 +33,12 @@ func TestList_SortByAmountOrdersByTheFigureShown(t *testing.T) {
 	now := time.Now().UTC()
 	mk := func(number string, status domain.InvoiceStatus, total, due, paid, credits int64) {
 		t.Helper()
-		if _, err := store.Create(ctx, tenantID, domain.Invoice{
+		if _, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: number, Status: status, PaymentStatus: domain.PaymentPending,
 			Currency: "USD", SubtotalCents: total, TotalAmountCents: total, AmountDueCents: due,
 			AmountPaidCents: paid, CreditsAppliedCents: credits,
 			BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-		}); err != nil {
+		}, nil); err != nil {
 			t.Fatalf("create %s: %v", number, err)
 		}
 	}

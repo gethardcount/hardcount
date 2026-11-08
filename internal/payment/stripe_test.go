@@ -154,16 +154,6 @@ func (m *mockInvoiceUpdater) StampBelowMinimum(_ context.Context, _, id string, 
 	return inv, true, nil
 }
 
-func (m *mockInvoiceUpdater) UpdateStatus(_ context.Context, _, id string, status domain.InvoiceStatus) (domain.Invoice, error) {
-	inv, ok := m.invoices[id]
-	if !ok {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	inv.Status = status
-	m.invoices[id] = inv
-	return inv, nil
-}
-
 func (m *mockInvoiceUpdater) GetByStripePaymentIntentID(_ context.Context, _, piID string) (domain.Invoice, error) {
 	id, ok := m.byPI[piID]
 	if !ok {

@@ -273,9 +273,8 @@ func TestIssuedInvoice_ReverseChargeLegendUsesSnapshot(t *testing.T) {
 // edits, then renders: a writer that skipped the stamp prints eraAfter.
 //
 // Go path → SQL site:
-//   - cycle close, threshold, BillOnCreate (non-tx): CreateWithLineItems(Audited) → createWithLineItemsInTx
+//   - cycle close, threshold, BillOnCreate (non-tx), operator create: CreateWithLineItems(Audited) → createWithLineItemsInTx
 //   - final-on-cancel, day-1 in the create tx, proration/swap: CreateWithLineItemsTx → createWithLineItemsInTx
-//   - operator Create: CreateAudited
 //   - engine draft finalize (paused/tax-deferred cycle draft): Service.Finalize → updateStatusInTx
 //   - operator-composed finalize: Service.Finalize → FinalizeWithDates
 //   - tax-retry auto-finalize and the profile-save flush: RetryTax / RetryCustomerDataErrors → updateStatusInTx
@@ -308,14 +307,7 @@ func TestIssuedInvoice_EveryFinalizeWriterStamps(t *testing.T) {
 			}
 			return id
 		}},
-		{"born finalized: Create (CreateAudited)", func(t *testing.T, r *snapRig) string {
-			inv, err := r.store.Create(r.ctx, r.tenantID, r.protoInvoice("SNAP-W-4", domain.InvoiceFinalized, domain.BillingReasonManual))
-			if err != nil {
-				t.Fatalf("create: %v", err)
-			}
-			return inv.ID
-		}},
-		{"engine draft: Service.Finalize → UpdateStatus", func(t *testing.T, r *snapRig) string {
+		{"engine draft: Service.Finalize → FinalizeDraft", func(t *testing.T, r *snapRig) string {
 			d, err := r.store.CreateWithLineItems(r.ctx, r.tenantID, r.protoInvoice("SNAP-W-5", domain.InvoiceDraft, domain.BillingReasonSubscriptionCycle), nil)
 			if err != nil {
 				t.Fatalf("create draft: %v", err)
@@ -499,10 +491,10 @@ func TestIssuedInvoice_LaterTransitionsKeepIssueCopy(t *testing.T) {
 		move func(t *testing.T, r *snapRig, id string) (domain.Invoice, error)
 	}{
 		{"void", func(t *testing.T, r *snapRig, id string) (domain.Invoice, error) {
-			return r.store.UpdateStatus(r.ctx, r.tenantID, id, domain.InvoiceVoided)
+			return r.store.UpdateStatusWithReversalPrior(r.ctx, r.tenantID, id, domain.InvoiceVoided, nil)
 		}},
 		{"mark uncollectible", func(t *testing.T, r *snapRig, id string) (domain.Invoice, error) {
-			return r.store.UpdateStatus(r.ctx, r.tenantID, id, domain.InvoiceUncollectible)
+			return r.store.UpdateStatusWithReversalPrior(r.ctx, r.tenantID, id, domain.InvoiceUncollectible, nil)
 		}},
 		{"mark paid", func(t *testing.T, r *snapRig, id string) (domain.Invoice, error) {
 			return r.store.MarkPaid(r.ctx, r.tenantID, id, "", time.Now().UTC())

@@ -100,7 +100,7 @@ func expireAll(t *testing.T, ctx context.Context, svc *credit.Service) {
 func seedPeriodInvoice(t *testing.T, ctx context.Context, store *invoice.PostgresStore, tenantID, customerID, subID string, reason domain.InvoiceBillingReason, status domain.InvoiceStatus, taxStatus domain.InvoiceTaxStatus, issued time.Time) domain.Invoice {
 	t.Helper()
 	due := issued.Add(7 * 24 * time.Hour)
-	inv, err := store.Create(ctx, tenantID, domain.Invoice{
+	inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		InvoiceNumber:      fmt.Sprintf("HOLD-%d", invoiceSeq.Add(1)),
 		CustomerID:         customerID,
 		SubscriptionID:     subID,
@@ -117,7 +117,7 @@ func seedPeriodInvoice(t *testing.T, ctx context.Context, store *invoice.Postgre
 		CreatedAt:          issued,
 		BillingReason:      reason,
 		TaxFacts:           domain.TaxFacts{TaxStatus: taxStatus},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create %s invoice: %v", reason, err)
 	}
@@ -226,7 +226,7 @@ func TestExpireCredits_HoldsAGrantWhileAPeriodInvoiceIsUncollected(t *testing.T)
 	// Tax resolves and the draft is finalized: it is now queued for
 	// collection, and still holds the grant.
 	bypassExec(t, db, ctx, `UPDATE invoices SET tax_status = 'ok', tax_error_code = NULL, tax_pending_reason = '' WHERE id = $1`, draft.ID)
-	fin, err := invoiceStore.UpdateStatus(ctx, tenantID, draft.ID, domain.InvoiceFinalized)
+	fin, err := invoiceStore.UpdateStatusWithReversalPrior(ctx, tenantID, draft.ID, domain.InvoiceFinalized, nil)
 	if err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
@@ -411,7 +411,7 @@ func TestExpireCredits_HoldsAGrantExpiringAtAPeriodInvoiceIssue(t *testing.T) {
 	}
 
 	bypassExec(t, db, ctx, `UPDATE invoices SET tax_status = 'ok', tax_error_code = NULL, tax_pending_reason = '' WHERE id = $1`, draft.ID)
-	fin, err := invoiceStore.UpdateStatus(ctx, tenantID, draft.ID, domain.InvoiceFinalized)
+	fin, err := invoiceStore.UpdateStatusWithReversalPrior(ctx, tenantID, draft.ID, domain.InvoiceFinalized, nil)
 	if err != nil || !fin.AutoChargePending {
 		t.Fatalf("finalize: queued=%v err=%v, want queued", fin.AutoChargePending, err)
 	}

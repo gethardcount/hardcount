@@ -992,7 +992,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 
 	// Bare-header create — caller adds line items incrementally afterwards.
 	if len(input.LineItems) == 0 {
-		return s.store.CreateAudited(ctx, tenantID, inv, s.createEmission(ctx, 0))
+		return s.store.CreateWithLineItemsAudited(ctx, tenantID, inv, nil, s.createEmission(ctx, 0))
 	}
 
 	// Atomic create-with-lines: header + items persist in one transaction
@@ -1141,11 +1141,6 @@ func (s *Service) ReleaseChargeClaim(ctx context.Context, tenantID, id string, h
 // a refused claim; it is never a gate.
 func (s *Service) ChargeHoldState(ctx context.Context, tenantID, id string) (domain.ChargeHoldState, error) {
 	return s.store.ChargeHoldStateOf(ctx, tenantID, id)
-}
-
-// SetNoPMNotifiedAt stamps the send-once no-PM email marker (see Store).
-func (s *Service) SetNoPMNotifiedAt(ctx context.Context, tenantID, id string, at time.Time) error {
-	return s.store.SetNoPMNotifiedAt(ctx, tenantID, id, at)
 }
 
 // attachAttention computes the unified Attention surface from durable

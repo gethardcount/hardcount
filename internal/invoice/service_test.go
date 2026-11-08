@@ -42,24 +42,6 @@ func (m *memStore) Create(_ context.Context, tenantID string, inv domain.Invoice
 	return inv, nil
 }
 
-// CreateAudited mirrors the store contract (ADR-090): emit runs after the row
-// exists and before "commit"; an emit error rolls the write back and surfaces.
-// The fake has no tx, so the closure gets a nil *sql.Tx — enough to prove the
-// service passes an emission and propagates its error.
-func (m *memStore) CreateAudited(ctx context.Context, tenantID string, inv domain.Invoice, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error) {
-	out, err := m.Create(ctx, tenantID, inv)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	if emit != nil {
-		if err := emit(nil, out); err != nil {
-			delete(m.invoices, out.ID) // shared fate: roll the write back
-			return domain.Invoice{}, fmt.Errorf("audit emission: %w", err)
-		}
-	}
-	return out, nil
-}
-
 func (m *memStore) Get(_ context.Context, tenantID, id string) (domain.Invoice, error) {
 	inv, ok := m.invoices[id]
 	if !ok || inv.TenantID != tenantID {
@@ -341,16 +323,6 @@ func (m *memStore) MarkPaymentFailedReportingTransition(_ context.Context, tenan
 	m.invoices[id] = inv
 	m.failNotedPI[id] = piID
 	return inv, domain.PaymentFailureResult{Recorded: true, FirstNotice: first}, nil
-}
-
-func (m *memStore) SetNoPMNotifiedAt(_ context.Context, tenantID, id string, at time.Time) error {
-	inv, ok := m.invoices[id]
-	if !ok || inv.TenantID != tenantID {
-		return errs.ErrNotFound
-	}
-	inv.NoPMNotifiedAt = &at
-	m.invoices[id] = inv
-	return nil
 }
 
 func (m *memStore) MarkPaid(_ context.Context, tenantID, id, stripeID string, paidAt time.Time) (domain.Invoice, error) {
@@ -702,6 +674,10 @@ func (m *memStore) CreateWithLineItems(_ context.Context, tenantID string, inv d
 	return inv, nil
 }
 
+// CreateWithLineItemsAudited mirrors the store contract (ADR-090): emit runs
+// after the rows exist and before "commit"; an emit error rolls the write back
+// and surfaces. The fake has no tx, so the closure gets a nil *sql.Tx — enough
+// to prove the service passes an emission and propagates its error.
 func (m *memStore) CreateWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error) {
 	out, err := m.CreateWithLineItems(ctx, tenantID, inv, items)
 	if err != nil {

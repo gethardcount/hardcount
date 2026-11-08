@@ -97,13 +97,13 @@ func (h *commitHarness) newCustomer(t *testing.T, ctx context.Context, round int
 // seedPayable inserts a finalized non-commit invoice as a drain target.
 func (h *commitHarness) seedPayable(t *testing.T, ctx context.Context, custID string, dueCents int64, round int) string {
 	t.Helper()
-	inv, err := invoice.NewPostgresStore(h.db).Create(ctx, h.tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(h.db).CreateWithLineItems(ctx, h.tenantID, domain.Invoice{
 		CustomerID: custID, InvoiceNumber: fmt.Sprintf("HC-CONC-%d", round),
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", SubtotalCents: dueCents, TotalAmountCents: dueCents, AmountDueCents: dueCents,
 		BillingPeriodStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
 		BillingPeriodEnd:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed payable: %v", err)
 	}
@@ -285,13 +285,13 @@ func TestCommitVoid_RetiresRemaining(t *testing.T) {
 	}
 
 	// Customer draws $40 against a normal invoice before the commit is paid.
-	target, err := invoice.NewPostgresStore(h.db).Create(ctx, h.tenantID, domain.Invoice{
+	target, err := invoice.NewPostgresStore(h.db).CreateWithLineItems(ctx, h.tenantID, domain.Invoice{
 		CustomerID: h.custID, InvoiceNumber: "HC-VOIDRETIRE-DRAW",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", SubtotalCents: 4000, TotalAmountCents: 4000, AmountDueCents: 4000,
 		BillingPeriodStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
 		BillingPeriodEnd:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed drawdown invoice: %v", err)
 	}

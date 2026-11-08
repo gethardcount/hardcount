@@ -85,7 +85,7 @@ func TestChokePointCloses(t *testing.T) {
 		store := invoice.NewPostgresStore(db)
 		invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 		claimID := seedOpenClaim(t, db, ctx, tenantID, invID)
-		if _, err := store.UpdateStatus(ctx, tenantID, invID, domain.InvoiceVoided); err != nil {
+		if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, invID, domain.InvoiceVoided, nil); err != nil {
 			t.Fatalf("void: %v", err)
 		}
 		if got := claimStatus(t, db, ctx, tenantID, claimID); got != "invoice_settled" {

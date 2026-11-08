@@ -28,7 +28,7 @@ func TestUpdateTaxAtomic_RejectsNonDraft(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "UpdateTax NonDraft")
 	invID := seedDraftInvoice(t, db, tenantID)
 
-	if _, err := store.UpdateStatus(ctx, tenantID, invID, domain.InvoiceFinalized); err != nil {
+	if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, invID, domain.InvoiceFinalized, nil); err != nil {
 		t.Fatalf("finalize invoice: %v", err)
 	}
 

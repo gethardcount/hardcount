@@ -9,10 +9,9 @@ import (
 )
 
 type Store interface {
-	Create(ctx context.Context, tenantID string, inv domain.Invoice) (domain.Invoice, error)
 	CreateWithLineItems(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error)
-	// CreateAudited / CreateWithLineItemsAudited / AddLineItemAtomicAudited run
-	// the caller-supplied audit emission on the SAME transaction as the write
+	// CreateWithLineItemsAudited / AddLineItemAtomicAudited run the
+	// caller-supplied audit emission on the SAME transaction as the write
 	// (ADR-090 in-tx emission): the invoice mutation and its audit row commit
 	// or roll back together. The service builds the emission closure (it owns
 	// audit-row content — the manual-create / line-item-added intent); the
@@ -20,13 +19,11 @@ type Store interface {
 	// the PERSISTED row(s) so the audit row can reference the store-assigned
 	// id, invoice number, and recomputed totals. nil emit = unaudited write —
 	// what the engine's cycle/threshold paths pass, since their canonical
-	// evidence is the finalize row.
-	CreateAudited(ctx context.Context, tenantID string, inv domain.Invoice, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error)
+	// evidence is the finalize row. A bare-header create passes no items.
 	CreateWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error)
 	Get(ctx context.Context, tenantID, id string) (domain.Invoice, error)
 	GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.Invoice, error)
 	List(ctx context.Context, filter ListFilter) ([]domain.Invoice, int, error)
-	UpdateStatus(ctx context.Context, tenantID, id string, status domain.InvoiceStatus) (domain.Invoice, error)
 	// UpdateStatusWithReversalPrior flips the status AND runs fn on the SAME
 	// tx — either both commit or neither, so a void never strands the
 	// customer's applied credits unrestored (Void runs the consumed-credit
@@ -84,10 +81,6 @@ type Store interface {
 	ChargeHoldStateOf(ctx context.Context, tenantID, id string) (domain.ChargeHoldState, error)
 
 	SetAutoChargePending(ctx context.Context, tenantID, id string, pending bool) error
-	// SetNoPMNotifiedAt stamps the send-once marker for the no-PM setup-link
-	// email (checked by the auto-charge sweep; stamped by whichever sender
-	// delivered the email).
-	SetNoPMNotifiedAt(ctx context.Context, tenantID, invoiceID string, at time.Time) error
 	// ClaimAutoCharge / ReleaseChargeHold: the per-invoice charge hold
 	// (HA hazard #1, ADR-127) — exactly one owner enters the charge leg per
 	// invoice. A claim returns its token (the zero ChargeHold = refused);
@@ -111,10 +104,10 @@ type Store interface {
 	// clients append lines concurrently. Returns the inserted line item and
 	// the updated invoice.
 	//
-	// emit is the in-tx audit emission (see CreateAudited). It receives the
-	// persisted line item and the rewritten invoice — the invoice number it
-	// labels the row with is therefore read INSIDE the tx, under the same row
-	// lock as the mutation.
+	// emit is the in-tx audit emission (see CreateWithLineItemsAudited). It
+	// receives the persisted line item and the rewritten invoice — the invoice
+	// number it labels the row with is therefore read INSIDE the tx, under the
+	// same row lock as the mutation.
 	AddLineItemAtomicAudited(ctx context.Context, tenantID, invoiceID string, item domain.InvoiceLineItem, emit func(tx *sql.Tx, item domain.InvoiceLineItem, inv domain.Invoice) error) (domain.InvoiceLineItem, domain.Invoice, error)
 
 	// UpdateTaxAtomic re-stamps an invoice's tax decision after a manual

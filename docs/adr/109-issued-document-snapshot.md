@@ -258,7 +258,8 @@ re-read live data, the exact failure this ADR exists to stop:
 - *twin-INSERT drift.* `postgres.go:309 CreateAudited` is a second
   hand-maintained INSERT with its own column list, already missing the
   public-token mint. Draft-only today, so it looks safe — until
-  something is born final through it.
+  something is born final through it. (Closed 2026-11-08: `CreateAudited`
+  is deleted, and operator create uses `createWithLineItemsInTx`.)
 
 **Already shipped and worth fixing in the same PR:** `invoice/pdf.go`
 prints the buyer's VAT **twice from two eras** — live `billTo.TaxID`
@@ -414,7 +415,7 @@ change; its callers re-read the row.
 | SQL site | Go paths that reach it | Stamps |
 |---|---|---|
 | `invoice/postgres.go` `createWithLineItemsInTx` | cycle close, day-1 / trial-end / activation (BillOnCreate), final invoice on cancel, usage threshold, proration and plan swap, operator create-with-lines | yes, when status is not `draft` |
-| `invoice/postgres.go` `CreateAudited` | operator create (always draft today) | yes, when status is not `draft` |
+| `invoice/postgres.go` `CreateAudited` (deleted 2026-11-08; operator create now uses `createWithLineItemsInTx`) | operator create (always draft today) | yes, when status is not `draft` |
 | `invoice/postgres.go` `updateStatusInTx` (target `finalized`) | `Service.Finalize` for engine drafts, tax-retry auto-finalize (scheduler, test clock, operator retry, `RetryCustomerDataErrors`, `RetryProviderConfigErrors`) | yes |
 | `invoice/postgres.go` `FinalizeWithDates` | `Service.Finalize` for operator-composed invoices | yes |
 | `creditnote/postgres.go` `TransitionStatusTx` (target `issued`) | `Service.Issue`, commit relief, every auto-issue | yes |

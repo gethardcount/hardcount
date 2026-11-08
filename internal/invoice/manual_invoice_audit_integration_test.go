@@ -237,14 +237,14 @@ func TestInvoiceAddLineItem_AuditsAndSharesFate(t *testing.T) {
 	seedDraft := func(t *testing.T, tenantID, suffix string) domain.Invoice {
 		t.Helper()
 		cust := seedAuditCustomer(t, db, tenantID, suffix)
-		inv, err := store.Create(ctx, tenantID, domain.Invoice{
+		inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID:    cust.ID,
 			InvoiceNumber: "INV-ADD-" + suffix,
 			Status:        domain.InvoiceDraft,
 			PaymentStatus: domain.PaymentPending,
 			Currency:      "USD",
 			BillingReason: domain.BillingReasonManual,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("seed draft invoice: %v", err)
 		}
@@ -340,7 +340,7 @@ func TestInvoiceAddLineItem_AuditsAndSharesFate(t *testing.T) {
 	t.Run("rejected add (non-draft invoice) emits nothing", func(t *testing.T) {
 		tenantID := testutil.CreateTestTenant(t, db, "Invoice AddLine Rejected")
 		inv := seedDraft(t, tenantID, "rejected")
-		if _, err := store.UpdateStatus(ctx, tenantID, inv.ID, domain.InvoiceFinalized); err != nil {
+		if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, inv.ID, domain.InvoiceFinalized, nil); err != nil {
 			t.Fatalf("finalize seed invoice: %v", err)
 		}
 		svc := newAuditedInvoiceService(t, db, logger, "INV-UNUSED")
