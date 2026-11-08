@@ -358,27 +358,36 @@ func simColumns(ctx context.Context, metadata map[string]any) (simAt, clockID an
 	return sim.At.UTC(), sim.TestClockID, m
 }
 
-// LogInTx writes an audit row on the caller's transaction, so the change and
-// its audit row commit or roll back together (ADR-090). The caller must return
-// the error, which rolls the change back. Never discard it.
+// LogInTx writes an audit row on the caller's transaction, so the caller's
+// change and its audit row commit or roll back together (shared fate; see
+// ADR-090). It returns an error only when the insert fails. The caller must
+// return that error, which rolls its change back. Never discard it.
 //
-// The row's tenant is the transaction's own app.tenant_id setting, so it always
-// matches row-level security, and a transaction without one fails. Metadata
-// that cannot be encoded is stored as {"marshal_error": ...} instead of failing
-// the caller's transaction. The test-clock columns come from ctx (simColumns),
-// and a table trigger sets livemode. TestLogInTx_TotalityAndVocabulary inserts
-// every declared action, so an action the schema rejects fails CI.
+// The transaction must set the app.tenant_id and app.livemode settings
+// (GUCs), or the insert fails. postgres.BeginTx sets both on a TxTenant
+// transaction. A bypass transaction must set them itself. The row's tenant
+// is that app.tenant_id value, so it always matches row-level security. A
+// table trigger sets the row's livemode from app.livemode.
 //
-// After the insert succeeds, it marks the request as audited for the
-// audit-coverage check. The public checkout routes write their audit rows only
-// here, so they rely on this mark. ADR-090, section 4, explains why marking
-// here is safe and names the one case it misses.
+// No Entry may make the insert fail (LogInTx is total by construction).
+// Otherwise a bug in audit data, such as telemetry metadata, would roll back
+// a money change. Metadata that cannot be encoded as JSON is stored as
+// {"marshal_error": ...} instead. The simulated-time columns,
+// sim_effective_at and test_clock_id (the sim axis), come from the clock
+// binding in ctx, never from the caller (simColumns). The integration test
+// TestLogInTx_TotalityAndVocabulary lists every domain.AuditAction* constant
+// and inserts each one, so an action the schema rejects fails CI.
+//
+// After the insert succeeds, LogInTx also marks the request as audited for
+// the mw.AuditCoverage detector.
 func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 	simAt, clockID, metadata := simColumns(ctx, e.Metadata)
 	metaJSON, err := json.Marshal(metadata)
 	if err != nil {
-		// Record the error instead of failing. A nil metaJSON would break the
-		// NOT NULL metadata column and roll back the caller's change.
+		// Keep LogInTx total: store the marshal error as the row's metadata,
+		// so the row is still written. A nil metaJSON would violate the NOT
+		// NULL constraint on the JSONB metadata column, fail the insert and
+		// roll back the caller's change.
 		metaJSON, _ = json.Marshal(map[string]string{"marshal_error": err.Error()})
 	}
 	if metadata == nil {
@@ -387,11 +396,14 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 
 	actorType, actorID := ResolveActor(ctx)
 
-	// created_at is wall-clock time (ADR-030). The tenant comes from the
-	// transaction's app.tenant_id setting. A pooled connection reports an
-	// unset setting as an empty string, and a new one as NULL. NULLIF turns
-	// both into NULL, so the NOT NULL constraint rejects a transaction with no
-	// tenant, without relying on the tenants foreign key.
+	// created_at is wall-clock time, even under a test clock (ADR-030). The
+	// tenant comes from the transaction's app.tenant_id setting.
+	// current_setting returns NULL on a connection that never set it. It
+	// returns an empty string on a connection where an earlier transaction
+	// set it with is_local, the usual case in a warm pool. NULLIF turns both
+	// into NULL, so the NOT NULL constraint rejects a transaction with no
+	// tenant. Without NULLIF, only the foreign key to tenants would catch the
+	// empty string.
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO audit_log (id, tenant_id, actor_type, actor_id, action,
 			resource_type, resource_id, resource_label, metadata, ip_address,
@@ -402,16 +414,25 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 		nullIfEmpty(ClientIP(ctx)), nullIfEmpty(chimw.GetReqID(ctx)),
 		simAt, clockID, time.Now().UTC())
 	if err != nil {
-		// This error rolls back the caller's change along with the row, so no
-		// evidence is missing. A lost row on the Log path is the opposite
-		// incident, and the outcome label lets on-call tell them apart.
+		// Count this as OutcomeMutationRefused, not OutcomeRowLost. Returning
+		// this error refuses the caller's change, which rolls back with the
+		// row. Nothing committed, so no evidence is missing. Log is the
+		// opposite case: it writes after the change commits, so its failure
+		// loses the row. The on-call runbook must tell the two apart from the
+		// metric alone, so each gets its own outcome label.
 		auditWriteErrors.WithLabelValues(OutcomeMutationRefused).Inc()
 		return fmt.Errorf("audit log (in-tx): insert: %w", err)
 	}
 
-	// Mark only after the insert succeeds. If a caller swallowed a failed
-	// insert and still answered 2xx, the coverage check then reports the
-	// request instead of trusting a row that does not exist.
+	// Mark only after the insert succeeds. If a caller ignored a failed
+	// insert's error and still answered 2xx, the AuditCoverage detector
+	// reports the request, because no row exists. Marking before the caller
+	// commits is safe: a change that rolls back answers non-2xx, and the
+	// detector reads only 2xx answers. The public checkout routes write audit
+	// rows only through LogInTx, so nothing else marks them. One case looks
+	// covered but is not: a route that writes no row of its own but runs
+	// another flow's write, such as the proration-fallback grant inside a
+	// change-plan request. See the amendments in ADR-090, section 4.
 	markEmitted(ctx)
 	return nil
 }
