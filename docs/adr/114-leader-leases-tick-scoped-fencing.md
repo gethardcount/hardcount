@@ -5,6 +5,7 @@
 **Amended:** 2026-08-30 — migration 0175 adds `not_before` (cooldown after a lost tick) so `last_tick_*` means completed ticks only (sweep S5)
 **Amended:** 2026-10-08 (a panicked tick is released as not completed).
 **Amended:** 2026-10-19 (a panic stops one step, not the tick; a panicked tick waits one full interval).
+**Amended:** 2026-11-05 (`invoice.finalized` is queued in the transaction that inserts the invoice).
 **Partly superseded:** by [ADR-115](115-one-closer-for-the-billing-period.md) on 2026-08-30 (the billing-period watermark compare-and-swap).
 **Amends:** ADR-006 (background scheduler; the leader gate it assumed), ADR-072 (transport lease model — unchanged, now composed with a leader fence), ADR-073 (boot contract — `VerifyAdvisoryLockTopology` retired)
 **Plan of record:** [docs/dev/records/ha-readiness-2026-07-06.md](../dev/records/ha-readiness-2026-07-06.md) (2026-08-30 header) · velox-ops `ha-program-2026-08-30.md`
@@ -400,3 +401,15 @@ Pinned by `TestScheduler_StepPanic_RestOfTheTickRuns`,
 `TestLease_PanicAfterShutdownReleasesAsInterrupted` (real Postgres), and by
 unit tests for the reconcilers, the hosted sweep, the dunning tenants, the
 errors a re-raised panic would drop, and the pre-created series.
+
+## Amendment 2026-11-05 — `invoice.finalized` is queued in the insert's transaction
+
+The effect table's `dispatchInvoiceFinalized` and the 2026-10-19
+amendment's `Engine.DispatchInvoiceFinalized` are gone. The invoice store
+queues `invoice.finalized` on the transaction that inserts an invoice born
+finalized (`createWithLineItemsInTx`): the cycle close, the threshold fire,
+the cancel's final invoice and the proration invoice alike (P1-01, ADR-040
+amendment). The guard is unchanged and now holds by construction. A closer
+whose insert fails or rolls back queues nothing, and a closer whose
+transaction commits cannot lose the event to a lost lease or a crash after
+the commit.

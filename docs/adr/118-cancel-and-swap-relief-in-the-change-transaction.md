@@ -8,6 +8,9 @@
 - 2026-10-22: one crediting rule for every change that gives prepaid time
   back, newest charging invoice first
   ([amendment](#amendment-2026-10-22-one-crediting-rule-the-invoice-that-charged-it-newest-first)).
+- 2026-11-05: a relief void's `invoice.voided` commits with the cancel or
+  plan swap
+  ([amendment](#amendment-2026-11-05-the-void-event-commits-with-the-change)).
 
 ## Summary
 
@@ -458,3 +461,18 @@ $35.81 due after Finalize, the note issued, the balance untouched);
 `internal/invoice` `TestFinalizeDraft_HookFailureRollsTheFlipBack`;
 `internal/creditnote/held_relief_test.go` (each note comes off what is due, a
 lost CAS is not applied, issuing stops once the invoice is paid).
+
+## Amendment 2026-11-05: the void event commits with the change
+
+`invoice.voided` is no longer one of a void's post-commit legs. The invoice
+store queues it in the void's transaction (P1-01, ADR-040 amendment), so a
+relief void's event commits with the cancel or plan swap, or rolls back
+with it. `AfterVoid`, which `FinishRelief` runs after the commit, now has
+three legs: stop collection at Stripe, reverse the tax, and resolve the
+dunning run. The Context's "runs each void's tax reversal and
+`invoice.voided` webhook" and leg 3 of the 2026-10-22 amendment describe the
+code before this change.
+
+**Tests.** `internal/invoice` `TestVoidUnchangedTx_EventCommitsWithTheCallerTx`
+(real Postgres: the caller's rollback removes the event, and its commit
+saves it).

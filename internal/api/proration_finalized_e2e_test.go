@@ -13,47 +13,73 @@ import (
 
 // TestE2E_ProrationInvoice_FinalizedWebhookAndAuditRow (#1279): a mid-period
 // upgrade, seat increase or added item writes a proration invoice that is
-// born finalized. It must send invoice.finalized exactly once, with the
-// payload the engine sends for its own invoices, and write one finalize
-// audit row, as a cycle or first invoice does. An integrator's revenue sync
-// keyed on invoice.finalized otherwise never sees these invoices.
+// born finalized. A swap to a plan with another billing interval writes the
+// new period's first invoice instead (BillOnPlanSwapTx), also born finalized.
+// Each must send invoice.finalized exactly once, with the payload the engine
+// sends for its own invoices, and write one finalize audit row, as a cycle or
+// first invoice does. An integrator's revenue sync keyed on invoice.finalized
+// otherwise never sees these invoices.
 //
 // The subscription's first invoice (engine-born) is the control: the same
-// queries find its event and its row, so a zero for the proration invoice is
+// queries find its event and its row, so a zero for the change's invoice is
 // the missing effect, not a wrong query.
 //
-// Mutation seam: drop the finalize audit emission or the post-commit
-// dispatch from the proration writer → this test fails on that count.
+// Mutation seams: drop the finalize audit emission from the proration writer
+// or from BillOnPlanSwapTx, or the enqueue in bornFinalizedTx, which
+// createWithLineItemsInTx calls for every invoice born finalized → this test
+// fails on that count.
 func TestE2E_ProrationInvoice_FinalizedWebhookAndAuditRow(t *testing.T) {
 	changeAt := lagP0.AddDate(0, 0, 10)
 	cases := []struct {
 		name  string
 		write func(r *lagRig) (string, string, any)
+		// reason is the billing reason of the invoice the change writes.
+		reason domain.InvoiceBillingReason
+		// firstUnpaid leaves the first invoice owed instead of paying it.
+		firstUnpaid bool
 	}{
 		{"upgrade", func(r *lagRig) (string, string, any) {
 			return http.MethodPatch, "/v1/subscriptions/" + r.subID + "/items/" + r.itemA, map[string]any{"new_plan_id": r.planB, "immediate": true}
-		}},
+		}, domain.BillingReasonSubscriptionUpdate, false},
 		{"seat increase", func(r *lagRig) (string, string, any) {
 			return http.MethodPatch, "/v1/subscriptions/" + r.subID + "/items/" + r.itemA, map[string]any{"quantity": 3}
-		}},
+		}, domain.BillingReasonSubscriptionUpdate, false},
 		{"add item", func(r *lagRig) (string, string, any) {
 			return http.MethodPost, "/v1/subscriptions/" + r.subID + "/items", map[string]any{"plan_id": r.planC, "quantity": 1}
-		}},
+		}, domain.BillingReasonSubscriptionUpdate, false},
+		// The swap from monthly to yearly starts a new period at changeAt, so
+		// its invoice is that period's first, not a proration. The first
+		// invoice stays owed, so the credit for its unused days goes on that
+		// invoice. Paid, the credit would go on the customer's balance, and
+		// collection would apply it to the new invoice after the commit. The
+		// row would then differ from the event, which is the invoice as the
+		// swap left it (ADR-131).
+		{"cross-interval swap", func(r *lagRig) (string, string, any) {
+			return http.MethodPatch, "/v1/subscriptions/" + r.subID + "/items/" + r.itemA, map[string]any{"new_plan_id": r.planY, "immediate": true}
+		}, domain.BillingReasonSubscriptionCreate, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			r := newLagRig(t, "in_advance", false)
-			r.payFirstInvoice(lagP0.Add(time.Hour))
+			if c.firstUnpaid {
+				r.checkFirstInvoice()
+			} else {
+				r.payFirstInvoice(lagP0.Add(time.Hour))
+			}
+			before := r.invoices()
 
 			method, path, body := c.write(r)
 			if code, raw := r.do(method, path, changeAt, body); code >= 300 {
 				t.Fatalf("%s %s: %d %s", method, path, code, raw)
 			}
-			pro := r.prorationInvoice()
-			if pro.status != string(domain.InvoiceFinalized) {
-				t.Fatalf("proration invoice status = %s, want finalized (no tax deferral, collection running)", pro.status)
+			inv := r.invoiceWrittenSince(before)
+			if inv.reason != string(c.reason) {
+				t.Fatalf("the change wrote a %s invoice, want %s", inv.reason, c.reason)
 			}
-			r.wantFinalizedOnce(pro.id, domain.BillingReasonSubscriptionUpdate)
+			if inv.status != string(domain.InvoiceFinalized) {
+				t.Fatalf("%s invoice status = %s, want finalized (no tax deferral, collection running)", inv.reason, inv.status)
+			}
+			r.wantFinalizedOnce(inv.id, c.reason)
 		})
 	}
 
@@ -90,12 +116,21 @@ func TestE2E_ProrationInvoice_FinalizedWebhookAndAuditRow(t *testing.T) {
 	})
 }
 
-// payFirstInvoice checks the control (the subscription's first invoice, born
-// finalized by the engine, has its one event and one row), then records an
-// offline payment on it. The check runs first because the payment lowers the
-// amount due the event reported. A charge on top of an unpaid invoice for the
-// running period is refused (ADR-050), which is not what these cases test.
+// payFirstInvoice checks the control (checkFirstInvoice), then records an
+// offline payment on the first invoice. The check runs first because the
+// payment lowers the amount due the event reported. A charge on top of an
+// unpaid invoice for the running period is refused (ADR-050), which is not
+// what these cases test.
 func (r *lagRig) payFirstInvoice(at time.Time) {
+	r.t.Helper()
+	id := r.checkFirstInvoice()
+	r.must(http.MethodPost, "/v1/invoices/"+id+"/record-payment", at, map[string]any{"note": "fixture"}, http.StatusOK)
+}
+
+// checkFirstInvoice checks the control: the subscription's first invoice,
+// born finalized by the engine, has its one event and one row. It returns the
+// invoice's ID.
+func (r *lagRig) checkFirstInvoice() string {
 	r.t.Helper()
 	var id string
 	for _, i := range r.invoices() {
@@ -111,7 +146,7 @@ func (r *lagRig) payFirstInvoice(at time.Time) {
 		r.t.Fatalf("no subscription_create invoice")
 	}
 	r.wantFinalizedOnce(id, domain.BillingReasonSubscriptionCreate)
-	r.must(http.MethodPost, "/v1/invoices/"+id+"/record-payment", at, map[string]any{"note": "fixture"}, http.StatusOK)
+	return id
 }
 
 // prorationInvoice returns the subscription's one subscription_update invoice.
@@ -127,6 +162,28 @@ func (r *lagRig) prorationInvoice() lagInvoice {
 	if len(found) != 1 {
 		r.logInvoices(invs)
 		r.t.Fatalf("%d proration invoices, want 1", len(found))
+	}
+	return found[0]
+}
+
+// invoiceWrittenSince returns the subscription's one live invoice that is not
+// in before: the invoice the change wrote.
+func (r *lagRig) invoiceWrittenSince(before []lagInvoice) lagInvoice {
+	r.t.Helper()
+	seen := make(map[string]bool, len(before))
+	for _, i := range before {
+		seen[i.id] = true
+	}
+	invs := r.invoices()
+	var found []lagInvoice
+	for _, i := range invs {
+		if !seen[i.id] {
+			found = append(found, i)
+		}
+	}
+	if len(found) != 1 {
+		r.logInvoices(invs)
+		r.t.Fatalf("the change wrote %d invoices, want 1", len(found))
 	}
 	return found[0]
 }

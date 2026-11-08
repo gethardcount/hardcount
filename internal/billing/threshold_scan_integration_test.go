@@ -835,6 +835,9 @@ type failableSubAdapter struct {
 	*subStoreAdapter
 	closePeriodTxErr error
 	beforeTx         func()
+	// afterTx runs as each transaction returns, committed or not: the seam
+	// where a crash or a cancelled request lands right after the commit.
+	afterTx func()
 	// moved counts ClosePeriodTx calls that lost the ADR-115 CAS.
 	moved atomic.Int32
 }
@@ -843,7 +846,11 @@ func (a *failableSubAdapter) WithTenantTx(ctx context.Context, tenantID string, 
 	if a.beforeTx != nil {
 		a.beforeTx()
 	}
-	return a.subStoreAdapter.WithTenantTx(ctx, tenantID, fn)
+	err := a.subStoreAdapter.WithTenantTx(ctx, tenantID, fn)
+	if a.afterTx != nil {
+		a.afterTx()
+	}
+	return err
 }
 
 func (a *failableSubAdapter) ClosePeriodTx(ctx context.Context, tx *sql.Tx, tenantID, id string, expected subscription.PeriodSnapshot, start, end, next time.Time, anchorDay int) error {
