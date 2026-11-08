@@ -37,7 +37,6 @@ import { DueBadge } from '@/components/DueBadge'
 import { effectiveNow } from '@/lib/effectiveNow'
 import { invoiceStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
-import { Layout } from '@/components/Layout'
 import { cn } from '@/lib/utils'
 import { creditNoteReasonLabel } from '@/lib/status'
 import { cardLabel } from '@/lib/paymentMethodCopy'
@@ -600,48 +599,34 @@ export default function InvoiceDetailPage() {
   usePageTitle(invoice?.invoice_number)
 
   if (loading) {
-    return (
-      <Layout>
-        <DetailSkeleton to="/invoices" parentLabel="Invoices" />
-      </Layout>
-    )
+    return <DetailSkeleton to="/invoices" parentLabel="Invoices" />
   }
 
   // Not found is an answer, not a failure: no Retry (it would find nothing
   // again) and not the server's raw "invoice could not be found".
   if (error && classifyError(loadError) === 'notfound') {
     return (
-      <Layout>
-        <div className="flex flex-col items-center px-6 py-16 text-center">
-          <FileX size={20} className="mb-2 text-muted-foreground" aria-hidden />
-          <p className="text-sm font-medium text-foreground">Invoice not found</p>
-          <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            It may be in the other mode (test or live), or the link may be wrong.
-          </p>
-          <Button size="sm" variant="outline" className="mt-3" render={<Link to="/invoices" />}>
-            Go to Invoices
-          </Button>
-        </div>
-      </Layout>
+      <div className="flex flex-col items-center px-6 py-16 text-center">
+        <FileX size={20} className="mb-2 text-muted-foreground" aria-hidden />
+        <p className="text-sm font-medium text-foreground">Invoice not found</p>
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+          It may be in the other mode (test or live), or the link may be wrong.
+        </p>
+        <Button size="sm" variant="outline" className="mt-3" render={<Link to="/invoices" />}>
+          Go to Invoices
+        </Button>
+      </div>
     )
   }
 
   // A failed refresh after a load keeps the page (StaleNotice below);
   // only a page that never loaded becomes the error screen.
   if (error && !invoiceData) {
-    return (
-      <Layout>
-        <LoadError what="this invoice" error={loadError} onRetry={() => refetch()} className="py-16" />
-      </Layout>
-    )
+    return <LoadError what="this invoice" error={loadError} onRetry={() => refetch()} className="py-16" />
   }
 
   if (!invoice) {
-    return (
-      <Layout>
-        <p className="text-sm text-muted-foreground py-16 text-center">Invoice not found</p>
-      </Layout>
-    )
+    return <p className="text-sm text-muted-foreground py-16 text-center">Invoice not found</p>
   }
 
   const seller = sellerBlock(invoice, settings)
@@ -662,7 +647,7 @@ export default function InvoiceDetailPage() {
   const showCopyLink = !!invoice.public_token && invoice.status !== 'draft'
 
   return (
-    <Layout>
+    <>
       <DetailBreadcrumb to="/invoices" parentLabel="Invoices" currentLabel={invoice.invoice_number} />
       {loadError && <StaleNotice what="this invoice" onRetry={() => refetch()} />}
 
@@ -1890,7 +1875,7 @@ export default function InvoiceDetailPage() {
           </div>
         </div>
       )}
-    </Layout>
+    </>
   )
 }
 

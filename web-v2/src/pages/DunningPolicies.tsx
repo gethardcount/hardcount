@@ -5,7 +5,6 @@ import { toast } from 'sonner'
 import { Pencil, Trash2, Plus, Star, AlertTriangle, MoreHorizontal } from 'lucide-react'
 
 import { api, type DunningPolicy, type DunningPolicyWithCount } from '@/lib/api'
-import { Layout } from '@/components/Layout'
 import { cn } from '@/lib/utils'
 import { EmptyState } from '@/components/EmptyState'
 import { LoadError } from '@/components/LoadError'
@@ -151,7 +150,7 @@ export default function DunningPoliciesPage() {
   }
 
   return (
-    <Layout>
+    <>
       <div className="space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="max-w-3xl">
@@ -286,7 +285,7 @@ export default function DunningPoliciesPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Layout>
+    </>
   )
 }
 

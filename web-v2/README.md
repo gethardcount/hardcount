@@ -7,7 +7,7 @@ public pages (hosted invoice, payment update, shared cost dashboard).
 ## Setup
 
 ```bash
-npm install        # .npmrc pins legacy-peer-deps — a plain install works
+npm install        # npm 10, or 11.6.3 or later (CONTRIBUTING.md, Frontend)
 npm run dev        # Vite on :5173, proxying /v1 to the Go server on :8080
 ```
 

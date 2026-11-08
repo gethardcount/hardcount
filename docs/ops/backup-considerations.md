@@ -1,5 +1,7 @@
 # Back up Hardcount
 
+This page is for whoever runs Hardcount. It sets up backups and proves that they restore. To bring a backup back during an incident, use [Restore Hardcount](restore.md).
+
 Back up two things, and keep them apart: the Postgres database and the encryption key. A backup cannot be read without its key.
 
 On the one-VM Docker Compose install, follow [Production on one VM, step 7](../production-one-vm.md#7-back-up-every-night): it runs these scripts in a container, every night.
@@ -24,7 +26,7 @@ Avoid these:
 - **Dumping table by table.** Hardcount adds tables often, and a list of tables goes out of date.
 - **Disk snapshots without the write-ahead log (WAL).** You lose everything since the last snapshot. Hourly snapshots still lose about 30 minutes on average.
 
-On managed Postgres, the provider's snapshots and PITR are your main backup. Still run the [restore drill](#5-run-the-restore-drill) every few months. Only the drill proves that Hardcount's money tables come back whole. A dump is also a copy you can restore anywhere, so your billing data is not tied to one cloud.
+On managed Postgres, the provider's snapshots and PITR are your main backup. Test them: every few months, restore one into a new instance, and run `hardcount-doctor` against it as at the end of [the restore drill](#4-run-the-restore-drill). The drill itself proves only that a dump restores. A dump is also a copy you can restore anywhere, so your billing data is not tied to one cloud.
 
 ## 3. Take a backup
 
@@ -45,7 +47,7 @@ On managed Postgres, the provider's snapshots and PITR are your main backup. Sti
    ls -l /var/backups/hardcount/
    ```
 
-   **You see:** `hardcount_<date>_<time>.dump`, and `latest.dump` pointing at the newest one.
+   **You see:** `hardcount_<date>_<time>.dump`, and `latest.dump` pointing at the newest one. The date and time are when the backup started, in UTC.
 
 Options, all set as environment variables:
 
@@ -56,10 +58,11 @@ Options, all set as environment variables:
 | `BACKUP_S3_PREFIX` | `logical-backups` | The folder inside the bucket |
 | `BACKUP_RETENTION_DAYS` | `30` | Local dumps older than this are deleted |
 | `PG_DUMP` | `pg_dump` | A different `pg_dump` to run, for example one in a container |
+| `HARDCOUNT_BACKUP_TOOL_MISMATCH_OK` | unset | `yes` dumps even when `pg_dump` is newer than the server, for a planned move to a newer Postgres |
 
 Exit codes: `0` success, `1` a setting is wrong, `2` `pg_dump` failed, `3` the dump could not be read back, `4` the S3 upload failed.
 
-**Use tools that match the server.** A `pg_dump` newer than the Postgres server writes a dump that server cannot restore, so the script stops. It can tell only when `psql` is installed, because it asks the server's version with `psql`; without `psql` it skips the check and dumps anyway. Run a matching `pg_dump` in a container:
+**Use a `pg_dump` that matches the server.** A `pg_dump` newer than the Postgres server writes a dump that server cannot restore, so the script stops. It asks the server's version with `psql`. Without `psql`, it skips the check and dumps anyway. Run a matching `pg_dump` in a container:
 
 ```bash
 PG_DUMP="docker run --rm -i --network host postgres:16-alpine pg_dump" ./scripts/backup.sh
@@ -67,44 +70,11 @@ PG_DUMP="docker run --rm -i --network host postgres:16-alpine pg_dump" ./scripts
 
 The dump travels through standard output, so the container needs no mounted folders.
 
-## 4. Restore a backup
+## 4. Run the restore drill
 
-`scripts/restore.sh` replaces the objects in the backup, in the target database, in one transaction: either all of it is restored, or nothing changes. Each restored table gets the access rights it has in the backup, even when the target database gives new tables more, as a new Compose install does. It needs `pg_restore` and `psql` on the machine that runs it. `psql` runs the SQL that `pg_restore` writes, so it must be at least as recent as `pg_restore`: an older `psql` stops at `invalid command \restrict`, and nothing changes.
+A backup counts only once you have restored it. The first drill found four defects in the scripts, among them a restore that had never worked on a new server ([record](../dev/records/restore-drill-first-run-2026-08-11.md)).
 
-**Restore into an empty database when you can.** The script replaces everything the backup holds, including the migration record. It leaves alone anything the backup does not hold, such as a table that a newer migration created. Such a table causes one of two problems:
-
-- It refers to a table in the backup (a foreign key). Then the restore cannot replace that table, so it stops and changes nothing.
-- It refers to no table in the backup. Then the restore keeps it, but takes the migration record back to the backup's version. The next upgrade runs that migration again, which can stop on `already exists`.
-
-1. On a new Postgres server, create the limited user first. Users and their settings belong to the server, not to the database, so a dump cannot carry them. Without the user the restore would fail, so the script stops before the restore starts. The second line sets the timeout that [Postgres requirements](postgres-requirements.md#timeouts-on-the-limited-user) calls required.
-
-   ```sql
-   CREATE ROLE hardcount_app LOGIN PASSWORD '<your-password>';
-   ALTER ROLE hardcount_app SET idle_in_transaction_session_timeout = '30s';
-   ```
-
-2. Run the restore against the target database.
-
-   ```bash
-   DATABASE_URL="postgres://hardcount:PASSWORD@db-host:5432/hardcount?sslmode=require" \
-     ./scripts/restore.sh /var/backups/hardcount/latest.dump
-   ```
-
-   **You see:** a warning box naming the target and the backup, then `Type 'yes' to proceed:`. Type `yes`. To skip the question in a script, set `HARDCOUNT_RESTORE_CONFIRM=yes`.
-
-3. Wait for it to finish.
-
-   **You see:** `All critical tables present.`, a "Restore Summary" block, and `Restore complete. Verify application behavior before resuming traffic.`
-
-4. Run the [checks after a restore](#checks-after-a-restore), then start Hardcount.
-
-Exit codes: `0` success, `1` a setting or the file is wrong, `2` the restore failed and was rolled back, `3` a critical table is missing after the restore.
-
-The tool rule from step 3 applies here too: if `pg_restore` is newer than the target server, the script stops. Use `PG_RESTORE="docker run --rm -i --network host postgres:16-alpine pg_restore"`.
-
-## 5. Run the restore drill
-
-A backup counts only once you have restored it. `scripts/restore-drill.sh` does the whole loop on a throwaway Postgres container, without touching your database or your backup folder:
+`scripts/restore-drill.sh` does the whole loop on a throwaway Postgres container, without touching your database or your backup folder:
 
 1. It counts the rows in five key tables of the source database.
 2. It takes a backup with `backup.sh` into a temporary folder.
@@ -133,157 +103,37 @@ Each run adds one line to `~/.hardcount/drill.log`, so you can see how long back
 
 Exit codes: `0` passed, `1` a setting is wrong, `2` the backup failed, `3` the restore failed, `4` row counts differ, `5` the container did not start.
 
-After a drill passes, you can also start Hardcount against a restored copy, check that `/health/ready` answers 200, and run the money checks against it. The money checks are one program, `hardcount-doctor`, and the release image does not include it. Run `go run ./cmd/hardcount-doctor` from a source checkout of the same release, with `DATABASE_URL` set to the restored copy. It should report no problems.
-Run it as the database owner. Run as the limited user (`hardcount_app`), it
-sees no rows and reports no problems, even when there are some.
+**Last, check the money rules on a restored copy.** `hardcount-doctor` reads the database and reports money records that break Hardcount's rules. The drill removes its copy, so restore into a spare database instead, such as the test database of [Test a restore](../production-one-vm.md#test-a-restore), and run the doctor before you delete it. The release image does not include it: run it from a source checkout of the same release.
 
-## Checks after a restore
-
-Run these before you let traffic back in. Run the SQL in `psql` as the database owner. The blocks that read or change account data begin with `SET app.bypass_rls = 'on';`. Without it, on a managed database whose admin user is not a superuser, they see no rows and change none, with no error, so a check looks passed ([why](runbook/index.md#before-you-start)).
-
-### 1. The schema version matches
-
-Run the `hardcount migrate status` of the release you will start, against the restored database.
-
-**You see:** `state:        up to date, nothing to apply`. `behind` lists what `hardcount migrate` will do. `no migration record` means the backup was restored without its migration table: restore it again, with the table, into an empty database. A backup from Velox 0.8.x (Velox is Hardcount's name before v0.9.0) gives the same state, and one from a later Velox build gives `made by Velox`. Neither can be upgraded: install fresh.
-
-The record itself, if you want to look:
-
-```sql
-SELECT max(version_id) FROM public.goose_db_version;
+```bash
+PGOPTIONS='-c app.bypass_rls=on' \
+  DATABASE_URL="postgres://hardcount:PASSWORD@db-host:5432/hardcount_restore_test?sslmode=require" \
+  go run ./cmd/hardcount-doctor
 ```
 
-### 2. Row-Level Security is on
+**You see:** `hardcount-doctor: <n> checks in <time>`, then `OK — no invariant violations`.
 
-```sql
-SELECT schemaname, tablename, rowsecurity
-FROM pg_tables WHERE schemaname = 'public' AND rowsecurity = true
-ORDER BY tablename;
-```
+`PGOPTIONS` lets the doctor read every account's rows. Without it, only a superuser, or a user with `BYPASSRLS`, sees them. Any other user sees no rows, and the doctor then reports no problems even when there are some ([why](runbook/index.md#before-you-start)).
 
-Row-Level Security (RLS) is the Postgres feature that keeps each account's rows apart. The list must include every account-scoped table, such as `customers` and `invoices`. A missing table means its data is not kept apart.
+Do not start Hardcount on a copy of your live database. The copy holds your live Stripe keys and your customers' email addresses, and Hardcount has no setting that makes it safe to start. Its background jobs would bill your customers, charge their cards a second time, and email them.
 
-### 3. The money tables look right
-
-```sql
-SET app.bypass_rls = 'on';
-SELECT tenant_id, count(*) FROM invoices GROUP BY tenant_id;
-SELECT tenant_id, count(*) FROM credit_notes GROUP BY tenant_id;
-SELECT tenant_id, sum(total_amount_cents) FROM invoices
-  WHERE status = 'paid' AND created_at >= now() - interval '90 days'
-  GROUP BY tenant_id;
-```
-
-Compare the numbers with what you saw before the incident, for example in your metrics.
-
-### 4. Queued emails and webhooks
-
-Hardcount queues outgoing emails and webhooks in two tables, `email_outbox` and `webhook_outbox`, and sends them later. After a restore, every `pending` row is sent again. If the backup is older than some sends, customers get those emails or webhooks twice.
-
-The safe default: leave the rows `pending` and accept a few duplicates. Webhook receivers should already handle the same event twice.
-
-If you are sure you want to skip them, mark them sent, and write down that you did:
-
-```sql
-SET app.bypass_rls = 'on';
-UPDATE email_outbox SET status = 'dispatched', dispatched_at = now(),
-  payload = payload - '{setup_url,update_url,password_reset_url,invite_url,public_token,pdf}'::text[]
-  WHERE status = 'pending';
-UPDATE webhook_outbox SET status = 'dispatched', dispatched_at = now() WHERE status = 'pending';
-```
-
-The `payload - '{…}'` part removes the links and the PDF from the email rows, so they are not kept for emails that were never sent.
-
-### 5. Billing picks up where it stopped
-
-Hardcount's background jobs resume by themselves after a restart, on one copy or on several:
-
-- A subscription that was due but not billed is billed on the next billing run (hourly, or every 5 minutes with `APP_ENV=local`).
-- Invoices waiting for an automatic charge are charged.
-- Payment retries (dunning) that are due run.
-
-After the restart, these counts should fall to zero within a few minutes:
-
-```sql
-SET app.bypass_rls = 'on';
-
--- Subscriptions that should have billed
-SELECT count(*) FROM subscriptions
-  WHERE status IN ('active', 'trialing') AND next_billing_at < now();
-
--- Invoices waiting for an automatic charge
-SELECT count(*) FROM invoices
-  WHERE auto_charge_pending = true;
-
--- Payment retries that are due
-SELECT count(*) FROM invoice_dunning_runs
-  WHERE state = 'active' AND next_action_at < now();
-```
-
-If they do not fall, the background jobs are not running. See the [runbook](runbook/background-job-stuck.md).
-
-### 6. Payments made during the gap
-
-If the backup is hours older than the failure, Stripe events sent in between are missing. The reconciler (the check that asks Stripe what happened to a charge whose result Hardcount did not save) asks Stripe about invoices whose payment status is `unknown`. It does not replay every event. List the invoices to check by hand:
-
-```sql
-SET app.bypass_rls = 'on';
-SELECT id, payment_status, updated_at FROM invoices
-  WHERE updated_at < now() - interval '4 hours'
-    AND payment_status IN ('processing', 'unknown', 'pending');
-```
-
-Compare them with the Stripe dashboard, or resend the events from Stripe.
+If you must start it, [pause the jobs](restore.md#pause-the-background-jobs) first, and never resume them on the copy. Do not charge, refund or change anything through its dashboard or API, and do not open its payment pages: they charge real cards. A test clock that was moving forward resumes at start, but it bills test customers only.
 
 ## What is in the database
 
-Some tables matter more than others when you decide what a restore must bring back.
+A restore must bring back every table. Only the rows below can be lost in an emergency:
 
-### Money and setup: never lose these
-
-| Table | Why it matters |
+| Rows | What is lost with them |
 |---|---|
-| `tenants` | Every other row belongs to an account |
-| `customers`, `customer_billing_profiles` | Who the customers are, with tax details and personal data |
-| `subscriptions`, `subscription_items` | What each customer is billed for |
-| `plans`, `meters`, `plan_prices`, `plan_price_versions`, `customer_price_overrides` (and, for test clocks, `plan_price_version_clocks`) | Prices, with each price's past rates and each customer's negotiated rates. Invoice amounts depend on them. |
-| `invoices`, `invoice_line_items` | Issued invoices: a financial record |
-| `credit_notes`, `credit_note_line_items` | Refunds and adjustments: a financial record |
-| `customer_credit_ledger` | Customer credit balances. Every entry is needed to work out a balance. |
-| `payment_methods`, `customers.stripe_customer_id` | Saved cards, and the link to each Stripe customer |
-| `dunning_policies` (and `customers.dunning_policy_id`) | Payment-retry policies, and which customer uses which |
-| `invoice_dunning_runs`, `invoice_dunning_events` | Payment retries in progress. Losing them can charge a failed card again too soon. |
-| `tax_calculations` | Stripe Tax records that tie an invoice to Stripe's tax transaction |
-| `audit_log` | Who changed what. Audits such as SOC 2 often ask for 7 years. |
-| `users`, `user_tenants`, `password_reset_tokens` | Dashboard users |
-| `api_keys` | API keys |
-| `tenant_settings`, `stripe_provider_credentials` | Account settings, including the encrypted Stripe keys |
-| `webhook_endpoints` | Where Hardcount sends webhooks, with their signing secrets |
-| `webhook_events`, `webhook_deliveries` | Webhooks Hardcount sent, with every try. Replay and timelines read them. |
-| `recipe_instances` | Installed pricing recipes |
-| `test_clocks`, `dashboard_sessions` | Not money, but losing them disrupts the people using the dashboard |
-| `goose_db_version` | The schema version. Hardcount does not start without it. |
+| `webhook_outbox` rows | Queued webhooks are not sent, and failed ones cannot be [sent again](runbook/webhook-outbox-backed-up.md#send-failed-rows-again) |
+| `email_outbox` rows with `status = 'pending'` | Queued emails are not sent. The other rows are the Sent emails history: keep them. |
+| `login_throttle` rows | The count of wrong passwords starts again from zero |
+| `usage_events` rows of billing periods already invoiced | No money is lost: the invoices hold the totals. The usage and margin reports for those periods lose them, and a resent old event is stored again ([why](postgres-requirements.md#how-the-data-grows)). |
 
-`usage_events` for billing periods that are still open belong here too: the next invoice needs every one of them.
-
-### Queues: can be dropped in an emergency
-
-| Table | If lost | Why it can be rebuilt |
-|---|---|---|
-| `email_outbox` | Queued emails are not sent | Later changes send new emails. A lost email is an annoyance, not lost money. |
-| `webhook_outbox` | Queued webhooks are not sent | Receivers should handle replays; send events again if needed |
-| `stripe_webhook_events` | Some history of Stripe's events is lost | Stripe holds the original events and its API returns them |
-
-### Old usage: can be lost in an emergency
-
-`usage_events` rows from billing periods that are already invoiced. Their totals are on the invoices, so losing them loses no money. Hardcount still uses them. An event sent again is found to be a repeat only while its row exists: without it, the event is stored again. The usage and margin reports for those periods also read them. Do not delete them yourself ([how the data grows](postgres-requirements.md#how-the-data-grows)).
-
-### Not in the database
-
-These do not need a database backup:
+These are not in the database, and need no database backup:
 
 - Hardcount itself and its container images: download or build them again.
 - Settings and secrets (the `.env` file or your secrets manager): back them up separately.
 - Invoice PDFs: Hardcount builds them again from the invoice.
 
-**Next:** [Health checks, alerts and logs](runbook/monitoring.md).
+**Next:** [Restore Hardcount](restore.md).

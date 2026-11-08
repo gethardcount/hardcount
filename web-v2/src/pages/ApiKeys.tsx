@@ -12,7 +12,6 @@ import { applyApiError, showApiError } from '@/lib/formErrors'
 import { StatusBadge } from '@/components/StatusBadge'
 import { NoticeRow } from '@/components/NoticeRow'
 import type { StatusDisplay } from '@/lib/statusLabels'
-import { Layout } from '@/components/Layout'
 import { TypedConfirmDialog } from '@/components/TypedConfirmDialog'
 import { revokeNeedsTypedWord } from '@/lib/apiKeyRisk'
 import { cn } from '@/lib/utils'
@@ -179,7 +178,7 @@ export default function ApiKeysPage() {
   const revokedKeys = keys.filter(k => !!k.revoked_at)
 
   return (
-    <Layout>
+    <>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">API keys</h1>
@@ -388,7 +387,7 @@ export default function ApiKeysPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Layout>
+    </>
   )
 }
 

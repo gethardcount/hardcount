@@ -14,7 +14,6 @@ import { api, type EndpointDelivery } from '@/lib/api'
 import { timeAgo, timeUntil, wallClockNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
 import { pausedEndpointNotice, isAllEvents } from '@/lib/webhookNotices'
-import { Layout } from '@/components/Layout'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -152,7 +151,7 @@ export default function WebhookEndpointDetailPage() {
   }
 
   return (
-    <Layout>
+    <>
       {/* Same header + tab strip as /webhooks — this page is a drill-down
           of the Endpoints tab, not a third surface. */}
       <div>
@@ -299,7 +298,7 @@ export default function WebhookEndpointDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Layout>
+    </>
   )
 }
 

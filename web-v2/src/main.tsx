@@ -119,7 +119,10 @@ function PublicOnlyRoute({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-// Lazy load pages
+// Lazy load pages. Layout too: the public pages (sign-in, the hosted invoice)
+// don't use it, and it would add about 55 kB gzipped to the code every page
+// loads first.
+const Layout = lazy(() => import('@/components/Layout').then(m => ({ default: m.Layout })))
 const LoginPage = lazy(() => import('@/pages/Login'))
 const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPassword'))
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPassword'))
@@ -154,7 +157,9 @@ const MeterDetailPage = lazy(() => import('@/pages/MeterDetail'))
 const RecipesPage = lazy(() => import('@/pages/Recipes'))
 const NotFoundPage = lazy(() => import('@/pages/NotFound'))
 
-// Every page renders inside RouteShell: one Suspense for the lazy pages.
+// Every page renders inside RouteShell: one Suspense for the lazy public
+// pages and for Layout. A signed-in page loads inside Layout's own Suspense,
+// so the sidebar stays on screen while the page's code downloads.
 function RouteShell() {
   return (
     <Suspense
@@ -178,31 +183,39 @@ const router = createBrowserRouter(createRoutesFromElements(
     <Route path="/reset-password" element={<PublicOnlyRoute><ResetPasswordPage /></PublicOnlyRoute>} />
     {/* Token-driven: no PublicOnlyRoute — see comment above. */}
     <Route path="/accept-invite" element={<AcceptInvitePage />} />
-    <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-    <Route path="/recipes" element={<ProtectedRoute><RecipesPage /></ProtectedRoute>} />
-    <Route path="/customers" element={<ProtectedRoute><CustomersPage /></ProtectedRoute>} />
-    <Route path="/pricing" element={<ProtectedRoute><PricingPage /></ProtectedRoute>} />
-    <Route path="/dunning" element={<ProtectedRoute><DunningPage /></ProtectedRoute>} />
-    <Route path="/dunning-policies" element={<ProtectedRoute><DunningPoliciesPage /></ProtectedRoute>} />
-    <Route path="/webhooks" element={<ProtectedRoute><WebhooksPage /></ProtectedRoute>} />
-    <Route path="/webhooks/events" element={<ProtectedRoute><WebhookEventsPage /></ProtectedRoute>} />
-    <Route path="/webhooks/endpoints/:id" element={<ProtectedRoute><WebhookEndpointDetailPage /></ProtectedRoute>} />
-    <Route path="/api-keys" element={<ProtectedRoute><ApiKeysPage /></ProtectedRoute>} />
-    <Route path="/test-clocks" element={<ProtectedRoute><TestClocksPage /></ProtectedRoute>} />
-    <Route path="/test-clocks/:id" element={<ProtectedRoute><TestClockDetailPage /></ProtectedRoute>} />
-    <Route path="/invoices" element={<ProtectedRoute><InvoicesPage /></ProtectedRoute>} />
-    <Route path="/subscriptions" element={<ProtectedRoute><SubscriptionsPage /></ProtectedRoute>} />
-    <Route path="/usage" element={<ProtectedRoute><UsageEventsPage /></ProtectedRoute>} />
-    <Route path="/credits" element={<ProtectedRoute><CreditsPage /></ProtectedRoute>} />
-    <Route path="/provider-costs" element={<ProtectedRoute><ProviderCostsPage /></ProtectedRoute>} />
-    <Route path="/credit-notes" element={<ProtectedRoute><CreditNotesPage /></ProtectedRoute>} />
-    <Route path="/audit-log" element={<ProtectedRoute><AuditLogPage /></ProtectedRoute>} />
-    <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-    <Route path="/customers/:id" element={<ProtectedRoute><CustomerDetailPage /></ProtectedRoute>} />
-    <Route path="/invoices/:id" element={<ProtectedRoute><InvoiceDetailPage /></ProtectedRoute>} />
-    <Route path="/subscriptions/:id" element={<ProtectedRoute><SubscriptionDetailPage /></ProtectedRoute>} />
-    <Route path="/plans/:id" element={<ProtectedRoute><PlanDetailPage /></ProtectedRoute>} />
-    <Route path="/meters/:id" element={<ProtectedRoute><MeterDetailPage /></ProtectedRoute>} />
+    {/* Every signed-in page. ProtectedRoute sends a signed-out visitor to
+        sign in first, and Layout draws the sidebar around the page. Both
+        stay mounted while the operator moves between these pages. */}
+    <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+      <Route path="/" element={<DashboardPage />} />
+      <Route path="/recipes" element={<RecipesPage />} />
+      <Route path="/customers" element={<CustomersPage />} />
+      <Route path="/pricing" element={<PricingPage />} />
+      <Route path="/dunning" element={<DunningPage />} />
+      <Route path="/dunning-policies" element={<DunningPoliciesPage />} />
+      <Route path="/webhooks" element={<WebhooksPage />} />
+      <Route path="/webhooks/events" element={<WebhookEventsPage />} />
+      <Route path="/webhooks/endpoints/:id" element={<WebhookEndpointDetailPage />} />
+      <Route path="/api-keys" element={<ApiKeysPage />} />
+      <Route path="/test-clocks" element={<TestClocksPage />} />
+      <Route path="/test-clocks/:id" element={<TestClockDetailPage />} />
+      <Route path="/invoices" element={<InvoicesPage />} />
+      <Route path="/subscriptions" element={<SubscriptionsPage />} />
+      <Route path="/usage" element={<UsageEventsPage />} />
+      <Route path="/credits" element={<CreditsPage />} />
+      <Route path="/provider-costs" element={<ProviderCostsPage />} />
+      <Route path="/credit-notes" element={<CreditNotesPage />} />
+      <Route path="/audit-log" element={<AuditLogPage />} />
+      <Route path="/settings" element={<SettingsPage />} />
+      <Route path="/customers/:id" element={<CustomerDetailPage />} />
+      <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+      <Route path="/subscriptions/:id" element={<SubscriptionDetailPage />} />
+      <Route path="/plans/:id" element={<PlanDetailPage />} />
+      <Route path="/meters/:id" element={<MeterDetailPage />} />
+      {/* Any other address: a mistyped or old link. Signed-out
+          visitors sign in first, then see this page. */}
+      <Route path="*" element={<NotFoundPage />} />
+    </Route>
     <Route path="/update-payment" element={<UpdatePaymentPage />} />
     {/* Stripe Checkout setup-session return URL.
         Public, unauthenticated — customers arrive here via
@@ -211,9 +224,6 @@ const router = createBrowserRouter(createRoutesFromElements(
         ?status=success|cancel query. */}
     <Route path="/payment-method-added" element={<PaymentMethodAddedPage />} />
     <Route path="/invoice/:token" element={<HostedInvoicePage />} />
-    {/* Any other address: a mistyped or old link. Signed-out
-        visitors sign in first, then see this page. */}
-    <Route path="*" element={<ProtectedRoute><NotFoundPage /></ProtectedRoute>} />
   </Route>,
 ))
 

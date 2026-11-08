@@ -147,3 +147,28 @@ the data with SQL. Instead:
 
 - send the webhook again from the Stripe dashboard, or
 - ask the customer to add a card again on the hosted payment-setup page.
+
+## Skip the emails and webhooks queued before a restore
+
+After a restore, Hardcount sends every `pending` row of `email_outbox` and
+`webhook_outbox` when its jobs resume. Rows the old database had already sent
+after the backup go out a second time. To skip the rows queued before you
+started the restored Hardcount, mark them sent, while the `email_outbox` and
+`webhook_outbox` jobs are still paused
+([Restore Hardcount](../restore.md#queued-emails-and-webhooks)). Put the time
+you noted just before that start in both lines. The rows queued after it stay
+`pending`: they are the receipts and webhooks of the payments recorded while
+matching Hardcount with Stripe.
+
+```sql
+SET app.bypass_rls = 'on';
+UPDATE email_outbox SET status = 'dispatched', dispatched_at = now(),
+  payload = payload - '{setup_url,update_url,password_reset_url,invite_url,public_token,pdf}'::text[]
+  WHERE status = 'pending' AND created_at < '2026-10-20 09:15:00+00';
+UPDATE webhook_outbox SET status = 'dispatched', dispatched_at = now()
+  WHERE status = 'pending' AND created_at < '2026-10-20 09:15:00+00';
+```
+
+**You see:** `SET`, then `UPDATE <n>` twice. The `payload - '{…}'` part
+removes the links and the PDF from the email rows, so they are not kept for
+emails that were never sent.

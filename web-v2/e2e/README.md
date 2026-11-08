@@ -75,6 +75,12 @@ the screen, and that the main things an operator does work end to end.
 - `rate-limit.spec.ts` stubs a 429 (Too many requests) with `Retry-After`
   on a customer page's first load. The page must show "Too many requests.
   Trying again in a moment." at once, then load the customer by itself.
+- `layout.spec.ts` checks the shell around every signed-in page: the
+  sidebar, the mode band and the phone top bar. The sidebar stays the same
+  element when the page changes, and a page whose code is still downloading
+  shows inside it, not on a blank screen. A new page opens at the top, a page
+  change refreshes sidebar counts older than 30 seconds, and the phone menu
+  closes when the page changes, also on Back.
 - `global.setup.ts` runs first. It seeds data through the API (code in
   `fixtures/`) and signs in once through the login page. The other tests reuse
   that session.
