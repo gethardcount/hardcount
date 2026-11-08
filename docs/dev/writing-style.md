@@ -32,6 +32,12 @@ most are short of time.
 The effort a reader spends should go into the ideas, never into untangling
 the sentences.
 
+A page serves its reader twice: when they are new to Hardcount, and when they
+know it well or are acting under pressure. The first must understand every
+line on the first read. The second needs every exact fact: each command,
+number and edge case, and what to do when the result differs. Making a page
+easier for the first never removes a fact the second needs.
+
 ## One reader, one job
 
 Every page names its one reader and its one job in its first lines
@@ -221,6 +227,12 @@ record. The results doc links both
   repointed link or a deleted history line. To see which lines moved, run
   `git diff --color-moved origin/main -- <files>`. Check that no link or
   `#anchor` broke ([Checks](#checks)).
+- **A task check for a page that changes money or data.** A runbook or how-to
+  whose steps can charge, refund, bill or change stored data gets one more
+  review before merge. The reviewer does the task as the page's reader under
+  pressure, step by step, and checks each step against the code. Where they
+  can, they run the steps on a test setup. They report any step that could
+  charge, refund or bill twice, lose a payment, or leave the reader stuck.
 - **A cold-reader check for a rewritten or restructured page.** Before merge,
   a reader who has not seen the old page reads the new one, in the role of
   the reader it names. The reader can be a teammate or a fresh AI agent. They
