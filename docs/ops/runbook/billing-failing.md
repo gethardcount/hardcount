@@ -60,9 +60,10 @@ After such an outage, retry the affected subscriptions
   that failure is fixed, so it is allowed.
 - A cancel scheduled for the end of a trial still fires on a trialing
   subscription that is failing or parked.
-- Any other change starts billing again only if it changes what is due. If
-  the subscription is still due for the same thing after the change, retry
-  billing after it.
+- A change the 409 rule allows, such as adding an item to a subscription
+  with none, clears the failure only if it changes when the subscription
+  is due. If `billing_failure` is still set afterwards, run retry-billing
+  ([Fix](#fix), step 2).
 
 ### Why the error rate falls
 
@@ -111,32 +112,46 @@ attempt, so each period is billed once, whichever runs first.
    ```
 
 3. **After a shared cause is fixed, retry every failing subscription of the
-   account.** There is no bulk endpoint. This lists every failing
-   subscription first, then retries each one once, so a retry that takes
-   one off the list cannot make the paging skip another:
+   account.** There is no bulk endpoint. The list is read 100 at a time,
+   and a subscription that leaves it while it is read makes the next page
+   skip one. So this lists every failing subscription before it retries
+   any. The billing run can still bill one while the list is read, so it
+   then reads the list again, and retries each subscription it has not
+   retried yet. It stops when the list holds no such subscription:
 
    ```bash
-   : > failing.txt; offset=0
+   : > retried.txt
    while :; do
-     resp=$(curl -sSf "$API/v1/subscriptions?billing=failing&limit=100&offset=$offset" \
-       -H "Authorization: Bearer $KEY") || { echo "The list failed: run this again."; break; }
-     jq -r '.data[].id' <<<"$resp" >> failing.txt
-     [ "$(jq '.data | length' <<<"$resp")" -lt 100 ] && break
-     offset=$((offset + 100))
+     : > failing.txt; offset=0; listed=1
+     while :; do
+       resp=$(curl -sSf "$API/v1/subscriptions?billing=failing&limit=100&offset=$offset" \
+         -H "Authorization: Bearer $KEY") || { listed=0; break; }
+       jq -r '.data[].id' <<<"$resp" >> failing.txt
+       [ "$(jq '.data | length' <<<"$resp")" -lt 100 ] && break
+       offset=$((offset + 100))
+     done
+     [ "$listed" = 1 ] || { echo "The list failed: run this again."; break; }
+     grep -vxFf retried.txt failing.txt > todo.txt
+     [ -s todo.txt ] || { echo "Every failing subscription on the list was retried."; break; }
+     while read -r id; do
+       curl -sS -X POST "$API/v1/subscriptions/$id/retry-billing" -H "Authorization: Bearer $KEY" \
+         | jq -c --arg id "$id" '{id: $id, invoices_generated, still_due,
+             still_failing: (.subscription.billing_failure != null), error: .error.code}'
+       echo "$id" >> retried.txt
+     done < todo.txt
    done
-   echo "$(grep -c . failing.txt) to retry; the list's total is $(jq .total <<<"$resp")"
-
-   while read -r id; do
-     curl -sS -X POST "$API/v1/subscriptions/$id/retry-billing" -H "Authorization: Bearer $KEY" \
-       | jq -c --arg id "$id" '{id: $id, invoices_generated, still_due,
-           still_failing: (.subscription.billing_failure != null), error: .error.code}'
-   done < failing.txt
    ```
 
-   **You see:** the two counts, which should match, then one line per
-   subscription. Read each line with the table in [Verify](#verify). A
-   line with `error: "billing_not_failing"` has no saved failure any more:
-   the billing run or another retry got to it first.
+   **You see:** one line per subscription, then
+   `Every failing subscription on the list was retried.` Read each line
+   with the table in [Verify](#verify).
+   - A subscription that is still failing after its retry stays on the
+     list. The loop does not retry it again.
+   - A line with `error: "billing_not_failing"` has no saved failure any
+     more: the billing run or another retry got to it first.
+   - If the list fails, the loop stops before it retries anything from
+     that list. Run the whole block again. It can retry a subscription
+     that is still failing once more, which only makes one more attempt.
 
 A cancel that arrives after the period end on a healthy subscription bills
 the ended period itself and needs no retry.

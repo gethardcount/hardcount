@@ -157,9 +157,10 @@ func TestThresholdInArrearsBase_FireThenCloseBillsTheBaseOnClose(t *testing.T) {
 // the close or by an immediate cancel. The fixture adds the base line the old
 // code wrote to the threshold invoice.
 //
-// The late-usage runbook's void and write-off guidance covers that base like
-// the usage: written off, it stays billed on the threshold invoice and the
-// close does not bill it again; voided before the close, the close bills it.
+// The void and write-off rules in docs/concepts/invoices.md (Spend
+// thresholds) apply to that base as to the usage: written off, it stays
+// billed on the threshold invoice and the close does not bill it again;
+// voided before the close, the close bills it.
 func TestThresholdInArrearsBase_LegacyFireWithBase_BilledOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

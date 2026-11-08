@@ -69,11 +69,14 @@ hand, can bill it.
   customer, meter and time. There is no list of such events yet.
 - The flag says only that the period was invoiced. It does not check that
   the plan priced the event's meter.
+- Usage on a canceled subscription is not flagged `after_close`, even for
+  a period that was invoiced: it counts as `outside_subscription`. The
+  steps below find it too.
 - A spend-threshold invoice bills a period's usage early, and the period's
   own invoice then bills only the usage stamped after it. Usage stamped
   before the spend-threshold invoice but arriving after it is on neither.
-  While that invoice is not paid, such usage is not flagged, so the counter
-  misses it
+  While that invoice is not paid (open or written off), such usage is not
+  flagged, so the counter misses it
   ([Spend thresholds](../../concepts/invoices.md#spend-thresholds-an-invoice-made-early)).
   The steps below find it too.
 
@@ -98,19 +101,28 @@ covers all of them: compare only the rows of this subscription's plan.
      period), it carries the next period's dates;
    - any spend-threshold invoice of the period (`billing_reason`
      `threshold`);
-   - any one-off invoice (`billing_reason` `manual`) that already billed
-     some of this usage, whatever its memo. The memo of step 4 names the
-     period's invoice.
+   - any one-off invoice (`billing_reason` `manual`) that step 4 made for
+     this period: its memo starts `Usage that arrived after` and the
+     period's invoice number. Keep also one you know billed this usage.
+     Never keep one made on another page, such as for
+     [usage with no price](usage-with-no-price.md) or
+     [usage below zero](usage-below-zero.md): that usage is not part of
+     the step 3 total.
 
-   If the period's own invoice is not there yet, stop: it will bill this
-   usage. If step 4 made a draft before, finalize that draft (step 5)
+   Note also any voided spend-threshold invoice of the period: step 3
+   needs it.
+
+   If the period's own invoice is not there yet, it will bill this usage:
+   stop. The exception is usage stamped before a spend-threshold invoice of
+   the period that is not voided: come back once the period's own invoice
+   is built. If step 4 made a draft before, finalize that draft (step 5)
    rather than make another.
 
    ```bash
    CUSTOMER=<customer id>
    # With more than 100 invoices, add &offset=100, 200, ...
    curl -sS "$API/v1/invoices?customer_id=$CUSTOMER&limit=100" -H "Authorization: Bearer $KEY" \
-     | jq -c '.data[] | {id, invoice_number, status, billing_reason, billing_period_start, billing_period_end, memo, subtotal_cents, total_amount_cents}'
+     | jq -c '.data[] | {id, invoice_number, status, billing_reason, billing_period_start, billing_period_end, memo, subtotal_cents, total_amount_cents, created_at, voided_at}'
    ```
 
 2. **Read the usage lines of the period's own and spend-threshold
@@ -124,10 +136,16 @@ covers all of them: compare only the rows of this subscription's plan.
 
 3. **Price the usage stored for the period.** `FROM` is the earliest
    `billing_period_start` of the step 2 lines, and `TO` the latest
-   `billing_period_end` (`from` inclusive, `to` exclusive). If the
-   invoices have no usage line, use the dates of the period's own invoice.
-   For a plan billed in advance, use the dates of the subscription's
-   invoice built one period earlier: they are this period's.
+   `billing_period_end` (`from` inclusive, `to` exclusive).
+   - If the invoices have no usage line: use the dates of the period's own
+     invoice. For a plan billed in advance, use those of the invoice built
+     one period earlier instead: they are this period's.
+   - If a spend-threshold invoice of the period was voided after the
+     period's own invoice was built (its `voided_at` is later than that
+     invoice's `created_at`), its usage is billed nowhere. Set `FROM` to
+     the voided invoice's `billing_period_start`, the period start: its
+     usage is then part of the difference below. If you voided it to
+     forgive that usage, also subtract its `subtotal_cents` from the total.
 
    ```bash
    FROM=<earliest billing_period_start>; TO=<latest billing_period_end>
@@ -154,19 +172,21 @@ covers all of them: compare only the rows of this subscription's plan.
      and price them as the step 2 lines did.
 
 4. **Create one one-off invoice for the total.** `N` goes into the memo
-   and the key, so each one-off invoice for this period gets its own. If
-   the command gets no answer, send it again within 24 hours: the
-   `Idempotency-Key` returns the same draft. After that, start again from
-   step 1.
+   (`MEMO`) and the idempotency key (`IDEMPOTENCY_KEY`), so each one-off
+   invoice for this period gets its own. If the command gets no answer,
+   send it again within 24 hours: the `Idempotency-Key` returns the same
+   draft. After that, start again from step 1.
 
    ```bash
    INVOICE=<the period's invoice id>; NUMBER=<its invoice_number>
    N=<one-off invoices that step 1 kept, plus 1>; CENTS=<the total>
-   jq -n --arg c "$CUSTOMER" --arg m "Usage that arrived after $NUMBER was built ($N)" \
+   MEMO="Usage that arrived after $NUMBER was built ($N)"
+   IDEMPOTENCY_KEY="late-usage-$INVOICE-$N"
+   jq -n --arg c "$CUSTOMER" --arg m "$MEMO" \
      --argjson cents "$CENTS" '{customer_id: $c, memo: $m, line_items: [{description: $m,
        line_type: "usage", quantity: 1, unit_amount_cents: $cents}]}' > late.json
    curl -sS -X POST "$API/v1/invoices" -H "Authorization: Bearer $KEY" \
-     -H "Content-Type: application/json" -H "Idempotency-Key: late-usage-$INVOICE-$N" \
+     -H "Content-Type: application/json" -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
      -d @late.json | jq '{id, status, total_amount_cents}'
    ```
 

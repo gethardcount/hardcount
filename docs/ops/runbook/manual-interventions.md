@@ -24,11 +24,12 @@ below). Both make the matching change to the invoice and send
    | annulled or billed in error | `invoice_voided` |
    | written off as bad debt | `invoice_not_collectible` |
 
-2. **Find the run's mode.** `true` is a live run, `false` a test run:
+2. **Find the run's account, invoice and mode.** Step 3 needs all three.
+   For `livemode`, `true` is a live run, `false` a test run:
 
    ```sql
    SET app.bypass_rls = 'on';
-   SELECT livemode FROM invoice_dunning_runs WHERE id = '<run_id>';
+   SELECT tenant_id, invoice_id, livemode FROM invoice_dunning_runs WHERE id = '<run_id>';
    ```
 
 3. **Resolve the run.** Set `app.livemode` to `'on'` for a live run or
@@ -75,22 +76,33 @@ below). Both make the matching change to the invoice and send
 
    - **Nothing, or only `requires_payment_method` or `canceled`:** no money
      moved through Stripe. Go on to step 2. Stripe's search can take up to
-     a minute to show a new payment, and it is not offered to Stripe
-     accounts in India.
+     a minute to show a new payment.
    - **`succeeded`:** the customer paid through Stripe, and Hardcount has
      not recorded it yet. Do not record a payment: the money would be
      counted twice. See [A charge's result is unclear](unclear-charge.md).
    - **`processing`, `requires_action`, `requires_confirmation` or
      `requires_capture`:** the payment can still go through. Wait until it
      ends.
+
+   Stripe's search is not offered to Stripe accounts in India. There,
+   list the customer's payments instead, with the customer's
+   `stripe_customer_id` from `GET /v1/customers/{id}`, and read the
+   statuses the same way:
+
+   ```bash
+   curl -sS -G https://api.stripe.com/v1/payment_intents -u "$STRIPE_SECRET_KEY:" \
+     --data-urlencode "customer=<stripe_customer_id>" --data-urlencode "limit=100" \
+     | jq '.data[] | select(.metadata.hardcount_invoice_id == "<invoice id>") | {id, status, amount, currency, created}'
+   ```
+
 2. **Record the payment.** Use **Record offline payment** in the invoice's
    ⋯ menu (on a written-off invoice, the **Record payment** button), or
    `POST /v1/invoices/{id}/record-payment` (optional body
    `{"note": "Cheque #1234"}`). It also closes the dunning run, sends
-   `invoice.paid` and writes the audit row, which an SQL update would skip.
-   Do not mark an invoice paid with SQL. It is refused while a charge on
-   the invoice is still being confirmed with Stripe: see
-   [A charge's result is unclear](unclear-charge.md).
+   `invoice.paid` and writes the audit row. Record payment is refused while
+   a charge on the invoice is still being confirmed with Stripe: see
+   [A charge's result is unclear](unclear-charge.md). Do not mark an
+   invoice paid with SQL: an SQL update skips all of this.
 
 ## A subscription change is refused with `unpaid_invoice_blocks_change`
 

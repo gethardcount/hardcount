@@ -271,7 +271,8 @@ paid chokepoint, undoing a re-bill that should not happen).
 **Void timing (`reset=false`).** A void before the period's invoice is
 built gives the window back to it. A void after that forgives the window:
 the built invoice never changes (ADR-120), and nothing else bills it. The
-operator bills it with a one-off invoice if wanted. The late-usage runbook
+operator bills it with a one-off invoice if wanted.
+[Spend thresholds](../concepts/invoices.md#spend-thresholds-an-invoice-made-early)
 says so.
 
 **`reset=true` is unchanged.** *(Removed later on 2026-10-23 with the

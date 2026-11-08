@@ -176,16 +176,21 @@ you do with that invoice, and when:
   one-off invoice.
 - **Void it after the period's own invoice is built:** the usage is billed
   nowhere, because that invoice does not change. To charge it, bill it on a
-  one-off invoice. A void that arrives while that invoice is being saved
-  waits for it, and then counts as after.
+  one-off invoice
+  ([Usage is missing from a built invoice](../ops/runbook/invoice-timing-late-usage.md#usage-is-missing-from-a-built-invoice),
+  step 3). A void that arrives while that invoice is being saved waits for
+  it, and then counts as after.
 
 Usage of a `sum` or `count` meter
 ([aggregation](meters-and-prices.md#meters)) that is stamped before a
 spend-threshold invoice but arrives after it is on neither invoice. While
 the spend-threshold invoice can still be voided, such usage is not flagged
 `after_close` ([late usage](usage-events.md#late-usage)): a void would give
-its window back. Such usage that arrives once that invoice is paid is
-flagged.
+its window back. A written-off invoice can still be voided, so usage behind
+it is not flagged either. Such usage that arrives once that invoice is paid
+is flagged. The
+[late-usage steps](../ops/runbook/invoice-timing-late-usage.md#usage-is-missing-from-a-built-invoice)
+find it either way.
 
 ## Credit notes
 

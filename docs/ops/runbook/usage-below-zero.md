@@ -46,7 +46,8 @@ It does not carry the negative amount into a later period.
    **You see:** `meters` (each with `meter_id`, `event_name`, `meter_name`,
    `quantity`, `from` and `to`), `billing_reason`, `period_start` and
    `period_end`, and `invoice_id` and `invoice_number` when an invoice was
-   made.
+   made. A row written before 2026-10-27 has `meter_key` where newer rows
+   have `event_name`.
 
 2. **List the meter's events in its window.** Use the meter's `from` and
    `to`, not the period. They differ when a spend-threshold invoice already
@@ -71,19 +72,42 @@ It does not carry the negative amount into a later period.
 ## Fix
 
 - **The corrected usage was billed on an earlier invoice:** create a credit
-  note on that invoice for the corrected amount
-  (`POST /v1/credit-notes` with `invoice_id` and `lines`), then issue it
-  (`POST /v1/credit-notes/{id}/issue`). With no `refund_amount_cents`, the
-  credit goes to the customer's balance and no money moves
-  ([Credit notes](../../concepts/invoices.md#credit-notes)). Before you set
-  a refund, check the payment in Stripe: a refund made there already is
-  recorded instead ([A refund made in Stripe](refund-made-in-stripe.md)).
-- **The correction was sent by mistake:** nothing was charged for it. Fix
-  the sender so it does not repeat.
+  note on that invoice (`POST /v1/credit-notes` with `invoice_id` and
+  `lines`), then issue it (`POST /v1/credit-notes/{id}/issue`).
+  - Credit the row's `quantity` (the part below zero, per price), priced
+    as the earlier invoice priced it. The rest of the correction already
+    cancelled out this period's usage.
+  - For example: usage 100, a correction of -150, and the row shows -50.
+    Credit 50 units.
+  - With no `refund_amount_cents`, the credit goes to the customer's
+    balance and no money moves
+    ([Credit notes](../../concepts/invoices.md#credit-notes)). Before you
+    set a refund, check the payment in Stripe: a refund made there already
+    is recorded instead ([A refund made in Stripe](refund-made-in-stripe.md)).
+- **The correction was sent by mistake:** nothing was charged for it, but
+  it cancelled out this period's real usage for that price. Bill that
+  usage, the period's usage for the price before the correction, on a
+  one-off invoice, as in steps 4 and 5 of
+  [Usage is missing from a built invoice](invoice-timing-late-usage.md#usage-is-missing-from-a-built-invoice).
+  - `INVOICE` and `NUMBER` are the row's `invoice_id` and
+    `invoice_number`. A row with no invoice has neither: use the
+    subscription ID and the row's `period_start` instead.
+  - `N` counts only such invoices for that invoice. Use this memo and
+    idempotency key, so the late-usage steps never count this invoice as
+    theirs:
+
+    ```bash
+    MEMO="Usage cancelled by a correction on $NUMBER ($N)"; IDEMPOTENCY_KEY="below-zero-$INVOICE-$N"
+    ```
+
+  - Then fix the sender so it does not repeat. Do not also send an event
+    that reverses the correction: the late-usage steps would then bill
+    the same usage again.
 
 ## Verify
 
 The credit note is issued on the earlier invoice, and the customer's
-balance or refund shows it.
+balance or refund shows it. For a correction sent by mistake, the one-off
+invoice is `finalized` or `paid`.
 
 Related: [Invoice timing and late usage](invoice-timing-late-usage.md).
