@@ -39,7 +39,7 @@ original text.
 
 ### Security
 
-- **`golang.org/x/net` is v0.62.0.** It fixes CVE-2026-78661, a denial of service in its HTML parser. Hardcount never calls that parser, so it was not exposed, but image scanners flag the old version.
+- **`golang.org/x/net` is v0.62.0.** It fixes CVE-2026-78661, a denial of service in its HTML parser. Hardcount never calls that parser, so it was not exposed, but image scanners flag the old version. ([#1614](https://github.com/gethardcount/hardcount/pull/1614))
 
 ## [0.9.2] - 2026-11-02
 
