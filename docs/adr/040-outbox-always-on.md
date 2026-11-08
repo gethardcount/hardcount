@@ -29,10 +29,10 @@ DLQ.
 > `.payment_recorded` joined them on 2026-11-05: the invoice store queues
 > each in the transaction of its change, for an invoice born finalized and
 > a finalized draft alike. Twelve `subscription.*` events joined them on
-> 2026-11-08: the subscription store queues each in the transaction of its
-> change, for the operator's schedule, pause, resume and trial actions,
-> the item changes, the threshold fire and the scheduled plan changes the
-> billing run applies. The other 10 are queued after the commit:
+> 2026-11-08. The subscription store queues each in the transaction of its
+> change. That covers the operator's schedule, pause, resume and trial
+> actions, the item changes, the threshold fire and the scheduled plan
+> changes the billing run applies. The other 10 are queued after the commit:
 > `dunning.escalated` and `.resolved`, `customer.email_bounced` and
 > `.email_complained`, the four payment anomalies
 > (`payment.duplicate_charge`, `.amount_mismatch`, `.currency_mismatch`
