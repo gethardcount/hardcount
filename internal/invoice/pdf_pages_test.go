@@ -445,3 +445,27 @@ func TestRenderPDF_THBAmountHasCurrency(t *testing.T) {
 		t.Errorf("Amount Due does not read %q", "THB 1,234.56")
 	}
 }
+
+// TestRenderPDF_AccentedLettersPrintWhole: an accented letter is drawn from
+// parts, such as e and an acute accent, and the embedded font must hold
+// every part. A viewer draws the letter without a part the font leaves out,
+// while text extraction still reads the whole letter, so the test checks the
+// font itself. The name is in the bold face and the address in the regular.
+func TestRenderPDF_AccentedLettersPrintWhole(t *testing.T) {
+	inv, items := longInvoice(1, domain.InvoiceFinalized)
+	bt := BillToInfo{Name: "José Müller Ñandú Ãö", AddressLine1: "Rua São João 12, Köln"}
+	out, err := RenderPDF(context.Background(), inv, items, bt, nil, CompanyInfo{Name: "Seller Ltd"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if p := pdftest.Read(t, out)[0]; !p.Has(bt.Name) || !p.Has(bt.AddressLine1) {
+		t.Fatalf("the bill-to block does not read %q and %q", bt.Name, bt.AddressLine1)
+	}
+	missing, nested := pdftest.MissingComponents(t, out)
+	if nested == 0 {
+		t.Fatal("no glyph in the embedded fonts has a nested part, so the check proves nothing")
+	}
+	if len(missing) > 0 {
+		t.Errorf("the embedded fonts leave out parts of accented letters:\n%s", strings.Join(missing, "\n"))
+	}
+}

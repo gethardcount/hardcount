@@ -10,6 +10,10 @@
 //
 // MissingGlyphs reports the characters the embedded fonts cannot draw, so a
 // test can prove a string the renderers print never shows up blank.
+//
+// MissingComponents reports the parts of accented letters that a PDF's
+// embedded fonts leave out. A viewer then prints é as a bare e, while Read
+// still reads é.
 package pdftest
 
 import (
