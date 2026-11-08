@@ -361,11 +361,12 @@ func TestCommitUncollectible_NoRetire_ThenVoidRetiresOnce(t *testing.T) {
 	}
 }
 
-// TestUpdateStatus_CAS_RejectsPaidToVoid pins ADR-078 D5 at the STORE level:
-// the void flip carries an in-SQL allowed-source predicate, so a pay-vs-void
-// race (service guard read a stale pre-paid snapshot) cannot flip a PAID
-// invoice to voided — which would retire credits the customer just paid for.
-func TestUpdateStatus_CAS_RejectsPaidToVoid(t *testing.T) {
+// TestUpdateStatusWithReversalPrior_CAS_RejectsPaidToVoid pins ADR-078 D5 at
+// the STORE level: the void flip carries an in-SQL allowed-source predicate,
+// so a pay-vs-void race (service guard read a stale pre-paid snapshot) cannot
+// flip a PAID invoice to voided — which would retire credits the customer just
+// paid for.
+func TestUpdateStatusWithReversalPrior_CAS_RejectsPaidToVoid(t *testing.T) {
 	h, ctx := newCommitHarness(t, "CAS Paid To Void")
 
 	inv := h.createCommitInvoice(t, ctx, 10000, 10000, nil)

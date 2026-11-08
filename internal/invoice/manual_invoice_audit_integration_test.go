@@ -17,8 +17,9 @@ import (
 // The manual-invoice routes (POST /v1/invoices, POST /v1/invoices/{id}/line-items)
 // used to get their audit rows from the HTTP catch-all middleware, which GUESSED
 // the action/resource from the URL. These tests pin the ADR-090 replacement:
-// an explicit in-tx emission on BOTH manual-create store paths and on the
-// line-item add, each sharing fate with its business mutation.
+// an explicit in-tx emission on the manual create (both request shapes, one
+// store method) and on the line-item add, each sharing fate with its business
+// mutation.
 
 var errEmitBoom = errors.New("injected audit emission failure")
 
@@ -92,10 +93,11 @@ func wantNum(t *testing.T, meta map[string]any, key string, want int64) {
 	}
 }
 
-// B2 — POST /v1/invoices. The route has TWO store paths (bare header when the
-// request carries no lines; CreateWithLineItems when it does). Both must audit,
-// and both must share fate with the emission.
-func TestInvoiceCreate_AuditsBothStorePathsAndSharesFate(t *testing.T) {
+// B2 — POST /v1/invoices. The route takes two request shapes: a bare header
+// when the request carries no lines, and a create with lines when it does.
+// Both go through one store method, CreateWithLineItemsAudited. Each shape must
+// audit, and each must share fate with the emission.
+func TestInvoiceCreate_AuditsBothCreateShapesAndSharesFate(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	logger := audit.NewLogger(db)

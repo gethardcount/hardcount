@@ -1772,3 +1772,68 @@ func TestFinalize_CommittedCalcSkipsExpiryCheck(t *testing.T) {
 		t.Fatalf("no re-commit for an already-committed calc, ran %d times", committer.commits)
 	}
 }
+
+// TestServiceReads_SetBillingPeriodDisplay pins the Period row of every
+// rendered invoice PDF. The hosted page reads the invoice through
+// GetByPublicToken; the downloaded and emailed PDFs read it through
+// GetWithLineItems. BuildPDFContext prints BillingPeriodDisplay as it gets
+// it, so each read must set it: FormatInclusivePeriod in the invoice's zone,
+// which is its own BillingTimezone, or the tenant's when it has none.
+//
+// The half-open period [May 2 00:00 IST, Jun 1 00:00 IST) reads
+// "May 2, 2026 – May 31, 2026" in Kolkata and "May 1, 2026 – May 30, 2026" in
+// New York, so a read that used the wrong zone fails too.
+//
+// Mutation-verify: delete the BillingPeriodDisplay assignment in
+// decorateInvoice, and both reads return "" in every case.
+func TestServiceReads_SetBillingPeriodDisplay(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+	svc := NewService(store, nil, nil)
+	svc.SetTenantSettingsReader(dispSettings{tz: "America/New_York"})
+
+	start := time.Date(2026, 5, 1, 18, 30, 0, 0, time.UTC) // May 2 00:00 IST
+	end := time.Date(2026, 5, 31, 18, 30, 0, 0, time.UTC)  // Jun 1 00:00 IST
+
+	cases := []struct {
+		name        string
+		invTZ       string
+		wantZone    string
+		wantDisplay string
+	}{
+		{"the invoice's own zone", "Asia/Kolkata", "Asia/Kolkata", "May 2, 2026 – May 31, 2026"},
+		{"the tenant's zone when the invoice has none", "", "America/New_York", "May 1, 2026 – May 30, 2026"},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			id := fmt.Sprintf("inv_period_%d", i)
+			token := "tok_" + id
+			store.invoices[id] = domain.Invoice{
+				ID: id, TenantID: "t1", CustomerID: "cus_1",
+				Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
+				PublicToken: token, BillingTimezone: tc.invTZ,
+				BillingPeriodStart: start, BillingPeriodEnd: end,
+			}
+			want := domain.FormatInclusivePeriod(start, end, domain.LoadLocationOrUTC(tc.wantZone))
+			if want != tc.wantDisplay {
+				t.Fatalf("FormatInclusivePeriod in %s = %q, want %q", tc.wantZone, want, tc.wantDisplay)
+			}
+
+			hosted, _, err := svc.GetByPublicToken(ctx, token)
+			if err != nil {
+				t.Fatalf("GetByPublicToken: %v", err)
+			}
+			if hosted.BillingPeriodDisplay != want {
+				t.Errorf("GetByPublicToken BillingPeriodDisplay = %q, want %q", hosted.BillingPeriodDisplay, want)
+			}
+
+			fetched, _, err := svc.GetWithLineItems(ctx, "t1", id)
+			if err != nil {
+				t.Fatalf("GetWithLineItems: %v", err)
+			}
+			if fetched.BillingPeriodDisplay != want {
+				t.Errorf("GetWithLineItems BillingPeriodDisplay = %q, want %q", fetched.BillingPeriodDisplay, want)
+			}
+		})
+	}
+}

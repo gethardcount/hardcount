@@ -1010,9 +1010,10 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 }
 
 // createEmission builds the in-tx audit emission for an operator/API invoice
-// create (POST /v1/invoices). BOTH manual-create store paths carry it — the
-// bare-header create and the atomic create-with-lines — so the audit row does
-// not depend on which shape the composer sent; lineItemCount is the only
+// create (POST /v1/invoices). Both request shapes, a bare header with no
+// lines and a create with lines, go through one store method,
+// CreateWithLineItemsAudited, with this emission. So the audit row does not
+// depend on which shape the composer sent; lineItemCount is the only
 // difference in content. Engine/cycle invoices reach the store through the
 // un-audited variants: their canonical evidence is the finalize row, and
 // double-emitting a 'create' there would fabricate an operator action.
