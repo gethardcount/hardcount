@@ -178,12 +178,12 @@ func TestExhaust_TestClock_FinalActionsDatedAtTheEscalation(t *testing.T) {
 			subscriptiontest.SetBillingCycle(t, ctx, db, tenantID, sub.ID, periodStart, periodEnd, periodEnd, 0)
 
 			invoices := invoice.NewPostgresStore(db)
-			inv, err := invoices.Create(ctx, tenantID, domain.Invoice{
+			inv, err := invoices.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 				CustomerID: cust.ID, SubscriptionID: sub.ID, InvoiceNumber: "INV-EXHAUST-DATES",
 				Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
 				SubtotalCents: 4900, TotalAmountCents: 4900, AmountDueCents: 4900, IsSimulated: true,
 				BillingPeriodStart: invStart, BillingPeriodEnd: invEnd, IssuedAt: &invStart,
-			})
+			}, nil)
 			if err != nil {
 				t.Fatalf("create invoice: %v", err)
 			}

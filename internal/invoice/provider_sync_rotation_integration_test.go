@@ -43,12 +43,12 @@ func TestUnknownSweepRotatesInsteadOfJamming(t *testing.T) {
 	issued := now
 
 	mkUnknown := func(num string, piID string, ageHours int) string {
-		inv, err := store.Create(ctx, tenantID, domain.Invoice{
+		inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: num, Status: domain.InvoiceFinalized,
 			PaymentStatus: domain.PaymentUnknown, Currency: "USD",
 			SubtotalCents: 1000, TotalAmountCents: 1000, AmountDueCents: 1000,
 			BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &issued,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create %s: %v", num, err)
 		}
@@ -149,12 +149,12 @@ func TestRecordProviderSyncTouchesOnlyTheObservation(t *testing.T) {
 	store := invoice.NewPostgresStore(db)
 	now := time.Now().UTC()
 	issued := now
-	inv, err := store.Create(ctx, tenantID, domain.Invoice{
+	inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-NARROW", Status: domain.InvoiceFinalized,
 		PaymentStatus: domain.PaymentUnknown, Currency: "USD",
 		SubtotalCents: 1000, TotalAmountCents: 1000, AmountDueCents: 1000,
 		BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &issued,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

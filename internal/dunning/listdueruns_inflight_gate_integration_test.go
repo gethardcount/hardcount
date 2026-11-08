@@ -74,12 +74,12 @@ func TestListDueRuns_InFlightGate(t *testing.T) {
 	// is a status change only — payment_status deliberately stays put, since
 	// nobody ever learned whether the card was charged).
 	mkDueRun := func(num string, ps domain.InvoicePaymentStatus, piID string, status domain.InvoiceStatus) string {
-		inv, err := istore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := istore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: num, Status: domain.InvoiceFinalized,
 			PaymentStatus: ps, Currency: "USD",
 			SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 			BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice %s: %v", num, err)
 		}
@@ -90,10 +90,11 @@ func TestListDueRuns_InFlightGate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create run %s: %v", num, err)
 		}
-		// Create does NOT persist stripe_payment_intent_id — that column is only
-		// ever written by the payment path. Setting it on the struct silently did
-		// nothing, which once made the "unknown WITH a PI" row indistinguishable
-		// from a parked one and its assertion vacuous. Write it the real way.
+		// CreateWithLineItems does NOT persist stripe_payment_intent_id — that
+		// column is only ever written by the payment path. Setting it on the
+		// struct silently did nothing, which once made the "unknown WITH a PI"
+		// row indistinguishable from a parked one and its assertion vacuous.
+		// Write it the real way.
 		if piID != "" {
 			if _, applied, err := istore.StampChargeOutcome(ctx, tenantID, inv.ID, inv.ChargeAttemptSeq, ps, piID, ""); err != nil || !applied {
 				t.Fatalf("attach payment intent to %s: applied=%v err=%v", num, applied, err)
@@ -107,7 +108,7 @@ func TestListDueRuns_InFlightGate(t *testing.T) {
 			}
 		}
 		if status != domain.InvoiceFinalized {
-			if _, err := istore.UpdateStatus(ctx, tenantID, inv.ID, status); err != nil {
+			if _, err := istore.UpdateStatusWithReversalPrior(ctx, tenantID, inv.ID, status, nil); err != nil {
 				t.Fatalf("set invoice %s status %s: %v", num, status, err)
 			}
 			after, gerr := istore.Get(ctx, tenantID, inv.ID)

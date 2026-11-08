@@ -136,10 +136,11 @@ type CustomerReader interface {
 	GetMany(ctx context.Context, tenantID string, ids []string) ([]domain.Customer, error)
 }
 
-// TenantSettingsReader reads tenant settings so a manual invoice with no
-// explicit net term uses the tenant's configured terms, 0 included — the same
-// resolution as the billing engine's invoices. Optional; nil (narrow tests)
-// uses 30.
+// TenantSettingsReader reads tenant settings. Service reads them so a manual
+// invoice with no explicit net term uses the tenant's configured terms, 0
+// included — the same resolution as the billing engine's invoices. Optional;
+// nil (narrow tests) uses 30. Handler and BuildPDFContext read them for the
+// PDF's company info.
 type TenantSettingsReader interface {
 	Get(ctx context.Context, tenantID string) (domain.TenantSettings, error)
 }
@@ -260,7 +261,7 @@ func (s *Service) SetDunningResolver(d DunningResolver) { s.dunningResolver = d 
 type AuditLogger interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 	// LogInTx is the ADR-090 in-tx emission: Void uses it inside
-	// UpdateStatusWithReversal so the status flip, the credit reversal,
+	// UpdateStatusWithReversalPrior so the status flip, the credit reversal,
 	// the commit-grant retirement, and the audit row share one fate.
 	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
 }
@@ -992,7 +993,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 
 	// Bare-header create — caller adds line items incrementally afterwards.
 	if len(input.LineItems) == 0 {
-		return s.store.CreateAudited(ctx, tenantID, inv, s.createEmission(ctx, 0))
+		return s.store.CreateWithLineItemsAudited(ctx, tenantID, inv, nil, s.createEmission(ctx, 0))
 	}
 
 	// Atomic create-with-lines: header + items persist in one transaction
@@ -1009,9 +1010,10 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 }
 
 // createEmission builds the in-tx audit emission for an operator/API invoice
-// create (POST /v1/invoices). BOTH manual-create store paths carry it — the
-// bare-header create and the atomic create-with-lines — so the audit row does
-// not depend on which shape the composer sent; lineItemCount is the only
+// create (POST /v1/invoices). Both request shapes, a bare header with no
+// lines and a create with lines, go through one store method,
+// CreateWithLineItemsAudited, with this emission. So the audit row does not
+// depend on which shape the composer sent; lineItemCount is the only
 // difference in content. Engine/cycle invoices reach the store through the
 // un-audited variants: their canonical evidence is the finalize row, and
 // double-emitting a 'create' there would fabricate an operator action.
@@ -1141,11 +1143,6 @@ func (s *Service) ReleaseChargeClaim(ctx context.Context, tenantID, id string, h
 // a refused claim; it is never a gate.
 func (s *Service) ChargeHoldState(ctx context.Context, tenantID, id string) (domain.ChargeHoldState, error) {
 	return s.store.ChargeHoldStateOf(ctx, tenantID, id)
-}
-
-// SetNoPMNotifiedAt stamps the send-once no-PM email marker (see Store).
-func (s *Service) SetNoPMNotifiedAt(ctx context.Context, tenantID, id string, at time.Time) error {
-	return s.store.SetNoPMNotifiedAt(ctx, tenantID, id, at)
 }
 
 // attachAttention computes the unified Attention surface from durable
@@ -2479,7 +2476,7 @@ type AddLineItemInput struct {
 
 func (s *Service) AddLineItem(ctx context.Context, tenantID, invoiceID string, input AddLineItemInput) (domain.InvoiceLineItem, error) {
 	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
-	// Currency is left empty here — AddLineItemAtomic stamps it from the
+	// Currency is left empty here — AddLineItemAtomicAudited stamps it from the
 	// invoice row it locks. The atomic-create path passes the resolved
 	// currency instead, since the header isn't persisted yet.
 	li, err := buildLineItem(input, "")
@@ -2569,8 +2566,8 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 	// Commit purchase lines (ADR-078): line-local rules here; the
 	// invoice-level rules (manual invoices only, at most one commit line
 	// per invoice) are enforced in the store under the invoice row lock,
-	// covering both this path's consumers (AddLineItemAtomic and
-	// CreateWithLineItems).
+	// covering both this path's consumers (AddLineItemAtomicAudited and
+	// CreateWithLineItemsAudited).
 	if input.CommitGrantedCents != nil {
 		if *input.CommitGrantedCents <= 0 {
 			return domain.InvoiceLineItem{}, errs.Invalid("commit_granted_cents", "must be greater than 0")

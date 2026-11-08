@@ -102,7 +102,7 @@ func TestStampBelowMinimum(t *testing.T) {
 
 	t.Run("a voided invoice is not moved", func(t *testing.T) {
 		inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-MIN-D")
-		if _, err := store.UpdateStatus(ctx, tenantID, inv.ID, domain.InvoiceVoided); err != nil {
+		if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, inv.ID, domain.InvoiceVoided, nil); err != nil {
 			t.Fatal(err)
 		}
 		got, applied, err := store.StampBelowMinimum(ctx, tenantID, inv.ID, inv.ChargeAttemptSeq, msg)

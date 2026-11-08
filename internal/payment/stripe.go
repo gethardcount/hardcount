@@ -290,7 +290,6 @@ type InvoiceUpdater interface {
 	// auto-charge queue cleared, below_minimum_at and Stripe's sentence, under
 	// the same seq CAS as StampChargeOutcome.
 	StampBelowMinimum(ctx context.Context, tenantID, id string, attemptSeq int64, lastPaymentError string) (domain.Invoice, bool, error)
-	UpdateStatus(ctx context.Context, tenantID, id string, status domain.InvoiceStatus) (domain.Invoice, error)
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
 	// MarkPaidReportingTransition is MarkPaid plus a `transitioned` flag —
 	// true only when THIS call moved the invoice into paid (false on the

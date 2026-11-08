@@ -227,9 +227,10 @@ The dashboard is a React + TypeScript + Vite app. See
 [`web-v2/README.md`](web-v2/README.md) for setup, the dev server, and the
 directory's own CI checks. Two things often surprise first-time contributors:
 
-- `npm install` relies on `web-v2/.npmrc`. It sets `legacy-peer-deps`,
-  because the lockfile was resolved that way. Without it, npm rewrites the
-  lockfile.
+- Use npm 10 (it comes with Node 22, as in CI) or npm 11.6.3 or later.
+  `npm install` on npm 11.5.0 to 11.6.2 drops an `@emnapi` package from the
+  lockfile, and CI's `npm ci` then fails with `Missing: @emnapi/... from lock
+  file`. Check with `npm --version`; `npm install -g npm@11` fixes it.
 - Typechecking is `npx tsc -b`. Do not use `tsc --noEmit`: here it checks
   nothing and reports no error.
 
@@ -243,8 +244,8 @@ secrets.
 
 | CI job | What it checks | Local command |
 |---|---|---|
-| `unit` | Unit tests with the race detector, then `go vet`. Includes the source-rule tests in `internal/arch` | `go test ./... -race -short -count=1` |
-| `test` | Build, module checksums, and the integration tests against a real Postgres | `go test -p 1 ./... -count=1 -short=false` (needs `docker compose up -d postgres`; test databases are created for you) |
+| `unit` | Unit tests with the race detector. Includes the source-rule tests in `internal/arch` | `go test ./... -race -short -count=1` |
+| `test` | Module checksums, and the integration tests against a real Postgres | `go test -p 1 ./... -count=1 -short=false` (needs `docker compose up -d postgres`; test databases are created for you) |
 | `test-pgbouncer` | The same suite through PgBouncer, a connection pooler, in transaction mode | `scripts/pgbouncer-test.sh` (needs Docker) |
 | `golden-path` | Boots a real server, runs `scripts/demo.sh` from prices to a finished invoice, then runs hardcount-doctor over the rows it wrote | Steps 2 to 5 of [Development setup](#development-setup), then `go run ./cmd/hardcount-doctor` |
 | `lint` | golangci-lint (`.golangci.yml`), the Go version in `go.mod` against the `Dockerfile`, the quickstart release against the Compose template, and `govulncheck` | `make lint`, then `govulncheck ./...` |

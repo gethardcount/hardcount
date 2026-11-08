@@ -47,7 +47,7 @@ func TestTerminalTransitions_ClearAutoChargePending(t *testing.T) {
 
 	t.Run("void clears it", func(t *testing.T) {
 		inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-ACP-VOID")
-		if _, err := store.UpdateStatus(ctx, tenantID, inv.ID, domain.InvoiceVoided); err != nil {
+		if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, inv.ID, domain.InvoiceVoided, nil); err != nil {
 			t.Fatalf("void: %v", err)
 		}
 		if acp(inv.ID) {
@@ -57,7 +57,7 @@ func TestTerminalTransitions_ClearAutoChargePending(t *testing.T) {
 
 	t.Run("uncollectible clears it", func(t *testing.T) {
 		inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-ACP-UNCOLL")
-		if _, err := store.UpdateStatus(ctx, tenantID, inv.ID, domain.InvoiceUncollectible); err != nil {
+		if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, inv.ID, domain.InvoiceUncollectible, nil); err != nil {
 			t.Fatalf("uncollectible: %v", err)
 		}
 		if acp(inv.ID) {

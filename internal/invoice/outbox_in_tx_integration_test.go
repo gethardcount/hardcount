@@ -60,7 +60,7 @@ func seedInvoice(t *testing.T, db *postgres.DB, ctx context.Context, tenantID st
 	inv.Currency = "USD"
 	inv.BillingPeriodStart = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	inv.BillingPeriodEnd = time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
-	out, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, inv)
+	out, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, inv, nil)
 	if err != nil {
 		t.Fatalf("seed invoice %s: %v", inv.InvoiceNumber, err)
 	}

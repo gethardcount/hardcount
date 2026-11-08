@@ -56,13 +56,13 @@ func TestRecordChargeAttempt_UpsertContract(t *testing.T) {
 		t.Fatalf("create subscription: %v", err)
 	}
 	due := ps.AddDate(0, 0, 30)
-	inv, err := store.Create(ctx, tenantID, domain.Invoice{
+	inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, SubscriptionID: sub.ID,
 		InvoiceNumber: "HC-ATTEMPT-001",
 		Status:        domain.InvoiceDraft, PaymentStatus: domain.PaymentPending, Currency: "USD",
 		BillingPeriodStart: ps, BillingPeriodEnd: pe,
 		IssuedAt: &ps, DueAt: &due, NetPaymentTermDays: 30,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
@@ -173,12 +173,12 @@ func TestChargeAttempt_SettleTransitionsResolveOutcomeAtomically(t *testing.T) {
 	due := ps.AddDate(0, 0, 30)
 	mk := func(number string) domain.Invoice {
 		t.Helper()
-		inv, err := store.Create(ctx, tenantID, domain.Invoice{
+		inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: number,
 			Status: domain.InvoiceDraft, PaymentStatus: domain.PaymentPending, Currency: "USD",
 			BillingPeriodStart: ps, BillingPeriodEnd: ps.AddDate(0, 1, 0),
 			IssuedAt: &ps, DueAt: &due, NetPaymentTermDays: 30,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create %s: %v", number, err)
 		}

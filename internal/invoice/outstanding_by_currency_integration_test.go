@@ -29,12 +29,12 @@ func TestGetOutstandingBalance_ByCurrency(t *testing.T) {
 	mk := func(num, currency string, due int64, status domain.InvoiceStatus, pay domain.InvoicePaymentStatus) {
 		t.Helper()
 		now := time.Now().UTC()
-		if _, err := store.Create(ctx, tenantID, domain.Invoice{
+		if _, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: num,
 			Status: status, PaymentStatus: pay,
 			Currency: currency, SubtotalCents: due, TotalAmountCents: due, AmountDueCents: due,
 			BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-		}); err != nil {
+		}, nil); err != nil {
 			t.Fatalf("create %s: %v", num, err)
 		}
 	}

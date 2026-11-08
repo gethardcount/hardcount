@@ -497,16 +497,6 @@ func (m *mockInvoiceUpdaterHandler) StampChargeOutcome(_ context.Context, tenant
 	return domain.Invoice{ID: id, TenantID: tenantID, PaymentStatus: ps}, true, nil
 }
 
-func (m *mockInvoiceUpdaterHandler) UpdateStatus(_ context.Context, _, id string, status domain.InvoiceStatus) (domain.Invoice, error) {
-	inv, ok := m.invoices[id]
-	if !ok {
-		return domain.Invoice{}, fmt.Errorf("not found")
-	}
-	inv.status = string(status)
-	m.invoices[id] = inv
-	return domain.Invoice{ID: id, Status: status}, nil
-}
-
 func (m *mockInvoiceUpdaterHandler) GetByStripePaymentIntentID(_ context.Context, _, piID string) (domain.Invoice, error) {
 	id, ok := m.byPI[piID]
 	if !ok {
@@ -594,14 +584,6 @@ func (m *mockInvoiceUpdaterHandler) MarkPaymentFailedReportingTransition(_ conte
 
 func (m *mockInvoiceUpdaterHandler) SetPaymentCard(_ context.Context, _, _ string, _, _ string) error {
 	return nil
-}
-
-func (m *mockInvoiceUpdaterHandler) ApplyCreditNote(_ context.Context, _, id string, _ int64) (domain.Invoice, error) {
-	inv, ok := m.invoices[id]
-	if !ok {
-		return domain.Invoice{}, fmt.Errorf("not found")
-	}
-	return domain.Invoice{ID: id, TenantID: inv.tenantID}, nil
 }
 
 type mockWebhookStoreH struct {

@@ -32,13 +32,13 @@ func seedWrittenOff(t *testing.T, db *postgres.DB, ctx context.Context, tenantID
 		t.Fatalf("create customer: %v", err)
 	}
 	store := invoice.NewPostgresStore(db)
-	inv, err := store.Create(ctx, tenantID, domain.Invoice{
+	inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: num,
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
 		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		BillingPeriodStart: time.Now().UTC().Add(-30 * 24 * time.Hour),
 		BillingPeriodEnd:   time.Now().UTC(),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
