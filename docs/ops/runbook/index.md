@@ -40,6 +40,7 @@ Stripe troubleshooting is out of scope.
 | `hardcount_audit_uncovered_mutation_total` rising | [Audit log gaps](audit-log-gaps.md#a-change-with-no-audit-row) |
 | `hardcount_billing_failing_subscriptions` above zero, or a subscription is not being invoiced | [Subscriptions whose billing is failing](billing-failing.md) |
 | A period ended but its invoice is not built yet, or usage is missing from an invoice | [Invoice timing and late usage](invoice-timing-late-usage.md) |
+| A period invoice billed less than usual after a scheduled plan change: base fee lines only for the items whose plan changed | [Base fees missed at a scheduled plan change](plan-change-missed-base-fees.md) |
 | `hardcount_usage_unpriced_quantity_total` rising, or a WARN with "matched no price" and "not billed" | [Usage with no price](usage-with-no-price.md) |
 | "Usage below zero billed as zero" on a subscription's timeline, or a WARN with "usage below zero" | [Usage below zero](usage-below-zero.md) |
 | Write I/O high for minutes after a bulk load | [Write I/O after a large backfill](write-io-after-backfill.md) |
