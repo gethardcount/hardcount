@@ -124,7 +124,7 @@ attempt, so each period is billed once, whichever runs first.
    retried yet. It stops when the list holds no such subscription:
 
    ```bash
-   : > retried.txt
+   : > retried.txt; : > not-retried.txt
    while :; do
      : > failing.txt; offset=0; listed=1
      while :; do
@@ -135,13 +135,23 @@ attempt, so each period is billed once, whichever runs first.
        offset=$((offset + 100))
      done
      [ "$listed" = 1 ] || { echo "The list failed: run this again."; break; }
-     grep -vxFf retried.txt failing.txt > todo.txt
-     [ -s todo.txt ] || { echo "Every failing subscription on the list was retried."; break; }
+     cat retried.txt not-retried.txt > done.txt
+     grep -vxFf done.txt failing.txt > todo.txt
+     if [ ! -s todo.txt ]; then
+       if [ -s not-retried.txt ]; then echo "Some retries did not run: run this again."
+       else echo "Every failing subscription on the list was retried."; fi
+       break
+     fi
      while read -r id; do
-       curl -sS -X POST "$API/v1/subscriptions/$id/retry-billing" -H "Authorization: Bearer $KEY" \
-         | jq -c --arg id "$id" '{id: $id, invoices_generated, still_due,
-             still_failing: (.subscription.billing_failure != null), error: .error.code}'
-       echo "$id" >> retried.txt
+       resp=$(curl -sS -X POST "$API/v1/subscriptions/$id/retry-billing" -H "Authorization: Bearer $KEY")
+       if jq -e '.subscription != null or .error.code == "billing_not_failing"' <<<"$resp" >/dev/null 2>&1; then
+         jq -c --arg id "$id" '{id: $id, invoices_generated, still_due,
+             still_failing: (.subscription.billing_failure != null), error: .error.code}' <<<"$resp"
+         echo "$id" >> retried.txt
+       else
+         echo "{\"id\":\"$id\",\"not_retried\":true}"
+         echo "$id" >> not-retried.txt
+       fi
      done < todo.txt
    done
    ```
@@ -153,6 +163,10 @@ attempt, so each period is billed once, whichever runs first.
      list. The loop does not retry it again.
    - A line with `error: "billing_not_failing"` has no saved failure any
      more: the billing run or another retry got to it first.
+   - A line with `not_retried` means the retry call failed: an error, a
+     timeout or no answer. The loop ends with
+     `Some retries did not run: run this again.` Run the whole block
+     again: nothing else retries a parked subscription.
    - If the list fails, the loop stops before it retries anything from
      that list. Run the whole block again. It can retry a subscription
      that is still failing once more, which only makes one more attempt.
@@ -172,16 +186,13 @@ Read two fields of the retry response:
 | no `billing_failure`, `still_due: false` | Billed, or nothing was left to bill |
 | `billing_failure` present | The attempt failed again. `attempts` is back to 1 and the billing run retries on its own. This includes an attempt that ended without an error but left the subscription due ("Billing didn't finish, and the subscription is still due") |
 | no `billing_failure`, `still_due: true` | The attempt did not complete: a database connection was lost, or a deadlock. Nothing was saved and the subscription is unbilled. The next billing run attempts it, and the server log has the reason (`retry-billing: the attempt failed`). A second call answers 409, because the failure is already cleared |
+| any other error, a timeout or no answer | The retry may not have run. Call it again. A 409 `billing_not_failing` then means the earlier call cleared the failure: the next billing run bills the subscription |
 
 `invoices_generated` is not the success test. It counts only the invoices
 built when a period closes, at the end of a billing period. It is 0 when
 the retry fired a scheduled cancel (the subscription comes back `canceled`,
 with its final invoice), ended a trial, or closed a period with nothing to
 bill.
-
-A call that times out returns an error, but may already have cleared the
-failure. A repeat call can then answer 409 `billing_not_failing` while the
-next billing run bills the subscription.
 
 `hardcount_billing_failing_subscriptions` falls on the next scrape.
 
