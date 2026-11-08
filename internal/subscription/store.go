@@ -56,6 +56,25 @@ var ErrNoScheduledCancel = errors.New("subscription: no cancel is scheduled")
 // and no audit row is written.
 var ErrNoPendingChange = errors.New("subscription: no plan change is scheduled")
 
+// AppliedPlanChanges is what ApplyDuePendingItemPlansAtomic committed.
+type AppliedPlanChanges struct {
+	// Items is every live item of the subscription, read on the swap's
+	// transaction after the swap: the items the period close bills.
+	Items []domain.SubscriptionItem
+	// Swapped has one entry per item whose scheduled change the swap applied,
+	// and none for an item whose change was canceled before the swap.
+	Swapped []AppliedPlanChange
+}
+
+// AppliedPlanChange is one item's scheduled plan change, applied.
+type AppliedPlanChange struct {
+	ItemID string
+	// OldPlanID is the plan the item left, read under the subscription row
+	// lock.
+	OldPlanID string
+	NewPlanID string
+}
+
 // PeriodSnapshot is the period state a writer derived its inputs from — the
 // status, period start and watermark it read before building an invoice or
 // computing a new period. Every period-closing write proves it in the WHERE
