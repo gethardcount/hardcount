@@ -1299,7 +1299,8 @@ func (s *Service) AddItem(ctx context.Context, tenantID, subscriptionID string, 
 // that bill one meter are checked one after the other, and an add that
 // waited on a plan swap or a period close sees what it wrote. The result
 // carries that state: the handler prices the add from it, never from its own
-// read before the tx.
+// read before the tx. subscription.item.added is queued on tx, so it commits
+// or rolls back with the add and its proration.
 func (s *Service) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, input AddItemInput) (ItemChangeResult, error) {
 	qty, err := addItemQuantity(input)
 	if err != nil {
@@ -1328,6 +1329,9 @@ func (s *Service) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscript
 		Quantity:       qty,
 	})
 	if err != nil {
+		return ItemChangeResult{}, err
+	}
+	if err := s.enqueueItemEventTx(ctx, tx, tenantID, subscriptionID, domain.EventSubscriptionItemAdded, item.ID); err != nil {
 		return ItemChangeResult{}, err
 	}
 	return ItemChangeResult{Item: item, EffectiveAt: now, pricedFrom: itemChangeBase{sub: sub}}, nil
@@ -1516,7 +1520,9 @@ func (s *Service) checkItemChange(ctx context.Context, tenantID, subscriptionID,
 // subscription row lock (#1270). It is the first statement of the change on
 // the caller's tx: UpdateItemTx's, or UpdateItem's own for a change that
 // prorates nothing. checked is the item the caller ran its checks on, before
-// the tx.
+// the tx. It queues the change's event on the same tx:
+// subscription.item.updated for a change to this period,
+// subscription.pending_change.scheduled for a scheduled one.
 //
 // A change that committed in between is seen here, not overwritten: a
 // quantity change is priced from the quantity and plan the item holds now,
@@ -1550,6 +1556,9 @@ func (s *Service) changeItemUnderLock(ctx context.Context, tx *sql.Tx, tenantID,
 		if err != nil {
 			return ItemChangeResult{}, err
 		}
+		if err := s.enqueueItemEventTx(ctx, tx, tenantID, subscriptionID, domain.EventSubscriptionItemUpdated, updated.ID); err != nil {
+			return ItemChangeResult{}, err
+		}
 		return ItemChangeResult{Item: updated, EffectiveAt: now, pricedFrom: pricedFrom}, nil
 	}
 
@@ -1578,13 +1587,32 @@ func (s *Service) changeItemUnderLock(ctx context.Context, tx *sql.Tx, tenantID,
 		if err != nil {
 			return ItemChangeResult{}, err
 		}
+		// An intent for the next period, not a change to this one. The
+		// billing run sends subscription.pending_change.applied when it
+		// applies it.
+		if err := s.enqueueItemEventTx(ctx, tx, tenantID, subscriptionID, domain.EventSubscriptionPendingChangeScheduled, updated.ID); err != nil {
+			return ItemChangeResult{}, err
+		}
 		return ItemChangeResult{Item: updated, EffectiveAt: effectiveAt, pricedFrom: pricedFrom}, nil
 	}
 	updated, err := s.store.ApplyItemPlanImmediatelyTx(ctx, tx, tenantID, item.ID, input.NewPlanID, now)
 	if err != nil {
 		return ItemChangeResult{}, err
 	}
+	if err := s.enqueueItemEventTx(ctx, tx, tenantID, subscriptionID, domain.EventSubscriptionItemUpdated, updated.ID); err != nil {
+		return ItemChangeResult{}, err
+	}
 	return ItemChangeResult{Item: updated, EffectiveAt: now, pricedFrom: pricedFrom}, nil
+}
+
+// enqueueItemEventTx queues an item event on the change's tx (ADR-040). It
+// carries the subscription as tx reads it after the change, and item_id
+// naming the item: on a removal the item is no longer in items. A
+// proration the handler writes on the same tx afterwards writes invoices
+// and credit notes, not the subscription, so the event still shows what
+// GET returns after the commit.
+func (s *Service) enqueueItemEventTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, eventType, itemID string) error {
+	return s.store.EnqueueEventTx(ctx, tx, tenantID, subscriptionID, eventType, map[string]any{"item_id": itemID})
 }
 
 // lockItemForChange locks the subscription row on tx and returns the
@@ -1698,7 +1726,8 @@ func mapPeriodMoved(err error) error {
 // here — the handler runs them POST-commit, because Stripe calls must never ride
 // a DB tx. A created new invoice is carried back on the result for that
 // post-commit FinalizeOnCreateInvoice. Caller has validated the swap (active
-// sub, plan exists + differs, same-cadence, different interval).
+// sub, plan exists + differs, same-cadence, different interval). Its last
+// write queues subscription.item.updated on the same tx.
 func (s *Service) applyCrossIntervalPlanSwapTx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -1857,6 +1886,10 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 			}
 		}
 	}
+	// Last: the event shows the new plan and the new period the swap wrote.
+	if err := s.enqueueItemEventTx(ctx, tx, tenantID, subscriptionID, domain.EventSubscriptionItemUpdated, itemID); err != nil {
+		return ItemChangeResult{}, err
+	}
 	return res, nil
 }
 
@@ -1922,17 +1955,22 @@ func (s *Service) finishReliefThenCollect(ctx context.Context, sub domain.Subscr
 }
 
 // CancelPendingItemChange clears a scheduled plan change on a single item.
-// Idempotent — a no-op if nothing was scheduled.
-func (s *Service) CancelPendingItemChange(ctx context.Context, tenantID, subscriptionID, itemID string) (domain.SubscriptionItem, error) {
-	item, err := s.store.GetItem(ctx, tenantID, itemID)
+// canceled is true only when this call cleared the change. The store then
+// queues subscription.pending_change.canceled in the clear's transaction
+// (Store.ClearItemPendingPlan), and the caller writes its audit row.
+// Idempotent: with nothing scheduled, or a change another cancel cleared
+// first, it returns the unchanged item with canceled false, and nothing is
+// written or queued.
+func (s *Service) CancelPendingItemChange(ctx context.Context, tenantID, subscriptionID, itemID string) (item domain.SubscriptionItem, canceled bool, err error) {
+	item, err = s.store.GetItem(ctx, tenantID, itemID)
 	if err != nil {
-		return domain.SubscriptionItem{}, err
+		return domain.SubscriptionItem{}, false, err
 	}
 	if item.SubscriptionID != subscriptionID {
-		return domain.SubscriptionItem{}, errs.ErrNotFound
+		return domain.SubscriptionItem{}, false, errs.ErrNotFound
 	}
 	if item.PendingPlanID == "" {
-		return item, nil
+		return item, false, nil
 	}
 	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
 	// A pending change due at a boundary that has passed has taken effect,
@@ -1940,19 +1978,42 @@ func (s *Service) CancelPendingItemChange(ctx context.Context, tenantID, subscri
 	// first and applies it, and the cancel is then refused rather than
 	// reported as a cancel.
 	if _, err := s.CloseEndedPeriodFirst(ctx, tenantID, subscriptionID); err != nil {
-		return domain.SubscriptionItem{}, err
+		return domain.SubscriptionItem{}, false, err
 	}
 	after, err := s.store.GetItem(ctx, tenantID, itemID)
 	if err != nil {
-		return domain.SubscriptionItem{}, err
+		return domain.SubscriptionItem{}, false, err
 	}
 	if after.PendingPlanID == "" {
-		if after.PlanID == item.PendingPlanID {
-			return domain.SubscriptionItem{}, errs.InvalidState("the pending plan change already took effect when the billing period ended")
-		}
-		return after, nil
+		after, err = pendingChangeGone(item, after)
+		return after, false, err
 	}
-	return s.store.ClearItemPendingPlan(ctx, tenantID, itemID)
+	cleared, err := s.store.ClearItemPendingPlan(ctx, tenantID, itemID)
+	if err == nil {
+		return cleared, true, nil
+	}
+	if !errors.Is(err, ErrNoPendingChange) {
+		return domain.SubscriptionItem{}, false, err
+	}
+	// Another cancel, or the boundary apply, committed between the read
+	// above and the clear's lock.
+	after, err = s.store.GetItem(ctx, tenantID, itemID)
+	if err != nil {
+		return domain.SubscriptionItem{}, false, err
+	}
+	after, err = pendingChangeGone(item, after)
+	return after, false, err
+}
+
+// pendingChangeGone answers a cancel of the change item had scheduled when
+// after, a later read of the item, has none: it took effect (the item is on
+// the scheduled plan) and the cancel is refused, or another cancel cleared
+// it and after is returned unchanged.
+func pendingChangeGone(item, after domain.SubscriptionItem) (domain.SubscriptionItem, error) {
+	if after.PlanID == item.PendingPlanID {
+		return domain.SubscriptionItem{}, errs.InvalidState("the pending plan change already took effect when the billing period ended")
+	}
+	return after, nil
 }
 
 // RemoveItem deletes an item. Removing the only remaining item on an active
@@ -1980,7 +2041,8 @@ func (s *Service) RemoveItem(ctx context.Context, tenantID, subscriptionID, item
 // Its first statement locks the subscription row, and the checks run on the
 // state read under that lock (#1270). The result carries that state: Item is
 // the item as it was removed, EffectiveAt the removal instant, and the
-// handler prices the removal credit from them.
+// handler prices the removal credit from them. subscription.item.removed is
+// queued on tx.
 func (s *Service) RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, itemID string) (ItemChangeResult, error) {
 	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
 	sub, item, err := s.lockItemForChange(ctx, tx, tenantID, subscriptionID, itemID)
@@ -1997,6 +2059,9 @@ func (s *Service) RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscr
 		return ItemChangeResult{}, errUnbilledPeriod(sub)
 	}
 	if err := s.store.RemoveItemTx(ctx, tx, tenantID, itemID); err != nil {
+		return ItemChangeResult{}, err
+	}
+	if err := s.enqueueItemEventTx(ctx, tx, tenantID, subscriptionID, domain.EventSubscriptionItemRemoved, itemID); err != nil {
 		return ItemChangeResult{}, err
 	}
 	return ItemChangeResult{Item: item, EffectiveAt: now, pricedFrom: itemChangeBase{sub: sub, item: item}}, nil
@@ -2571,9 +2636,10 @@ func (s *Service) ScheduleCancel(ctx context.Context, tenantID, id string, input
 	return s.store.ScheduleCancellation(ctx, tenantID, id, cancelAt, input.AtPeriodEnd, sub.Status)
 }
 
-// ClearScheduledCancel undoes any prior schedule. Idempotent — a row
-// without a schedule returns unchanged, with cleared false, so the caller
-// announces nothing.
+// ClearScheduledCancel undoes any prior schedule. The store queues
+// subscription.cancel_cleared in the clear's transaction. Idempotent: a row
+// without a schedule returns unchanged, with cleared false. Nothing was
+// written or queued then, and the caller writes no audit row.
 //
 // A schedule whose boundary has passed has already taken effect, even if the
 // billing run has not closed the period yet: the close runs first and fires
@@ -2593,7 +2659,7 @@ func (s *Service) ClearScheduledCancel(ctx context.Context, tenantID, id string)
 	}
 	sub, err := s.store.ClearScheduledCancellation(ctx, tenantID, id)
 	if errors.Is(err, ErrNoScheduledCancel) {
-		// Idempotent for the operator: nothing changed, nothing announced.
+		// Idempotent for the operator: nothing changed, nothing queued.
 		sub, err = s.store.Get(ctx, tenantID, id)
 		return sub, false, err
 	}
@@ -2752,11 +2818,13 @@ func (s *Service) PauseCollectionForDunning(ctx context.Context, tenantID, id, i
 	return outcome != DunningPauseInvoiceSettled, nil
 }
 
-// ResumeCollection clears any active collection-pause. Idempotent — a row
-// without an active pause returns unchanged, with resumed false, so the
-// caller announces nothing. A pause that had already lifted (a payment
-// released it, or its date came) is resumed as the scheduled resumer would
-// resume it, with that trigger, and resumed is false too.
+// ResumeCollection clears any active collection-pause. The store queues
+// subscription.collection_resumed (triggered_by operator) in the resume's
+// transaction, and this method writes the audit row. Idempotent: a row
+// without an active pause returns unchanged, with resumed false, and nothing
+// is queued or audited. A pause that had already lifted (a payment released
+// it, or its date came) is resumed as the scheduled resumer would resume it:
+// the store queues the event with that trigger, and resumed is false too.
 //
 // Its one caller is the operator (handler). The scheduled resumers write
 // their own row (triggered_by "schedule", or "payment" for a dunning pause
@@ -2770,9 +2838,9 @@ func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (do
 	}
 	sub, err := s.store.ClearPauseCollection(ctx, tenantID, id, s.resumeAudit())
 	if errors.Is(err, ErrNotPaused) || errors.Is(err, ErrPauseLifted) {
-		// Idempotent for the operator: nothing was paused, so the operator
-		// announces nothing. A lifted pause's resume was announced by the
-		// store, with its own trigger.
+		// Idempotent for the operator: nothing was paused, so nothing is
+		// queued or audited for the operator. A lifted pause's resume was
+		// queued by the store, with its own trigger.
 		sub, err = s.store.Get(ctx, tenantID, id)
 		return sub, false, err
 	}

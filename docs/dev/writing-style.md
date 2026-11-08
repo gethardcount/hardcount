@@ -5,7 +5,7 @@ It is for anyone who writes a new doc or changes an old one, a person or an
 AI agent. It applies to every Markdown file: README, guides, runbooks, ADRs,
 design docs, CHANGELOG, the release checklist and the files AI agents read
 (CLAUDE.md, playbooks).
-Comments in Go code follow the same ideas, with the extra rules in
+Comments in code follow the same ideas, with the extra rules in
 [Code comments](code-comments.md). The words the dashboard shows follow
 [Activity lines and UI words](activity-lines.md).
 

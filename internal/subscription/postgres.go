@@ -38,21 +38,19 @@ type OutboxEnqueuer interface {
 	Enqueue(ctx context.Context, tx *sql.Tx, tenantID, eventType string, payload map[string]any) (string, error)
 }
 
-// SetOutboxEnqueuer wires transactional lifecycle events (2026-07-05,
-// DispatchTx-seam subscription subset): subscription.created / .activated /
-// .canceled / .trial_ended, and dunning's .collection_paused, are enqueued
-// IN the transition tx, so a crash in the old commit→dispatch window can
-// no longer silently drop them — a
-// dropped emission left no row anywhere (nothing to replay, nothing to
-// reconcile). Optional — when unset (narrow tests), no events are enqueued.
+// SetOutboxEnqueuer wires the subscription's webhook events. Every
+// subscription.* event is queued in the transaction of the change it reports
+// (ADR-040), so the change and its event commit together: a crash, a
+// cancelled request or a lost lease after the commit cannot drop the event.
+// The router wires it, and webhook.MustWiredOutbox refuses to boot without
+// it. Unset (narrow tests), no events are queued.
 func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 
-// enqueueLifecycle enqueues one lifecycle event on the caller's tx, carrying
-// sub (ADR-131): the caller passes the row with its items as the
-// transaction has written it. An enqueue failure fails the transition —
-// atomicity with the state change is the entire point of the seam (the
-// pre-fix post-commit dispatch could drop the event with no trace). No-op
-// when the enqueuer isn't wired.
+// enqueueLifecycle queues one subscription event on the caller's tx,
+// carrying sub (ADR-131): the caller passes the row with its items as the
+// transaction has written it. An enqueue error fails the change, so the
+// change never commits without its event. No-op when the outbox is not
+// wired.
 func (s *PostgresStore) enqueueLifecycle(ctx context.Context, tx *sql.Tx, eventType string, sub domain.Subscription, extra map[string]any) error {
 	if s.outbox == nil {
 		return nil
@@ -61,6 +59,40 @@ func (s *PostgresStore) enqueueLifecycle(ctx context.Context, tx *sql.Tx, eventT
 		return fmt.Errorf("enqueue %s: %w", eventType, err)
 	}
 	return nil
+}
+
+// EnqueueEventTx queues eventType for subscription subID on the caller's
+// tx, carrying the subscription with its items as tx reads it now, and extra
+// beside it. A caller that writes a subscription's change on its own tx (the
+// item changes, the threshold fire) calls it after the change's last write
+// to the subscription and its items, so the event shows what GET returns
+// after the commit. An error fails the change. tenantID is accepted for
+// symmetry with the store's other *Tx methods; RLS scoping rides the tx.
+func (s *PostgresStore) EnqueueEventTx(ctx context.Context, tx *sql.Tx, _ string, subID, eventType string, extra map[string]any) error {
+	if s.outbox == nil {
+		return nil
+	}
+	sub, err := readSubTx(ctx, tx, subID)
+	if err != nil {
+		return fmt.Errorf("read the subscription for %s: %w", eventType, err)
+	}
+	return s.enqueueLifecycle(ctx, tx, eventType, sub, extra)
+}
+
+// readSubTx reads subscription id with its items on tx.
+func readSubTx(ctx context.Context, tx *sql.Tx, id string) (domain.Subscription, error) {
+	var sub domain.Subscription
+	err := scanSubRow(tx.QueryRowContext(ctx, `SELECT `+subCols+` FROM subscriptions WHERE id = $1`, id), &sub)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Subscription{}, errs.ErrNotFound
+	}
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, err
+	}
+	return sub, nil
 }
 
 // finishCancelTx is the last write of every cancel writer: it retires the
@@ -575,7 +607,8 @@ func retireLiveOnlyStateTx(ctx context.Context, tx *sql.Tx, id string) (domain.S
 // boundaries for ACTIVE subs, and the trial-end guard/CancelAtTrialEnd for
 // TRIALING subs (a free, no-invoice cancel at trial_end_at). Returns the
 // updated subscription with hydrated items so the handler can echo the
-// same shape it returns elsewhere.
+// same shape it returns elsewhere, and queues subscription.cancel_scheduled
+// in the same transaction.
 //
 // The UPDATE CAS-es on observedStatus — the status the caller validated the
 // intent under — because the flag's MEANING is status-polymorphic: landing
@@ -629,6 +662,11 @@ func (s *PostgresStore) ScheduleCancellation(ctx context.Context, tenantID, id s
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
 		return domain.Subscription{}, err
 	}
+	// The row carries cancel_at, cancel_at_period_end and the derived
+	// cancel_effective_at (ADR-069: when the cancel actually lands).
+	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCancelScheduled, sub, nil); err != nil {
+		return domain.Subscription{}, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return domain.Subscription{}, err
@@ -636,9 +674,10 @@ func (s *PostgresStore) ScheduleCancellation(ctx context.Context, tenantID, id s
 	return sub, nil
 }
 
-// ClearScheduledCancellation undoes a prior schedule. A row with no schedule
-// is not written and returns ErrNoScheduledCancel, so only a clear that
-// changed the row announces it (two racing clears: the second sees the
+// ClearScheduledCancellation undoes a prior schedule and queues
+// subscription.cancel_cleared in the same transaction. A row with no
+// schedule is not written and returns ErrNoScheduledCancel, so only a clear
+// that changed the row announces it (two racing clears: the second sees the
 // cleared row). Returns errs.ErrNotFound if the subscription doesn't exist.
 // Status is not checked: every cancel
 // writer clears the schedule in its own transaction (retireLiveOnlyStateTx),
@@ -676,6 +715,9 @@ func (s *PostgresStore) ClearScheduledCancellation(ctx context.Context, tenantID
 	}
 
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, err
+	}
+	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCancelCleared, sub, nil); err != nil {
 		return domain.Subscription{}, err
 	}
 
@@ -848,8 +890,10 @@ func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, t
 // SetPauseCollection writes the operator's (behavior, resumes_at) onto the
 // row and clears pause_collection_invoice_id: an operator who re-pauses a
 // subscription dunning paused takes the pause over, and a payment no longer
-// lifts it. A lifted pause still on the row is resumed first, with its own
-// trigger (clearLiftedPauseTx; onResume writes its audit row). Rejects a
+// lifts it. It queues subscription.collection_paused (triggered_by
+// operator) in the same transaction. A lifted pause still on the row is
+// resumed first, with its own trigger (clearLiftedPauseTx; onResume writes
+// its audit row). Rejects a
 // canceled row since collection-pause on a terminated sub has no meaning —
 // the engine wouldn't observe the row anyway, but failing loudly here keeps
 // the API honest. Draft, trialing and active are allowed; there is no
@@ -889,6 +933,14 @@ func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id str
 	}
 
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, err
+	}
+	// The row's pause_collection holds the behavior and resumes_at.
+	// Dunning's pause queues the same event from SetDunningPause, with
+	// triggered_by dunning.
+	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCollectionPaused, sub, map[string]any{
+		"triggered_by": "operator",
+	}); err != nil {
 		return domain.Subscription{}, err
 	}
 
@@ -1150,7 +1202,8 @@ func (s *PostgresStore) ReleaseDunningPauseTx(ctx context.Context, tx *sql.Tx, s
 
 // ClearPauseCollection is the operator's resume: it nulls the
 // pause_collection_* columns, including the invoice a dunning pause waits
-// for. A row with no pause returns ErrNotPaused; a missing row
+// for, and queues subscription.collection_resumed (triggered_by operator) in
+// the same transaction. A row with no pause returns ErrNotPaused; a missing row
 // errs.ErrNotFound. A lifted pause (its resumes_at has passed) is resumed
 // with its own trigger and onResume's audit row (clearLiftedPauseTx), and
 // the call returns ErrPauseLifted after the commit: collection had already
@@ -1202,6 +1255,13 @@ func (s *PostgresStore) ClearPauseCollection(ctx context.Context, tenantID, id s
 	}
 
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, err
+	}
+	// The operator's resume carries no resumed_at: it is the event's own
+	// time. A scheduled or payment resume carries one (clearLiftedPauseTx).
+	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCollectionResumed, sub, map[string]any{
+		"triggered_by": "operator",
+	}); err != nil {
 		return domain.Subscription{}, err
 	}
 
@@ -1499,7 +1559,9 @@ func (s *PostgresStore) endTrialEarlyInTx(ctx context.Context, tx *sql.Tx, id st
 // ExtendTrial atomically updates trial_end_at AND the period anchor on
 // a 'trialing' row. The caller (Service.ExtendTrial) validates that
 // newTrialEnd makes sense (in the future, after the existing
-// trial_end_at) and computes the new period via firstPeriodAfterTrial.
+// trial_end_at) and computes the new period via firstPeriodAfterTrial. It
+// is the operator's action, and queues subscription.trial_extended
+// (triggered_by operator) in the same transaction.
 // Returns errs.InvalidState if the row's status is not 'trialing' at
 // UPDATE time — distinguishes operator-already-ended / canceled from
 // missing-row by re-querying status when no row matches.
@@ -1551,6 +1613,12 @@ func (s *PostgresStore) ExtendTrial(ctx context.Context, tenantID, id string, ne
 	}
 
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, err
+	}
+	// The new trial end is the row's trial_end_at.
+	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionTrialExtended, sub, map[string]any{
+		"triggered_by": "operator",
+	}); err != nil {
 		return domain.Subscription{}, err
 	}
 
@@ -2618,6 +2686,13 @@ func (s *PostgresStore) setItemPendingPlanInTx(ctx context.Context, tx *sql.Tx, 
 	return stored, nil
 }
 
+// ClearItemPendingPlan cancels the item's scheduled plan change and queues
+// subscription.pending_change.canceled in the same transaction. It writes
+// only an item that still has a change scheduled, read after the
+// subscription row lock that the boundary apply (ApplyDuePendingItemPlansAtomic)
+// also takes: a cancel that a second cancel or the apply beat returns
+// ErrNoPendingChange, writes nothing and sends nothing. ErrNotFound when the
+// item is gone or removed.
 func (s *PostgresStore) ClearItemPendingPlan(ctx context.Context, tenantID, itemID string) (domain.SubscriptionItem, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2630,19 +2705,33 @@ func (s *PostgresStore) ClearItemPendingPlan(ctx context.Context, tenantID, item
 
 	now := clock.Now(ctx)
 	var stored domain.SubscriptionItem
+	// deleted_at IS NULL: as in setItemPendingPlanInTx.
 	err = tx.QueryRowContext(ctx, `
 		UPDATE subscription_items
 		SET pending_plan_id = NULL,
 		    pending_plan_effective_at = NULL,
 		    updated_at = $1
-		WHERE id = $2
+		WHERE id = $2 AND deleted_at IS NULL
+		  AND pending_plan_id IS NOT NULL
 		RETURNING `+itemCols,
 		now, itemID,
 	).Scan(scanItemDest(&stored)...)
-	if err == sql.ErrNoRows {
-		return domain.SubscriptionItem{}, errs.ErrNotFound
+	if errors.Is(err, sql.ErrNoRows) {
+		var live bool
+		if e := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM subscription_items WHERE id = $1 AND deleted_at IS NULL)`, itemID).Scan(&live); e != nil {
+			return domain.SubscriptionItem{}, e
+		}
+		if !live {
+			return domain.SubscriptionItem{}, errs.ErrNotFound
+		}
+		return domain.SubscriptionItem{}, ErrNoPendingChange
 	}
 	if err != nil {
+		return domain.SubscriptionItem{}, err
+	}
+	if err := s.EnqueueEventTx(ctx, tx, tenantID, stored.SubscriptionID, domain.EventSubscriptionPendingChangeCanceled, map[string]any{
+		"item_id": stored.ID,
+	}); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2662,9 +2751,14 @@ const duePendingItemsWhere = `subscription_id = $2
 // ApplyDuePendingItemPlansAtomic swaps plan_id ← pending_plan_id for every
 // item under the given subscription whose pending change has come due
 // (pending_plan_effective_at <= now). All applicable items are updated in
-// one statement. Returns the post-swap items. Called by the billing engine
-// at the cycle boundary.
-func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, subscriptionID string, now time.Time) ([]domain.SubscriptionItem, error) {
+// one statement. Returns the swapped items only, as the swap left them.
+// Called by the billing engine at the cycle boundary.
+//
+// In the same transaction it queues one subscription.pending_change.applied
+// per swapped item, carrying the subscription as the swap left it, the plan
+// the item left (read under the lock) and appliedAt. A stale caller that
+// finds nothing due swaps and sends nothing.
+func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, subscriptionID string, now, appliedAt time.Time) ([]domain.SubscriptionItem, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
@@ -2674,12 +2768,14 @@ func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tena
 		return nil, err
 	}
 	// Each due item references its current plan (the change row's
-	// from_plan_id) and its pending one. The same predicate as the UPDATE
-	// below, read under the subscription row lock, so the set cannot change.
+	// from_plan_id, and the event's old_plan_id) and its pending one. The
+	// same predicate as the UPDATE below, read under the subscription row
+	// lock, so the set cannot change.
 	var duePlans []string
+	oldPlan := map[string]string{} // item id → the plan it leaves
 	if err := func() error {
 		rows, err := tx.QueryContext(ctx, `
-			SELECT plan_id, pending_plan_id FROM subscription_items
+			SELECT id, plan_id, pending_plan_id FROM subscription_items
 			WHERE `+duePendingItemsWhere,
 			now, subscriptionID,
 		)
@@ -2688,10 +2784,11 @@ func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tena
 		}
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
-			var cur, pending string
-			if err := rows.Scan(&cur, &pending); err != nil {
+			var id, cur, pending string
+			if err := rows.Scan(&id, &cur, &pending); err != nil {
 				return err
 			}
+			oldPlan[id] = cur
 			duePlans = append(duePlans, cur, pending)
 		}
 		return rows.Err()
@@ -2745,10 +2842,36 @@ func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tena
 			return nil, err
 		}
 	}
+	if err := s.enqueuePlanChangesApplied(ctx, tx, subscriptionID, updated, oldPlan, appliedAt); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return updated, nil
+}
+
+// enqueuePlanChangesApplied queues one subscription.pending_change.applied
+// per applied item on tx. Each carries the subscription read once after the
+// swap: the item's plan_id is the new plan, and old_plan_id the one it left.
+func (s *PostgresStore) enqueuePlanChangesApplied(ctx context.Context, tx *sql.Tx, subscriptionID string, applied []domain.SubscriptionItem, oldPlan map[string]string, appliedAt time.Time) error {
+	if s.outbox == nil || len(applied) == 0 {
+		return nil
+	}
+	sub, err := readSubTx(ctx, tx, subscriptionID)
+	if err != nil {
+		return fmt.Errorf("read the subscription for %s: %w", domain.EventSubscriptionPendingChangeApplied, err)
+	}
+	for _, it := range applied {
+		if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionPendingChangeApplied, sub, map[string]any{
+			"item_id":     it.ID,
+			"old_plan_id": oldPlan[it.ID],
+			"applied_at":  appliedAt.UTC(),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RemoveItem is RemoveItemTx in a transaction of its own.
