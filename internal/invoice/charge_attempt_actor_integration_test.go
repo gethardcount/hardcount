@@ -48,11 +48,11 @@ func newAttemptActorRig(t *testing.T) *attemptActorRig {
 func (r *attemptActorRig) invoice() string {
 	r.t.Helper()
 	r.n++
-	inv, err := r.store.Create(r.ctx, r.tenantID, domain.Invoice{
+	inv, err := r.store.CreateWithLineItems(r.ctx, r.tenantID, domain.Invoice{
 		CustomerID: r.custID, InvoiceNumber: "HC-ACTOR-" + string(rune('A'+r.n)), Status: domain.InvoiceFinalized,
 		PaymentStatus: domain.PaymentPending, Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		BillingPeriodStart: time.Now().UTC().Add(-30 * 24 * time.Hour), BillingPeriodEnd: time.Now().UTC(),
-	})
+	}, nil)
 	if err != nil {
 		r.t.Fatalf("create invoice: %v", err)
 	}

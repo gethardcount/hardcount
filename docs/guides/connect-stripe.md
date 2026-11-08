@@ -6,7 +6,8 @@ bill and makes the invoice; Stripe charges the card, and the money goes
 straight to your Stripe account.
 
 Do it in test mode first. Each mode, test and live, has its own Stripe
-connection, and you connect live mode the same way when you are ready.
+connection. You connect live mode the same way when you are ready, in the
+dashboard's live mode or with a live key.
 
 ## Before you start
 
@@ -58,6 +59,10 @@ what to do:
 - `rejected`: Stripe refused the key. Save a working key.
 - `unavailable`: Hardcount could not reach Stripe, so the key was not
   checked. Save the same keys again to check them.
+
+A key manages only its own mode's Stripe connection. Your test key connects
+test mode, and a request from it for live mode answers `403`. Connect live
+mode with a live key (`hc_secret_live_…`), or in the dashboard in live mode.
 
 ## 2. Send Stripe's events to Hardcount
 

@@ -49,13 +49,13 @@ func TestGetInvoiceForPeriod_SkipsManualInvoices(t *testing.T) {
 	}
 	create := func(num string, reason domain.InvoiceBillingReason, createdAt time.Time) domain.Invoice {
 		t.Helper()
-		inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, SubscriptionID: sub.ID, InvoiceNumber: num,
 			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending, Currency: "USD",
 			SubtotalCents: 1000, TotalAmountCents: 1000, AmountDueCents: 1000,
 			BillingPeriodStart: periodStart, BillingPeriodEnd: periodEnd, BillingReason: reason,
 			CreatedAt: createdAt,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create %s invoice: %v", reason, err)
 		}
@@ -118,14 +118,14 @@ func TestGetInvoiceForPeriod_SkipsProrationInvoices(t *testing.T) {
 	prorate := func(num string, changeType domain.ItemChangeType, createdAt time.Time) {
 		t.Helper()
 		changedAt := periodStart
-		if _, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		if _, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, SubscriptionID: sub.ID, InvoiceNumber: num,
 			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending, Currency: "USD",
 			BillingPeriodStart: periodStart, BillingPeriodEnd: periodEnd,
 			BillingReason:       domain.BillingReasonSubscriptionUpdate,
 			SourcePlanChangedAt: &changedAt, SourceSubscriptionItemID: itemID, SourceChangeType: changeType,
 			CreatedAt: createdAt,
-		}); err != nil {
+		}, nil); err != nil {
 			t.Fatalf("create proration invoice %s: %v", num, err)
 		}
 	}
@@ -135,13 +135,13 @@ func TestGetInvoiceForPeriod_SkipsProrationInvoices(t *testing.T) {
 		t.Fatalf("only a proration invoice in the period: got %s (%s), err %v; want ErrNotFound", inv.ID, inv.BillingReason, err)
 	}
 
-	cycle, err := invStore.Create(ctx, tenantID, domain.Invoice{
+	cycle, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, SubscriptionID: sub.ID, InvoiceNumber: "IFP-PRO-CYCLE",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending, Currency: "USD",
 		SubtotalCents: 1000, TotalAmountCents: 1000, AmountDueCents: 1000,
 		BillingPeriodStart: periodStart, BillingPeriodEnd: periodEnd, BillingReason: domain.BillingReasonSubscriptionCycle,
 		CreatedAt: periodStart.Add(2 * time.Hour),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create cycle invoice: %v", err)
 	}

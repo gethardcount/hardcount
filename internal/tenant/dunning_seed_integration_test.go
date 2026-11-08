@@ -85,12 +85,12 @@ func TestBootstrap_SeedsDefaultDunningPolicy(t *testing.T) {
 			t.Fatalf("create customer: %v", err)
 		}
 		now := time.Now().UTC()
-		inv, err := invoice.NewPostgresStore(db).Create(testCtx, res.Tenant.ID, domain.Invoice{
+		inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(testCtx, res.Tenant.ID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: "INV-SEED-1", Status: domain.InvoiceFinalized,
 			PaymentStatus: domain.PaymentFailed, Currency: "USD", SubtotalCents: 5000,
 			TotalAmountCents: 5000, AmountDueCents: 5000, BillingPeriodStart: now.Add(-time.Hour),
 			BillingPeriodEnd: now, IssuedAt: &now,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice: %v", err)
 		}

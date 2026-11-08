@@ -62,13 +62,13 @@ func (r *ccyRig) block(customerID, currency string, cents int64) domain.CreditLe
 // invoiceIn is a finalized invoice in the currency, due cents.
 func (r *ccyRig) invoiceIn(customerID, currency string, cents int64, number string) string {
 	r.t.Helper()
-	inv, err := invoice.NewPostgresStore(r.db).Create(r.ctx, r.tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(r.db).CreateWithLineItems(r.ctx, r.tenantID, domain.Invoice{
 		CustomerID: customerID, InvoiceNumber: number,
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending, Currency: currency,
 		SubtotalCents: cents, TotalAmountCents: cents, AmountDueCents: cents,
 		BillingPeriodStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
 		BillingPeriodEnd:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
-	})
+	}, nil)
 	if err != nil {
 		r.t.Fatalf("seed %s invoice: %v", currency, err)
 	}

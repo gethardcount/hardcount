@@ -53,7 +53,7 @@ func TestMarkPaid_IdempotentPreservesAmountPaid(t *testing.T) {
 		t.Fatalf("commit seed tx: %v", err)
 	}
 
-	if _, err := store.UpdateStatus(ctx, tenantID, invID, domain.InvoiceFinalized); err != nil {
+	if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, invID, domain.InvoiceFinalized, nil); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
 
@@ -117,7 +117,7 @@ func TestMarkPaidReportingTransition_FlagsTheRealTransition(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit seed tx: %v", err)
 	}
-	if _, err := store.UpdateStatus(ctx, tenantID, invID, domain.InvoiceFinalized); err != nil {
+	if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, invID, domain.InvoiceFinalized, nil); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
 
@@ -168,7 +168,7 @@ func TestMarkPaymentFailedReportingTransition_FlagsTheRealNotification(t *testin
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit seed tx: %v", err)
 	}
-	if _, err := store.UpdateStatus(ctx, tenantID, invID, domain.InvoiceFinalized); err != nil {
+	if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, invID, domain.InvoiceFinalized, nil); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
 
@@ -340,7 +340,7 @@ func seedFinalizedInvoice(t *testing.T, db *postgres.DB, ctx context.Context, te
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit seed tx: %v", err)
 	}
-	if _, err := invoice.NewPostgresStore(db).UpdateStatus(ctx, tenantID, invID, domain.InvoiceFinalized); err != nil {
+	if _, err := invoice.NewPostgresStore(db).UpdateStatusWithReversalPrior(ctx, tenantID, invID, domain.InvoiceFinalized, nil); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
 	return invID

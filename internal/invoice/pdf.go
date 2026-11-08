@@ -515,9 +515,9 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 	// domain.FormatInclusivePeriod (ADR-058 follow-up) and carried on
 	// inv.BillingPeriodDisplay so every PDF (including the hosted page's and
 	// portal's PDF downloads) and the dashboard show the identical string. The
-	// hosted invoice page itself has no Period row. Empty for one-off / no-period invoices → omit the
-	// row. Callers that fetch via GetByPublicToken (hosted/portal, bypassing the
-	// service read decorator) populate this field before RenderPDF.
+	// hosted invoice page itself has no Period row. Empty for one-off /
+	// no-period invoices → omit the row. Every caller reads the invoice
+	// through Service, whose read decorator sets the field.
 	if inv.BillingPeriodDisplay != "" {
 		detailRow("Period", inv.BillingPeriodDisplay)
 	}

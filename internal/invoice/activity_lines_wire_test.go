@@ -369,7 +369,7 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 				{ID: "m4", EmailType: "payment_setup_request", Status: "skipped", Trigger: "finalize_no_pm", To: "billing@acme.test", CreatedAt: at.Add(3 * time.Minute)},
 				{ID: "m5", EmailType: "payment_setup_request", Status: "dispatched", Trigger: "auto_charge_retry_no_pm", To: "billing@acme.test", CreatedAt: at.Add(4 * time.Minute)},
 				{ID: "m6", EmailType: "credit_note", Status: "dispatched", DeliveryState: "complained", To: "billing@acme.test", CreatedAt: at.Add(5 * time.Minute)},
-				{ID: "m7", EmailType: "invoice", Status: "failed", LastError: "send invoice email: smtp: 550 mailbox unavailable", To: "billing@acme.test", CreatedAt: at.Add(6 * time.Minute)},
+				{ID: "m7", EmailType: "invoice", Status: "failed", To: "billing@acme.test", CreatedAt: at.Add(6 * time.Minute)},
 			},
 		})
 		byID := map[string]wireRow{}

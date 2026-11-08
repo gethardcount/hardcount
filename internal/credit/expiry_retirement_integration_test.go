@@ -80,7 +80,7 @@ func createOpenInvoice(t *testing.T, ctx context.Context, invoiceStore *invoice.
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	dueAt := now.Add(7 * 24 * time.Hour)
 	issuedAt := now
-	inv, err := invoiceStore.Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoiceStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		InvoiceNumber:      fmt.Sprintf("EXP-%d", invoiceSeq.Add(1)),
 		CustomerID:         customerID,
 		Status:             domain.InvoiceDraft,
@@ -93,7 +93,7 @@ func createOpenInvoice(t *testing.T, ctx context.Context, invoiceStore *invoice.
 		BillingPeriodEnd:   now,
 		IssuedAt:           &issuedAt,
 		DueAt:              &dueAt,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

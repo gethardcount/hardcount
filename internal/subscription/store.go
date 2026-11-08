@@ -49,6 +49,13 @@ var ErrPauseLifted = errors.New("subscription: the pause had already lifted")
 // subscription.cancel_cleared must not be sent.
 var ErrNoScheduledCancel = errors.New("subscription: no cancel is scheduled")
 
+// ErrNoPendingChange is returned by ClearItemPendingPlan when the item has
+// no plan change scheduled under the subscription row lock: another cancel
+// cleared it, or the boundary apply made it the item's plan. The clear
+// changed nothing, so subscription.pending_change.canceled must not be sent,
+// and no audit row is written.
+var ErrNoPendingChange = errors.New("subscription: no plan change is scheduled")
+
 // PeriodSnapshot is the period state a writer derived its inputs from — the
 // status, period start and watermark it read before building an invoice or
 // computing a new period. Every period-closing write proves it in the WHERE
@@ -358,15 +365,23 @@ type Store interface {
 	// caller's tx.
 	SetItemPendingPlanTx(ctx context.Context, tx *sql.Tx, tenantID, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error)
 
-	// ClearItemPendingPlan removes any scheduled plan change on an item.
-	// Idempotent — a second call on an item with no pending change returns
-	// the unchanged item.
+	// ClearItemPendingPlan cancels the scheduled plan change on an item and
+	// queues subscription.pending_change.canceled in the same transaction.
+	// An item with no change scheduled under the subscription row lock
+	// returns ErrNoPendingChange and is not written.
 	ClearItemPendingPlan(ctx context.Context, tenantID, itemID string) (domain.SubscriptionItem, error)
 
 	// RemoveItemTx deletes a single item on the caller's tx. The service
 	// layer refuses to remove the last item of an active subscription: a
 	// subscription with no priced lines is not a valid state.
 	RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, itemID string) error
+
+	// EnqueueEventTx queues eventType for the subscription on the caller's
+	// tx, carrying the subscription with its items as tx reads it, and extra
+	// beside it (ADR-040, ADR-131). The item changes call it after their
+	// last write to the subscription, so the event commits or rolls back
+	// with the change. An error fails the change.
+	EnqueueEventTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, eventType string, extra map[string]any) error
 
 	// FindMeterConflicts returns, for each candidate meter, the live
 	// (draft / trialing / active) subscriptions of the customer whose

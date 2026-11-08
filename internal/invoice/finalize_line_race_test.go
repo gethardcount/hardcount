@@ -23,10 +23,10 @@ func (f *memAddingTaxRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, 
 func (f *memAddingTaxRetrier) ComputeTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
 	if f.add {
 		f.add = false
-		if _, _, err := f.store.AddLineItemAtomic(ctx, tenantID, invoiceID, domain.InvoiceLineItem{
+		if _, _, err := f.store.AddLineItemAtomicAudited(ctx, tenantID, invoiceID, domain.InvoiceLineItem{
 			LineType: domain.LineTypeAddOn, Description: "Added during finalize", Quantity: 1,
 			UnitAmountCents: 2500, AmountCents: 2500, TotalAmountCents: 2500,
-		}); err != nil {
+		}, nil); err != nil {
 			return domain.Invoice{}, err
 		}
 	}

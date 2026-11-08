@@ -620,47 +620,28 @@ func TestUpdateItem_ProrationDeferredTaxCarriesRetryFacts(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Event dispatch tests — P0 #2. Design partners building on Hardcount need a
-// webhook stream for subscription lifecycle the same way Stripe customers
-// depend on customer.subscription.*. These tests pin the dispatch contract
-// for every mutating handler so a silent regression can't ship.
+// Handler tests for each mutating subscription route. Every subscription
+// event is queued in the transaction of its change: the store's writers
+// queue the lifecycle events, and the service queues the item events through
+// Store.EnqueueEventTx, which the memStore records. The real-Postgres tests
+// (outbox_in_tx_integration_test.go, lifecycle_outbox_integration_test.go)
+// check that each event commits with its change.
 // ---------------------------------------------------------------------------
 
+// capturedEvent is one event the memStore recorded.
 type capturedEvent struct {
 	tenantID  string
 	eventType string
 	payload   map[string]any
 }
 
-type capturingDispatcher struct {
-	events []capturedEvent
-	err    error
-}
-
-func (d *capturingDispatcher) Dispatch(_ context.Context, tenantID, eventType string, payload map[string]any) error {
-	d.events = append(d.events, capturedEvent{tenantID: tenantID, eventType: eventType, payload: payload})
-	return d.err
-}
-
-func (d *capturingDispatcher) firstOfType(eventType string) (capturedEvent, bool) {
-	for _, e := range d.events {
-		if e.eventType == eventType {
-			return e, true
-		}
-	}
-	return capturedEvent{}, false
-}
-
-func TestHandler_Cancel_FiresSubscriptionCanceled(t *testing.T) {
+func TestHandler_Cancel_CancelsTheSubscription(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
 	store := newMemStore()
 	subID, _ := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
 	svc := NewService(store, nil)
-
-	dispatcher := &capturingDispatcher{}
 	h := NewHandler(svc)
-	h.SetEventDispatcher(dispatcher)
 
 	req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+subID+"/cancel", nil)
 	rctx := chi.NewRouteContext()
@@ -675,17 +656,18 @@ func TestHandler_Cancel_FiresSubscriptionCanceled(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
 	}
-
-	// subscription.canceled moved IN-TX to the store's cancel writer
-	// (DispatchTx subscription subset, 2026-07-05) — the handler must NOT
-	// also dispatch it (double-emit). In-tx enqueue + payload proven by
-	// lifecycle_outbox_integration_test.go.
-	if _, ok := dispatcher.firstOfType(domain.EventSubscriptionCanceled); ok {
-		t.Fatalf("%s must not be dispatched by the handler — it is enqueued in the cancel tx", domain.EventSubscriptionCanceled)
+	var got domain.Subscription
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
 	}
+	if got.Status != domain.SubscriptionCanceled {
+		t.Errorf("status: got %q, want canceled", got.Status)
+	}
+	// subscription.canceled is queued in the cancel tx by the store's cancel
+	// writer, proven by lifecycle_outbox_integration_test.go.
 }
 
-func TestHandler_UpdateItem_ImmediatePlanChangeFiresItemUpdated(t *testing.T) {
+func TestHandler_UpdateItem_ImmediatePlanChangeQueuesItemUpdated(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
 
@@ -701,10 +683,8 @@ func TestHandler_UpdateItem_ImmediatePlanChangeFiresItemUpdated(t *testing.T) {
 	// against an UNPAID source is blocked per ADR-050).
 	invoices := &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}
 
-	dispatcher := &capturingDispatcher{}
 	h := NewHandler(svc)
 	h.SetProrationDeps(plans, invoices)
-	h.SetEventDispatcher(dispatcher)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
 	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
@@ -714,21 +694,21 @@ func TestHandler_UpdateItem_ImmediatePlanChangeFiresItemUpdated(t *testing.T) {
 		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
 	}
 
-	ev, ok := dispatcher.firstOfType(domain.EventSubscriptionItemUpdated)
+	ev, ok := store.firstEvent(domain.EventSubscriptionItemUpdated)
 	if !ok {
-		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionItemUpdated, eventTypes(dispatcher.events))
+		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionItemUpdated, eventTypes(store.events))
 	}
 	item := eventItem(t, ev.eventType, ev.payload, itemID)
 	if item["plan_id"] != "plan_new" {
 		t.Errorf("plan_id: got %v, want plan_new (post-change plan expected)", item["plan_id"])
 	}
-	// Scheduled event must NOT fire on immediate plan change.
-	if _, fired := dispatcher.firstOfType(domain.EventSubscriptionPendingChangeScheduled); fired {
-		t.Errorf("pending_change.scheduled fired on immediate plan change")
+	// An immediate plan change is not a scheduled one.
+	if _, queued := store.firstEvent(domain.EventSubscriptionPendingChangeScheduled); queued {
+		t.Errorf("pending_change.scheduled queued on immediate plan change")
 	}
 }
 
-func TestHandler_UpdateItem_ScheduledPlanChangeFiresPendingChangeScheduled(t *testing.T) {
+func TestHandler_UpdateItem_ScheduledPlanChangeQueuesPendingChangeScheduled(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
 
@@ -742,10 +722,8 @@ func TestHandler_UpdateItem_ScheduledPlanChangeFiresPendingChangeScheduled(t *te
 	}}
 	invoices := &invoicesMock{}
 
-	dispatcher := &capturingDispatcher{}
 	h := NewHandler(svc)
 	h.SetProrationDeps(plans, invoices)
-	h.SetEventDispatcher(dispatcher)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: false})
 	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
@@ -755,21 +733,21 @@ func TestHandler_UpdateItem_ScheduledPlanChangeFiresPendingChangeScheduled(t *te
 		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
 	}
 
-	ev, ok := dispatcher.firstOfType(domain.EventSubscriptionPendingChangeScheduled)
+	ev, ok := store.firstEvent(domain.EventSubscriptionPendingChangeScheduled)
 	if !ok {
-		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionPendingChangeScheduled, eventTypes(dispatcher.events))
+		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionPendingChangeScheduled, eventTypes(store.events))
 	}
 	if item := eventItem(t, ev.eventType, ev.payload, itemID); item["pending_plan_id"] != "plan_new" {
 		t.Errorf("pending_plan_id: got %v, want plan_new", item["pending_plan_id"])
 	}
-	// item.updated must NOT also fire for a scheduled change — the intent is
-	// observable but the item hasn't mutated yet.
-	if _, fired := dispatcher.firstOfType(domain.EventSubscriptionItemUpdated); fired {
-		t.Errorf("item.updated fired on scheduled (non-immediate) plan change")
+	// item.updated is not also queued for a scheduled change: the intent is
+	// observable, but the item has not changed yet.
+	if _, queued := store.firstEvent(domain.EventSubscriptionItemUpdated); queued {
+		t.Errorf("item.updated queued on scheduled (non-immediate) plan change")
 	}
 }
 
-func TestHandler_RemoveItem_FiresItemRemoved(t *testing.T) {
+func TestHandler_RemoveItem_QueuesItemRemoved(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
 
@@ -782,9 +760,7 @@ func TestHandler_RemoveItem_FiresItemRemoved(t *testing.T) {
 		t.Fatalf("seed second item: %v", err)
 	}
 
-	dispatcher := &capturingDispatcher{}
 	h := NewHandler(svc)
-	h.SetEventDispatcher(dispatcher)
 
 	req := httptest.NewRequest(http.MethodDelete, "/subscriptions/"+subID+"/items/"+firstItemID, nil)
 	rctx := chi.NewRouteContext()
@@ -800,20 +776,20 @@ func TestHandler_RemoveItem_FiresItemRemoved(t *testing.T) {
 		t.Fatalf("status: got %d, want 204. body=%s", rr.Code, rr.Body.String())
 	}
 
-	ev, ok := dispatcher.firstOfType(domain.EventSubscriptionItemRemoved)
+	ev, ok := store.firstEvent(domain.EventSubscriptionItemRemoved)
 	if !ok {
-		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionItemRemoved, eventTypes(dispatcher.events))
+		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionItemRemoved, eventTypes(store.events))
 	}
 	if ev.payload["item_id"] != firstItemID {
 		t.Errorf("item_id: got %v, want %q", ev.payload["item_id"], firstItemID)
 	}
 }
 
-// TestHandler_CancelPendingItemChange_FiresPendingChangeCanceled locks in that
-// clearing a scheduled plan change surfaces as its own event type, so a
-// webhook consumer listening for upgrade/downgrade flows can distinguish
-// "scheduled but rolled back" from "applied at cycle boundary".
-func TestHandler_CancelPendingItemChange_FiresPendingChangeCanceled(t *testing.T) {
+// TestHandler_CancelPendingItemChange_ClearsTheChange: canceling a scheduled
+// plan change clears it from the item. The store queues
+// subscription.pending_change.canceled in the clear's transaction, only when
+// it canceled a change (TestCancelPendingItemChange_EventOnlyWhenAChangeIsCanceled).
+func TestHandler_CancelPendingItemChange_ClearsTheChange(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
 
@@ -833,10 +809,8 @@ func TestHandler_CancelPendingItemChange_FiresPendingChangeCanceled(t *testing.T
 		t.Fatalf("stage scheduled change: %v", err)
 	}
 
-	dispatcher := &capturingDispatcher{}
 	h := NewHandler(svc)
 	h.SetProrationDeps(plans, &invoicesMock{})
-	h.SetEventDispatcher(dispatcher)
 
 	req := httptest.NewRequest(http.MethodDelete, "/subscriptions/"+subID+"/items/"+itemID+"/pending-change", nil)
 	rctx := chi.NewRouteContext()
@@ -852,8 +826,12 @@ func TestHandler_CancelPendingItemChange_FiresPendingChangeCanceled(t *testing.T
 		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
 	}
 
-	if _, ok := dispatcher.firstOfType(domain.EventSubscriptionPendingChangeCanceled); !ok {
-		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionPendingChangeCanceled, eventTypes(dispatcher.events))
+	var got domain.SubscriptionItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.ID != itemID || got.PlanID != "plan_old" || got.PendingPlanID != "" || got.PendingPlanEffectiveAt != nil {
+		t.Errorf("item %+v, want %s on plan_old with no change scheduled", got, itemID)
 	}
 }
 
@@ -1220,22 +1198,20 @@ func eventTypes(events []capturedEvent) []string {
 	return out
 }
 
-// TestHandler_ScheduleCancel_FiresEvent covers the soft-cancel handler surface
-// end-to-end: the at_period_end body is accepted, the row picks up
-// CancelAtPeriodEnd=true, status remains active (schedule must not flip
-// status), and the dispatcher receives subscription.cancel_scheduled with the
-// right payload. Audit logging is wired in handler.go and exercised in the
+// TestHandler_ScheduleCancel_SetsTheSchedule covers the soft-cancel handler
+// surface: the at_period_end body is accepted, the row picks up
+// CancelAtPeriodEnd=true, and status remains active (schedule must not flip
+// status). Audit logging is wired in handler.go and exercised in the
 // integration tests; here we focus on the contract a UI client depends on.
-func TestHandler_ScheduleCancel_FiresEvent(t *testing.T) {
+// subscription.cancel_scheduled is queued in the schedule's transaction
+// (TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued).
+func TestHandler_ScheduleCancel_SetsTheSchedule(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
 	store := newMemStore()
 	subID, _ := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
 	svc := NewService(store, nil)
-
-	dispatcher := &capturingDispatcher{}
 	h := NewHandler(svc)
-	h.SetEventDispatcher(dispatcher)
 
 	body := bytes.NewBufferString(`{"at_period_end": true}`)
 	req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+subID+"/schedule-cancel", body)
@@ -1261,17 +1237,6 @@ func TestHandler_ScheduleCancel_FiresEvent(t *testing.T) {
 	}
 	if got.Status != domain.SubscriptionActive {
 		t.Errorf("status: got %q, want active (schedule must not flip status)", got.Status)
-	}
-
-	ev, ok := dispatcher.firstOfType(domain.EventSubscriptionCancelScheduled)
-	if !ok {
-		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionCancelScheduled, eventTypes(dispatcher.events))
-	}
-	if err := domain.CheckWebhookData(ev.eventType, ev.payload); err != nil {
-		t.Fatal(err)
-	}
-	if sub := ev.payload[domain.WebhookResourceSubscription].(map[string]any); sub["cancel_at_period_end"] != true {
-		t.Errorf("subscription.cancel_at_period_end: got %v, want true", sub["cancel_at_period_end"])
 	}
 }
 
@@ -1313,20 +1278,18 @@ func TestHandler_ScheduleCancel_RejectsBadInput(t *testing.T) {
 	}
 }
 
-// TestHandler_PauseCollection_FiresEvent covers the pause-collection PUT
+// TestHandler_PauseCollection_SetsThePause covers the pause-collection PUT
 // surface: the keep_as_draft body is accepted, the row picks up
-// PauseCollection, status remains active, and the dispatcher receives
-// subscription.collection_paused with the right payload.
-func TestHandler_PauseCollection_FiresEvent(t *testing.T) {
+// PauseCollection, and status remains active.
+// subscription.collection_paused is queued in the pause's transaction
+// (TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued).
+func TestHandler_PauseCollection_SetsThePause(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
 	store := newMemStore()
 	subID, _ := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
 	svc := NewService(store, nil)
-
-	dispatcher := &capturingDispatcher{}
 	h := NewHandler(svc)
-	h.SetEventDispatcher(dispatcher)
 
 	body := bytes.NewBufferString(`{"behavior": "keep_as_draft"}`)
 	req := httptest.NewRequest(http.MethodPut, "/subscriptions/"+subID+"/pause-collection", body)
@@ -1355,18 +1318,6 @@ func TestHandler_PauseCollection_FiresEvent(t *testing.T) {
 	}
 	if got.Status != domain.SubscriptionActive {
 		t.Errorf("status: got %q, want active (collection-pause must not flip status)", got.Status)
-	}
-
-	ev, ok := dispatcher.firstOfType(domain.EventSubscriptionCollectionPaused)
-	if !ok {
-		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionCollectionPaused, eventTypes(dispatcher.events))
-	}
-	if err := domain.CheckWebhookData(ev.eventType, ev.payload); err != nil {
-		t.Fatal(err)
-	}
-	sub := ev.payload[domain.WebhookResourceSubscription].(map[string]any)
-	if pc, _ := sub["pause_collection"].(map[string]any); pc["behavior"] != "keep_as_draft" {
-		t.Errorf("subscription.pause_collection: got %v, want behavior keep_as_draft", sub["pause_collection"])
 	}
 }
 
@@ -1407,10 +1358,11 @@ func TestHandler_PauseCollection_RejectsBadInput(t *testing.T) {
 	}
 }
 
-// TestHandler_ResumeCollection_FiresEvent covers the inverse: a sub with
-// pause_collection set can have it cleared via DELETE, and the resumed event
-// fires.
-func TestHandler_ResumeCollection_FiresEvent(t *testing.T) {
+// TestHandler_ResumeCollection_ClearsThePause covers the inverse: a sub with
+// pause_collection set can have it cleared via DELETE.
+// subscription.collection_resumed is queued in the resume's transaction
+// (TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued).
+func TestHandler_ResumeCollection_ClearsThePause(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
 	store := newMemStore()
@@ -1421,10 +1373,7 @@ func TestHandler_ResumeCollection_FiresEvent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed pause: %v", err)
 	}
-
-	dispatcher := &capturingDispatcher{}
 	h := NewHandler(svc)
-	h.SetEventDispatcher(dispatcher)
 
 	req := httptest.NewRequest(http.MethodDelete, "/subscriptions/"+subID+"/pause-collection", nil)
 	rctx := chi.NewRouteContext()
@@ -1446,15 +1395,13 @@ func TestHandler_ResumeCollection_FiresEvent(t *testing.T) {
 	if got.PauseCollection != nil {
 		t.Errorf("PauseCollection should be cleared, got %+v", got.PauseCollection)
 	}
-
-	if _, ok := dispatcher.firstOfType(domain.EventSubscriptionCollectionResumed); !ok {
-		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionCollectionResumed, eventTypes(dispatcher.events))
-	}
 }
 
-// TestHandler_ClearScheduledCancel_FiresEvent covers the inverse: a sub with a
-// scheduled cancel can have it cleared via DELETE, and the cleared event fires.
-func TestHandler_ClearScheduledCancel_FiresEvent(t *testing.T) {
+// TestHandler_ClearScheduledCancel_ClearsTheSchedule covers the inverse: a
+// sub with a scheduled cancel can have it cleared via DELETE.
+// subscription.cancel_cleared is queued in the clear's transaction
+// (TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued).
+func TestHandler_ClearScheduledCancel_ClearsTheSchedule(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
 	store := newMemStore()
@@ -1463,10 +1410,7 @@ func TestHandler_ClearScheduledCancel_FiresEvent(t *testing.T) {
 	if _, err := svc.ScheduleCancel(ctx, tenantID, subID, ScheduleCancelInput{AtPeriodEnd: true}); err != nil {
 		t.Fatalf("seed schedule: %v", err)
 	}
-
-	dispatcher := &capturingDispatcher{}
 	h := NewHandler(svc)
-	h.SetEventDispatcher(dispatcher)
 
 	req := httptest.NewRequest(http.MethodDelete, "/subscriptions/"+subID+"/scheduled-cancel", nil)
 	rctx := chi.NewRouteContext()
@@ -1488,47 +1432,52 @@ func TestHandler_ClearScheduledCancel_FiresEvent(t *testing.T) {
 	if got.CancelAtPeriodEnd {
 		t.Error("cancel_at_period_end should be cleared")
 	}
-
-	if _, ok := dispatcher.firstOfType(domain.EventSubscriptionCancelCleared); !ok {
-		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionCancelCleared, eventTypes(dispatcher.events))
-	}
 }
 
-// TestHandler_NothingToUndo_SendsNoEvent: resuming collection that is not
-// paused, or clearing a cancel that is not scheduled, answers 200 with the
-// subscription and changes nothing. So it sends no event and writes no audit
-// entry: a receiver that acts on subscription.collection_resumed or
-// .cancel_cleared must not act on a change that did not happen.
-func TestHandler_NothingToUndo_SendsNoEvent(t *testing.T) {
+// TestHandler_NothingToUndo_WritesNoAudit: resuming collection that is not
+// paused, clearing a cancel that is not scheduled, or canceling a plan change
+// that is not scheduled, answers 200 with the subscription (or the item) and
+// changes nothing. So it writes no audit entry. The store writes nothing
+// either, so it queues no subscription.collection_resumed, .cancel_cleared
+// or .pending_change.canceled
+// (TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued,
+// TestCancelPendingItemChange_EventOnlyWhenAChangeIsCanceled).
+func TestHandler_NothingToUndo_WritesNoAudit(t *testing.T) {
 	cases := []struct {
-		name   string
-		path   string
-		call   func(h *Handler, w http.ResponseWriter, r *http.Request)
-		absent string
+		name string
+		path string // after /subscriptions/{id}
+		item bool   // the route names the item and answers with it
+		call func(h *Handler, w http.ResponseWriter, r *http.Request)
 	}{
-		{"resume collection, not paused", "/pause-collection", (*Handler).resumeCollection, domain.EventSubscriptionCollectionResumed},
-		{"clear scheduled cancel, none scheduled", "/scheduled-cancel", (*Handler).clearScheduledCancel, domain.EventSubscriptionCancelCleared},
+		{"resume collection, not paused", "/pause-collection", false, (*Handler).resumeCollection},
+		{"clear scheduled cancel, none scheduled", "/scheduled-cancel", false, (*Handler).clearScheduledCancel},
+		{"cancel plan change, none scheduled", "/items/{itemID}/pending-change", true, (*Handler).cancelPendingItemChange},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			tenantID := "t1"
 			store := newMemStore()
-			subID, _ := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
+			subID, itemID := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
 			before, err := store.Get(ctx, tenantID, subID)
 			if err != nil {
 				t.Fatalf("get: %v", err)
 			}
+			wantID, wantUpdated := subID, before.UpdatedAt
+			if tc.item {
+				wantID, wantUpdated = itemID, before.Items[0].UpdatedAt
+			}
 
-			dispatcher := &capturingDispatcher{}
 			audits := &capturingAudit{}
 			h := NewHandler(NewService(store, nil))
-			h.SetEventDispatcher(dispatcher)
 			h.SetAuditLogger(audits)
 
 			req := httptest.NewRequest(http.MethodDelete, "/subscriptions/"+subID+tc.path, nil)
 			rctx := chi.NewRouteContext()
 			rctx.URLParams.Add("id", subID)
+			if tc.item {
+				rctx.URLParams.Add("itemID", itemID)
+			}
 			req = req.WithContext(auth.WithTenantID(
 				context.WithValue(ctx, chi.RouteCtxKey, rctx),
 				tenantID,
@@ -1538,15 +1487,15 @@ func TestHandler_NothingToUndo_SendsNoEvent(t *testing.T) {
 			if rr.Code != http.StatusOK {
 				t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
 			}
-			var got domain.Subscription
+			var got struct {
+				ID        string    `json:"id"`
+				UpdatedAt time.Time `json:"updated_at"`
+			}
 			if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 				t.Fatalf("decode response: %v", err)
 			}
-			if got.ID != subID || !got.UpdatedAt.Equal(before.UpdatedAt) {
-				t.Errorf("response: id %s updated_at %v, want %s unchanged at %v", got.ID, got.UpdatedAt, subID, before.UpdatedAt)
-			}
-			if len(dispatcher.events) != 0 {
-				t.Errorf("events sent %v, want none (%s for a change that did not happen)", eventTypes(dispatcher.events), tc.absent)
+			if got.ID != wantID || !got.UpdatedAt.Equal(wantUpdated) {
+				t.Errorf("response: id %s updated_at %v, want %s unchanged at %v", got.ID, got.UpdatedAt, wantID, wantUpdated)
 			}
 			if len(audits.entries) != 0 {
 				t.Errorf("audit entries %v, want none", audits.actions())
@@ -1555,10 +1504,11 @@ func TestHandler_NothingToUndo_SendsNoEvent(t *testing.T) {
 	}
 }
 
-// TestHandler_EndTrial_FiresEvent covers the operator-driven trial end:
-// POST /end-trial flips a trialing sub to active, fires
-// subscription.trial_ended with triggered_by="operator".
-func TestHandler_EndTrial_FiresEvent(t *testing.T) {
+// TestHandler_EndTrial_ActivatesTheSubscription covers the operator-driven
+// trial end: POST /end-trial flips a trialing sub to active. The store's
+// EndTrialEarly writer queues subscription.trial_ended (triggered_by
+// operator) in its transaction (lifecycle_outbox_integration_test.go).
+func TestHandler_EndTrial_ActivatesTheSubscription(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
 	store := newMemStore()
@@ -1582,9 +1532,7 @@ func TestHandler_EndTrial_FiresEvent(t *testing.T) {
 	}
 
 	svc := NewService(store, nil)
-	dispatcher := &capturingDispatcher{}
 	h := NewHandler(svc)
-	h.SetEventDispatcher(dispatcher)
 
 	req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+sub.ID+"/end-trial", nil)
 	rctx := chi.NewRouteContext()
@@ -1608,13 +1556,6 @@ func TestHandler_EndTrial_FiresEvent(t *testing.T) {
 	}
 	if got.ActivatedAt == nil {
 		t.Error("activated_at should be stamped")
-	}
-
-	// subscription.trial_ended moved IN-TX to the store's EndTrialEarly
-	// writer (DispatchTx subscription subset) — the handler must NOT also
-	// dispatch it. Proven in-tx by lifecycle_outbox_integration_test.go.
-	if _, ok := dispatcher.firstOfType(domain.EventSubscriptionTrialEnded); ok {
-		t.Fatalf("%s must not be dispatched by the handler — it is enqueued in the end-trial tx", domain.EventSubscriptionTrialEnded)
 	}
 }
 
@@ -1643,10 +1584,11 @@ func TestHandler_EndTrial_RejectsNonTrialingSub(t *testing.T) {
 	}
 }
 
-// TestHandler_ExtendTrial_FiresEvent covers the happy path: POST
-// /extend-trial pushes trial_end_at later, fires
-// subscription.trial_extended with triggered_by="operator".
-func TestHandler_ExtendTrial_FiresEvent(t *testing.T) {
+// TestHandler_ExtendTrial_MovesTheTrialEnd covers the happy path: POST
+// /extend-trial pushes trial_end_at later. subscription.trial_extended
+// (triggered_by operator) is queued in the extension's transaction
+// (TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued).
+func TestHandler_ExtendTrial_MovesTheTrialEnd(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
 	store := newMemStore()
@@ -1670,9 +1612,7 @@ func TestHandler_ExtendTrial_FiresEvent(t *testing.T) {
 	}
 
 	svc := NewService(store, nil)
-	dispatcher := &capturingDispatcher{}
 	h := NewHandler(svc)
-	h.SetEventDispatcher(dispatcher)
 
 	// RFC3339 strips sub-second precision on round-trip; truncate so the
 	// equality assertion below holds.
@@ -1700,14 +1640,6 @@ func TestHandler_ExtendTrial_FiresEvent(t *testing.T) {
 	}
 	if got.TrialEndAt == nil || !got.TrialEndAt.Equal(newEnd) {
 		t.Errorf("trial_end_at: got %v, want %v", got.TrialEndAt, newEnd)
-	}
-
-	ev, ok := dispatcher.firstOfType(domain.EventSubscriptionTrialExtended)
-	if !ok {
-		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionTrialExtended, eventTypes(dispatcher.events))
-	}
-	if ev.payload["triggered_by"] != "operator" {
-		t.Errorf("triggered_by: got %v, want operator", ev.payload["triggered_by"])
 	}
 }
 

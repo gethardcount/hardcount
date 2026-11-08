@@ -188,11 +188,11 @@ func (r *hardDeclineRig) chargeAsCycle(inv domain.Invoice, stripeCustomerID, pm 
 
 func (r *hardDeclineRig) finalizedInvoice(custID, num string) domain.Invoice {
 	r.t.Helper()
-	inv, err := r.invoices.Create(r.ctx, r.tenantID, domain.Invoice{
+	inv, err := r.invoices.CreateWithLineItems(r.ctx, r.tenantID, domain.Invoice{
 		CustomerID: custID, InvoiceNumber: num, Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		BillingPeriodStart: time.Now().UTC().Add(-30 * 24 * time.Hour), BillingPeriodEnd: time.Now().UTC(),
-	})
+	}, nil)
 	if err != nil {
 		r.t.Fatalf("create invoice: %v", err)
 	}

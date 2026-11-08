@@ -150,7 +150,9 @@ func TestIngestKey_RefusedOnEveryRouteButUsage(t *testing.T) {
 					t.Errorf("%s: the ingest key's 403 says %s, want the missing-permission message", key, body)
 				}
 			case kt == auth.KeyTypeSecret && sessionOnly:
-				// /v1/members takes a dashboard session only, as before.
+				// /v1/members and PUT /v1/settings take only a dashboard
+				// session. TestE2E_Settings_ChangeTakesDashboardSession checks
+				// that a secret key is refused on PUT /v1/settings.
 			default:
 				if !reached {
 					t.Errorf("%s: a %s principal is refused (%d); ADR-133 takes nothing from it", key, kt, rec.Code)

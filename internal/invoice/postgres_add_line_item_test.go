@@ -17,14 +17,14 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestAddLineItemAtomic_ConcurrentAdds is the regression test for COR-4a:
-// the previous implementation issued CreateLineItem, ListLineItems, and
-// UpdateTotals as separate transactions, so two goroutines adding line
+// TestAddLineItemAtomicAudited_ConcurrentAdds is the regression test for
+// COR-4a: the previous implementation inserted the line, listed the lines and
+// updated the totals as separate transactions, so two goroutines adding line
 // items at the same time could each read the subtotal before the other
 // wrote, then both write back a stale sum — a classic lost-update race.
 // The atomic version locks the invoice row FOR UPDATE, so the second
 // caller blocks until the first commits and sees the updated subtotal.
-func TestAddLineItemAtomic_ConcurrentAdds(t *testing.T) {
+func TestAddLineItemAtomicAudited_ConcurrentAdds(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 
@@ -47,14 +47,14 @@ func TestAddLineItemAtomic_ConcurrentAdds(t *testing.T) {
 		go func(g int) {
 			defer wg.Done()
 			for j := 0; j < perG; j++ {
-				_, _, err := store.AddLineItemAtomic(ctx, tenantID, invID, domain.InvoiceLineItem{
+				_, _, err := store.AddLineItemAtomicAudited(ctx, tenantID, invID, domain.InvoiceLineItem{
 					LineType:         domain.LineTypeAddOn,
 					Description:      "concurrent add",
 					Quantity:         qty,
 					UnitAmountCents:  unitCents,
 					AmountCents:      qty * unitCents,
 					TotalAmountCents: qty * unitCents,
-				})
+				}, nil)
 				if err != nil {
 					errCh <- err
 					return
@@ -105,17 +105,17 @@ func TestPostgresLineItem_TaxabilityReasonRoundTrip(t *testing.T) {
 
 	store := invoice.NewPostgresStore(db)
 	tenantID := testutil.CreateTestTenant(t, db, "TaxReason RoundTrip")
-	invID := seedDraftInvoice(t, db, tenantID)
 
 	// Three lines, each carrying a different Stripe-canonical reason to
 	// prove the column doesn't collapse them onto a single value, and to
 	// cover the cases that drive different PDF legends (customer_exempt
 	// triggers the exemption legend; standard_rated and not_collecting
-	// don't, which the dashboard relies on).
+	// don't, which the dashboard relies on). CreateWithLineItems writes them,
+	// as billing writes taxed lines.
 	want := []string{"customer_exempt", "standard_rated", "not_collecting"}
+	var lines []domain.InvoiceLineItem
 	for _, reason := range want {
-		_, err := store.CreateLineItem(ctx, tenantID, domain.InvoiceLineItem{
-			InvoiceID:        invID,
+		lines = append(lines, domain.InvoiceLineItem{
 			LineType:         domain.LineTypeBaseFee,
 			Description:      "line " + reason,
 			Quantity:         1,
@@ -125,26 +125,25 @@ func TestPostgresLineItem_TaxabilityReasonRoundTrip(t *testing.T) {
 			Currency:         "USD",
 			TaxabilityReason: reason,
 		})
-		if err != nil {
-			t.Fatalf("create line item with reason %q: %v", reason, err)
-		}
 	}
+	inv := seedDraftInvoiceWithLines(t, db, tenantID, lines)
 
-	got, err := store.ListLineItems(ctx, tenantID, invID)
+	got, err := store.ListLineItems(ctx, tenantID, inv.ID)
 	if err != nil {
 		t.Fatalf("list line items: %v", err)
 	}
 	if len(got) != len(want) {
 		t.Fatalf("ListLineItems returned %d items, want %d", len(got), len(want))
 	}
-	gotReasons := make([]string, len(got))
-	for i, it := range got {
-		gotReasons[i] = it.TaxabilityReason
+	// One insert transaction gives the lines one created_at, so match them by
+	// description, not by position.
+	gotReasons := make(map[string]string, len(got))
+	for _, it := range got {
+		gotReasons[it.Description] = it.TaxabilityReason
 	}
-	// CreateLineItem orders by created_at ASC, so we expect the same order.
-	for i, w := range want {
-		if gotReasons[i] != w {
-			t.Errorf("line %d TaxabilityReason = %q, want %q (column must round-trip the Stripe-canonical reason)", i, gotReasons[i], w)
+	for _, w := range want {
+		if g := gotReasons["line "+w]; g != w {
+			t.Errorf("line %q TaxabilityReason = %q, want %q (column must round-trip the Stripe-canonical reason)", "line "+w, g, w)
 		}
 	}
 }
@@ -160,11 +159,10 @@ func TestPostgresLineItem_QuantityDecimalRoundTrip(t *testing.T) {
 
 	store := invoice.NewPostgresStore(db)
 	tenantID := testutil.CreateTestTenant(t, db, "QtyDecimal RoundTrip")
-	invID := seedDraftInvoice(t, db, tenantID)
 
+	// CreateWithLineItems writes the line, as billing writes usage lines.
 	qty := decimal.RequireFromString("1.5")
-	if _, err := store.CreateLineItem(ctx, tenantID, domain.InvoiceLineItem{
-		InvoiceID:        invID,
+	inv := seedDraftInvoiceWithLines(t, db, tenantID, []domain.InvoiceLineItem{{
 		LineType:         domain.LineTypeUsage,
 		Description:      "GPU-hours",
 		Quantity:         qty.IntPart(), // 1 (truncated, back-compat)
@@ -173,11 +171,9 @@ func TestPostgresLineItem_QuantityDecimalRoundTrip(t *testing.T) {
 		AmountCents:      1500,
 		TotalAmountCents: 1500,
 		Currency:         "USD",
-	}); err != nil {
-		t.Fatalf("create usage line item: %v", err)
-	}
+	}})
 
-	got, err := store.ListLineItems(ctx, tenantID, invID)
+	got, err := store.ListLineItems(ctx, tenantID, inv.ID)
 	if err != nil {
 		t.Fatalf("list line items: %v", err)
 	}
@@ -192,10 +188,10 @@ func TestPostgresLineItem_QuantityDecimalRoundTrip(t *testing.T) {
 	}
 }
 
-// TestAddLineItemAtomic_RejectsNonDraft ensures the status check happens
-// inside the locking tx: callers cannot add a line item to a finalized
+// TestAddLineItemAtomicAudited_RejectsNonDraft ensures the status check
+// happens inside the locking tx: callers cannot add a line item to a finalized
 // or voided invoice, even if they race a concurrent Finalize call.
-func TestAddLineItemAtomic_RejectsNonDraft(t *testing.T) {
+func TestAddLineItemAtomicAudited_RejectsNonDraft(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 
@@ -203,18 +199,18 @@ func TestAddLineItemAtomic_RejectsNonDraft(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "AddLineItem NonDraft")
 	invID := seedDraftInvoice(t, db, tenantID)
 
-	if _, err := store.UpdateStatus(ctx, tenantID, invID, domain.InvoiceFinalized); err != nil {
+	if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, invID, domain.InvoiceFinalized, nil); err != nil {
 		t.Fatalf("finalize invoice: %v", err)
 	}
 
-	_, _, err := store.AddLineItemAtomic(ctx, tenantID, invID, domain.InvoiceLineItem{
+	_, _, err := store.AddLineItemAtomicAudited(ctx, tenantID, invID, domain.InvoiceLineItem{
 		LineType:         domain.LineTypeAddOn,
 		Description:      "rejected",
 		Quantity:         1,
 		UnitAmountCents:  500,
 		AmountCents:      500,
 		TotalAmountCents: 500,
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("expected error adding line item to finalized invoice, got nil")
 	}
@@ -223,6 +219,13 @@ func TestAddLineItemAtomic_RejectsNonDraft(t *testing.T) {
 // seedDraftInvoice creates the minimum fixture chain (customer → plan →
 // subscription → invoice) and returns the draft invoice ID.
 func seedDraftInvoice(t *testing.T, db *postgres.DB, tenantID string) string {
+	t.Helper()
+	return seedDraftInvoiceWithLines(t, db, tenantID, nil).ID
+}
+
+// seedDraftInvoiceWithLines is seedDraftInvoice with the invoice's line items
+// written in the same insert. It returns the invoice.
+func seedDraftInvoiceWithLines(t *testing.T, db *postgres.DB, tenantID string, lines []domain.InvoiceLineItem) domain.Invoice {
 	t.Helper()
 	ctx := postgres.WithLivemode(context.Background(), false)
 
@@ -257,7 +260,7 @@ func seedDraftInvoice(t *testing.T, db *postgres.DB, tenantID string) string {
 
 	issuedAt := periodStart
 	dueAt := periodStart.AddDate(0, 0, 30)
-	inv, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, SubscriptionID: sub.ID,
 		InvoiceNumber:      "HC-LINEITEM-001",
 		Status:             domain.InvoiceDraft,
@@ -268,9 +271,9 @@ func seedDraftInvoice(t *testing.T, db *postgres.DB, tenantID string) string {
 		IssuedAt:           &issuedAt,
 		DueAt:              &dueAt,
 		NetPaymentTermDays: 30,
-	})
+	}, lines)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
-	return inv.ID
+	return inv
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -76,14 +77,50 @@ type ConnectInput struct {
 	WebhookSecret  string `json:"webhook_secret,omitempty"`
 }
 
+// checkMode returns errs.ErrForbidden when livemode is not the caller's own
+// mode. Each mode has its own Stripe connection, and a caller manages only
+// the one of its own mode, as it does with all other data: an API key the
+// mode it was made in, a dashboard session the mode it is in. Settings →
+// Payments shows that mode's connection, and the Test/Live toggle switches
+// the mode. Every write this service takes from a request calls checkMode
+// first, before it validates or writes anything. So the write, the
+// post-connect retry count and the handler's audit row all run in the mode
+// of the connection they change. A ctx with no mode returns
+// postgres.ErrLivemodeUnset: that is a bug at the entry point, and nothing
+// guesses a mode in its place.
+func checkMode(ctx context.Context, livemode bool) error {
+	own, err := postgres.Livemode(ctx)
+	if err != nil {
+		return err
+	}
+	if own == livemode {
+		return nil
+	}
+	ownLabel, other := modeLabel(own), modeLabel(livemode)
+	return errs.Forbidden(fmt.Sprintf(
+		"a %s-mode request can manage only the %s-mode Stripe connection: for %s mode, use a %s-mode key or switch the dashboard to %s mode",
+		ownLabel, ownLabel, other, other, other))
+}
+
+func modeLabel(livemode bool) string {
+	if livemode {
+		return "live"
+	}
+	return "test"
+}
+
 // Connect validates key shapes, writes the credentials, then calls Stripe
 // with the supplied secret to confirm it works and capture account identity.
 // A verify failure does NOT roll back the write — the row is persisted so
 // the UI can show "connected but failing verify: <reason>" and the tenant
-// can retry without re-entering keys.
+// can retry without re-entering keys. A caller that may not manage the mode
+// gets errs.ErrForbidden, and nothing is written or sent to Stripe.
 func (s *Service) Connect(ctx context.Context, tenantID string, in ConnectInput) (domain.StripeProviderCredentials, error) {
 	if tenantID == "" {
 		return domain.StripeProviderCredentials{}, errs.Required("tenant_id")
+	}
+	if err := checkMode(ctx, in.Livemode); err != nil {
+		return domain.StripeProviderCredentials{}, err
 	}
 	in.SecretKey = strings.TrimSpace(in.SecretKey)
 	in.PublishableKey = strings.TrimSpace(in.PublishableKey)
@@ -180,20 +217,35 @@ func (s *Service) runPostConnectRetry(tenantID string, livemode bool, expected i
 		"duration_ms", time.Since(start).Milliseconds())
 }
 
-// List returns both modes' public views. Handlers enforce that the caller's
+// List returns the public view of the caller's own mode's connection (see
+// checkMode), as a list of at most one. Handlers enforce that the caller's
 // auth key tenant matches tenantID before calling.
 func (s *Service) List(ctx context.Context, tenantID string) ([]domain.StripeProviderCredentials, error) {
 	if tenantID == "" {
 		return nil, errs.Required("tenant_id")
 	}
-	return s.store.ListByTenant(ctx, tenantID)
+	own, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
+	all, err := s.store.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(all, func(c domain.StripeProviderCredentials) bool {
+		return c.Livemode != own
+	}), nil
 }
 
 // Delete removes credentials for a single mode. Returns errs.ErrNotFound if
-// no row exists — handler translates to 404.
+// no row exists — handler translates to 404 — and errs.ErrForbidden when the
+// caller may not manage the mode.
 func (s *Service) Delete(ctx context.Context, tenantID string, livemode bool) error {
 	if tenantID == "" {
 		return errs.Required("tenant_id")
+	}
+	if err := checkMode(ctx, livemode); err != nil {
+		return err
 	}
 	return s.store.Delete(ctx, tenantID, livemode)
 }
@@ -203,10 +255,14 @@ func (s *Service) Delete(ctx context.Context, tenantID string, livemode bool) er
 // forcing the tenant to re-enter API keys. Stripe isn't re-probed: the key was
 // already verified on Connect, and the new secret is HMAC-validated per
 // incoming webhook rather than at save time. Returns errs.ErrNotFound if the
-// tenant hasn't connected API keys yet — caller must finish Connect first.
+// tenant hasn't connected API keys yet — caller must finish Connect first —
+// and errs.ErrForbidden when the caller may not manage the mode.
 func (s *Service) SetWebhookSecret(ctx context.Context, tenantID string, livemode bool, secret string) (domain.StripeProviderCredentials, error) {
 	if tenantID == "" {
 		return domain.StripeProviderCredentials{}, errs.Required("tenant_id")
+	}
+	if err := checkMode(ctx, livemode); err != nil {
+		return domain.StripeProviderCredentials{}, err
 	}
 	secret = strings.TrimSpace(secret)
 	if secret == "" {

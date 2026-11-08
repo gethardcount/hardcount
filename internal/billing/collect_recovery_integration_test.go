@@ -112,13 +112,13 @@ func newCollectHarness(t *testing.T) collectHarness {
 		if err != nil {
 			t.Fatalf("create customer: %v", err)
 		}
-		inv, err := invoiceStore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := invoiceStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: num,
 			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 			Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 			BillingPeriodStart: time.Now().UTC().Add(-30 * 24 * time.Hour),
 			BillingPeriodEnd:   time.Now().UTC(),
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice: %v", err)
 		}
@@ -257,13 +257,13 @@ func TestCollector_FirstRetryCountsFromTheFailure_RealStore(t *testing.T) {
 	}
 	periodStart := time.Now().UTC().Add(-10 * 24 * time.Hour)
 	issued := periodStart.Add(time.Hour)
-	inv, err := h.invoices.Create(h.ctx, h.tenantID, domain.Invoice{
+	inv, err := h.invoices.CreateWithLineItems(h.ctx, h.tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-ANCHOR-1",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		BillingPeriodStart: periodStart, BillingPeriodEnd: periodStart.Add(30 * 24 * time.Hour),
 		IssuedAt: &issued,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
@@ -314,12 +314,12 @@ func TestStartDunning_ClockPinnedInvoiceCountsFromIssue_RealStore(t *testing.T) 
 		t.Fatalf("customer test_clock_id = %q, want %q", cust.TestClockID, clockID)
 	}
 	issued := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
-	inv, err := h.invoices.Create(h.ctx, h.tenantID, domain.Invoice{
+	inv, err := h.invoices.CreateWithLineItems(h.ctx, h.tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-ANCHOR-SIM",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		IssuedAt: &issued,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
@@ -419,12 +419,12 @@ func TestStartDunning_ClockPinnedChargedLater_OneRetryNotTheCampaign_RealStore(t
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
-	inv, err := h.invoices.Create(h.ctx, h.tenantID, domain.Invoice{
+	inv, err := h.invoices.CreateWithLineItems(h.ctx, h.tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-CHARGED-LATER",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
 		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		IssuedAt: &issued,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
@@ -479,12 +479,12 @@ func TestCollector_CardlessDraftCollectedLater_CountsFromCollection_RealStore(t 
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
-	inv, err := h.invoices.Create(h.ctx, h.tenantID, domain.Invoice{
+	inv, err := h.invoices.CreateWithLineItems(h.ctx, h.tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-CARDLESS-LATER",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		BillingReason: domain.BillingReasonSubscriptionCycle, IssuedAt: &issued,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

@@ -78,11 +78,11 @@ func TestListDueRuns_ChargeHoldIsSkipped(t *testing.T) {
 	istore := invoice.NewPostgresStore(db)
 	now := time.Now().UTC()
 	mkRun := func(num string, dueAgo time.Duration) (invoiceID, runID string) {
-		inv, err := istore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := istore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: num, Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
 			Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 			BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice %s: %v", num, err)
 		}
@@ -117,7 +117,7 @@ func TestListDueRuns_ChargeHoldIsSkipped(t *testing.T) {
 	held[liveRun] = true
 	wroff, wroffRun := mkRun("INV-HOLD-WROFF", 3*time.Hour)
 	setHold(t, db, ctx, wroff, -11*time.Minute)
-	if _, err := istore.UpdateStatus(ctx, tenantID, wroff, domain.InvoiceUncollectible); err != nil {
+	if _, err := istore.UpdateStatusWithReversalPrior(ctx, tenantID, wroff, domain.InvoiceUncollectible, nil); err != nil {
 		t.Fatalf("write off: %v", err)
 	}
 	_, ordinary := mkRun("INV-HOLD-ORDINARY", time.Hour)

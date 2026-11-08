@@ -21,7 +21,7 @@ import (
 func renderedText(t *testing.T, inv domain.Invoice, items []domain.InvoiceLineItem, ts domain.TenantSettings) []pdftest.Page {
 	t.Helper()
 	customers := &fakePDFCustomers{cust: domain.Customer{DisplayName: "Acme Corp"}}
-	bt, ci, cns := BuildPDFContext(context.Background(), customers, &fakePDFSettings{ts: ts}, nil, "t1", &inv)
+	bt, ci, cns := BuildPDFContext(context.Background(), customers, &fakePDFSettings{ts: ts}, nil, "t1", inv)
 	out, err := RenderPDF(context.Background(), inv, items, bt, cns, ci)
 	if err != nil {
 		t.Fatalf("render: %v", err)

@@ -21,8 +21,9 @@ type AuditWriter interface {
 
 // Handler serves the tenant-facing Stripe connection endpoints. Mount under
 // /v1/settings/stripe with auth middleware that populates the tenant ctx.
-// This endpoint is deliberately platform-scoped: a tenant uses their single
-// set of platform API keys to administer both modes via the same surface.
+// The mode in the body or path names the connection. The service refuses a
+// mode other than the caller's own: an API key's, or the mode a dashboard
+// session is in.
 type Handler struct {
 	svc         *Service
 	auditLogger AuditWriter
@@ -160,6 +161,10 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	if err := h.svc.Delete(r.Context(), tenantID, livemode); err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			respond.NotFound(w, r, "stripe_credentials")
+			return
+		}
+		if errors.Is(err, errs.ErrForbidden) {
+			respond.FromError(w, r, err, "stripe_credentials")
 			return
 		}
 		respond.InternalError(w, r)

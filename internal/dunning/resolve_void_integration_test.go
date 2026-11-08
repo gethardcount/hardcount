@@ -101,12 +101,12 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 		invSvc.SetCollectionStopper(stopper)
 		invSvc.SetDunningResolver(dsvc)
 
-		inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: "INV-RESOLVE-VOID-" + tag,
 			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
 			SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 			BillingPeriodStart: time.Now().UTC().Add(-30 * 24 * time.Hour), BillingPeriodEnd: time.Now().UTC(),
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice: %v", err)
 		}

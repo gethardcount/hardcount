@@ -77,18 +77,18 @@ func TestThresholdWatermarkReads_WriteOffKeepsWindow(t *testing.T) {
 			if err != nil {
 				t.Fatalf("create subscription: %v", err)
 			}
-			inv, err := store.Create(ctx, tenantID, domain.Invoice{
+			inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 				CustomerID: cust.ID, SubscriptionID: sub.ID, InvoiceNumber: fmt.Sprintf("WM-%d", i),
 				Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending, Currency: "USD",
 				SubtotalCents: 500, TotalAmountCents: 500, AmountDueCents: 500,
 				BillingPeriodStart: p0, BillingPeriodEnd: fireEnd, BillingReason: domain.BillingReasonThreshold,
 				IssuedAt: &fireEnd, DueAt: &fireEnd,
-			})
+			}, nil)
 			if err != nil {
 				t.Fatalf("create threshold invoice: %v", err)
 			}
 			for _, s := range tc.path {
-				if _, err := store.UpdateStatus(ctx, tenantID, inv.ID, s); err != nil {
+				if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, inv.ID, s, nil); err != nil {
 					t.Fatalf("move the invoice to %s: %v", s, err)
 				}
 			}
