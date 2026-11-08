@@ -29,6 +29,9 @@ refuses a database made by Velox, a 0.8.x release or a build of Velox's
 A Velox install on one VM does not get that far: its `.env` names `VELOX_*`
 settings, so `docker compose pull` (or `build`, from source) stops with
 `required variable HARDCOUNT_APP_DB_PASSWORD is missing a value`.
+A backup made by Velox cannot be restored into Hardcount either:
+`hardcount migrate status` reports `no migration record` for a Velox 0.8.x
+backup, and `made by Velox` for one from a later build.
 
 Install Hardcount fresh, with an empty database: a new VM, or a new Compose
 data volume. Start from [Install a pinned release](production-one-vm.md#1-install-a-pinned-release).
@@ -161,22 +164,7 @@ On one VM:
    **You see:** files such as `hardcount_20261019_143000.dump`, a backup
    started at 14:30:00 UTC on 19 October 2026.
 
-3. List the invoices created or changed since that time, and keep the list.
-   Run this in the database shell
-   (`docker compose exec postgres psql -U hardcount -d hardcount`), with your
-   backup's time:
-
-   ```sql
-   SELECT id, livemode, status, payment_status, total_amount_cents, updated_at
-   FROM invoices
-   WHERE updated_at >= '2026-10-19 14:30:00+00'
-   ORDER BY updated_at;
-   ```
-
-   **You see:** one row for each invoice that the restore removes, or takes
-   back to how it was at the backup.
-
-4. Empty the database and restore the backup into it. `dropdb` deletes the
+3. Empty the database and restore the backup into it. `dropdb` deletes the
    database Hardcount runs on, so check first that step 2 found the right file. Use your
    backup's file name in the last line.
 
@@ -199,41 +187,59 @@ On one VM:
    carries its access rights, including the rights to tables that a later
    upgrade creates.
 
-5. Put back the old release's files and images, and start it. This example
-   goes back to `v0.9.1`.
+4. Pause the background jobs, check the restored database, and start the
+   old release. The pause keeps billing from charging again for an invoice
+   paid after the backup.
+   - Run the five `leader_pause` lines of
+     [Pause the background jobs](ops/restore.md#pause-the-background-jobs) in
+     the database shell
+     (`docker compose exec postgres psql -U hardcount -d hardcount`).
+   - Put back the old release's files and images, and see its plan. This
+     example goes back to `v0.9.1`.
 
-   ```bash
-   HARDCOUNT_VERSION=v0.9.1
-   cd /opt/hardcount
-   git checkout "$HARDCOUNT_VERSION"
-   cd deploy/compose
-   sed -i "s|^HARDCOUNT_IMAGE=.*|HARDCOUNT_IMAGE=ghcr.io/gethardcount/hardcount:${HARDCOUNT_VERSION}|; s|^HARDCOUNT_DASHBOARD_IMAGE=.*|HARDCOUNT_DASHBOARD_IMAGE=ghcr.io/gethardcount/hardcount-dashboard:${HARDCOUNT_VERSION}|" .env
-   docker compose run --rm hardcount-api migrate status
-   docker compose up -d
-   docker compose exec hardcount-api /usr/local/bin/hardcount version
-   ```
+     ```bash
+     HARDCOUNT_VERSION=v0.9.1
+     cd /opt/hardcount
+     git checkout "$HARDCOUNT_VERSION"
+     cd deploy/compose
+     sed -i "s|^HARDCOUNT_IMAGE=.*|HARDCOUNT_IMAGE=ghcr.io/gethardcount/hardcount:${HARDCOUNT_VERSION}|; s|^HARDCOUNT_DASHBOARD_IMAGE=.*|HARDCOUNT_DASHBOARD_IMAGE=ghcr.io/gethardcount/hardcount-dashboard:${HARDCOUNT_VERSION}|" .env
+     docker compose run --rm hardcount-api migrate status
+     ```
 
-   **You see:** `state:        up to date, nothing to apply`, then
-   `hardcount v0.9.1`, and `curl -fsS http://localhost:8080/health/ready`
-   answers `"status":"ok"`.
+     **You see:** `state:        up to date, nothing to apply`. That is
+     check 1 of
+     [Check the restored database](ops/restore.md#check-the-restored-database).
+     Run checks 2 and 3 there too.
+   - Put the holds of item 1 of
+     [Before you restore](ops/restore.md#before-you-restore) in place: your
+     app's calls, the dashboard and the customer payment pages. Note the
+     database's time, `SELECT now();`, in the database shell. Then start the
+     release.
 
-6. Put back what the restore removed.
-   - **Usage events.** Have your app send again every event it sent after
-     the backup time, with the same `idempotency_key`. Hardcount counts each
-     key once, so an event the backup already holds is not counted twice. An
-     event that is not sent again is not billed.
-   - **Payments.** The restored database does not know about a payment
-     Stripe took after the backup. A subscription's invoice built after the
-     backup is built again by the next billing run, and the customer's card
-     can be charged again. Check each invoice on your list from step 3 in
-     Stripe, and refund a second charge.
-   - **Everything else.** Run the
-     [checks after a restore](ops/backup-considerations.md#checks-after-a-restore).
+     ```bash
+     docker compose up -d
+     docker compose exec hardcount-api /usr/local/bin/hardcount version
+     ```
 
-With a managed Postgres, stop every copy, restore the snapshot or the point
-in time you noted into the database, start the old release on every copy,
-and then do step 6. How a restore works, and what to check before you
-start: [Restore a backup](ops/backup-considerations.md#4-restore-a-backup).
+     **You see:** `hardcount v0.9.1`, and
+     `curl -fsS http://localhost:8080/health/ready` answers
+     `"status":"ok"`.
+
+5. Put back what the restore removed. Follow
+   [Match Hardcount with Stripe](ops/restore.md#match-hardcount-with-stripe)
+   and the sections after it, to the end of that page. Hardcount already runs
+   since step 4, so skip its step 2: the time you noted in step 4 is the one
+   it asks for. The last sections resume the background jobs.
+
+With a managed Postgres, stop every copy and put the holds in place. Restore
+the snapshot or the point in time you noted into the database, and
+[pause the background jobs](ops/restore.md#pause-the-background-jobs). Put
+the old release's image or binary in place on every copy. Then run the
+[checks of the restored database](ops/restore.md#check-the-restored-database)
+with that release: its `migrate status` says `up to date`. Note the
+database's time, then start the old release on every copy, and do step 5.
+How a restore works, and what to check before you start:
+[Restore Hardcount](ops/restore.md).
 
 **Next:** [Versioning](versioning.md): what a release may change, and where
 it says so.
