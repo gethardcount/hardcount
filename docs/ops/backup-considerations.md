@@ -117,7 +117,17 @@ PGOPTIONS='-c app.bypass_rls=on' \
 
 Do not start Hardcount on a copy of your live database. The copy holds your live Stripe keys and your customers' email addresses, and Hardcount has no setting that makes it safe to start. Its background jobs would bill your customers, charge their cards a second time, and email them.
 
-If you must start it, [pause the jobs](restore.md#pause-the-background-jobs) first, and never resume them on the copy. Do not charge, refund or change anything through its dashboard or API, and do not open its payment pages: they charge real cards. A test clock that was moving forward resumes at start, but it bills test customers only.
+If you must start it, first pause its five background jobs, and never resume them on the copy. Billing returns an empty value on a copy `restore.sh` made, which has paused it already:
+
+```sql
+SELECT leader_pause('billing',          'your-name', 'copy');
+SELECT leader_pause('dunning',          'your-name', 'copy');
+SELECT leader_pause('email_outbox',     'your-name', 'copy');
+SELECT leader_pause('webhook_outbox',   'your-name', 'copy');
+SELECT leader_pause('webhook_delivery', 'your-name', 'copy');
+```
+
+A copy `restore.sh` made is also marked as restored, so Hardcount refuses to start on it: remove the marker with `DELETE FROM restore_catchup;`. Do not run `hardcount restore catch-up` on a copy: it closes your live customers' open payment pages at Stripe. Do not charge, refund or change anything through the copy's dashboard or API, and do not open its payment pages: they charge real cards. A test clock that was moving forward resumes at start, but it bills test customers only.
 
 ## What is in the database
 

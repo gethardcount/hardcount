@@ -7,15 +7,7 @@ first. Every shipped change, with its date, is in the
 
 ## Now
 
-The item planned right after v0.9.0 has shipped ([Shipped recently](#shipped-recently)). In progress:
-
-- **A safe restore mode.** After a database restore, Hardcount refuses to
-  start until a catch-up has read from Stripe every payment, refund and
-  dispute since the backup. A payment whose invoice the restore lost becomes
-  credit for that customer. Today the [restore page](ops/restore.md) has the
-  operator match these by hand.
-
-What comes next is below.
+The items planned right after v0.9.0 have shipped ([Shipped recently](#shipped-recently)). What comes next is below.
 
 ## Next
 
@@ -52,6 +44,10 @@ Each item waits until someone using Hardcount needs it:
   bills its usage at the end of the year; for monthly usage, add a monthly
   subscription ([how](ai-pricing.md#usage-on-a-yearly-plan)).
 - Billing late usage on the next invoice.
+- After a restore, turning a payment whose invoice the restore lost into
+  credit for its customer. Today the catch-up lists such a payment, and the
+  operator grants the credit or refunds it by hand
+  ([restore](ops/restore.md#handle-the-payments-the-catch-up-listed)).
 - Automatic credit top-ups.
 - Importing LLM prices from a public price list.
 - Two-factor sign-in.
@@ -96,6 +92,7 @@ Each item waits until someone using Hardcount needs it:
 
 After v0.9.0 (see the [changelog](../CHANGELOG.md)):
 
+- **A restored database catches up with Stripe before it serves.** After a restore, Hardcount refuses to start until `hardcount restore catch-up` has applied every payment, refund, dispute and saved card Stripe recorded since the backup ([ADR-135](adr/135-restore-refuses-to-serve-until-caught-up.md)).
 - **A refund made in the Stripe dashboard is recorded.** It becomes a credit note when it plainly fits the invoice, so the documents and Stripe Tax match the card; otherwise the invoice shows a notice ([ADR-134](adr/134-refunds-made-in-stripe-are-recorded.md)).
 - **A usage-only API key for LiteLLM and other gateways.** It can send usage events and nothing else ([key types](api-keys.md#key-types)). The platform key type and `/v1/tenants`, which nothing could use, are removed ([ADR-133](adr/133-api-key-types-secret-and-ingest.md)).
 

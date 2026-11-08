@@ -2,7 +2,10 @@
 # Hardcount Database Restore Script
 #
 # Restores a database from a pg_dump backup file, in one transaction, with
-# each restored object's privileges as the backup holds them.
+# each restored object's privileges as the backup holds them. The same
+# transaction marks the database as restored and pauses billing: Hardcount
+# then refuses to start until `hardcount restore catch-up` has applied what
+# Stripe did since the backup (docs/ops/restore.md).
 #
 # A custom-format backup (what scripts/backup.sh writes) goes through
 # pg_restore into psql, so psql must be at least as recent as pg_restore. A
@@ -102,6 +105,32 @@ privilege_sql() {
       for (i = 1; i <= ns; i++) print stmts[i]
     }'
 }
+
+# The restore marker (ADR-135), written last in the restore's transaction,
+# so a restore that rolls back leaves no marker and no pause. These are the
+# statements `hardcount restore begin` runs, with 'restore.sh' as the
+# marker's set_by (cmd/hardcount/restore.go; a test there checks that the
+# two agree). The two set_config lines come first: pg_restore's SQL empties
+# search_path, and the anchor reads stripe_webhook_events, whose row-level
+# security binds an owner that is not a superuser. The anchor is read before
+# the pause, which clears billing's lease heartbeat.
+MARK_SQL=$(cat <<'SQL'
+SELECT pg_catalog.set_config('search_path', 'public', true);
+SELECT pg_catalog.set_config('app.bypass_rls', 'on', true);
+CREATE TABLE IF NOT EXISTS public.restore_catchup (
+    id boolean PRIMARY KEY DEFAULT true CHECK (id),
+    set_at timestamptz NOT NULL DEFAULT now(),
+    set_by text NOT NULL,
+    anchor timestamptz
+);
+INSERT INTO public.restore_catchup (set_by, anchor)
+SELECT 'restore.sh'::text, GREATEST(
+    (SELECT max(GREATEST(heartbeat_at, last_tick_ended_at)) FROM public.leader_leases),
+    (SELECT max(received_at) FROM public.stripe_webhook_events))
+ON CONFLICT (id) DO NOTHING;
+SELECT public.leader_pause('billing', 'restore', 'database restored: run hardcount restore catch-up, then resume billing');
+SQL
+)
 
 # ---------------------------------------------------------------------------
 # Preflight checks
@@ -244,9 +273,10 @@ if [ "$FILE_TYPE" = "custom" ]; then
   log "Restoring using pg_restore (custom format)..."
 
   # One transaction, all or nothing: pg_restore writes the archive as SQL,
-  # and psql runs BEGIN, that SQL, the privilege SQL, COMMIT. pg_restore
-  # cannot run the privilege SQL itself, and a second transaction after it
-  # could leave a restored database with the wider privileges.
+  # and psql runs BEGIN, that SQL, the privilege SQL, the restore marker,
+  # COMMIT. pg_restore cannot run the privilege SQL itself, and a second
+  # transaction after it could leave a restored database with the wider
+  # privileges, or without the marker.
   # --clean drops existing objects before recreating.
   # --if-exists avoids errors when objects don't exist.
   # --no-owner skips ownership commands (the restoring user becomes owner).
@@ -262,6 +292,7 @@ if [ "$FILE_TYPE" = "custom" ]; then
       2> >(while IFS= read -r line; do log "  pg_restore: $line"; done >&2) \
       || exit 1
     printf '%s\n' "$PRIVILEGE_SQL"
+    printf '%s\n' "$MARK_SQL"
     echo 'COMMIT;'
   } | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -o /dev/null -f - 2>&1 \
     | while IFS= read -r line; do log "  psql: $line"; done \
@@ -270,10 +301,13 @@ if [ "$FILE_TYPE" = "custom" ]; then
 elif [ "$FILE_TYPE" = "sql" ]; then
   log "Restoring using psql (SQL format)..."
 
+  # --single-transaction wraps the file and the restore marker in one
+  # transaction.
   psql "$DATABASE_URL" \
     --single-transaction \
     --set ON_ERROR_STOP=on \
     -f "$BACKUP_FILE" \
+    -c "$MARK_SQL" \
     2>&1 | while IFS= read -r line; do log "  psql: $line"; done \
     || die "psql restore failed — the single-transaction restore was rolled back." 2
 
@@ -371,8 +405,9 @@ log "  Duration:  ${DURATION}s"
 log "  Rows:      ${PRE_COUNTS} (before) -> ${POST_COUNTS} (after)"
 log "  Tables:    All critical tables present"
 log "  Migration: ${LATEST_MIGRATION:-check manually}"
+log "  Marker:    restored, billing paused"
 log "========================================"
 echo ""
-log "Restore complete. Verify application behavior before resuming traffic."
+log "Restore complete. Hardcount will not start until you run 'hardcount restore catch-up'."
 
 exit 0

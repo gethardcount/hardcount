@@ -73,6 +73,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "unknown migrate subcommand: %s\navailable: status, rollback\n", subcmd)
 			os.Exit(1)
 		}
+	case "restore":
+		var args []string
+		if len(os.Args) > 3 {
+			args = os.Args[3:]
+		}
+		runRestore(subcmd, args)
 	case "version":
 		fmt.Println("hardcount " + version.Version)
 	case "help", "-h", "--help":
@@ -134,6 +140,20 @@ func serve() {
 	if err := migrate.CheckSchemaReady(pool); err != nil {
 		slog.Error("schema check failed", "error", err)
 		os.Exit(1)
+	}
+
+	// Refuse to start on a restored database until it has caught up with
+	// Stripe (ADR-135). It holds none of the payments and refunds Stripe made
+	// after the backup, so any request or job could charge or refund that
+	// money again. This runs before anything listens or takes a lease, and
+	// after RUN_MIGRATIONS_ON_BOOT, which keeps the marker.
+	if m, restored, err := readRestoreMarker(context.Background(), pool); err != nil {
+		slog.Error("refusing to start: could not read the restore marker", "error", err)
+		os.Exit(1)
+	} else if restored {
+		slog.Error("refusing to start: this database was restored from a backup and has not caught up with Stripe. Run `hardcount restore catch-up` first (docs/ops/restore.md)",
+			"restored_at", m.SetAt, "restored_by", m.SetBy)
+		os.Exit(2)
 	}
 
 	appPool, closeAppPool := openAppPool(cfg, pool)
@@ -496,6 +516,14 @@ Commands:
                        migrations still to apply, and whether one is running
   migrate rollback     Undo the latest migration (APP_ENV=local only; never
                        below 180, the baseline)
+  restore begin        Mark a database restored from a snapshot or to a point
+                       in time, and pause billing. scripts/restore.sh does
+                       this for a dump. serve refuses to start until the
+                       catch-up finishes.
+  restore catch-up     Apply what Stripe did since the backup, then let serve
+                       start. Flags: --acknowledge pi_…, --stripe-key
+                       <tenant>:<live|test>=@<file>, --since <time>
+  restore status       Show whether the database is marked as restored
   version              Print version
   help                 Show this help
 

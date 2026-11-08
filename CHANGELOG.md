@@ -29,6 +29,11 @@ original text.
 - `DATABASE_URL` and `APP_DATABASE_URL` are now read the way `psql` reads them. Percent-encode special characters in the user name and password, such as `@` as `%40`. An unencoded `@` used to work. Now Hardcount refuses to start, and the error names the setting. A `+` is no longer read as a space, and an IPv6 host needs brackets: `@[::1]:5432` ([settings](docs/settings.md#database), [#1625](https://github.com/gethardcount/hardcount/pull/1625)).
 - If a database URL repeats a parameter such as `sslmode`, Hardcount now uses the last value instead of the first, which can turn TLS off. Remove the duplicate.
 - Compose installs: an `@` in `POSTGRES_PASSWORD` or `HARDCOUNT_APP_DB_PASSWORD` now stops start-up, because Compose puts both into the database URLs as written. Set each such password to a new value from `openssl rand -hex 24`. Postgres reads these settings only when it creates its data, so also set each new password on its database user with `ALTER ROLE` ([how](deploy/compose/README.md#if-something-goes-wrong)).
+- A script that restores a backup and then starts Hardcount must run `hardcount restore catch-up` between the two: Hardcount now refuses to start on a restored database until the catch-up has run. After a snapshot or point-in-time restore, run `hardcount restore begin` first ([Restore Hardcount](docs/ops/restore.md)).
+
+### Added
+
+- **A restored database catches up with Stripe before Hardcount serves it.** Started on a restored database, Hardcount could charge or refund again money Stripe moved after the backup. Now the restore pauses billing, and Hardcount refuses to start until `hardcount restore catch-up` has applied Stripe's events since the backup. A payment whose invoice the restore lost is listed for you to handle. [Restore Hardcount](docs/ops/restore.md) is much shorter.
 
 ### Changed
 
