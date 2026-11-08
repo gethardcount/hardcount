@@ -26,7 +26,7 @@ Avoid these:
 - **Dumping table by table.** Hardcount adds tables often, and a list of tables goes out of date.
 - **Disk snapshots without the write-ahead log (WAL).** You lose everything since the last snapshot. Hourly snapshots still lose about 30 minutes on average.
 
-On managed Postgres, the provider's snapshots and PITR are your main backup. Still run the [restore drill](#4-run-the-restore-drill) every few months. Only the drill proves that Hardcount's money tables come back whole. A dump is also a copy you can restore anywhere, so your billing data is not tied to one cloud.
+On managed Postgres, the provider's snapshots and PITR are your main backup. Test them: every few months, restore one into a new instance, and run `hardcount-doctor` against it as at the end of [the restore drill](#4-run-the-restore-drill). The drill itself proves only that a dump restores. A dump is also a copy you can restore anywhere, so your billing data is not tied to one cloud.
 
 ## 3. Take a backup
 
@@ -115,7 +115,9 @@ PGOPTIONS='-c app.bypass_rls=on' \
 
 `PGOPTIONS` lets the doctor read every account's rows. Without it, only a superuser, or a user with `BYPASSRLS`, sees them. Any other user sees no rows, and the doctor then reports no problems even when there are some ([why](runbook/index.md#before-you-start)).
 
-Do not start Hardcount on a copy of your live database. Its background jobs could bill your customers and charge their cards a second time. If you must start it, pause the jobs first ([how](restore.md#restore), step 3).
+Do not start Hardcount on a copy of your live database. The copy holds your live Stripe keys and your customers' email addresses, and Hardcount has no setting that makes it safe to start. Its background jobs would bill your customers, charge their cards a second time, and email them.
+
+If you must start it, [pause the jobs](restore.md#pause-the-background-jobs) first, and never resume them on the copy. Do not charge, refund or change anything through its dashboard or API, and do not open its payment pages: they charge real cards. A test clock that was moving forward resumes at start, but it bills test customers only.
 
 ## What is in the database
 

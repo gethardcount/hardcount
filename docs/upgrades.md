@@ -202,8 +202,14 @@ On one VM:
    carries its access rights, including the rights to tables that a later
    upgrade creates.
 
-5. Put back the old release's files and images, and start it. This example
-   goes back to `v0.9.1`.
+5. Pause the background jobs, then put back the old release's files and
+   images, and start it. The pause keeps billing from charging again for an
+   invoice paid after the backup. Run the five `leader_pause` lines of
+   [Pause the background jobs](ops/restore.md#pause-the-background-jobs) in
+   the database shell
+   (`docker compose exec postgres psql -U hardcount -d hardcount`). The jobs
+   stay paused until the checks of step 6 resume them. This example goes
+   back to `v0.9.1`.
 
    ```bash
    HARDCOUNT_VERSION=v0.9.1
@@ -231,11 +237,13 @@ On one VM:
      can be charged again. Check each invoice on your list from step 3 in
      Stripe, and refund a second charge.
    - **Everything else.** Run the
-     [checks after a restore](ops/restore.md#checks-after-a-restore).
+     [checks after a restore](ops/restore.md#checks-after-a-restore). The
+     last one resumes the background jobs.
 
 With a managed Postgres, stop every copy, restore the snapshot or the point
-in time you noted into the database, start the old release on every copy,
-and then do step 6. How a restore works, and what to check before you
+in time you noted into the database, and
+[pause the background jobs](ops/restore.md#pause-the-background-jobs). Then
+start the old release on every copy, and do step 6. How a restore works, and what to check before you
 start: [Restore Hardcount](ops/restore.md).
 
 **Next:** [Versioning](versioning.md): what a release may change, and where
