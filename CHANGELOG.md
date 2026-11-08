@@ -44,7 +44,7 @@ original text.
 ### Security
 
 - **An API key can change only its own mode's Stripe connection.** `/v1/settings/stripe` answers `403` when a key names the other mode, and a key lists only its own. A dashboard session follows the mode it is in. Account settings, which both modes share, now change only from the dashboard ([authentication](docs/api/authentication.md), [#1618](https://github.com/gethardcount/hardcount/pull/1618)).
-- **The Postgres driver pgx is v5.12.0.** It fixes GHSA-95fj-3fxw-g62g (high). With `channel_binding=require` in a database URL and no certificate check (`sslmode=require`, as in Neon's default URLs), Hardcount connected to a server that skipped authentication. Whoever answered could read every query and return made-up results. Now that connection is refused. It also fixes GHSA-j38q-h3ph-jjpq, which Hardcount does not reach: it sends no query batches. ([#PR](https://github.com/gethardcount/hardcount/pull/PR))
+- **The Postgres driver pgx is v5.12.0.** It fixes GHSA-95fj-3fxw-g62g (high). With `channel_binding=require` in a database URL and no certificate check (`sslmode=require`, as in Neon's default URLs), Hardcount connected to a server that skipped authentication. Whoever answered could read every query and return made-up results. Now that connection is refused. It also fixes GHSA-j38q-h3ph-jjpq, which Hardcount does not reach: it sends no query batches. ([#1625](https://github.com/gethardcount/hardcount/pull/1625))
 - **`golang.org/x/net` is v0.62.0.** It fixes CVE-2026-78661, a denial of service in its HTML parser. Hardcount never calls that parser, so it was not exposed, but image scanners flag the old version. ([#1614](https://github.com/gethardcount/hardcount/pull/1614))
 
 ## [0.9.2] - 2026-11-02
