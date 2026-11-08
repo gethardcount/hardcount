@@ -1684,8 +1684,8 @@ export default function InvoiceDetailPage() {
         )}
         {/* Whether a later invoice bills a voided threshold invoice's
             charges depends on when the void lands (before or after the
-            period's invoice is built), which this page does not know; the runbook
-            (invoice-timing-late-usage.md) and ADR-066's 2026-10-23
+            period's invoice is built), which this page does not know; the Invoices
+            concept page (docs/concepts/invoices.md, Spend thresholds) and ADR-066's 2026-10-23
             amendment give each case. This line is true in all of them. */}
         {invoice.billing_reason === 'threshold' && (
           <p className="text-xs text-muted-foreground">

@@ -51,7 +51,7 @@ with `APP_ENV=local`. `POST /v1/billing/run` does not check it. The
 period's own invoice does not bill again what the threshold invoice billed,
 even after you write the threshold invoice off.
 Voiding it before the period's invoice is built does: that invoice then
-bills those charges too ([runbook](ops/runbook/invoice-timing-late-usage.md)).
+bills those charges too ([Spend thresholds](concepts/invoices.md#spend-thresholds-an-invoice-made-early)).
 
 ## Credits and refunds
 
