@@ -38,10 +38,12 @@ import (
 
 // stopAfterCommit is the audit logger of the handler and the service. Every
 // change here writes its audit row right after its transaction commits, so
-// Log is the first step after the commit: it ends the request's context.
+// Log is the first step after the commit: it ends the request's context. It
+// also keeps the metadata action of each row, for the tests that count them.
 type stopAfterCommit struct {
-	mu   sync.Mutex
-	stop context.CancelFunc
+	mu      sync.Mutex
+	stop    context.CancelFunc
+	actions []string
 }
 
 func (s *stopAfterCommit) set(stop context.CancelFunc) {
@@ -50,13 +52,28 @@ func (s *stopAfterCommit) set(stop context.CancelFunc) {
 	s.stop = stop
 }
 
-func (s *stopAfterCommit) Log(context.Context, string, string, string, string, string, map[string]any) error {
+func (s *stopAfterCommit) Log(_ context.Context, _, _, _, _, _ string, metadata map[string]any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	action, _ := metadata["action"].(string)
+	s.actions = append(s.actions, action)
 	if s.stop != nil {
 		s.stop()
 	}
 	return nil
+}
+
+// logged returns how many audit rows with metadata action were written.
+func (s *stopAfterCommit) logged(action string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, a := range s.actions {
+		if a == action {
+			n++
+		}
+	}
+	return n
 }
 
 func (s *stopAfterCommit) LogInTx(context.Context, *sql.Tx, audit.Entry) error { return nil }
@@ -359,10 +376,21 @@ func (s *applyFirst) ClearItemPendingPlan(ctx context.Context, tenantID, itemID 
 	return s.PostgresStore.ClearItemPendingPlan(ctx, tenantID, itemID)
 }
 
+// checkCancelAudits checks that the handler wrote want audit rows for a
+// canceled plan change: one for each change a cancel really canceled, the
+// same count as the events.
+func (r *eventRig) checkCancelAudits(t *testing.T, want int, why string) {
+	t.Helper()
+	if got := r.stopper.logged(domain.SubAuditPendingPlanChangeCanceled); got != want {
+		t.Errorf("%d %s audit rows, want %d: %s", got, domain.SubAuditPendingPlanChangeCanceled, want, why)
+	}
+}
+
 // TestCancelPendingItemChange_EventOnlyWhenAChangeIsCanceled:
 // subscription.pending_change.canceled says a scheduled plan change was
 // canceled, so it is sent once for each change that really was, and never
-// for a cancel that changed nothing.
+// for a cancel that changed nothing. The audit row, which the activity
+// timeline shows, follows the same rule.
 func TestCancelPendingItemChange_EventOnlyWhenAChangeIsCanceled(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 
@@ -372,6 +400,7 @@ func TestCancelPendingItemChange_EventOnlyWhenAChangeIsCanceled(t *testing.T) {
 		if got := r.events(t, domain.EventSubscriptionPendingChangeCanceled, r.subID, r.itemID); len(got) != 0 {
 			t.Errorf("%d pending_change.canceled rows, want 0: nothing was scheduled", len(got))
 		}
+		r.checkCancelAudits(t, 0, "nothing was scheduled")
 	})
 
 	t.Run("canceled twice", func(t *testing.T) {
@@ -380,6 +409,7 @@ func TestCancelPendingItemChange_EventOnlyWhenAChangeIsCanceled(t *testing.T) {
 		checkStatus(t, "cancel", r.cancelPending(t, r.h, r.itemID), http.StatusOK)
 		checkStatus(t, "cancel again", r.cancelPending(t, r.h, r.itemID), http.StatusOK)
 		r.checkOneEvent(t, domain.EventSubscriptionPendingChangeCanceled, r.subID, map[string]any{"item_id": r.itemID})
+		r.checkCancelAudits(t, 1, "the second cancel found nothing scheduled")
 	})
 
 	t.Run("two cancels at once", func(t *testing.T) {
@@ -421,6 +451,7 @@ func TestCancelPendingItemChange_EventOnlyWhenAChangeIsCanceled(t *testing.T) {
 			checkStatus(t, "cancel "+string(rune('A'+i)), rr, http.StatusOK)
 		}
 		r.checkOneEvent(t, domain.EventSubscriptionPendingChangeCanceled, r.subID, map[string]any{"item_id": r.itemID})
+		r.checkCancelAudits(t, 1, "one change was canceled, and the losing cancel found nothing scheduled")
 	})
 
 	t.Run("the change applied first", func(t *testing.T) {
@@ -452,6 +483,56 @@ func TestCancelPendingItemChange_EventOnlyWhenAChangeIsCanceled(t *testing.T) {
 			"item_id": r.itemID, "old_plan_id": r.plans["basic"].ID, "applied_at": proPeriodEnd,
 		})
 	})
+}
+
+// TestApplyDuePlanChanges_OneEventPerSwappedItem: the period-end apply of
+// scheduled plan changes queues one subscription.pending_change.applied for
+// each item it swaps, naming the plan that item left. An item whose change
+// is not due yet gets none. Every row of the subscription is counted,
+// whatever its item, so an event for an item that did not change fails too.
+func TestApplyDuePlanChanges_OneEventPerSwappedItem(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+
+	for _, tc := range []struct {
+		name     string
+		keeperAt time.Time // when the keeper item's change takes effect
+		both     bool      // the keeper's change is due at proPeriodEnd too
+	}{
+		{"one of two changes due", proPeriodEnd.AddDate(0, 1, 0), false},
+		{"both changes due", proPeriodEnd, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newEventRig(t, db, "Outbox Applied "+tc.name, true)
+			ctx := clock.WithEffectiveNow(r.ctx, proNow)
+			if _, err := r.store.SetItemPendingPlan(ctx, r.tenantID, r.itemID, r.plans["pro"].ID, proPeriodEnd); err != nil {
+				t.Fatalf("schedule the basic item's change: %v", err)
+			}
+			if _, err := r.store.SetItemPendingPlan(ctx, r.tenantID, r.keeperID, r.plans["meter-a"].ID, tc.keeperAt); err != nil {
+				t.Fatalf("schedule the keeper item's change: %v", err)
+			}
+			left := map[string]string{r.itemID: r.plans["basic"].ID} // swapped item → the plan it left
+			if tc.both {
+				left[r.keeperID] = r.plans["keeper"].ID
+			}
+
+			applied, err := r.store.ApplyDuePendingItemPlansAtomic(r.ctx, r.tenantID, r.subID, proPeriodEnd, proPeriodEnd)
+			if err != nil {
+				t.Fatalf("apply: %v", err)
+			}
+			if len(applied) != len(left) {
+				t.Errorf("apply returned %d items, want %d: only the swapped items", len(applied), len(left))
+			}
+
+			if got := r.events(t, domain.EventSubscriptionPendingChangeApplied, r.subID, ""); len(got) != len(left) {
+				t.Errorf("%d pending_change.applied rows for the subscription, want %d: one for each swapped item, none for another item", len(got), len(left))
+			}
+			for itemID, oldPlan := range left {
+				r.checkOneEvent(t, domain.EventSubscriptionPendingChangeApplied, r.subID, map[string]any{
+					"item_id": itemID, "old_plan_id": oldPlan, "applied_at": proPeriodEnd,
+				})
+			}
+		})
+	}
 }
 
 // TestItemEvent_RollsBackWithItsChange: an item change's event is written on

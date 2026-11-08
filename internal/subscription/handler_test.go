@@ -1435,28 +1435,37 @@ func TestHandler_ClearScheduledCancel_ClearsTheSchedule(t *testing.T) {
 }
 
 // TestHandler_NothingToUndo_WritesNoAudit: resuming collection that is not
-// paused, or clearing a cancel that is not scheduled, answers 200 with the
-// subscription and changes nothing. So it writes no audit entry. The store
-// writes nothing either, so it queues no subscription.collection_resumed or
-// .cancel_cleared (TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued).
+// paused, clearing a cancel that is not scheduled, or canceling a plan change
+// that is not scheduled, answers 200 with the subscription (or the item) and
+// changes nothing. So it writes no audit entry. The store writes nothing
+// either, so it queues no subscription.collection_resumed, .cancel_cleared
+// or .pending_change.canceled
+// (TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued,
+// TestCancelPendingItemChange_EventOnlyWhenAChangeIsCanceled).
 func TestHandler_NothingToUndo_WritesNoAudit(t *testing.T) {
 	cases := []struct {
 		name string
-		path string
+		path string // after /subscriptions/{id}
+		item bool   // the route names the item and answers with it
 		call func(h *Handler, w http.ResponseWriter, r *http.Request)
 	}{
-		{"resume collection, not paused", "/pause-collection", (*Handler).resumeCollection},
-		{"clear scheduled cancel, none scheduled", "/scheduled-cancel", (*Handler).clearScheduledCancel},
+		{"resume collection, not paused", "/pause-collection", false, (*Handler).resumeCollection},
+		{"clear scheduled cancel, none scheduled", "/scheduled-cancel", false, (*Handler).clearScheduledCancel},
+		{"cancel plan change, none scheduled", "/items/{itemID}/pending-change", true, (*Handler).cancelPendingItemChange},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			tenantID := "t1"
 			store := newMemStore()
-			subID, _ := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
+			subID, itemID := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
 			before, err := store.Get(ctx, tenantID, subID)
 			if err != nil {
 				t.Fatalf("get: %v", err)
+			}
+			wantID, wantUpdated := subID, before.UpdatedAt
+			if tc.item {
+				wantID, wantUpdated = itemID, before.Items[0].UpdatedAt
 			}
 
 			audits := &capturingAudit{}
@@ -1466,6 +1475,9 @@ func TestHandler_NothingToUndo_WritesNoAudit(t *testing.T) {
 			req := httptest.NewRequest(http.MethodDelete, "/subscriptions/"+subID+tc.path, nil)
 			rctx := chi.NewRouteContext()
 			rctx.URLParams.Add("id", subID)
+			if tc.item {
+				rctx.URLParams.Add("itemID", itemID)
+			}
 			req = req.WithContext(auth.WithTenantID(
 				context.WithValue(ctx, chi.RouteCtxKey, rctx),
 				tenantID,
@@ -1475,12 +1487,15 @@ func TestHandler_NothingToUndo_WritesNoAudit(t *testing.T) {
 			if rr.Code != http.StatusOK {
 				t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
 			}
-			var got domain.Subscription
+			var got struct {
+				ID        string    `json:"id"`
+				UpdatedAt time.Time `json:"updated_at"`
+			}
 			if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 				t.Fatalf("decode response: %v", err)
 			}
-			if got.ID != subID || !got.UpdatedAt.Equal(before.UpdatedAt) {
-				t.Errorf("response: id %s updated_at %v, want %s unchanged at %v", got.ID, got.UpdatedAt, subID, before.UpdatedAt)
+			if got.ID != wantID || !got.UpdatedAt.Equal(wantUpdated) {
+				t.Errorf("response: id %s updated_at %v, want %s unchanged at %v", got.ID, got.UpdatedAt, wantID, wantUpdated)
 			}
 			if len(audits.entries) != 0 {
 				t.Errorf("audit entries %v, want none", audits.actions())
