@@ -14,7 +14,7 @@ require (
 	github.com/rs/cors v1.11.1
 	github.com/rs/xid v1.6.0
 	github.com/shopspring/decimal v1.4.0
-	github.com/signintech/gopdf v0.36.0
+	github.com/signintech/gopdf v0.38.4
 	github.com/sony/gobreaker/v2 v2.4.0
 	github.com/stripe/stripe-go/v82 v82.5.1
 	github.com/wneessen/go-mail v0.8.1
