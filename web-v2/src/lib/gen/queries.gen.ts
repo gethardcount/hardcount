@@ -7398,13 +7398,13 @@ export const getCancelSubscriptionItemPendingChangeUrl = (id: string,
 }
 
 /**
- * Cancels the plan change scheduled on an item. Calling it on an item
- * with no scheduled change returns the item unchanged. Sends the
- * `subscription.pending_change.canceled` webhook event, and writes an
- * audit log entry, also when no change was scheduled.
+ * Cancels the plan change scheduled on an item, sends the
+ * `subscription.pending_change.canceled` webhook event and writes an
+ * audit log entry. Calling it on an item with no scheduled change
+ * returns the item unchanged, sends no event and records nothing.
  *
- * If the period has already ended, the change has taken effect and
- * the request answers 409.
+ * If the period has already ended, or the change took effect while the
+ * request ran, the request answers 409.
  * @summary Cancel a scheduled plan change
  */
 export const cancelSubscriptionItemPendingChange = async (id: string,

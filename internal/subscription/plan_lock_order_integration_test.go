@@ -245,7 +245,7 @@ var lockOrderWriters = []lockOrderWriter{
 			t.Fatalf("schedule: %v", err)
 		}
 		return func(ctx context.Context) error {
-			applied, err := r.store.ApplyDuePendingItemPlansAtomic(ctx, r.tenantID, sub.ID, lockOrderPE)
+			applied, err := r.store.ApplyDuePendingItemPlansAtomic(ctx, r.tenantID, sub.ID, lockOrderPE, lockOrderPE)
 			if err == nil && len(applied) != 1 {
 				t.Errorf("the scheduled change must apply to 1 item, applied %d", len(applied))
 			}
@@ -258,7 +258,7 @@ var lockOrderWriters = []lockOrderWriter{
 			t.Fatalf("schedule: %v", err)
 		}
 		return func(ctx context.Context) error {
-			applied, err := r.store.ApplyDuePendingItemPlansAtomic(ctx, r.tenantID, sub.ID, lockOrderPE)
+			applied, err := r.store.ApplyDuePendingItemPlansAtomic(ctx, r.tenantID, sub.ID, lockOrderPE, lockOrderPE)
 			if err == nil && len(applied) != 1 {
 				t.Errorf("the scheduled change must apply to 1 item, applied %d", len(applied))
 			}

@@ -1363,7 +1363,7 @@ is when it ended.
 A trial's end date moved later. The new end is the subscription's
 `trial_end_at`. `triggered_by` is `operator`.
 
-**Also in `data`:** `triggered_by`.
+**Always sent.** **Also in `data`:** `triggered_by`.
 
 <details>
 <summary>Example message</summary>
@@ -1419,7 +1419,7 @@ A trial's end date moved later. The new end is the subscription's
 
 A cancel at period end was scheduled.
 
-**Also in `data`:** nothing.
+**Always sent.** **Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -1475,7 +1475,7 @@ A cancel at period end was scheduled.
 A scheduled cancel was removed. Clearing when no cancel is scheduled sends
 nothing.
 
-**Also in `data`:** nothing.
+**Always sent.** **Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -1532,13 +1532,12 @@ Collection was paused: invoices stay drafts. The subscription's
 `pause_collection` says how and until when. `triggered_by` is `operator` or
 `dunning` (payment retries ran out and your policy pauses).
 
-Dunning's pause is saved with the change, so a crash cannot drop its event.
 Dunning never resumes collection itself: the pause lasts until that invoice
 is paid (`subscription.collection_resumed` with `triggered_by: payment`) or
 you resume it. On a canceled subscription, paying the invoice does not lift
 the pause; resume it yourself.
 
-**Also in `data`:** `triggered_by`.
+**Always sent.** **Also in `data`:** `triggered_by`.
 
 <details>
 <summary>Example message</summary>
@@ -1599,16 +1598,15 @@ nothing. `triggered_by` is `operator`, `schedule` (its resume date came) or
 - A payment lifts the pause when it is recorded. This event follows on the
   next scheduled billing run, once any period that ended under the pause
   has closed (Hardcount built its invoice and started the next period).
-- A `schedule` or `payment` resume carries `resumed_at`, and is saved with
-  the change, so a crash cannot drop it. An `operator` resume has no
-  `resumed_at`.
+- A `schedule` or `payment` resume carries `resumed_at`. An `operator`
+  resume has no `resumed_at`.
 - A pause can end before Hardcount clears it: its resume date comes, or
   its invoice is paid. If a new pause or a resume call arrives in that gap,
   Hardcount still sends one event for the ended pause, with that pause's
   own trigger (`schedule` or `payment`). The resume call then sends no
   event with `triggered_by: operator`.
 
-**Also in `data`:** `triggered_by`, `resumed_at`.
+**Always sent.** **Also in `data`:** `triggered_by`, `resumed_at`.
 
 <details>
 <summary>Example message</summary>
@@ -1665,7 +1663,7 @@ nothing. `triggered_by` is `operator`, `schedule` (its resume date came) or
 
 A plan was added to the subscription. `item_id` names the new item.
 
-**Also in `data`:** `item_id`.
+**Always sent.** **Also in `data`:** `item_id`.
 
 <details>
 <summary>Example message</summary>
@@ -1721,7 +1719,7 @@ A plan was added to the subscription. `item_id` names the new item.
 
 An item's plan or quantity changed. `item_id` names the item.
 
-**Also in `data`:** `item_id`.
+**Always sent.** **Also in `data`:** `item_id`.
 
 <details>
 <summary>Example message</summary>
@@ -1777,7 +1775,7 @@ An item's plan or quantity changed. `item_id` names the item.
 
 An item was removed. `item_id` names it; it is no longer in `items`.
 
-**Also in `data`:** `item_id`.
+**Always sent.** **Also in `data`:** `item_id`.
 
 <details>
 <summary>Example message</summary>
@@ -1834,7 +1832,7 @@ An item was removed. `item_id` names it; it is no longer in `items`.
 A plan change for the next billing period was scheduled. The item's
 `pending_plan_id` and `pending_plan_effective_at` show it.
 
-**Also in `data`:** `item_id`.
+**Always sent.** **Also in `data`:** `item_id`.
 
 <details>
 <summary>Example message</summary>
@@ -1888,9 +1886,12 @@ A plan change for the next billing period was scheduled. The item's
 
 ### `subscription.pending_change.canceled`
 
-A scheduled plan change was canceled.
+A scheduled plan change was canceled. A cancel call on an item with no
+change scheduled sends nothing. If the change took effect at the period end
+before the cancel reached it, the call answers 409 and sends nothing:
+`subscription.pending_change.applied` says what happened.
 
-**Also in `data`:** `item_id`.
+**Always sent.** **Also in `data`:** `item_id`.
 
 <details>
 <summary>Example message</summary>
@@ -1949,7 +1950,7 @@ is the new plan, `old_plan_id` the one it left, and `applied_at` when. The
 subscription is as it was just before the period closed. Closing a period
 means Hardcount builds its invoice and starts the next period.
 
-**Also in `data`:** `item_id`, `old_plan_id`, `applied_at`.
+**Always sent.** **Also in `data`:** `item_id`, `old_plan_id`, `applied_at`.
 
 <details>
 <summary>Example message</summary>
@@ -2015,7 +2016,7 @@ the period's usage so far, or a usage count on one item.
 - `crossed_item_id`: the item whose usage-count threshold was crossed,
   empty if none.
 
-**Also in `data`:** `invoice_id`, `running_subtotal`, `crossed_amount`,
+**Always sent.** **Also in `data`:** `invoice_id`, `running_subtotal`, `crossed_amount`,
 `crossed_item_id`.
 
 <details>

@@ -886,7 +886,17 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 			return err
 		}
 		// So does the row for usage below zero this invoice counts as 0.
-		return e.noteNetNegativeTx(ctx, tx, sub, belowZero, domain.BillingReasonThreshold, periodStart, now, created)
+		if err := e.noteNetNegativeTx(ctx, tx, sub, belowZero, domain.BillingReasonThreshold, periodStart, now, created); err != nil {
+			return err
+		}
+		// And subscription.threshold_crossed (ADR-040), carrying the
+		// subscription as the fire leaves it (ADR-131).
+		return e.subs.EnqueueEventTx(ctx, tx, sub.TenantID, sub.ID, domain.EventSubscriptionThresholdCrossed, map[string]any{
+			"invoice_id":       created.ID,
+			"running_subtotal": eval.RunningSubtotal,
+			"crossed_amount":   eval.CrossedAmount,
+			"crossed_item_id":  eval.CrossedItemID,
+		})
 	})
 	if err != nil {
 		if errors.Is(err, errs.ErrAlreadyExists) {
@@ -905,8 +915,9 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 		return false, fmt.Errorf("create threshold invoice: %w", err)
 	}
 
-	// The finalize AUDIT row and invoice.finalized already committed inside
-	// the fire tx above (the same contract as the cycle path).
+	// The finalize AUDIT row, invoice.finalized and
+	// subscription.threshold_crossed already committed inside the fire tx
+	// above (the same contract as the cycle path).
 	// Commit tax (Stripe parity) — matches the cycle scan's flow.
 	if inv.TaxProvider != "" && inv.TaxCalculationID != "" {
 		if err := e.CommitTax(ctx, sub.TenantID, inv.ID, inv.TaxCalculationID); err != nil {
@@ -922,26 +933,6 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 	// collected when the tax-retry chain finalizes it.
 	e.CollectInvoice(ctx, sub.TenantID, inv.ID, &now)
 
-	// The event carries the subscription as the fire left it (ADR-131): the
-	// scan's snapshot predates the fire's write, so it is read again.
-	if e.events != nil {
-		fired, err := e.subs.Get(ctx, sub.TenantID, sub.ID)
-		if err != nil {
-			slog.Error("threshold scan: subscription.threshold_crossed not sent: the subscription could not be read after the fire",
-				"subscription_id", sub.ID, "tenant_id", sub.TenantID, "error", err)
-		} else {
-			payload := domain.SubscriptionWebhookData(fired, map[string]any{
-				"invoice_id":       inv.ID,
-				"running_subtotal": eval.RunningSubtotal,
-				"crossed_amount":   eval.CrossedAmount,
-				"crossed_item_id":  eval.CrossedItemID,
-			})
-			if err := e.events.Dispatch(ctx, sub.TenantID, domain.EventSubscriptionThresholdCrossed, payload); err != nil {
-				slog.Error("threshold scan: dispatch subscription.threshold_crossed failed",
-					"subscription_id", sub.ID, "tenant_id", sub.TenantID, "error", err)
-			}
-		}
-	}
 	// Audit row so the crossing shows on the subscription activity feed —
 	// pre-fix only the webhook fired and the invoice appeared, with no
 	// timeline row explaining WHY an invoice landed mid-cycle.
