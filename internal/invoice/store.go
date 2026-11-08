@@ -8,8 +8,10 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
+// Store is the invoice persistence Service uses. It lists only the methods
+// Service calls; other packages reach the PostgresStore methods they need
+// through their own interfaces.
 type Store interface {
-	CreateWithLineItems(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error)
 	// CreateWithLineItemsAudited / AddLineItemAtomicAudited run the
 	// caller-supplied audit emission on the SAME transaction as the write
 	// (ADR-090 in-tx emission): the invoice mutation and its audit row commit
@@ -22,7 +24,6 @@ type Store interface {
 	// evidence is the finalize row. A bare-header create passes no items.
 	CreateWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error)
 	Get(ctx context.Context, tenantID, id string) (domain.Invoice, error)
-	GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.Invoice, error)
 	List(ctx context.Context, filter ListFilter) ([]domain.Invoice, int, error)
 	// UpdateStatusWithReversalPrior flips the status AND runs fn on the SAME
 	// tx — either both commit or neither, so a void never strands the
@@ -48,27 +49,11 @@ type Store interface {
 	// FinalizeDraft is the draft→finalized flip for a cycle invoice, with the
 	// same onFinalized hook.
 	FinalizeDraft(ctx context.Context, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error)
-	// StampChargeOutcome records a charge attempt's outcome (processing /
-	// unknown, or a failure with no PaymentIntent) only if no outcome was
-	// recorded since the attempt read attemptSeq — the charge_attempt_seq its
-	// idempotency key was built from (P13). A refused stamp returns the row
-	// as it now stands with applied=false and a nil error. A failure that
-	// names a PaymentIntent goes through MarkPaymentFailedReportingTransition.
-	StampChargeOutcome(ctx context.Context, tenantID, id string, attemptSeq int64, paymentStatus domain.InvoicePaymentStatus, stripePaymentIntentID, lastPaymentError string) (domain.Invoice, bool, error)
-	// MarkPaymentFailedReportingTransition records one report that a
-	// PaymentIntent failed. It moves the invoice only for the attempt the
-	// invoice is waiting on, and reports whether this was the first notice
-	// for that PaymentIntent (payment.failed + customer email fire once per
-	// PaymentIntent). See the PostgresStore method for the rule.
-	MarkPaymentFailedReportingTransition(ctx context.Context, tenantID, id string, report domain.PaymentFailureReport, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, domain.PaymentFailureResult, error)
 	// MarkPaid flips status='paid', payment_status='succeeded',
-	// amount_paid=amount_due, amount_due=0 in one transaction. Used by
-	// the engine's zero-amount auto-pay path, the billing threshold
-	// scan, and the operator-driven Record Offline Payment flow. The
-	// store is the right place to atomically mutate all four fields
-	// — Service.RecordOfflinePayment calls this so an out-of-band
-	// collection produces the same invoice end-state as a successful
-	// engine charge.
+	// amount_paid=amount_due, amount_due=0 in one transaction. Service uses
+	// it to settle an invoice with nothing left due (SettleZeroDue, and
+	// RetryTax after a finalize that leaves $0 due). Record Offline Payment
+	// uses MarkPaidOffline.
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
 	// MarkPaidOffline is MarkPaid for Record Offline Payment: it sets
 	// paid_out_of_band and writes no PaymentIntent, and check runs on the
@@ -80,17 +65,14 @@ type Store interface {
 	// ChargeHoldStateOf reads the hold outside any lock, to word a refusal.
 	ChargeHoldStateOf(ctx context.Context, tenantID, id string) (domain.ChargeHoldState, error)
 
-	SetAutoChargePending(ctx context.Context, tenantID, id string, pending bool) error
-	// ClaimAutoCharge / ReleaseChargeHold: the per-invoice charge hold
-	// (HA hazard #1, ADR-127) — exactly one owner enters the charge leg per
-	// invoice. A claim returns its token (the zero ChargeHold = refused);
-	// the release compares it.
-	ClaimAutoCharge(ctx context.Context, tenantID, id string) (domain.ChargeHold, error)
-	// ClaimChargeForManualCollect: operator-collect twin on the same
-	// hold — see postgres.go (2026-07-21 snapshot-race audit).
+	// ClaimChargeForManualCollect / ReleaseChargeHold: the per-invoice charge
+	// hold (HA hazard #1, ADR-127) — exactly one owner enters the charge leg
+	// per invoice. The operator-collect claim shares the auto-charge sweep's
+	// hold — see postgres.go (2026-07-21 snapshot-race audit). A claim
+	// returns its token (the zero ChargeHold = refused); the release compares
+	// it.
 	ClaimChargeForManualCollect(ctx context.Context, tenantID, id string) (domain.ChargeHold, error)
 	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
-	ListAutoChargePending(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error)
 
 	ListLineItems(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceLineItem, error)
 
@@ -109,14 +91,6 @@ type Store interface {
 	// number it labels the row with is therefore read INSIDE the tx, under the
 	// same row lock as the mutation.
 	AddLineItemAtomicAudited(ctx context.Context, tenantID, invoiceID string, item domain.InvoiceLineItem, emit func(tx *sql.Tx, item domain.InvoiceLineItem, inv domain.Invoice) error) (domain.InvoiceLineItem, domain.Invoice, error)
-
-	// UpdateTaxAtomic re-stamps an invoice's tax decision after a manual
-	// retry. Locks the invoice row, gates on tax_status pending
-	// and status='draft', rewrites per-line tax stamps and invoice-level tax
-	// columns, increments tax_retry_count, recomputes total + amount_due.
-	// Returns errs.InvalidState when a gate fails (caller surfaces 409) and
-	// errs.ErrNotFound when the invoice doesn't exist (caller surfaces 404).
-	UpdateTaxAtomic(ctx context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem) (domain.Invoice, error)
 
 	// ListPendingTaxRetry returns draft invoices awaiting another
 	// tax-calculation attempt: tax_status pending,
@@ -179,16 +153,6 @@ type Store interface {
 	// surface live-mode rows. ADR-019.
 	ListProviderConfigErrors(ctx context.Context, tenantID string, livemode bool) ([]domain.Invoice, error)
 
-	// GetOutstandingBalance returns the customer's accounts-receivable
-	// exposure: SUM(amount_due_cents) + COUNT(*) of finalized invoices
-	// in payment_status pending/failed/unknown, excluding voided +
-	// uncollectible (those are either canceled or written off as bad
-	// debt). Powers the "Outstanding balance" card on customer detail —
-	// industry-standard surface (Stripe customer overview tile, Lago /
-	// Chargebee / Recurly customer page) that operators rely on to see
-	// total AR exposure for a customer at a glance.
-	GetOutstandingBalance(ctx context.Context, tenantID, customerID string) (OutstandingBalance, error)
-
 	// SetPublicToken writes (or overwrites) the hosted-invoice-URL token for
 	// an invoice. The rotate-public-token endpoint calls it; the finalize
 	// writes mint the first token themselves. Invoice must exist and be
@@ -209,29 +173,11 @@ type Store interface {
 	// errs.ErrNotFound on miss.
 	GetByPublicToken(ctx context.Context, token string) (domain.Invoice, bool, error)
 
-	// FindBaseInvoiceForPeriod returns the most-recent NON-VOIDED invoice
-	// carrying a base-fee line item with billing_period_start = the given
-	// periodStart for the given subscription. A written-off one counts: it
-	// is billed but unpaid. handleItemProration reads it to refuse a net
-	// charge while the period's base is unpaid (ADR-050) — industry
-	// standard (Recurly blocks a change on a past-due invoice; Stripe warns
-	// operators to disable proration when the latest invoice is unpaid).
-	//
-	// For in_advance plans, the cycle-close invoice from the prior period
-	// (or BillOnCreate's day-1 invoice for new subs) carries the base
-	// line whose billing_period_start matches the now-being-canceled
-	// period's start. For in_arrears plans no such line exists —
-	// callers shouldn't be granting unpaid-period credits to in_arrears
-	// subs in the first place. Returns errs.ErrNotFound when no
-	// matching invoice exists.
-	FindBaseInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error)
-
-	// RecordChargeAttempt / ListChargeAttemptsByInvoice are the ADR-102
-	// charge-attempt facts: one row per attempt, upserted by
-	// PaymentIntent id as settle paths resolve the outcome. The
-	// timeline renders each attempt exactly once via the precedence
-	// chain dunning row → attempt row → stripe webhook row.
-	RecordChargeAttempt(ctx context.Context, tenantID string, a domain.InvoiceChargeAttempt) error
+	// ListChargeAttemptsByInvoice reads the ADR-102 charge-attempt facts:
+	// one row per attempt, upserted by PaymentIntent id as settle paths
+	// resolve the outcome (PostgresStore.RecordChargeAttempt). The timeline
+	// renders each attempt exactly once via the precedence chain dunning row
+	// → attempt row → stripe webhook row.
 	ListChargeAttemptsByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceChargeAttempt, error)
 }
 

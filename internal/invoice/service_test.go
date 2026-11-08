@@ -18,16 +18,14 @@ import (
 )
 
 type memStore struct {
-	invoices    map[string]domain.Invoice
-	lineItems   map[string][]domain.InvoiceLineItem
-	failNotedPI map[string]string // invoice ID -> PI whose failure notifications fired
+	invoices  map[string]domain.Invoice
+	lineItems map[string][]domain.InvoiceLineItem
 }
 
 func newMemStore() *memStore {
 	return &memStore{
-		invoices:    make(map[string]domain.Invoice),
-		lineItems:   make(map[string][]domain.InvoiceLineItem),
-		failNotedPI: make(map[string]string),
+		invoices:  make(map[string]domain.Invoice),
+		lineItems: make(map[string][]domain.InvoiceLineItem),
 	}
 }
 
@@ -50,18 +48,6 @@ func (m *memStore) Get(_ context.Context, tenantID, id string) (domain.Invoice, 
 	return inv, nil
 }
 
-func (m *memStore) GetByProrationSource(_ context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.Invoice, error) {
-	for _, inv := range m.invoices {
-		if inv.TenantID == tenantID && inv.SubscriptionID == subscriptionID &&
-			inv.SourceSubscriptionItemID == subscriptionItemID &&
-			inv.SourceChangeType == changeType &&
-			inv.SourcePlanChangedAt != nil && inv.SourcePlanChangedAt.Equal(changeAt) {
-			return inv, nil
-		}
-	}
-	return domain.Invoice{}, errs.ErrNotFound
-}
-
 func (m *memStore) List(_ context.Context, filter ListFilter) ([]domain.Invoice, int, error) {
 	var result []domain.Invoice
 	for _, inv := range m.invoices {
@@ -74,23 +60,6 @@ func (m *memStore) List(_ context.Context, filter ListFilter) ([]domain.Invoice,
 		result = append(result, inv)
 	}
 	return result, len(result), nil
-}
-
-func (m *memStore) GetOutstandingBalance(_ context.Context, tenantID, customerID string) (OutstandingBalance, error) {
-	var out OutstandingBalance
-	for _, inv := range m.invoices {
-		if inv.TenantID != tenantID || inv.CustomerID != customerID {
-			continue
-		}
-		if inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible || inv.Status == domain.InvoiceDraft {
-			continue
-		}
-		if inv.PaymentStatus == domain.PaymentPending || inv.PaymentStatus == domain.PaymentFailed || inv.PaymentStatus == domain.PaymentUnknown {
-			out.TotalCents += inv.AmountDueCents
-			out.UnpaidCount++
-		}
-	}
-	return out, nil
 }
 
 func (m *memStore) SetPublicToken(_ context.Context, tenantID, invoiceID, token string) error {
@@ -117,36 +86,6 @@ func (m *memStore) GetByPublicToken(_ context.Context, token string) (domain.Inv
 		}
 	}
 	return domain.Invoice{}, false, errs.ErrNotFound
-}
-
-func (m *memStore) FindBaseInvoiceForPeriod(_ context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error) {
-	var best domain.Invoice
-	found := false
-	for _, inv := range m.invoices {
-		if inv.TenantID != tenantID || inv.SubscriptionID != subscriptionID {
-			continue
-		}
-		if inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible {
-			continue
-		}
-		for _, li := range m.lineItems[inv.ID] {
-			if li.LineType == domain.LineTypeBaseFee && li.BillingPeriodStart != nil && li.BillingPeriodStart.Equal(periodStart) {
-				if !found || inv.CreatedAt.After(best.CreatedAt) {
-					best = inv
-					found = true
-				}
-				break
-			}
-		}
-	}
-	if !found {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	return best, nil
-}
-
-func (m *memStore) RecordChargeAttempt(_ context.Context, _ string, _ domain.InvoiceChargeAttempt) error {
-	return nil
 }
 
 func (m *memStore) ListChargeAttemptsByInvoice(_ context.Context, _, _ string) ([]domain.InvoiceChargeAttempt, error) {
@@ -285,46 +224,6 @@ func (m *memStore) mintToken(id string) domain.Invoice {
 	return inv
 }
 
-func (m *memStore) StampChargeOutcome(_ context.Context, tenantID, id string, attemptSeq int64, ps domain.InvoicePaymentStatus, stripeID, errMsg string) (domain.Invoice, bool, error) {
-	inv, ok := m.invoices[id]
-	if !ok || inv.TenantID != tenantID {
-		return domain.Invoice{}, false, errs.ErrNotFound
-	}
-	if inv.ChargeAttemptSeq != attemptSeq {
-		return inv, false, nil
-	}
-	inv.PaymentStatus = ps
-	inv.StripePaymentIntentID = stripeID
-	inv.LastPaymentError = errMsg
-	inv.ChargeAttemptSeq++
-	m.invoices[id] = inv
-	return inv, true, nil
-}
-
-func (m *memStore) MarkPaymentFailedReportingTransition(_ context.Context, tenantID, id string, report domain.PaymentFailureReport, _ func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, domain.PaymentFailureResult, error) {
-	piID := report.PaymentIntentID
-	inv, ok := m.invoices[id]
-	if !ok || inv.TenantID != tenantID {
-		return domain.Invoice{}, domain.PaymentFailureResult{}, errs.ErrNotFound
-	}
-	if !report.MovesInvoice(inv.Status, inv.PaymentStatus, inv.StripePaymentIntentID, inv.ChargeAttemptSeq, domain.AttemptNotHardcount) {
-		return inv, domain.PaymentFailureResult{}, nil
-	}
-	if m.failNotedPI == nil {
-		m.failNotedPI = make(map[string]string)
-	}
-	first := m.failNotedPI[id] != piID
-	if inv.PaymentStatus != domain.PaymentFailed || inv.StripePaymentIntentID != piID {
-		inv.ChargeAttemptSeq++
-	}
-	inv.PaymentStatus = domain.PaymentFailed
-	inv.StripePaymentIntentID = piID
-	inv.LastPaymentError = report.Message
-	m.invoices[id] = inv
-	m.failNotedPI[id] = piID
-	return inv, domain.PaymentFailureResult{Recorded: true, FirstNotice: first}, nil
-}
-
 func (m *memStore) MarkPaid(_ context.Context, tenantID, id, stripeID string, paidAt time.Time) (domain.Invoice, error) {
 	inv, ok := m.invoices[id]
 	if !ok || inv.TenantID != tenantID {
@@ -355,56 +254,6 @@ func (m *memStore) MarkPaid(_ context.Context, tenantID, id, stripeID string, pa
 
 func (m *memStore) ListLineItems(_ context.Context, _, invoiceID string) ([]domain.InvoiceLineItem, error) {
 	return m.lineItems[invoiceID], nil
-}
-
-func (m *memStore) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem) (domain.Invoice, error) {
-	inv, ok := m.invoices[invoiceID]
-	if !ok || inv.TenantID != tenantID {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	if inv.Status != domain.InvoiceDraft {
-		return domain.Invoice{}, errs.InvalidState("not draft")
-	}
-	if inv.TaxStatus != domain.InvoiceTaxPending {
-		return domain.Invoice{}, errs.InvalidState("tax not retryable")
-	}
-	byID := make(map[string]domain.InvoiceLineItem, len(lineItems))
-	for _, li := range lineItems {
-		byID[li.ID] = li
-	}
-	for i, existing := range m.lineItems[invoiceID] {
-		if updated, ok := byID[existing.ID]; ok {
-			m.lineItems[invoiceID][i].TaxRate = updated.TaxRate
-			m.lineItems[invoiceID][i].TaxAmountCents = updated.TaxAmountCents
-			m.lineItems[invoiceID][i].TotalAmountCents = updated.TotalAmountCents
-		}
-	}
-	inv.TaxAmountCents = update.TaxAmountCents
-	inv.TaxRate = update.TaxRate
-	inv.TaxName = update.TaxName
-	inv.TaxCountry = update.TaxCountry
-	inv.TaxID = update.TaxID
-	inv.TaxProvider = update.TaxProvider
-	inv.TaxCalculationID = update.TaxCalculationID
-	inv.TaxReverseCharge = update.TaxReverseCharge
-	inv.TaxExemptReason = update.TaxExemptReason
-	inv.TaxStatus = update.TaxStatus
-	inv.TaxDeferredAt = update.TaxDeferredAt
-	inv.TaxPendingReason = update.TaxPendingReason
-	inv.TaxErrorCode = update.TaxErrorCode
-	inv.TaxNextRetryAt = update.TaxNextRetryAt
-	if !update.InitialAttempt {
-		inv.TaxRetryCount++
-	}
-	inv.TotalAmountCents = update.TotalAmountCents
-	due := inv.TotalAmountCents - inv.AmountPaidCents - inv.CreditsAppliedCents
-	if due < 0 {
-		due = 0
-	}
-	inv.AmountDueCents = due
-	inv.UpdatedAt = time.Now().UTC()
-	m.invoices[invoiceID] = inv
-	return inv, nil
 }
 
 // TestRetryProviderConfigErrors_FlushesStuckRows covers ADR-019.
@@ -741,17 +590,6 @@ func (m *memStore) AddLineItemAtomicAudited(_ context.Context, tenantID, invoice
 // the hold itself, only whether the claim's predicate admitted the invoice.
 var memHold = domain.ChargeHold{Until: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)}
 
-func (m *memStore) ClaimAutoCharge(_ context.Context, _, id string) (domain.ChargeHold, error) {
-	inv, ok := m.invoices[id]
-	if !ok {
-		return domain.ChargeHold{}, errs.ErrNotFound
-	}
-	if inv.AutoChargePending && inv.PaymentStatus == domain.PaymentPending && inv.Status == domain.InvoiceFinalized {
-		return memHold, nil
-	}
-	return domain.ChargeHold{}, nil
-}
-
 func (m *memStore) ClaimChargeForManualCollect(_ context.Context, _, id string) (domain.ChargeHold, error) {
 	inv, ok := m.invoices[id]
 	if !ok {
@@ -768,26 +606,6 @@ func (m *memStore) ClaimChargeForManualCollect(_ context.Context, _, id string) 
 
 func (m *memStore) ReleaseChargeHold(_ context.Context, _, _ string, _ domain.ChargeHold) error {
 	return nil
-}
-
-func (m *memStore) SetAutoChargePending(_ context.Context, _, id string, pending bool) error {
-	inv, ok := m.invoices[id]
-	if !ok {
-		return errs.ErrNotFound
-	}
-	inv.AutoChargePending = pending
-	m.invoices[id] = inv
-	return nil
-}
-
-func (m *memStore) ListAutoChargePending(_ context.Context, _ domain.InvoiceKeyset, _ int) ([]domain.Invoice, error) {
-	var result []domain.Invoice
-	for _, inv := range m.invoices {
-		if inv.AutoChargePending && inv.Status == domain.InvoiceFinalized && inv.PaymentStatus == domain.PaymentPending {
-			result = append(result, inv)
-		}
-	}
-	return result, nil
 }
 
 // memNumberer is a deterministic in-memory InvoiceNumberer for tests.

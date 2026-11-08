@@ -149,7 +149,7 @@ func (r *snapRig) pdfParties(t *testing.T, id string) (domain.Invoice, BillToInf
 	if err != nil {
 		t.Fatalf("get %s: %v", id, err)
 	}
-	bt, ci, _ := BuildPDFContext(r.ctx, r.customers, r.settings, nil, r.tenantID, &inv)
+	bt, ci, _ := BuildPDFContext(r.ctx, r.customers, r.settings, nil, r.tenantID, inv)
 	return inv, bt, ci
 }
 

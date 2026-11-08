@@ -136,10 +136,11 @@ type CustomerReader interface {
 	GetMany(ctx context.Context, tenantID string, ids []string) ([]domain.Customer, error)
 }
 
-// TenantSettingsReader reads tenant settings so a manual invoice with no
-// explicit net term uses the tenant's configured terms, 0 included — the same
-// resolution as the billing engine's invoices. Optional; nil (narrow tests)
-// uses 30.
+// TenantSettingsReader reads tenant settings. Service reads them so a manual
+// invoice with no explicit net term uses the tenant's configured terms, 0
+// included — the same resolution as the billing engine's invoices. Optional;
+// nil (narrow tests) uses 30. Handler and BuildPDFContext read them for the
+// PDF's company info.
 type TenantSettingsReader interface {
 	Get(ctx context.Context, tenantID string) (domain.TenantSettings, error)
 }

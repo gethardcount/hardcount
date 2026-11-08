@@ -78,7 +78,7 @@ func (h *Handler) emailInvoice(ctx context.Context, tenantID string, inv domain.
 	// this path previously hand-rolled a THINNER context (no buyer
 	// address/tax id, no credit notes), so the emailed document diverged
 	// from the downloaded one.
-	bt, ci, cnInfos := BuildPDFContext(bound, h.customers, h.settings, h.pdfCreditNotes, tenantID, &inv)
+	bt, ci, cnInfos := BuildPDFContext(bound, h.customers, h.settings, h.pdfCreditNotes, tenantID, inv)
 
 	pdfBytes, err := RenderPDF(bound, inv, items, bt, cnInfos, ci)
 	if err != nil {

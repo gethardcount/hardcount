@@ -227,7 +227,7 @@ const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoi
 	billing_period_start, billing_period_end, issued_at, due_at, paid_at, voided_at, uncollectible_at,
 	COALESCE(stripe_payment_intent_id,''), COALESCE(last_payment_error,''),
 	auto_charge_pending, net_payment_term_days, COALESCE(memo,''), COALESCE(footer,''),
-	metadata, created_at, updated_at, source_plan_changed_at, COALESCE(source_subscription_item_id,''),
+	created_at, updated_at, source_plan_changed_at, COALESCE(source_subscription_item_id,''),
 	COALESCE(source_change_type,''),
 	tax_provider, tax_calculation_id, COALESCE(tax_transaction_id,''),
 	tax_reverse_charge, tax_exempt_reason,
@@ -2064,6 +2064,14 @@ func errLinesChanged() error {
 		WithCode("invoice_lines_changed")
 }
 
+// UpdateTaxAtomic re-stamps an invoice's tax decision, at finalize or on a
+// retry. It locks the invoice row and refuses unless the invoice is a draft,
+// rewrites the per-line tax stamps and the invoice-level tax columns, counts
+// the attempt in tax_retry_count (not the initial one), and recomputes total
+// + amount_due. Returns errs.InvalidState when the invoice is not a draft
+// (caller surfaces 409), invoice_lines_changed when a line was added after
+// the computation read the invoice, and errs.ErrNotFound when the invoice
+// doesn't exist (caller surfaces 404).
 func (s *PostgresStore) UpdateTaxAtomic(
 	ctx context.Context, tenantID, invoiceID string,
 	update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem,
@@ -2270,10 +2278,6 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 	if now.IsZero() {
 		now = clock.Now(ctx)
 	}
-	metaJSON, _ := json.Marshal(inv.Metadata)
-	if inv.Metadata == nil {
-		metaJSON = []byte("{}")
-	}
 
 	taxStatus := inv.TaxStatus
 	if taxStatus == "" {
@@ -2294,6 +2298,8 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 	// Store the token as an encrypted blob (reversible, for re-send URLs) + a
 	// SHA-256 blind index (for lookup). Never store the raw token.
 	encToken, tokenHash := s.encodeToken(publicToken)
+	// metadata is written as '{}': nothing sets Invoice.Metadata, and no
+	// read returns the column.
 	err := tx.QueryRowContext(ctx, `
 		INSERT INTO invoices (id, tenant_id, customer_id, subscription_id, invoice_number,
 			status, payment_status, currency, subtotal_cents, discount_cents, tax_amount_cents,
@@ -2306,7 +2312,7 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 			tax_status, tax_deferred_at, tax_retry_count, tax_pending_reason, tax_error_code, billing_reason,
 			public_token_encrypted, public_token_hash, paid_at, voided_at, is_simulated,
 			billing_timezone, auto_charge_pending)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,'{}',$27,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47)
 		RETURNING `+invCols,
 		id, tenantID, inv.CustomerID, postgres.NullableString(inv.SubscriptionID), inv.InvoiceNumber,
 		inv.Status, inv.PaymentStatus, inv.Currency,
@@ -2317,7 +2323,7 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 		inv.BillingPeriodStart, inv.BillingPeriodEnd,
 		postgres.NullableTime(inv.IssuedAt), postgres.NullableTime(inv.DueAt),
 		inv.NetPaymentTermDays, postgres.NullableString(inv.Memo),
-		postgres.NullableString(inv.Footer), metaJSON, now,
+		postgres.NullableString(inv.Footer), now,
 		postgres.NullableTime(inv.SourcePlanChangedAt),
 		postgres.NullableString(inv.SourceSubscriptionItemID),
 		postgres.NullableString(string(inv.SourceChangeType)),
@@ -3866,7 +3872,6 @@ func (s *PostgresStore) openBillTo(b domain.DocumentBillTo) (domain.DocumentBill
 }
 
 func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
-	var metaJSON []byte
 	return []any{
 		&inv.ID, &inv.TenantID, &inv.CustomerID, &inv.SubscriptionID, &inv.InvoiceNumber,
 		&inv.Status, &inv.PaymentStatus, &inv.Currency,
@@ -3877,7 +3882,7 @@ func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
 		&inv.IssuedAt, &inv.DueAt, &inv.PaidAt, &inv.VoidedAt, &inv.UncollectibleAt,
 		&inv.StripePaymentIntentID, &inv.LastPaymentError,
 		&inv.AutoChargePending, &inv.NetPaymentTermDays, &inv.Memo, &inv.Footer,
-		&metaJSON, &inv.CreatedAt, &inv.UpdatedAt, &inv.SourcePlanChangedAt,
+		&inv.CreatedAt, &inv.UpdatedAt, &inv.SourcePlanChangedAt,
 		&inv.SourceSubscriptionItemID, (*string)(&inv.SourceChangeType),
 		&inv.TaxProvider, &inv.TaxCalculationID, &inv.TaxTransactionID,
 		&inv.TaxReverseCharge, &inv.TaxExemptReason,
@@ -4037,6 +4042,11 @@ const baseFundsPeriod = `i.status <> 'voided'`
 // 2026-10-23). ORDER BY created_at DESC + LIMIT 1 surfaces the
 // most-recent matching invoice (relevant for plan-swap chains within
 // the same period that re-issued the base line).
+//
+// For in_advance plans, the cycle-close invoice from the prior period (or
+// BillOnCreate's day-1 invoice for new subs) carries the base line whose
+// billing_period_start matches the period's start. For in_arrears plans no
+// such line exists. Returns errs.ErrNotFound when no matching invoice exists.
 func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error) {
 	if subscriptionID == "" {
 		return domain.Invoice{}, errs.ErrNotFound
