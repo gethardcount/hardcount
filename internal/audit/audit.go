@@ -358,54 +358,27 @@ func simColumns(ctx context.Context, metadata map[string]any) (simAt, clockID an
 	return sim.At.UTC(), sim.TestClockID, m
 }
 
-// LogInTx writes an audit row on the CALLER's transaction — the business
-// mutation and its audit row commit or roll back together (ADR-090 in-tx
-// emission, shared fate). This is what makes "mutation committed but audit
-// row missing" unrepresentable on covered paths; callers must propagate the
-// error (which aborts their tx), never discard it.
+// LogInTx writes an audit row on the caller's transaction, so the change and
+// its audit row commit or roll back together (ADR-090). The caller must return
+// the error, which rolls the change back. Never discard it.
 //
-// LogInTx is TOTAL by construction (design-panel amendment A2): tenant_id is
-// taken from the transaction's own app.tenant_id GUC — it cannot disagree
-// with RLS, and a missing GUC fails loudly: NULLIF(…, ”) maps BOTH the
-// virgin-connection NULL and the pooled-connection empty string (a reverted
-// is_local set_config placeholder — the dominant case in a warm pool) onto
-// the NOT NULL constraint, so the guard does not silently depend on the
-// tenants FK. A metadata bag that cannot marshal degrades to a
-// {"marshal_error": …} payload instead of aborting a money transaction on a
-// telemetry bug; a partial clock binding is treated as absent rather than
-// polluting the partial clock index with a half-truth; the sim axis is
-// derived from ctx, never supplied by the caller (simColumns);
-// livemode is stamped by the table trigger from the same tx session. The
-// vocabulary round-trip integration test INSERTs every declared action
-// constant so a value the schema rejects cannot ship.
+// The row's tenant is the transaction's own app.tenant_id setting, so it always
+// matches row-level security, and a transaction without one fails. Metadata
+// that cannot be encoded is stored as {"marshal_error": ...} instead of failing
+// the caller's transaction. The test-clock columns come from ctx (simColumns),
+// and a table trigger sets livemode. TestLogInTx_TotalityAndVocabulary inserts
+// every declared action, so an action the schema rejects fails CI.
 //
-// LogInTx marks the request as having produced audit evidence (ADR-090 §4,
-// amended by the uninstall PR — the ADR's "LogInTx does NOT mark the request
-// handled" rule was written for the catch-all WRITER, where suppression cost a
-// route its only row; it does not carry to a pure OBSERVER):
-//
-//   - Rolled back after we return? Then the mutation failed and the handler
-//     answers non-2xx, and the detector only inspects 2xx — so a rolled-back
-//     emission can never make an uncovered mutation look covered.
-//   - A secondary emission deep inside another route's flow (the
-//     proration-fallback grant inside a change-plan request) marks that request
-//     too. That costs nothing REAL — the detector is a runtime backstop, and the
-//     thing that actually holds a route to its own emission is the route-audit
-//     registry + its arch test (internal/api/audit_routes.go), which forces every
-//     mutating route to declare explicit or exempt(reason) in review. The blind
-//     spot is bounded and named: a route that emits nothing of its own but nests
-//     someone else's emission reads as covered at runtime.
-//
-// Self-marking is also load-bearing: both public checkout
-// routes emit ONLY in-tx, and nothing else would account for them.
+// After the insert succeeds, it marks the request as audited for the
+// audit-coverage check. The public checkout routes write their audit rows only
+// here, so they rely on this mark. ADR-090, section 4, explains why marking
+// here is safe and names the one case it misses.
 func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 	simAt, clockID, metadata := simColumns(ctx, e.Metadata)
 	metaJSON, err := json.Marshal(metadata)
 	if err != nil {
-		// Totality: never let an unmarshalable telemetry bag abort the
-		// business tx (a nil metaJSON would violate the JSONB NOT NULL and
-		// do exactly that). The row still lands, carrying the failure it
-		// represents.
+		// Record the error instead of failing. A nil metaJSON would break the
+		// NOT NULL metadata column and roll back the caller's change.
 		metaJSON, _ = json.Marshal(map[string]string{"marshal_error": err.Error()})
 	}
 	if metadata == nil {
@@ -414,11 +387,11 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 
 	actorType, actorID := ResolveActor(ctx)
 
-	// created_at stays wall-clock (ADR-030); tenant_id comes from the tx
-	// GUC so the row is authoritative for the transaction it rides in.
-	// NULLIF folds the pooled-connection empty-string placeholder into
-	// NULL so the NOT NULL constraint — not the incidental tenants FK —
-	// is what rejects a GUC-less transaction.
+	// created_at is wall-clock time (ADR-030). The tenant comes from the
+	// transaction's app.tenant_id setting. A pooled connection reports an
+	// unset setting as an empty string, and a new one as NULL. NULLIF turns
+	// both into NULL, so the NOT NULL constraint rejects a transaction with no
+	// tenant, without relying on the tenants foreign key.
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO audit_log (id, tenant_id, actor_type, actor_id, action,
 			resource_type, resource_id, resource_label, metadata, ip_address,
@@ -429,20 +402,16 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 		nullIfEmpty(ClientIP(ctx)), nullIfEmpty(chimw.GetReqID(ctx)),
 		simAt, clockID, time.Now().UTC())
 	if err != nil {
-		// In-tx path: returning this error ABORTS the caller's business transaction
-		// (ADR-090 shared fate), so the mutation is refused and rolls back with the
-		// row. No evidence is missing — nothing happened. That is the OPPOSITE
-		// incident from the own-tx path's lost row, and the on-call runbook needs to
-		// be able to tell them apart from the metric alone.
+		// This error rolls back the caller's change along with the row, so no
+		// evidence is missing. A lost row on the Log path is the opposite
+		// incident, and the outcome label lets on-call tell them apart.
 		auditWriteErrors.WithLabelValues(OutcomeMutationRefused).Inc()
 		return fmt.Errorf("audit log (in-tx): insert: %w", err)
 	}
 
-	// This request produced audit evidence. Marked only AFTER a successful
-	// INSERT: a failed emission must leave the request unaccounted-for, so the
-	// caller's tx aborts (shared fate) and — if some caller were to swallow that
-	// and still answer 2xx — the detector reports it rather than trusting a row
-	// that isn't there.
+	// Mark only after the insert succeeds. If a caller swallowed a failed
+	// insert and still answered 2xx, the coverage check then reports the
+	// request instead of trusting a row that does not exist.
 	markEmitted(ctx)
 	return nil
 }
