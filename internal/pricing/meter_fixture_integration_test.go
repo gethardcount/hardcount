@@ -27,9 +27,6 @@ type meterEditFixture struct {
 
 func newMeterEditFixture(t *testing.T) meterEditFixture {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	svc := pricing.NewService(pricing.NewPostgresStore(db))
 	svc.SetSubscriptionPlanUsageReader(subscription.NewPostgresStore(db))

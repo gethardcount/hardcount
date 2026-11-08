@@ -184,9 +184,6 @@ func TestPreview_ScheduledPlanChangeMatchesCycleClose(t *testing.T) {
 // the other side of A5 — the scheduled plan applies only in the estimate of
 // the close (previewCycle), never in the flat window the fire persists.
 func TestThresholdScan_IgnoresPlanChangeScheduledForPeriodEnd(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Threshold Pending Plan")
 	ctx := postgres.WithLivemode(context.Background(), false)
 

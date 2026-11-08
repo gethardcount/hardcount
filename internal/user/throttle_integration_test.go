@@ -43,9 +43,6 @@ func (c *lookupCounter) GetByEmail(ctx context.Context, email string) (domain.Us
 
 func throttleIT(t *testing.T) (*postgres.DB, *lookupCounter) {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("integration test — requires postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	tenantID := testutil.CreateTestTenant(t, db, "Throttle IT")
 	store := NewPostgresStore(db)

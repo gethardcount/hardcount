@@ -161,9 +161,6 @@ func endPeriodNow(t *testing.T, ctx context.Context, f *thresholdFixture, subID 
 // for deferred max/last buckets) reads the whole period again and must not
 // count it a second time.
 func TestUnpricedUsage_ThresholdThenCycle_CountedOnce(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Unpriced Threshold")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
@@ -228,9 +225,6 @@ func TestUnpricedUsage_ThresholdThenCycle_CountedOnce(t *testing.T) {
 // event with no labels on a meter its plan prices only for region=eu. The
 // preview warning carries each quantity; the close counts each one once.
 func TestUnpricedUsage_CycleClose_CountsEachMeter(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Unpriced Cycle")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
@@ -282,9 +276,6 @@ func TestUnpricedUsage_CycleClose_CountsEachMeter(t *testing.T) {
 // usage has no price builds no invoice (nothing to bill), and the unpriced
 // quantity is still counted.
 func TestUnpricedUsage_ImmediateCancel_NoInvoice_Counted(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Unpriced Cancel")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
@@ -333,9 +324,6 @@ func TestUnpricedUsage_ImmediateCancel_NoInvoice_Counted(t *testing.T) {
 // two invoices). The threshold invoice must not report it, or the close
 // reports the same peak again.
 func TestUnpricedUsage_MaxMeter_ThresholdLeavesItToClose(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Unpriced Max")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
@@ -383,9 +371,6 @@ func TestUnpricedUsage_MaxMeter_ThresholdLeavesItToClose(t *testing.T) {
 // A first attempt whose transaction rolls back (as a refused relief does,
 // and the billing run then retries it) counts nothing.
 func TestUnpricedUsage_ImmediateCancelTx_WithInvoice_Counted(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, "Unpriced Cancel Tx")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
@@ -452,9 +437,6 @@ func TestUnpricedUsage_ImmediateCancelTx_WithInvoice_Counted(t *testing.T) {
 // and on the close, for a sum meter and a max meter alike, and the next
 // period bills it.
 func TestUnpricedUsage_PriceAddedMidPeriodBillsNextPeriod(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	for _, mode := range []string{domain.AggregationSum, domain.AggregationMax} {
 		t.Run(mode, func(t *testing.T) {
 			f := newThresholdFixture(t, "Priced After Fire "+mode)

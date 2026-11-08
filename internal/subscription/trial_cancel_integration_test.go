@@ -60,9 +60,6 @@ func seedTrialingSub(t *testing.T, db *postgres.DB, ctx context.Context, tenantI
 // strip the schedule predicate from activateAfterTrialInTx and this fails by
 // activating.
 func TestActivateAfterTrial_SQLGuardBlocksScheduledCancel(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	store := subscription.NewPostgresStore(db)
@@ -95,9 +92,6 @@ func TestActivateAfterTrial_SQLGuardBlocksScheduledCancel(t *testing.T) {
 // lose (ErrTrialCancelConflict) — the customer is never terminated off a
 // stale snapshot. Mutation seam: drop the schedule/trial_end predicates.
 func TestCancelAtTrialEnd_CASSemantics(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	store := subscription.NewPostgresStore(db)
@@ -163,9 +157,6 @@ func TestCancelAtTrialEnd_CASSemantics(t *testing.T) {
 // active sub carrying a flag the operator was told meant "free at trial
 // end" — must be unreachable.
 func TestScheduleCancel_RacesActivation_ExactlyOneMeaning(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	store := subscription.NewPostgresStore(db)

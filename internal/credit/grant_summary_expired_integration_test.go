@@ -15,9 +15,6 @@ import (
 // expired. Mutation-verify: return 0 for expired_cents in
 // ListGrantSummaries → red.
 func TestGrantSummary_SplitsExpiredFromUsed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db, ctx, tenantID, cust, _, svc, invoiceStore := expirySetup(t, "GrantSummaryExpired")
 
 	expiresAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)

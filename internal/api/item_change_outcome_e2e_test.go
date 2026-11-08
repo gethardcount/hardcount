@@ -21,7 +21,6 @@ import (
 // $1.67 goes to the balance. Before, the response said "credit" with $16.67
 // and nothing about the open invoice.
 func TestE2E_ItemChangeOutcome_ReportsEachPart(t *testing.T) {
-	skipShort(t)
 	r := newSeatRig(t, ocP0, 5)
 	up := r.upgradeTo8(false)
 
@@ -51,7 +50,6 @@ func TestE2E_ItemChangeOutcome_ReportsEachPart(t *testing.T) {
 // With every charging invoice paid, the whole credit is reported as going to
 // the balance and nothing as taken off open invoices.
 func TestE2E_ItemChangeOutcome_AllPaidReportsBalanceOnly(t *testing.T) {
-	skipShort(t)
 	r := newSeatRig(t, ocP0, 5)
 	r.upgradeTo8(true)
 
@@ -76,7 +74,6 @@ func TestE2E_ItemChangeOutcome_AllPaidReportsBalanceOnly(t *testing.T) {
 // $8.33 goes back to the balance. Before, the response said all $13.33 came
 // off open invoices.
 func TestE2E_ItemChangeOutcome_CreditsAppliedSplit(t *testing.T) {
-	skipShort(t)
 	r := newSeatRigGranted(t, ocP0, 5, 4500)
 	base := r.invoice(r.baseID)
 	if got, due := flowInt(base, "credits_applied_cents"), flowInt(base, "amount_due_cents"); got != 4500 || due != 500 {
@@ -117,7 +114,6 @@ func TestE2E_ItemChangeOutcome_CreditsAppliedSplit(t *testing.T) {
 // seats on Oct 21 owes $14.19 (4 x $10 x 11/31). Before, the response said it
 // came off open invoices.
 func TestE2E_ItemChangeOutcome_DraftInvoiceHeld(t *testing.T) {
-	skipShort(t)
 	r := newSeatRig(t, ocP0, 5)
 	r.pay(r.baseID, ocP0.Add(time.Hour))
 	r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/pause-collection", ocP0.AddDate(0, 0, 1),
@@ -167,7 +163,6 @@ func TestE2E_ItemChangeOutcome_DraftInvoiceHeld(t *testing.T) {
 // charged it at once; the reconciler issued the note up to an hour later on
 // the paid invoice, as account credit.
 func TestE2E_HeldReliefIssuesAtFinalize(t *testing.T) {
-	skipShort(t)
 	r := newSeatRig(t, ocP0, 5)
 	r.pay(r.baseID, ocP0.Add(time.Hour))
 	r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/pause-collection", ocP0.AddDate(0, 0, 1),
@@ -218,7 +213,6 @@ func (r *seatRig) issuedCreditNoteCentsOn(invID string) int64 {
 // total, so the dashboard can say what was billed. Before, it returned no
 // outcome at all.
 func TestE2E_CrossIntervalSwap_ReportsTheNewPeriodInvoice(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_advance", false)
 	first := r.firstInvoiceID()
 	r.must(http.MethodPost, "/v1/invoices/"+first+"/record-payment", lagP0.Add(time.Hour), map[string]any{"note": "fixture"}, http.StatusOK)
@@ -259,7 +253,6 @@ func (r *lagRig) invoice(invID string) map[string]any {
 // written as a draft, so its total may still change before it is issued. The
 // response says so with its status.
 func TestE2E_CrossIntervalSwap_ReportsADraftNewPeriodInvoice(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_advance", false)
 	first := r.firstInvoiceID()
 	r.must(http.MethodPost, "/v1/invoices/"+first+"/record-payment", lagP0.Add(time.Hour), map[string]any{"note": "fixture"}, http.StatusOK)

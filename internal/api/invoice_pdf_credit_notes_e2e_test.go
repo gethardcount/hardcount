@@ -20,7 +20,6 @@ import (
 // PDF and the customer's hosted-page PDF must print all 101 issued notes and
 // no draft.
 func TestE2E_InvoicePDF_PrintsEveryIssuedCreditNote(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_advance", true) // first invoice: 4000c, unpaid
 	invID := r.firstInvoiceID()
 

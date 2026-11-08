@@ -41,7 +41,6 @@ var (
 
 type seatRig struct {
 	*lagRig
-	tenantID  string
 	planTeam  string
 	planAddOn string
 	baseID    string // the invoice that billed the period's first base fee
@@ -72,23 +71,8 @@ func newSeatRigGranted(t *testing.T, start time.Time, seats int, grantCents int6
 	}, http.StatusCreated)
 	r.subID = sub["id"].(string)
 	r.itemA = r.sub().Items[0].ID
-	r.tenantID = r.tenantOf()
 	r.baseID = r.firstInvoiceID()
 	return r
-}
-
-func (r *seatRig) tenantOf() string {
-	r.t.Helper()
-	tx, err := r.db.BeginTx(context.Background(), postgres.TxBypass, "")
-	if err != nil {
-		r.t.Fatalf("begin: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	var id string
-	if err := tx.QueryRowContext(context.Background(), `SELECT tenant_id FROM subscriptions WHERE id = $1`, r.subID).Scan(&id); err != nil {
-		r.t.Fatalf("tenant of subscription: %v", err)
-	}
-	return id
 }
 
 func (r *seatRig) pay(invID string, at time.Time) {
@@ -116,11 +100,6 @@ func (r *seatRig) prorationInvoiceAt(at time.Time) string {
 		r.t.Fatalf("proration invoice of the change at %v: %v", at, err)
 	}
 	return id
-}
-
-func (r *seatRig) invoice(invID string) map[string]any {
-	r.t.Helper()
-	return flowObj(r.must(http.MethodGet, "/v1/invoices/"+invID, r.clk.Now(context.Background()), nil, http.StatusOK), "invoice")
 }
 
 // wantNotes checks the sum of the invoice's credit notes that are not voided.
@@ -151,7 +130,6 @@ func (r *seatRig) upgradeTo8(payUpgrade bool) string {
 // on Sep 21 owes $16.67 (5 x $10 x 10/30): $15.00 on the upgrade invoice, the
 // $1.67 rest on the base. A split by subtotal gave about $3.85 / $12.82.
 func TestE2E_OneCreditRule_SeatDecreaseNewestFirst(t *testing.T) {
-	skipShort(t)
 	r := newSeatRig(t, ocP0, 5)
 	up := r.upgradeTo8(true)
 
@@ -168,7 +146,6 @@ func TestE2E_OneCreditRule_SeatDecreaseNewestFirst(t *testing.T) {
 // on the paid base reaches the balance. A split by subtotal left $11.15 due
 // while $12.82 went to the balance.
 func TestE2E_OneCreditRule_UnpaidNewestRelievedFirst(t *testing.T) {
-	skipShort(t)
 	r := newSeatRig(t, ocP0, 5)
 	up := r.upgradeTo8(false)
 
@@ -196,7 +173,6 @@ func TestE2E_OneCreditRule_UnpaidNewestRelievedFirst(t *testing.T) {
 // 21, owing $6.67. It all lands on the base invoice; B's invoice, which never
 // charged A, gets no note.
 func TestE2E_OneCreditRule_ItemScopedCandidates(t *testing.T) {
-	skipShort(t)
 	r := newSeatRig(t, ocP0, 5)
 	r.pay(r.baseID, ocP0.Add(time.Hour))
 	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/items", ocUp, map[string]any{"plan_id": r.planAddOn, "quantity": 1}, http.StatusCreated)
@@ -219,8 +195,6 @@ func TestE2E_OneCreditRule_ItemScopedCandidates(t *testing.T) {
 // August usage. A weight by subtotal sent nearly all of the credit to it; the
 // split stays $15.00 / $11.67.
 func TestE2E_OneCreditRule_CancelNewestFirst(t *testing.T) {
-	skipShort(t)
-
 	t.Run("base on the first invoice", func(t *testing.T) {
 		r := newSeatRig(t, ocP0, 5)
 		up := r.upgradeTo8(true)
@@ -280,7 +254,6 @@ func (r *seatRig) chargeFails(invID, pi string, at time.Time) {
 // credits the upgrade invoice first ($15.00 to the balance) and relieves the
 // $1.67 rest on the now-unpaid base. Before, it relieved only the base.
 func TestE2E_OneCreditRule_AsyncBaseThenFailedCharge(t *testing.T) {
-	skipShort(t)
 	r := newSeatRig(t, ocP0, 5)
 	r.chargeInFlight(r.baseID, "pi_t5_base", ocP0.Add(time.Hour))
 	r.setSeats(8, ocUp)
@@ -303,7 +276,6 @@ func TestE2E_OneCreditRule_AsyncBaseThenFailedCharge(t *testing.T) {
 // the invoice can still be credited (total − credited), and Issue holds it
 // until the charge settles. Cancel on Sep 16: $25.00 of unused time.
 func TestE2E_OneCreditRule_InFlightCancelDrafts(t *testing.T) {
-	skipShort(t)
 	r := newSeatRig(t, ocP0, 5)
 	r.chargeInFlight(r.baseID, "pi_t6_base", ocP0.Add(time.Hour))
 
@@ -322,7 +294,6 @@ func TestE2E_OneCreditRule_InFlightCancelDrafts(t *testing.T) {
 // which owes $25.00, credits the $10.00 left. The change succeeds, and its
 // audit row says $15.00 was not credited.
 func TestE2E_OneCreditRule_RemainderRecorded(t *testing.T) {
-	skipShort(t)
 	r := newSeatRig(t, ocP0, 5)
 	r.pay(r.baseID, ocP0.Add(time.Hour))
 	r.creditNote(r.baseID, 4000, ocP0.Add(2*time.Hour))
@@ -346,7 +317,6 @@ func TestE2E_OneCreditRule_RemainderRecorded(t *testing.T) {
 // $7.00 goes to the base. Sizing the upgrade invoice by what is due ($15.00)
 // asked the credit-note writer for more than its room, and the change failed.
 func TestE2E_OneCreditRule_HeldNoteKeepsItsRoom(t *testing.T) {
-	skipShort(t)
 	r := newSeatRig(t, ocP0, 5)
 	up := r.upgradeTo8(false)
 	r.chargeInFlight(up, "pi_t9_up", ocUp.Add(time.Hour))
@@ -406,7 +376,6 @@ func (r *lagRig) auditMeta(action string) map[string]any {
 // refused, no invoice is credited past its total, and what was credited minus
 // what was billed matches the seats removed, within a cent per change.
 func TestE2E_OneCreditRule_ConcurrentDecreases(t *testing.T) {
-	skipShort(t)
 	r := newSeatRig(t, ocP0, 5)
 	up := r.upgradeTo8(true)
 
