@@ -625,8 +625,13 @@ test('a keyboard pick of the second of two same-named customers grants the credi
   const dialog = page.getByRole('dialog', { name: 'Grant credits' })
   await dialog.getByRole('button', { name: 'Search customers...' }).click()
   await page.getByPlaceholder('Search...', { exact: true }).fill(name)
+  // Wait until the list holds only the search's results. After a server
+  // search, cmdk can keep the highlight on a row that is no longer listed, so
+  // no row is highlighted. Home puts it on the first row.
+  await expect(page.getByRole('option')).toHaveCount(2)
   const twins = page.getByRole('option', { name, exact: true })
   await expect(twins).toHaveCount(2)
+  await page.keyboard.press('Home')
   await expect(twins.first()).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('ArrowDown')
   await expect(twins.nth(1)).toHaveAttribute('aria-selected', 'true')
