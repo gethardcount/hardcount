@@ -82,8 +82,8 @@ func TestStampChargeOutcome_OutcomeRecordedDuringTheCallWins(t *testing.T) {
 	}
 	setStatus := func(s domain.InvoiceStatus) step {
 		return func(t *testing.T, id string) {
-			if _, err := store.UpdateStatus(ctx, tenantID, id, s); err != nil {
-				t.Fatalf("UpdateStatus(%s): %v", s, err)
+			if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, id, s, nil); err != nil {
+				t.Fatalf("UpdateStatusWithReversalPrior(%s): %v", s, err)
 			}
 		}
 	}

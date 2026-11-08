@@ -1,20 +1,12 @@
-.PHONY: build run test lint migrate migration dev clean gen
+.PHONY: dev test test-unit lint bench migrate migrate-status migration bootstrap gen up down
 
 # .env (cp .env.example .env) configures the targets that start Hardcount or
-# its tools: run, dev, migrate, migrate-status and bootstrap. Only those
-# load it, so the test targets see the same environment CI does.
-ifneq ($(filter run dev migrate migrate-status bootstrap,$(MAKECMDGOALS)),)
+# its tools: dev, migrate, migrate-status and bootstrap. Only those load it,
+# so the test targets see the same environment CI does.
+ifneq ($(filter dev migrate migrate-status bootstrap,$(MAKECMDGOALS)),)
 -include .env
 export
 endif
-
-# Build the hardcount binary
-build:
-	go build -o bin/hardcount ./cmd/hardcount
-
-# Run the server locally
-run: build
-	./bin/hardcount
 
 # Run the server from source
 dev:
@@ -44,10 +36,6 @@ lint:
 bench:
 	go test ./internal/domain/ -bench=. -benchmem -count=1
 
-# Tidy dependencies
-tidy:
-	go mod tidy
-
 # Migration management
 migrate:
 	go run ./cmd/hardcount migrate
@@ -63,18 +51,9 @@ migrate-status:
 migration:
 	@scripts/new-migration.sh "$(name)" "$(concurrent)"
 
-# Clean build artifacts
-clean:
-	rm -rf bin/
-
-# Bootstrap: create demo tenant + API keys
+# Bootstrap: create demo tenant + API keys. DATABASE_URL comes from .env.
 bootstrap:
-	DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" \
 	go run ./cmd/hardcount-bootstrap
-
-# Run demo script (requires: make up, make bootstrap, make dev)
-demo:
-	@echo "Run: ./scripts/demo.sh <YOUR_SECRET_KEY>"
 
 # Code generation from the OpenAPI spec at api/openapi.yaml: see
 # docs/dev/openapi-workflow.md. It writes the dashboard's typed
@@ -86,34 +65,9 @@ demo:
 gen:
 	cd web-v2 && npm run gen
 
-# Frontend
-web-install:
-	cd web-v2 && npm install
-
-web-dev:
-	cd web-v2 && npm run dev
-
-web-build:
-	cd web-v2 && npm run build
-
 # Docker compose for local dev
 up:
 	docker compose up -d
 
 down:
 	docker compose down
-
-# Project stats
-stats:
-	@echo "━━━ Hardcount Project Stats ━━━"
-	@echo ""
-	@printf "  Go files:     %s\n" "$$(find . -name '*.go' -not -path './vendor/*' | wc -l | tr -d ' ')"
-	@printf "  Go lines:     %s\n" "$$(find . -name '*.go' -not -path './vendor/*' -exec cat {} + | wc -l | tr -d ' ')"
-	@printf "  Test files:   %s\n" "$$(find . -name '*_test.go' | wc -l | tr -d ' ')"
-	@printf "  SQL files:    %s\n" "$$(find . -name '*.sql' | wc -l | tr -d ' ')"
-	@printf "  Packages:     %s\n" "$$(find ./internal -type d | wc -l | tr -d ' ')"
-	@printf "  API routes:   %s\n" "$$(grep -rhoE '(^|[^A-Za-z0-9_])r\.(Get|Post|Put|Patch|Delete|Method|Handle)\(' internal --include='*.go' --exclude='*_test.go' | wc -l | tr -d ' ')"
-	@printf "  TS/TSX files: %s\n" "$$(find ./web-v2/src -name '*.ts' -o -name '*.tsx' 2>/dev/null | wc -l | tr -d ' ')"
-	@echo ""
-	@printf "  Tests:        " && go test ./... -short -count=1 2>&1 | grep -c "^ok" && echo ""
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"

@@ -11,54 +11,23 @@ deploy/compose/quickstart-credentials.json
 # out of git so `git checkout <release>` never meets a local edit.
 deploy/compose/docker-compose.override.yml
 .DS_Store
-/hardcount
-/hardcount-bench-seed
 temp.txt
-MANUAL_TEST_BUGS.md
 
 # Local agent worktrees + settings (Claude Code)
 .claude/
 .playwright-mcp/
-hardcount-api
 
-# Walk screenshots dropped at the repo root.
-#
-# Hand checks take screenshots as evidence, and none of them are committed —
-# zero image files are tracked in this repo. They are local proof for whoever
-# ran the check, not artifacts. But Playwright writes them next to the repo
-# root rather than into the already-ignored .playwright-mcp/ when a bare
-# filename is passed, so they accumulate: 25 of them had piled up by
-# 2026-08-04, ~3MB, from many sessions.
-#
-# Untracked and un-ignored is the bad combination — one `git add -A` in the
-# main working tree commits the lot. Scoped to the ROOT (`/*.png`, not
-# `*.png`) so a genuine image asset under docs/ or web-v2/public/ stays
-# committable; a deliberate root-level one still lands with `git add -f`.
+# Screenshots from hand checks land at the repo root; none are committed.
 /*.png
 /*.jpg
 /*.jpeg
 
-# Compiled binaries at the repo root (an 18.8MB velox-bootstrap Mach-O, the old name,
-# slipped into git via #374 — go build drops artifacts named after the
-# package in CWD; bin/ is already ignored, the root wasn't).
+# Binaries that `go build` drops at the repo root, under the current name and
+# the name before the rename to Hardcount.
 /hardcount
-/hardcount-bootstrap
-/hardcount-cli
-/hardcount-doctor
-/hardcount-bench-seed
-#
-# ...and the enumeration failed anyway: a 54MB `velox-api-adr101` (the old name) sat untracked
-# at the root because the list above names exact binaries and a
-# branch-suffixed build isn't one of them. Glob the prefixes rather than
-# extending the list a third time.
-/hardcount-api*
-/hardcount-bench*
-#
-# Binaries built before the rename to Hardcount still sit at the root under
-# the old name (velox, velox-bootstrap, velox-api-…). Keep them ignored.
-/velox*
+/hardcount-*
+/velox
+/velox-*
 
-# k6 writes its run summary into whatever directory it is invoked from, so a
-# path-anchored ignore keeps missing it — this is the third directory it has
-# turned up in. Match the filename anywhere instead.
+# k6 writes its run summary into whatever directory it runs from.
 summary.json

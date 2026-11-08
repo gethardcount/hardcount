@@ -48,12 +48,12 @@ func TestCreditNoteSums_Routes_CountEveryNote(t *testing.T) {
 		// PaymentIntent, as a card payment would leave them.
 		ctx := postgres.WithLivemode(context.Background(), false)
 		now := time.Now().UTC()
-		inv, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, domain.Invoice{
+		inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: customerID, InvoiceNumber: "INV-CNSUMS-PAID",
 			Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded, Currency: "USD",
 			SubtotalCents: 10000, TotalAmountCents: 10000, AmountPaidCents: 10000,
 			BillingPeriodStart: now.Add(-720 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create paid invoice: %v", err)
 		}

@@ -366,7 +366,7 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 	// issued with (ADR-109), and one issued before migration 0177 falls back
 	// to live rows. Only the projection below leaves the server, so no
 	// tenant_id leaks.
-	bt, ci, _ := invoice.BuildPDFContext(r.Context(), h.customers, h.settings, nil, inv.TenantID, &inv)
+	bt, ci, _ := invoice.BuildPDFContext(r.Context(), h.customers, h.settings, nil, inv.TenantID, inv)
 	billTo := viewBillTo{
 		Name:         bt.Name,
 		Email:        bt.Email,
@@ -550,10 +550,10 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// One shared context builder across emailed/downloaded/hosted PDFs
-	// (invoice.BuildPDFContext) — it also stamps BillingPeriodDisplay,
-	// which this path needs because GetByPublicToken bypasses the
-	// service read decorator that normally sets it.
-	bt, ci, cnInfos := invoice.BuildPDFContext(r.Context(), h.customers, h.settings, h.creditNotes, inv.TenantID, &inv)
+	// (invoice.BuildPDFContext). BillingPeriodDisplay is already set:
+	// Service.GetByPublicToken runs the same read decorator as every other
+	// invoice read.
+	bt, ci, cnInfos := invoice.BuildPDFContext(r.Context(), h.customers, h.settings, h.creditNotes, inv.TenantID, inv)
 
 	pdfBytes, err := invoice.RenderPDF(r.Context(), inv, items, bt, cnInfos, ci)
 	if err != nil {

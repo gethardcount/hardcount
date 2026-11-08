@@ -180,7 +180,7 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 		draft.SubscriptionID = sub.ID
 		draft.BillingPeriodStart, draft.BillingPeriodEnd = periodStart, periodEnd
 	}
-	inv, err := invoices.Create(ctx, tenantID, draft)
+	inv, err := invoices.CreateWithLineItems(ctx, tenantID, draft, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

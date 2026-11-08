@@ -46,7 +46,7 @@ func TestStats_CountsEveryNoteAndKeepsCurrenciesApart(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	mkInvoice := func(num, currency string) domain.Invoice {
-		inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID:         cust.ID,
 			InvoiceNumber:      num,
 			Status:             domain.InvoicePaid,
@@ -58,7 +58,7 @@ func TestStats_CountsEveryNoteAndKeepsCurrenciesApart(t *testing.T) {
 			BillingPeriodStart: now.Add(-30 * 24 * time.Hour),
 			BillingPeriodEnd:   now,
 			IssuedAt:           &now,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create invoice %s: %v", num, err)
 		}

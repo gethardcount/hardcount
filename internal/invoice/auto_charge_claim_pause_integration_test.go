@@ -42,13 +42,13 @@ func seedQueuedSubInvoice(t *testing.T, db *postgres.DB, ctx context.Context, te
 		t.Fatalf("create subscription: %v", err)
 	}
 	store := invoice.NewPostgresStore(db)
-	inv, err = store.Create(ctx, tenantID, domain.Invoice{
+	inv, err = store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, SubscriptionID: sub.ID, InvoiceNumber: num,
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		BillingReason: domain.BillingReasonSubscriptionCycle, Currency: "USD",
 		SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		BillingPeriodStart: ps, BillingPeriodEnd: pe,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

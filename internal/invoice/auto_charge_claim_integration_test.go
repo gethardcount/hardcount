@@ -24,7 +24,7 @@ func seedClaimableInvoice(t *testing.T, db *postgres.DB, ctx context.Context, te
 		t.Fatalf("create customer: %v", err)
 	}
 	store := invoice.NewPostgresStore(db)
-	inv, err := store.Create(ctx, tenantID, domain.Invoice{
+	inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID:         cust.ID,
 		InvoiceNumber:      num,
 		Status:             domain.InvoiceFinalized,
@@ -35,7 +35,7 @@ func seedClaimableInvoice(t *testing.T, db *postgres.DB, ctx context.Context, te
 		AmountDueCents:     5000,
 		BillingPeriodStart: time.Now().UTC().Add(-30 * 24 * time.Hour),
 		BillingPeriodEnd:   time.Now().UTC(),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

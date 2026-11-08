@@ -204,12 +204,12 @@ func TestIssue_CreditReturnRacesADraw(t *testing.T) {
 	// 2000 more credit for the race's draw. The invoice stays unpaid: 2000
 	// due, 8000 of credit applied.
 	r.grant(t, 2000, nil, "")
-	other, err := r.invStore.Create(r.ctx, r.tenantID, domain.Invoice{
+	other, err := r.invStore.CreateWithLineItems(r.ctx, r.tenantID, domain.Invoice{
 		CustomerID: r.cust.ID, InvoiceNumber: "INV-CNRETURN-OTHER", Status: domain.InvoiceFinalized,
 		PaymentStatus: domain.PaymentPending, Currency: "USD",
 		SubtotalCents: 3000, TotalAmountCents: 3000, AmountDueCents: 3000,
 		BillingPeriodStart: time.Now().UTC().Add(-30 * 24 * time.Hour), BillingPeriodEnd: time.Now().UTC(),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create other invoice: %v", err)
 	}

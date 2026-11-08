@@ -65,12 +65,12 @@ func TestListDueRuns_LivemodeIsolation(t *testing.T) {
 	now := time.Now().UTC()
 
 	mkRun := func(num, runID string, livemode bool) {
-		inv, err := istore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := istore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: num, Status: domain.InvoiceFinalized,
 			PaymentStatus: domain.PaymentFailed, Currency: "USD",
 			SubtotalCents: 1000, TotalAmountCents: 1000, AmountDueCents: 1000,
 			BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("create %s: %v", num, err)
 		}
@@ -136,18 +136,18 @@ func TestProcessDueRuns_TerminalInvoiceResolvesWithoutPolicy(t *testing.T) {
 	}
 	istore := invoice.NewPostgresStore(db)
 	now := time.Now().UTC()
-	inv, err := istore.Create(ctx, tenantID, domain.Invoice{
+	inv, err := istore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-NOPOLICY", Status: domain.InvoiceFinalized,
 		PaymentStatus: domain.PaymentFailed, Currency: "USD",
 		SubtotalCents: 1000, TotalAmountCents: 1000, AmountDueCents: 1000,
 		BillingPeriodStart: now.Add(-time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
 	// Write the invoice off — terminal. (payment_status='failed' here; the
 	// walk's original was 'unknown', but the wedge is status-driven.)
-	if _, err := istore.UpdateStatus(ctx, tenantID, inv.ID, domain.InvoiceUncollectible); err != nil {
+	if _, err := istore.UpdateStatusWithReversalPrior(ctx, tenantID, inv.ID, domain.InvoiceUncollectible, nil); err != nil {
 		t.Fatalf("write off: %v", err)
 	}
 

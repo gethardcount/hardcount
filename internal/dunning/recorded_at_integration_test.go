@@ -33,13 +33,13 @@ func TestDunningEvent_RecordedAt_DualStamp(t *testing.T) {
 		t.Fatalf("create customer: %v", err)
 	}
 	now := time.Now().UTC()
-	inv, err := invStore.Create(base, tenantID, domain.Invoice{
+	inv, err := invStore.CreateWithLineItems(base, tenantID, domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "HC-DUNREC-1",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
 		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now,
 		IssuedAt: &now,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

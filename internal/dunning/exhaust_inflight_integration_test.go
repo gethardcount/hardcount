@@ -165,12 +165,12 @@ func newExhaustFixture(t *testing.T, db *postgres.DB, name string, acts finalAct
 	subscriptiontest.SetBillingCycle(t, ctx, db, tenantID, sub.ID, periodStart, periodEnd, periodEnd, 0)
 
 	invoices := invoice.NewPostgresStore(db)
-	inv, err := invoices.Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoices.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: cust.ID, SubscriptionID: sub.ID, InvoiceNumber: "INV-INFLIGHT",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
 		SubtotalCents: 4900, TotalAmountCents: 4900, AmountDueCents: 4900,
 		BillingPeriodStart: periodStart, BillingPeriodEnd: periodEnd, IssuedAt: &periodStart,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

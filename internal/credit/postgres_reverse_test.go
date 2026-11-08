@@ -56,7 +56,7 @@ func TestReverseForInvoiceTx_SecondReversalRefused(t *testing.T) {
 	now := time.Now().UTC()
 	dueAt := now.Add(7 * 24 * time.Hour)
 	issuedAt := now
-	inv, err := invoiceStore.Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoiceStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID:         cust.ID,
 		Status:             domain.InvoiceDraft,
 		PaymentStatus:      domain.PaymentPending,
@@ -68,7 +68,7 @@ func TestReverseForInvoiceTx_SecondReversalRefused(t *testing.T) {
 		BillingPeriodEnd:   now.Add(30 * 24 * time.Hour),
 		IssuedAt:           &issuedAt,
 		DueAt:              &dueAt,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

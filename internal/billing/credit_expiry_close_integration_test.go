@@ -343,13 +343,13 @@ func TestSweepCollect_CycleInvoiceDrawsCreditLiveAtIssuedAt(t *testing.T) {
 		x.backdatedGrant(t, cust, 2000, expires)
 		issued := tc.issued
 		due := issued.Add(30 * 24 * time.Hour)
-		inv, err := x.invoices.Create(x.ctx, x.tenantID, domain.Invoice{
+		inv, err := x.invoices.CreateWithLineItems(x.ctx, x.tenantID, domain.Invoice{
 			InvoiceNumber: fmt.Sprintf("SWEEP-%d", i), CustomerID: cust,
 			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending, Currency: "USD",
 			SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 			BillingPeriodStart: issued.AddDate(0, -1, 0), BillingPeriodEnd: issued,
 			IssuedAt: &issued, DueAt: &due, CreatedAt: issued, BillingReason: tc.reason,
-		})
+		}, nil)
 		if err != nil || !inv.AutoChargePending {
 			t.Fatalf("seed %s invoice: queued=%v err=%v", tc.name, inv.AutoChargePending, err)
 		}
