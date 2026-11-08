@@ -38,6 +38,10 @@ original text.
 - **A customer is no longer sent to `http://localhost:5173` after paying or saving a card.** With one of the three return addresses unset, Stripe sent the customer to the local development address in every environment, so in production they landed on "site can't be reached". Each flow now refuses before calling Stripe, and the invoice notices say which setting to set. ([#1597](https://github.com/gethardcount/hardcount/pull/1597))
 - **Docs: 37 statements that were wrong are corrected.** The LiteLLM guide no longer has you create the customer on a test clock: the clock's time stands still, so a real proxy's calls were refused as in the future, while LiteLLM read the answer as delivered. "Bill for AI tokens by model" and the LiteLLM guide now save the plan ID their later steps use. The checks after a restore set `app.bypass_rls`, so on managed Postgres they no longer read zero rows and pass. ([#1584](https://github.com/gethardcount/hardcount/pull/1584))
 
+### Security
+
+- **`golang.org/x/net` is v0.62.0.** It fixes CVE-2026-78661, a denial of service in its HTML parser. Hardcount never calls that parser, so it was not exposed, but image scanners flag the old version. ([#1614](https://github.com/gethardcount/hardcount/pull/1614))
+
 ## [0.9.2] - 2026-11-02
 
 Money and integrator fixes before the public launch. Finalizing a paused subscription's draft no longer charges the card, Stripe Tax prices every base fee by its plan's tax code, a line can no longer be added to a subscription's draft and go out untaxed, and LiteLLM usage is no longer lost to its batch size or log format. The API reference now describes every field with real examples, and new concept pages and guides cover what an integrator needs.
