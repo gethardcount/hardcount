@@ -9,7 +9,6 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { api, formatCents, formatDate, formatDateTime, type PlanDetail, type Customer } from '@/lib/api'
 import { applyApiError } from '@/lib/formErrors'
-import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { Callout } from '@/components/Callout'
 import { TestClockBadge } from '@/components/TestClockBadge'
@@ -133,33 +132,21 @@ export default function PlanDetailPage() {
   usePageTitle(plan?.name)
 
   if (loading) {
-    return (
-      <Layout>
-        <DetailSkeleton to="/pricing" parentLabel="Plans" />
-      </Layout>
-    )
+    return <DetailSkeleton to="/pricing" parentLabel="Plans" />
   }
 
   // A failed refresh after a load keeps the page (StaleNotice below);
   // only a page that never loaded becomes the error screen.
   if (loadError && !plan) {
-    return (
-      <Layout>
-        <LoadError what="this plan" error={loadError} onRetry={() => refetch()} className="py-16" />
-      </Layout>
-    )
+    return <LoadError what="this plan" error={loadError} onRetry={() => refetch()} className="py-16" />
   }
 
   if (!plan) {
-    return (
-      <Layout>
-        <p className="text-sm text-muted-foreground py-16 text-center">Plan not found</p>
-      </Layout>
-    )
+    return <p className="text-sm text-muted-foreground py-16 text-center">Plan not found</p>
   }
 
   return (
-    <Layout>
+    <>
       <DetailBreadcrumb to="/pricing" parentLabel="Plans" currentLabel={plan.name} />
       {loadError && <StaleNotice what="this plan" onRetry={() => refetch()} />}
 
@@ -324,7 +311,7 @@ export default function PlanDetailPage() {
           }}
         />
       )}
-    </Layout>
+    </>
   )
 }
 

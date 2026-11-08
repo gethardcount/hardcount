@@ -10,7 +10,6 @@ import { toast } from 'sonner'
 import { api, formatDate, formatDateTime, getTenantTimezone, type TestClock } from '@/lib/api'
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
-import { Layout } from '@/components/Layout'
 import { cn } from '@/lib/utils'
 import { StatusBadge } from '@/components/StatusBadge'
 import { genericStatus } from '@/lib/statusLabels'
@@ -81,7 +80,7 @@ export default function TestClocksPage() {
   const clocks = data?.data ?? []
 
   return (
-    <Layout>
+    <>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Test clocks</h1>
@@ -161,7 +160,7 @@ export default function TestClocksPage() {
       )}
 
       {showCreate && <CreateClockDialog onClose={() => setShowCreate(false)} />}
-    </Layout>
+    </>
   )
 }
 

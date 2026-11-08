@@ -20,7 +20,7 @@
 #                  Then restore it over a newer database, one where a later
 #                  migration added a table that refers to a backed-up one:
 #                  the restore must stop and change nothing
-#                  (docs/ops/backup-considerations.md, section 4).
+#                  (docs/ops/restore.md, "Before you restore").
 #   Postgres 15    HEAD applies on postgres:15 and reports up to date. 15 is
 #                  the oldest major the docs expect to work.
 #   Postgres 18    The same on postgres:18, the newest Postgres major. The

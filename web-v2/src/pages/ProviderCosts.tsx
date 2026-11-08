@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { showApiError } from '@/lib/formErrors'
 import { Button } from '@/components/ui/button'
@@ -103,7 +102,7 @@ export default function ProviderCostsPage() {
   }
 
   return (
-    <Layout>
+    <>
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Provider costs</h1>
@@ -229,6 +228,6 @@ export default function ProviderCostsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Layout>
+    </>
   )
 }
