@@ -661,9 +661,9 @@ func (h *Handler) pauseCollection(w http.ResponseWriter, r *http.Request) {
 
 // endTrial flips a 'trialing' subscription to 'active' immediately,
 // regardless of trial_end_at. Operator-driven counterpart to the cycle
-// scan's auto-flip. Fires subscription.trial_ended with
-// triggered_by="operator" so analytics can distinguish from the
-// scheduled transition. Returns 422 if the row is not in 'trialing'.
+// scan's auto-flip. The store queues subscription.trial_ended with
+// triggered_by="operator" in the flip's transaction, so a consumer can tell
+// it from the scheduled flip. Returns 422 if the row is not in 'trialing'.
 func (h *Handler) endTrial(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {
 		return
@@ -729,8 +729,8 @@ type ExtendTrialInput struct {
 // extendTrial pushes a trialing subscription's trial_end_at later. Body:
 // {trial_end:<RFC3339>}. Returns 422 if the new value is in the past or
 // not strictly after the current trial_end_at, or the sub is not in
-// 'trialing'. Fires subscription.trial_extended with
-// triggered_by="operator".
+// 'trialing'. The store queues subscription.trial_extended with
+// triggered_by="operator" in the extension's transaction.
 func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
@@ -764,11 +764,12 @@ func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 	h.respondSub(w, r, http.StatusOK, sub)
 }
 
-// resumeCollection clears the collection-pause state. Idempotent —
-// clearing a row that has no active pause returns 200 with the unchanged
-// subscription. A pause that had already lifted is resumed by the store
-// with its own trigger, and this handler sends nothing. Returns 404 only
-// when the subscription itself doesn't exist.
+// resumeCollection clears the collection-pause state. The store queues
+// subscription.collection_resumed in the resume's transaction. Idempotent:
+// with no active pause it answers 200 with the unchanged subscription, and
+// nothing is queued or audited for the operator. A pause that had already
+// lifted is resumed by the store, which queues the event with that pause's
+// own trigger. Returns 404 only when the subscription itself doesn't exist.
 func (h *Handler) resumeCollection(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {
 		return
@@ -782,7 +783,7 @@ func (h *Handler) resumeCollection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !resumed {
-		// Collection was not paused: nothing resumed, nothing announced.
+		// Collection was not paused: nothing resumed, nothing queued.
 		audit.MarkSkip(r.Context())
 		h.respondSub(w, r, http.StatusOK, sub)
 		return
@@ -912,9 +913,10 @@ func (h *Handler) clearBillingThresholds(w http.ResponseWriter, r *http.Request)
 	h.respondSub(w, r, http.StatusOK, sub)
 }
 
-// clearScheduledCancel removes any prior schedule. Idempotent — clearing a
-// row that has no pending cancel returns 200 with the unchanged subscription,
-// and writes no audit entry and sends no event, since nothing changed.
+// clearScheduledCancel removes any prior schedule. The store queues
+// subscription.cancel_cleared in the clear's transaction. Idempotent:
+// clearing a row that has no pending cancel answers 200 with the unchanged
+// subscription, and nothing is audited or queued, since nothing changed.
 // Returns 404 only when the subscription itself doesn't exist.
 func (h *Handler) clearScheduledCancel(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {
@@ -1203,6 +1205,11 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, result)
 }
 
+// cancelPendingItemChange cancels the plan change scheduled on an item. The
+// store queues subscription.pending_change.canceled in the clear's
+// transaction. Idempotent: with no change scheduled, or one another cancel
+// cleared first, it answers 200 with the unchanged item and records nothing.
+// A change that already took effect answers 409.
 func (h *Handler) cancelPendingItemChange(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {
 		return
@@ -1211,9 +1218,16 @@ func (h *Handler) cancelPendingItemChange(w http.ResponseWriter, r *http.Request
 	subID := chi.URLParam(r, "id")
 	itemID := chi.URLParam(r, "itemID")
 
-	item, err := h.svc.CancelPendingItemChange(r.Context(), tenantID, subID, itemID)
+	item, canceled, err := h.svc.CancelPendingItemChange(r.Context(), tenantID, subID, itemID)
 	if err != nil {
 		respond.FromError(w, r, err, "subscription item")
+		return
+	}
+	if !canceled {
+		// Nothing was canceled, so the activity timeline gets no row. The
+		// store queued no event either.
+		audit.MarkSkip(r.Context())
+		respond.JSON(w, r, http.StatusOK, item)
 		return
 	}
 
@@ -1223,10 +1237,6 @@ func (h *Handler) cancelPendingItemChange(w http.ResponseWriter, r *http.Request
 			"item_id": item.ID,
 		})
 	}
-
-	// subscription.pending_change.canceled is queued in the clear's
-	// transaction, and only when it canceled a change
-	// (PostgresStore.ClearItemPendingPlan).
 
 	respond.JSON(w, r, http.StatusOK, item)
 }

@@ -1955,19 +1955,22 @@ func (s *Service) finishReliefThenCollect(ctx context.Context, sub domain.Subscr
 }
 
 // CancelPendingItemChange clears a scheduled plan change on a single item.
-// Idempotent: with nothing scheduled it returns the unchanged item and sends
-// no event. subscription.pending_change.canceled is queued only by a clear
-// that canceled a change (Store.ClearItemPendingPlan).
-func (s *Service) CancelPendingItemChange(ctx context.Context, tenantID, subscriptionID, itemID string) (domain.SubscriptionItem, error) {
-	item, err := s.store.GetItem(ctx, tenantID, itemID)
+// canceled is true only when this call cleared the change. The store then
+// queues subscription.pending_change.canceled in the clear's transaction
+// (Store.ClearItemPendingPlan), and the caller writes its audit row.
+// Idempotent: with nothing scheduled, or a change another cancel cleared
+// first, it returns the unchanged item with canceled false, and nothing is
+// written or queued.
+func (s *Service) CancelPendingItemChange(ctx context.Context, tenantID, subscriptionID, itemID string) (item domain.SubscriptionItem, canceled bool, err error) {
+	item, err = s.store.GetItem(ctx, tenantID, itemID)
 	if err != nil {
-		return domain.SubscriptionItem{}, err
+		return domain.SubscriptionItem{}, false, err
 	}
 	if item.SubscriptionID != subscriptionID {
-		return domain.SubscriptionItem{}, errs.ErrNotFound
+		return domain.SubscriptionItem{}, false, errs.ErrNotFound
 	}
 	if item.PendingPlanID == "" {
-		return item, nil
+		return item, false, nil
 	}
 	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
 	// A pending change due at a boundary that has passed has taken effect,
@@ -1975,26 +1978,31 @@ func (s *Service) CancelPendingItemChange(ctx context.Context, tenantID, subscri
 	// first and applies it, and the cancel is then refused rather than
 	// reported as a cancel.
 	if _, err := s.CloseEndedPeriodFirst(ctx, tenantID, subscriptionID); err != nil {
-		return domain.SubscriptionItem{}, err
+		return domain.SubscriptionItem{}, false, err
 	}
 	after, err := s.store.GetItem(ctx, tenantID, itemID)
 	if err != nil {
-		return domain.SubscriptionItem{}, err
+		return domain.SubscriptionItem{}, false, err
 	}
 	if after.PendingPlanID == "" {
-		return pendingChangeGone(item, after)
+		after, err = pendingChangeGone(item, after)
+		return after, false, err
 	}
 	cleared, err := s.store.ClearItemPendingPlan(ctx, tenantID, itemID)
+	if err == nil {
+		return cleared, true, nil
+	}
 	if !errors.Is(err, ErrNoPendingChange) {
-		return cleared, err
+		return domain.SubscriptionItem{}, false, err
 	}
 	// Another cancel, or the boundary apply, committed between the read
 	// above and the clear's lock.
 	after, err = s.store.GetItem(ctx, tenantID, itemID)
 	if err != nil {
-		return domain.SubscriptionItem{}, err
+		return domain.SubscriptionItem{}, false, err
 	}
-	return pendingChangeGone(item, after)
+	after, err = pendingChangeGone(item, after)
+	return after, false, err
 }
 
 // pendingChangeGone answers a cancel of the change item had scheduled when
@@ -2628,9 +2636,10 @@ func (s *Service) ScheduleCancel(ctx context.Context, tenantID, id string, input
 	return s.store.ScheduleCancellation(ctx, tenantID, id, cancelAt, input.AtPeriodEnd, sub.Status)
 }
 
-// ClearScheduledCancel undoes any prior schedule. Idempotent — a row
-// without a schedule returns unchanged, with cleared false, so the caller
-// announces nothing.
+// ClearScheduledCancel undoes any prior schedule. The store queues
+// subscription.cancel_cleared in the clear's transaction. Idempotent: a row
+// without a schedule returns unchanged, with cleared false. Nothing was
+// written or queued then, and the caller writes no audit row.
 //
 // A schedule whose boundary has passed has already taken effect, even if the
 // billing run has not closed the period yet: the close runs first and fires
@@ -2650,7 +2659,7 @@ func (s *Service) ClearScheduledCancel(ctx context.Context, tenantID, id string)
 	}
 	sub, err := s.store.ClearScheduledCancellation(ctx, tenantID, id)
 	if errors.Is(err, ErrNoScheduledCancel) {
-		// Idempotent for the operator: nothing changed, nothing announced.
+		// Idempotent for the operator: nothing changed, nothing queued.
 		sub, err = s.store.Get(ctx, tenantID, id)
 		return sub, false, err
 	}
@@ -2809,11 +2818,13 @@ func (s *Service) PauseCollectionForDunning(ctx context.Context, tenantID, id, i
 	return outcome != DunningPauseInvoiceSettled, nil
 }
 
-// ResumeCollection clears any active collection-pause. Idempotent — a row
-// without an active pause returns unchanged, with resumed false, so the
-// caller announces nothing. A pause that had already lifted (a payment
-// released it, or its date came) is resumed as the scheduled resumer would
-// resume it, with that trigger, and resumed is false too.
+// ResumeCollection clears any active collection-pause. The store queues
+// subscription.collection_resumed (triggered_by operator) in the resume's
+// transaction, and this method writes the audit row. Idempotent: a row
+// without an active pause returns unchanged, with resumed false, and nothing
+// is queued or audited. A pause that had already lifted (a payment released
+// it, or its date came) is resumed as the scheduled resumer would resume it:
+// the store queues the event with that trigger, and resumed is false too.
 //
 // Its one caller is the operator (handler). The scheduled resumers write
 // their own row (triggered_by "schedule", or "payment" for a dunning pause
@@ -2827,9 +2838,9 @@ func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (do
 	}
 	sub, err := s.store.ClearPauseCollection(ctx, tenantID, id, s.resumeAudit())
 	if errors.Is(err, ErrNotPaused) || errors.Is(err, ErrPauseLifted) {
-		// Idempotent for the operator: nothing was paused, so the operator
-		// announces nothing. A lifted pause's resume was announced by the
-		// store, with its own trigger.
+		// Idempotent for the operator: nothing was paused, so nothing is
+		// queued or audited for the operator. A lifted pause's resume was
+		// queued by the store, with its own trigger.
 		sub, err = s.store.Get(ctx, tenantID, id)
 		return sub, false, err
 	}

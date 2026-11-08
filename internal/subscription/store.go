@@ -52,7 +52,8 @@ var ErrNoScheduledCancel = errors.New("subscription: no cancel is scheduled")
 // ErrNoPendingChange is returned by ClearItemPendingPlan when the item has
 // no plan change scheduled under the subscription row lock: another cancel
 // cleared it, or the boundary apply made it the item's plan. The clear
-// changed nothing, so subscription.pending_change.canceled must not be sent.
+// changed nothing, so subscription.pending_change.canceled must not be sent,
+// and no audit row is written.
 var ErrNoPendingChange = errors.New("subscription: no plan change is scheduled")
 
 // PeriodSnapshot is the period state a writer derived its inputs from — the

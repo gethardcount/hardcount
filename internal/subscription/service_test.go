@@ -1782,9 +1782,12 @@ func TestUpdateItem_Scheduled(t *testing.T) {
 	})
 
 	t.Run("cancel pending clears scheduled change", func(t *testing.T) {
-		updated, err := svc.CancelPendingItemChange(ctx, "t1", sub.ID, itemID)
+		updated, canceled, err := svc.CancelPendingItemChange(ctx, "t1", sub.ID, itemID)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+		if !canceled {
+			t.Error("canceled = false, want true: a change was scheduled")
 		}
 		if updated.PendingPlanID != "" {
 			t.Errorf("pending_plan_id should be cleared: got %q", updated.PendingPlanID)
@@ -1798,9 +1801,12 @@ func TestUpdateItem_Scheduled(t *testing.T) {
 	})
 
 	t.Run("cancel with no pending is no-op", func(t *testing.T) {
-		updated, err := svc.CancelPendingItemChange(ctx, "t1", sub.ID, itemID)
+		updated, canceled, err := svc.CancelPendingItemChange(ctx, "t1", sub.ID, itemID)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+		if canceled {
+			t.Error("canceled = true, want false: nothing was scheduled")
 		}
 		if updated.PendingPlanID != "" {
 			t.Errorf("expected no pending: got %q", updated.PendingPlanID)
@@ -3742,7 +3748,7 @@ func TestSubMutators_StampSimTimeOnClockPinnedSub(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed pending plan: %v", err)
 		}
-		item, err := svc.CancelPendingItemChange(context.Background(), "t1", sub.ID, sub.Items[0].ID)
+		item, _, err := svc.CancelPendingItemChange(context.Background(), "t1", sub.ID, sub.Items[0].ID)
 		if err != nil {
 			t.Fatalf("CancelPendingItemChange: %v", err)
 		}
