@@ -80,9 +80,6 @@ type s1Rig struct {
 
 func newS1Rig(t *testing.T, name string, amountGTE int64) *s1Rig {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, name)
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	t.Cleanup(cancel)
@@ -215,9 +212,6 @@ func assertUsageBilledOnce(t *testing.T, ctx context.Context) {
 // Mutation-verify: WHERE id-only CAS → in the close-first order the fire
 // lands after the close and bills [P0, t1) again (doctor overlap).
 func TestCloseVsThresholdFire_BothOrders_BillsUsageOnce(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	const iterations = 20
 	var fireWon, closeWon int
 	for i := range iterations {

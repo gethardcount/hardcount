@@ -94,7 +94,6 @@ func (r *lagRig) planPricing(code string, prices ...map[string]any) string {
 //
 // Mutation check: answer no status for Outside → the first two are absent.
 func TestBillingStatus_OutsideSubscription(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	n0 := unbilledCount(t, "outside_subscription", "api")
 
@@ -126,7 +125,6 @@ func TestBillingStatus_OutsideSubscription(t *testing.T) {
 // event that was answered outside_subscription earlier that day. The status
 // was true when the event arrived; the invoice is the final answer.
 func TestBillingStatus_OutsideSubscription_SameDaySubscriptionBillsIt(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	morning := lagP0.Add(9 * time.Hour)
 	out := r.postLabelled("calls", "morning", morning, morning, 5, nil)
@@ -150,7 +148,6 @@ func TestBillingStatus_OutsideSubscription_SameDaySubscriptionBillsIt(t *testing
 //
 // Mutation check: answer no status for NotOnPlan → absent.
 func TestBillingStatus_NotOnPlan(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	r.newMeter("seats", "sum")
 	n0 := unbilledCount(t, "not_on_plan", "api")
@@ -186,7 +183,6 @@ func TestBillingStatus_NotOnPlan(t *testing.T) {
 // events; compare label values with fmt.Sprint → the number event is
 // answered with no status but not billed.
 func TestBillingStatus_NoPrice(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	tokens := r.newMeter("tokens", "sum")
 	plan := r.planPricing("plan_labels",
@@ -240,7 +236,6 @@ func TestBillingStatus_NoPrice(t *testing.T) {
 // Mutation check: read the prices at the ingest instant instead of the pin
 // → the current-period event carries no status but is not billed.
 func TestBillingStatus_NoPriceStaysTrueAfterAnEdit(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	tokens := r.newMeter("tokens", "sum")
 	plan := r.planPricing("plan_edit", map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "a"}})
@@ -285,7 +280,6 @@ func TestBillingStatus_NoPriceStaysTrueAfterAnEdit(t *testing.T) {
 // Mutation check: classify against the current items' plans only → the
 // April 10 event is answered not_on_plan and then billed.
 func TestBillingStatus_SwappedAwayPlanStillBillsItsWindow(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	swapAt := lagP0.AddDate(0, 0, 14).Add(12 * time.Hour)
 	r.must(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, swapAt,
@@ -316,7 +310,6 @@ func TestBillingStatus_SwappedAwayPlanStillBillsItsWindow(t *testing.T) {
 // in the period (as the pins do) → the April 10 event is answered
 // not_on_plan and then billed.
 func TestBillingStatus_RemovedItemStillBillsItsWindow(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	seats := r.newMeter("seats", "sum")
 	planD := r.planPricing("plan_d", map[string]any{"meter_id": seats})
@@ -356,7 +349,6 @@ func TestBillingStatus_RemovedItemStillBillsItsWindow(t *testing.T) {
 // Mutation check: index the statuses by inserted row instead of by request
 // index → the statuses shift past the replayed event.
 func TestBillingStatus_BatchAnswersPerIndex(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	tokens := r.newMeter("tokens", "sum")
 	r.newMeter("seats", "sum")
@@ -417,7 +409,6 @@ func TestBillingStatus_BatchAnswersPerIndex(t *testing.T) {
 // answers no_price 2 (its input and output rows), and a call for a customer
 // with no subscription answers outside_subscription 2. Neither is billed.
 func TestBillingStatus_LiteLLMCounts(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	tokens := r.newMeter("tokens", "sum")
 	plan := r.planPricing("plan_llm", map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "claude-x"}})
@@ -455,7 +446,6 @@ func TestBillingStatus_LiteLLMCounts(t *testing.T) {
 // Mutation check: classify released rows without their labels → both rows
 // no_price.
 func TestBillingStatus_HeldReleaseCountsNoPrice(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	tokens := r.newMeter("tokens", "sum")
 	plan := r.planPricing("plan_held", map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "gpt-4o", "token_type": "input"}})

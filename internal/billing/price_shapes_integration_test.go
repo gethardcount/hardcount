@@ -168,9 +168,6 @@ func runPriceStory(t *testing.T, lf *liveFixture, keys map[string]string, events
 }
 
 func TestPriceShapes_ExpressibleBeforeBillUnchanged(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	cases := []struct {
 		name   string
 		price  func(t *testing.T, lf *liveFixture) map[string]string // price id → name
@@ -265,9 +262,6 @@ func TestPriceShapes_ExpressibleBeforeBillUnchanged(t *testing.T) {
 //     (the graduated cases of the test above); "up_to": 0 is refused when
 //     saved (pricing's TestPriceShapes_TierTableCheckedWhenSaved).
 func TestPriceShapes_EachShapeBillsItsGolden(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	cases := []struct {
 		name     string
 		rule     string // the plan's price, as the shape of a POST /v1/plans/{plan_id}/prices body

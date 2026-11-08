@@ -49,9 +49,6 @@ func seedClaimInvoice(t *testing.T, db *postgres.DB, ctx context.Context, tenant
 // exactly one winner; the loser receives the WINNER's claim (whose id
 // derives the Stripe idempotency key, so both converge on one session).
 func TestClaimOpen_ConcurrentDoublePOST_OneWinner(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Claim Race")
@@ -103,9 +100,6 @@ func TestClaimOpen_ConcurrentDoublePOST_OneWinner(t *testing.T) {
 // ErrChargeInFlight (dunning-retry racing the Pay click); a stale caller
 // amount is re-anchored to the locked row's amount_due.
 func TestClaimOpen_PayableRecheck(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Claim Recheck")
@@ -134,9 +128,6 @@ func TestClaimOpen_PayableRecheck(t *testing.T) {
 // TestSupersede_CASExactlyOnce: two racers superseding one open claim —
 // exactly one wins the remint right.
 func TestSupersede_CASExactlyOnce(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Supersede CAS")

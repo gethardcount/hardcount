@@ -44,9 +44,6 @@ func TestRequestID_IgnoresClientSuppliedHeader(t *testing.T) {
 
 	t.Run("inbound X-Request-Id is not honoured", func(t *testing.T) {
 		got := serve(t, map[string]string{"X-Request-Id": forged})
-		if got == forged {
-			t.Fatalf("request id was taken from the client's X-Request-Id header: %q", got)
-		}
 		if strings.Contains(got, forged) {
 			t.Fatalf("client-supplied value leaked into the request id: %q", got)
 		}
@@ -60,7 +57,7 @@ func TestRequestID_IgnoresClientSuppliedHeader(t *testing.T) {
 	t.Run("header-name variants are not honoured", func(t *testing.T) {
 		for _, name := range []string{"x-request-id", "X-REQUEST-ID", "X-Request-ID", "Request-Id", "X-Correlation-Id"} {
 			got := serve(t, map[string]string{name: forged})
-			if got == forged || strings.Contains(got, forged) {
+			if strings.Contains(got, forged) {
 				t.Errorf("header %q was honoured: request id = %q", name, got)
 			}
 		}

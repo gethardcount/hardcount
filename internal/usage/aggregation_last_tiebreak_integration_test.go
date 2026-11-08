@@ -25,9 +25,6 @@ import (
 // The events are written lower id first, so an order that ignores the id
 // keeps the scan's order and picks the lower id.
 func TestAggregateLast_TimestampTieBreaksByID(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()

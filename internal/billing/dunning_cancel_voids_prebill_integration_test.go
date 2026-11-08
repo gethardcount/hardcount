@@ -79,9 +79,6 @@ func (r *recordingDunningEvents) count(eventType string) int {
 
 func newPrebillVoidRig(t *testing.T, name string, policy domain.DunningPolicy) *prebillVoidRig {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleDunning)
 	r := &prebillVoidRig{t: t, ctx: ctx, db: db, tenantID: testutil.CreateTestTenant(t, db, name)}

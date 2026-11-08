@@ -132,9 +132,6 @@ func TestListsDoc_NamesTheSetsThatDoNotPage(t *testing.T) {
 }
 
 func TestListRoutes_OnePagingStyle(t *testing.T) {
-	if testing.Short() {
-		t.Skip("needs Postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	srv := NewServer(db, clock.Real(), nil)
 	ts := httptest.NewServer(srv)
@@ -479,9 +476,6 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 // most 500 rows, so a tenant's 501st plan was in no answer and nothing said
 // so. It is now on page 6 at limit 100, and total counts it.
 func TestPlans_ListPagesPastFiveHundred(t *testing.T) {
-	if testing.Short() {
-		t.Skip("needs Postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
 	defer ts.Close()
@@ -535,9 +529,6 @@ func TestPlans_ListPagesPastFiveHundred(t *testing.T) {
 // in one statement, so they share created_at and only the id keeps the order
 // stable from page to page.
 func TestLists_ReachRowsPastOldReadCaps(t *testing.T) {
-	if testing.Short() {
-		t.Skip("needs Postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
 	defer ts.Close()

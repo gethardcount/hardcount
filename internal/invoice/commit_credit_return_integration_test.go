@@ -18,10 +18,6 @@ import (
 // voided first" leaves 4000 spendable on the voided commit (remaining,
 // balance and retired_cents red).
 func TestVoid_ReturnsCommitCreditAndReRetiresIt(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
-
 	t.Run("funding voided first: the returned share is retired again", func(t *testing.T) {
 		h, ctx := newCommitHarness(t, "Return Commit ReRetire")
 		funding := h.createCommitInvoice(t, ctx, 10000, 10000, nil)

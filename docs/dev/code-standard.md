@@ -6,7 +6,8 @@ reason after it and a link to the guide it comes from.
 - **Why we build this way:** [How Hardcount is engineered](../ENGINEERING.md)
 - **Package layout:** [Architecture](../architecture.md)
 - **Which test to write, and how to write it:** [How we test](../testing.md)
-- **Comments and docs:** [Writing style](writing-style.md)
+- **Comments and docs:** [Code comments](code-comments.md) for Go comments,
+  and [Writing style](writing-style.md) for docs
 - **Database migrations:** [Migrations](migrations.md)
 - **Changes to money code** (invoices, payments, credits, dunning,
   subscriptions, tax): the [money-path playbook](money-path-robustness-playbook.md)

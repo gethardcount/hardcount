@@ -292,9 +292,6 @@ func (r *settleRaceRig) assertRecordedOnce(t *testing.T, round int, tenantID, in
 }
 
 func TestSettleSucceeded_ConcurrentSources_RecordsOnce(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test — requires postgres")
-	}
 	r := newSettleRaceRig(t)
 
 	t.Run("charge response vs redelivered webhook", func(t *testing.T) {

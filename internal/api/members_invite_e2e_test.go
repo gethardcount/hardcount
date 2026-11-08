@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -67,10 +66,7 @@ func TestE2E_MemberInviteAcceptRemove(t *testing.T) {
 	// The accept link rides the email outbox; pull the raw token from the
 	// enqueued row (production sends it via SMTP — the DB row is the same
 	// payload the dispatcher would render).
-	token := inviteTokenFromOutbox(t, db)
-	if !strings.HasPrefix(token, "") || token == "" {
-		t.Fatal("no invite token found in the email outbox")
-	}
+	token := flowEmailLinkToken(t, db, "member_invite", "invite_url")
 
 	// Public preview — no auth, token is the credential.
 	prevResp := doGet(t, ts, "/v1/auth/invite/"+token, "")
@@ -209,35 +205,4 @@ func assertAuditAction(t *testing.T, db *postgres.DB, action string) {
 	if n == 0 {
 		t.Errorf("no audit_log row for action %q — the auth-event audit write is failing again (livemode guard?)", action)
 	}
-}
-
-// inviteTokenFromOutbox reads the newest member_invite outbox row and
-// extracts the raw token from its accept URL.
-func inviteTokenFromOutbox(t *testing.T, db *postgres.DB) string {
-	t.Helper()
-	ctx := t.Context()
-	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		t.Fatalf("begin tx: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	var payload []byte
-	err = tx.QueryRowContext(ctx, `
-		SELECT payload FROM email_outbox
-		WHERE email_type = 'member_invite'
-		ORDER BY created_at DESC LIMIT 1`).Scan(&payload)
-	if err != nil {
-		t.Fatalf("read outbox: %v", err)
-	}
-	var msg struct {
-		InviteURL string `json:"invite_url"`
-	}
-	if err := json.Unmarshal(payload, &msg); err != nil {
-		t.Fatalf("decode payload: %v", err)
-	}
-	_, token, found := strings.Cut(msg.InviteURL, "token=")
-	if !found {
-		t.Fatalf("no token in invite URL %q", msg.InviteURL)
-	}
-	return token
 }
