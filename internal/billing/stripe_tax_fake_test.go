@@ -18,7 +18,8 @@ import (
 // stripeTaxFake stands in for the Stripe Tax API over HTTP. A test wires the
 // real tax.StripeTaxProvider to it (it is the provider's client resolver), so
 // the provider's own request building and response reading run. It taxes
-// every line at one rate, as Stripe documents the two tax behaviors:
+// each line at one rate, or at the rate set for the line's tax code, as
+// Stripe documents the two tax behaviors:
 //
 //   - exclusive: the line amount is before tax; amount_tax = amount × rate.
 //   - inclusive: the line amount includes the tax, and Stripe returns it
@@ -28,10 +29,11 @@ import (
 type stripeTaxFake struct {
 	client *stripe.Client
 
-	mu       sync.Mutex
-	rateBP   int64
-	failNext bool
-	requests []stripeTaxFakeRequest
+	mu        sync.Mutex
+	rateBP    int64
+	codeRates map[string]int64 // tax code → rate in basis points, in place of rateBP
+	failNext  bool
+	requests  []stripeTaxFakeRequest
 }
 
 // stripeTaxFakeRequest is what one calculation request asked for.
@@ -60,6 +62,18 @@ func (f *stripeTaxFake) SetRate(bp int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rateBP = bp
+}
+
+// SetCodeRate taxes the lines that carry tax code code at bp, whatever rate
+// SetRate set. Stripe rates a product by its code, and a zero-rated
+// product's code carries 0.
+func (f *stripeTaxFake) SetCodeRate(code string, bp int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.codeRates == nil {
+		f.codeRates = map[string]int64{}
+	}
+	f.codeRates[code] = bp
 }
 
 // FailNext makes the next calculation fail with a 500, as an outage does.
@@ -101,6 +115,9 @@ func (f *stripeTaxFake) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	var lines []line
 	var taxInclusive, taxExclusive int64
+	// One tax_breakdown entry per rate, in the order the rates first appear.
+	var rates []int64
+	taxByRate := map[int64]int64{}
 	for i := 0; ; i++ {
 		key := fmt.Sprintf("line_items[%d]", i)
 		raw := r.PostForm.Get(key + "[amount]")
@@ -112,18 +129,22 @@ func (f *stripeTaxFake) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		rate := f.rateBP
+		if bp, set := f.codeRates[r.PostForm.Get(key+"[tax_code]")]; set {
+			rate = bp
+		}
 		behavior := r.PostForm.Get(key + "[tax_behavior]")
 		var lineTax int64
 		var ok bool
 		if behavior == "inclusive" {
 			req.Inclusive = true
 			var net int64
-			if net, ok = money.MulDivRoundHalfToEvenSigned(amount, 10000, 10000+f.rateBP); ok {
+			if net, ok = money.MulDivRoundHalfToEvenSigned(amount, 10000, 10000+rate); ok {
 				lineTax = amount - net
 				taxInclusive += lineTax
 			}
 		} else {
-			if lineTax, ok = money.MulDivRoundHalfToEvenSigned(amount, f.rateBP, 10000); ok {
+			if lineTax, ok = money.MulDivRoundHalfToEvenSigned(amount, rate, 10000); ok {
 				taxExclusive += lineTax
 			}
 		}
@@ -131,6 +152,10 @@ func (f *stripeTaxFake) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "amount out of range", http.StatusBadRequest)
 			return
 		}
+		if _, seen := taxByRate[rate]; !seen {
+			rates = append(rates, rate)
+		}
+		taxByRate[rate] += lineTax
 		req.Amounts = append(req.Amounts, amount)
 		lines = append(lines, line{
 			Object: "tax.calculation_line_item", ID: fmt.Sprintf("tax_li_%d", i),
@@ -148,22 +173,30 @@ func (f *stripeTaxFake) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	id := fmt.Sprintf("taxcalc_fake_%d", len(f.requests))
 
+	breakdown := make([]map[string]any, 0, len(rates))
+	for _, rate := range rates {
+		reason := "standard_rated"
+		if rate == 0 {
+			reason = "zero_rated"
+		}
+		breakdown = append(breakdown, map[string]any{
+			"amount":            taxByRate[rate],
+			"inclusive":         req.Inclusive,
+			"taxability_reason": reason,
+			"tax_rate_details": map[string]any{
+				"country":            "GB",
+				"percentage_decimal": strconv.FormatFloat(float64(rate)/100, 'f', 4, 64),
+				"tax_type":           "vat",
+			},
+		})
+	}
 	body, err := json.Marshal(map[string]any{
 		"id":                   id,
 		"object":               "tax.calculation",
 		"currency":             r.PostForm.Get("currency"),
 		"tax_amount_inclusive": taxInclusive,
 		"tax_amount_exclusive": taxExclusive,
-		"tax_breakdown": []map[string]any{{
-			"amount":            taxInclusive + taxExclusive,
-			"inclusive":         req.Inclusive,
-			"taxability_reason": "standard_rated",
-			"tax_rate_details": map[string]any{
-				"country":            "GB",
-				"percentage_decimal": strconv.FormatFloat(float64(f.rateBP)/100, 'f', 4, 64),
-				"tax_type":           "vat",
-			},
-		}},
+		"tax_breakdown":        breakdown,
 		"line_items": map[string]any{
 			"object": "list", "data": lines, "has_more": false,
 			"url": "/v1/tax/calculations/" + id + "/line_items",
