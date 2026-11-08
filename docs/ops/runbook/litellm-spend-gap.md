@@ -1,93 +1,187 @@
 # LiteLLM spend gap after an outage
 
-LiteLLM is an AI proxy that can send each model call's token usage to
-Hardcount. If Hardcount refuses a batch during an outage and LiteLLM runs out of
-retries, that usage is lost. Back to the [runbook index](index.md).
+LiteLLM is an AI proxy that sends each model call's token usage to
+Hardcount. LiteLLM also keeps its own spend log: one row per call, in the
+`LiteLLM_SpendLogs` table of its database. If Hardcount refuses a batch of
+calls and LiteLLM does not send it again, that usage is lost. This page
+finds the lost calls and sends them again from the spend log. Its Hardcount
+commands use `API` and `KEY` from [Before you start](index.md#before-you-start).
 
 ## Symptom
 
-- The `…/litellm/spend` 503 counter rose during a Postgres failover or a
-  rolling restart:
+- Hardcount's 503 counter for the LiteLLM route,
+  `POST /v1/integrations/litellm/spend`, rose while Hardcount could not
+  reach its own database, such as during a Postgres failover:
   `hardcount_http_requests_total{method="POST",path="/v1/integrations/litellm/spend",status="503"}`.
-- LiteLLM's proxy log shows `Generic API Logger Error sending batch`.
-  - LiteLLM 1.83.9 sends a batch again only after a refused or dropped
-    connection, once, at once.
-  - LiteLLM 1.84.0 and later send it again after a timeout, a connection
-    error or a 5xx, while `max_retries` lasts. A send started because the
-    queue was full gets at most two more tries, within 20 seconds.
-  - No version sends a batch again after a 4xx, such as a 413 for a body
-    over 32 MB
-    ([what LiteLLM sends again](../../integrations/litellm.md#what-litellm-sends-again-and-what-is-lost)).
-- Or nothing failed at all. LiteLLM can drop calls it queued while a send
-  was in flight
-  ([calls lost when nothing failed](../../integrations/litellm.md#calls-lost-when-nothing-failed)).
-  So compare the two regularly, not only after an outage.
+- LiteLLM's proxy log shows `Generic API Logger Error sending batch`, its
+  error for a batch Hardcount did not take. While Hardcount restarts, its
+  own counter shows nothing: it refuses the connection.
+- Hardcount's usage for a customer is short of LiteLLM's. This can happen
+  with no outage at all: LiteLLM can drop calls when nothing failed
+  ([why](../../integrations/litellm.md#calls-lost-when-nothing-failed)).
 
 ## Why
 
-Hardcount answered 503 to spend batches while its usage store was unreachable,
-or refused connections while it restarted, so LiteLLM could send them
-again. A batch LiteLLM did not send again, or whose retries ran out, is
-lost: every LLM call in it. Hardcount's spend view is then short
-against LiteLLM's spend page for the period.
+Hardcount answers 503 while it cannot reach its database, and refuses
+connections while it restarts. LiteLLM sends such a batch again only in some
+cases, and only for a short time
+([what each version sends again](../../integrations/litellm.md#what-litellm-sends-again-and-what-is-lost)).
+A batch it does not send again is lost, with every call in it.
 
 ## Check
 
-Compare the window's calls in LiteLLM's spend log with what Hardcount
-stored. A call Hardcount holds has usage events whose idempotency key starts
-with its `request_id`
-(`GET /v1/usage-events?customer_id=<id>&from=<start>&to=<end>`).
+Compare each customer's tokens over a window, from a few minutes before the
+outage to a few minutes after it. LiteLLM stores its times in UTC, in
+columns with no time zone, so write the window in UTC, ending in `Z`.
+`LITELLM_DATABASE_URL` is the address of LiteLLM's database, the
+`DATABASE_URL` of the proxy. `end_user` is the customer's external ID, the
+`user` your app passes to LiteLLM.
+
+1. **Sum LiteLLM's tokens per customer.** Save this as `compare.sql`:
+
+   ```sql
+   SELECT end_user, sum(prompt_tokens + completion_tokens) AS tokens
+   FROM "LiteLLM_SpendLogs"
+   WHERE "endTime" >= :'from' AND "endTime" < :'to'
+     AND "startTime" >= (:'from')::timestamp - interval '1 hour'
+     AND coalesce(status, '') <> 'failure'
+     AND coalesce(cache_hit, '') <> 'True'
+   GROUP BY end_user
+   ORDER BY end_user;
+   ```
+
+   ```bash
+   FROM=2026-11-08T13:15:00Z; TO=2026-11-08T13:22:00Z
+   psql "$LITELLM_DATABASE_URL" -v from="$FROM" -v to="$TO" -f compare.sql
+   ```
+
+   - It picks calls by the time they ended. Hardcount dates each call with
+     that time too.
+   - The `startTime` line lets Postgres use LiteLLM's index. It leaves out
+     a call that ran for more than an hour: if yours can, make the hour
+     longer.
+   - Failed calls and LiteLLM cache hits are left out: Hardcount bills
+     neither.
+
+2. **Sum Hardcount's tokens for each `end_user` that step 1 lists.**
+   LiteLLM usage goes to Hardcount's `tokens` meter, as up to five usage
+   events per call: input, cache reads, cache writes (two kinds) and
+   output. Their sum is LiteLLM's prompt tokens plus completion tokens. The
+   window works the same way: `from` inclusive, `to` exclusive, by the time
+   each event is dated.
+
+   ```bash
+   EXTERNAL_ID=<end_user>
+   TOKENS=$(curl -sS "$API/v1/meters" -H "Authorization: Bearer $KEY" \
+     | jq -r '.data[] | select(.event_name == "tokens") | .id')
+   CUSTOMER=$(curl -sS -G "$API/v1/customers" -H "Authorization: Bearer $KEY" \
+     --data-urlencode "external_id=$EXTERNAL_ID" | jq -r '.data[0].id')
+   curl -sS -G "$API/v1/usage-events/aggregate" -H "Authorization: Bearer $KEY" \
+     --data-urlencode "customer_id=$CUSTOMER" --data-urlencode "meter_id=$TOKENS" \
+     --data-urlencode "from=$FROM" --data-urlencode "to=$TO" | jq .total_units
+   ```
+
+   **You see:** the same number as step 1 when nothing is lost. A lower
+   one means lost calls. A higher one means something else sends `tokens`
+   events for that customer, such as your own app.
 
 ## Fix
 
-Replay the window's calls to `POST /v1/integrations/litellm/spend`.
+Send the window's calls again. Each usage event has an idempotency key, a
+unique key Hardcount builds from the call and keeps forever. So a call
+Hardcount already holds comes back `deduplicated`, and is never billed
+twice.
 
-- **Rebuild each call as the record LiteLLM sends.** The endpoint takes
-  LiteLLM's logging record, not a spend-log row. Hardcount ships no tool
-  that converts one to the other yet, so build one JSON object per row of
-  LiteLLM's spend log (`LiteLLM_SpendLogs`):
-  - `id`: the row's `request_id`. It is LiteLLM's call ID, so a call
-    Hardcount already holds gets the same keys and is deduplicated.
-  - `call_type`, `model`, `custom_llm_provider`, and the customer's ID in
-    `end_user`, as the record LiteLLM sends carries them.
-  - `usage`: `prompt_tokens`, `completion_tokens`, and the cache counts
-    (`cache_read_input_tokens`, `cache_creation_input_tokens`, or
-    `prompt_tokens_details`), as LiteLLM reported them for the call.
+Send them before the period's invoice is built: `INVOICE_GRACE_PERIOD`,
+a setting of the Hardcount server (1 hour by default), after the billing
+period ends, plus up to one billing run
+([when invoices are made](../../api/timing-and-limits.md#when-invoices-are-made)).
+Hardcount never bills, on its own, a call that arrives after that: step 3
+does.
 
-  Send them as `{"events": [ ... ]}`. What each field is for:
-  [Send usage from LiteLLM](../../integrations/litellm.md).
-- Every billed row carries an idempotency key
-  (`<call id>:input|cache_read|cache_write_5m|cache_write_1h|output`), and a
-  call's rows are saved together. Nothing else goes into the key. So the
-  spend log's millisecond times don't matter, and replaying a window that
-  was partly recorded only fills the gap.
-  - Call types Hardcount billed before 2026-10-22 (completion, chat,
-    embedding, text completion) use the call ID in the key as it is.
-  - For the other call types, an ID that would make a key longer than 255
-    characters goes in as its SHA-256. Hardcount works it out the same way
-    on the replay.
-  - A call first saved before cache writes were split (2026-10-22) is saved
-    the old way again, so it is not billed twice.
-- **Deadline:** the replay must reach Hardcount before the period's invoice is
-  built. That is `INVOICE_GRACE_PERIOD` (default 1 hour) after the period
-  ends, plus up to one billing tick. A replay after that is stored but not
-  billed; bill it with a one-off invoice (see
-  [Invoice timing and late usage](invoice-timing-late-usage.md)).
-- A replayed row that missed its period's invoice is counted in the
-  answer's `after_close` and in
-  `hardcount_usage_unbilled_total{reason="after_close"}`, with a WARN line
-  naming it. Rows on a canceled subscription count as
-  `outside_subscription` instead. A spend-threshold invoice is one issued
-  early, in the middle of a period, when usage crosses a limit you set.
-  Rows before a spend-threshold invoice that is not paid yet are not
-  counted (see
-  [Invoice timing and late usage](invoice-timing-late-usage.md)). These
-  counts are what Hardcount found when each row arrived; the invoice is the
-  final answer. `hardcount_usage_late_event_total` counts only events more than
-  24 hours old on arrival, so it does not show which rows missed an
-  invoice.
+1. **Build one record per spend-log row.** Save this as `replay.sql`:
+
+   ```sql
+   SELECT json_build_object(
+     'id', request_id,
+     'call_type', call_type,
+     'model', model,
+     'custom_llm_provider', custom_llm_provider,
+     'end_user', end_user,
+     'startTime', extract(epoch FROM "startTime"),
+     'endTime', extract(epoch FROM "endTime"),
+     'prompt_tokens', prompt_tokens,
+     'completion_tokens', completion_tokens,
+     'metadata', json_build_object('usage_object', metadata->'usage_object'))
+   FROM "LiteLLM_SpendLogs"
+   WHERE "endTime" >= :'from' AND "endTime" < :'to'
+     AND "startTime" >= (:'from')::timestamp - interval '1 hour'
+     AND coalesce(status, '') <> 'failure'
+     AND coalesce(cache_hit, '') <> 'True'
+   ORDER BY "endTime";
+   ```
+
+   ```bash
+   psql "$LITELLM_DATABASE_URL" -At -v from="$FROM" -v to="$TO" -f replay.sql > replay.ndjson
+   ```
+
+   The fields that matter:
+   - `id` is LiteLLM's call ID, the same as in the record LiteLLM first
+     sent. Hardcount builds the keys from it and the kind of token, so the
+     keys match the first send's. `call_type` comes from the same record:
+     it decides whether an ID over 240 characters is shortened to its
+     SHA-256, as on the first send.
+   - `endTime`, in unix seconds, dates the call, so it is billed in the
+     period it ended in. Without it, Hardcount dates the call at the moment
+     of the replay and bills it in the current period.
+   - `end_user` is the customer. A row without one cannot be billed:
+     Hardcount lists it in the answer's `errors`. LiteLLM's `user` column
+     is the owner of the LiteLLM key, so it is left out.
+   - `metadata.usage_object` holds the token counts, with the cache reads
+     and cache writes.
+
+2. **Send the records.** Each is about 1 KB, and one request takes up to
+   32 MB, so send them in parts of 20,000. Each answer is saved next to its
+   part:
+
+   ```bash
+   split -l 20000 replay.ndjson part-
+   for f in part-*; do
+     curl -sS -X POST "$API/v1/integrations/litellm/spend" \
+       -H "Authorization: Bearer $KEY" -H "Content-Type: application/x-ndjson" \
+       --data-binary @"$f" | tee "answer-$f"
+     echo
+   done
+   ```
+
+   **You see:** one answer per part, such as
+   `{"accepted":8,"deduplicated":8,"held":0,"skipped":0,"cache_hits":0,"after_close":0,"no_price":3,"not_on_plan":0,"outside_subscription":0}`.
+   - The counts are of usage events. `accepted` counts the new ones, and
+     `deduplicated` the ones Hardcount already held.
+   - `after_close` counts the accepted events whose period was already
+     invoiced: step 3.
+   - `held` counts events whose customer does not exist in Hardcount yet.
+     They become usage events, dated when each call ended, once you create
+     the customer and release them
+     ([held usage](../../integrations/litellm.md#usage-for-a-customer-hardcount-does-not-know-yet)).
+   - `no_price` counts events that no price of the plan takes:
+     [Usage with no price](usage-with-no-price.md).
+   - A part that failed can be sent again: rows already stored come back
+     `deduplicated`.
+
+3. **Bill what missed its invoice.** For each event counted in
+   `after_close`, Hardcount's log has a WARN line,
+   `usage event arrived after its period was invoiced`, with its customer
+   and time. A second send counts them as `deduplicated`, so read the
+   first answers or the WARN lines. For each such customer, follow
+   [Usage is missing from a built invoice](invoice-timing-late-usage.md#usage-is-missing-from-a-built-invoice):
+   it works out the amount.
+
+A replayed call has no `team_id` or `request_tags` label. A price that names
+one of them does not match it, so the call bills at another price, or shows
+as usage with no price.
 
 ## Verify
 
-Rows Hardcount already held come back as `deduplicated`, never counted twice,
-and Hardcount's spend for the window now matches LiteLLM's.
+Run the Check again: each customer's totals now match, unless step 2 of the
+Check found more in Hardcount, or some rows are held.

@@ -1,163 +1,211 @@
 # Invoice timing and late usage
 
-Hardcount waits a short grace period after a billing period ends before it
-builds the invoice, so usage that arrives a little late still counts. This
-page is for an invoice that seems late, or usage missing from an invoice.
-Back to the [runbook index](index.md).
+Hardcount builds a period's invoice only after a short wait, the invoice
+grace period (`INVOICE_GRACE_PERIOD`, 1 hour by default), so usage that
+arrives a little late still counts. Once built, an invoice never changes.
+Usage for that period that arrives later is stored, and Hardcount never
+bills it on its own. This page is for an invoice that is not built yet, or
+usage missing from a built one. Its commands use `API` and `KEY` from
+[Before you start](index.md#before-you-start).
 
-## Symptom
+## The invoice is not built yet
 
-- A billing period has ended and its invoice is not built yet.
-- Or a customer or a usage pipeline reports usage missing from an invoice.
+**Why:** the billing run is Hardcount's scheduled job that builds the
+invoices that are due. Its first run after the grace period ends builds the
+invoice ([how long that takes](../../api/timing-and-limits.md#when-invoices-are-made)).
 
-## Why
+- The same wait applies to `POST /v1/billing/run`, a billing run you start
+  by hand, and to the final invoice of a cancel scheduled for a date.
+- These build the invoice at once, with no grace: an immediate cancel,
+  `POST /v1/subscriptions/{id}/retry-billing` on a subscription whose
+  billing is failing, and moving a test clock (a pretend clock for test
+  customers) forward.
+- A change you make now to a subscription whose period has ended, such as
+  a plan change, builds that period's invoice at once too. Usage still on
+  its way then misses it.
+- The invoice is still dated at the period end. Its webhook, tax record,
+  use of prepaid credit and card charge come when it is built, and payment
+  retries count from then.
 
-Hardcount builds a period's invoice only once `INVOICE_GRACE_PERIOD` (default
-1 hour, 0 to 72 hours) has passed after the period ends. Usage that is
-stamped inside the period but arrives late is then still billed. The hourly
-billing run picks it up after that, so with the default the invoice is
-built 1 to 2 hours after the period end. The same wait applies to the final
-invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
-
-- **The invoice is still dated at the period end.** Its webhook, tax
-  record, credits, charge and first payment retry come when it is built.
-- **Some actions build the invoice at once, with no grace:** an immediate
-  cancel, `POST /v1/subscriptions/{id}/retry-billing` on a subscription
-  whose billing is failing, any other change to a subscription whose period
-  has ended, and a test-clock advance. (A test clock is a pretend clock for
-  test customers, and an advance moves it forward.)
-- **Dunning's final pause or cancel waits for the grace.** Dunning is
-  Hardcount's retrying of a failed payment, and a dunning run is the retries
-  for one invoice. When the retries run out inside the grace period, the
-  dunning run stays active and is due again when the grace ends. The invoice page shows that time as "Final step" and the
-  Dunning page as "Final step in …": no charge is retried then, the pause or
-  cancel runs.
-- **A cancel or plan change scheduled for a date** takes effect when
-  Hardcount closes that period (builds the period's invoice). That close
-  comes up to one grace period after the scheduled date. Until then the subscription is
-  `active` on its old plan. `subscription.canceled` is sent at the close,
-  with `canceled_at` at the scheduled date. A scheduled resume of paused
-  collection that falls after a period end waits for that close too.
-- **Once the invoice is built it does not change.** Usage stamped inside
-  its period that arrives later is stored, but billed on no invoice, now or
-  later. A spend-threshold invoice is one Hardcount issues early, in the
-  middle of a period, when a subscription crosses a limit you set (a spend
-  threshold). After a spend-threshold invoice, usage stamped before it that
-  arrives later is not on the period-end invoice either (sum and count
-  meters). Hardcount says so when it writes such an event: the answer carries
-  `billing_status: "after_close"` (an `after_close` count on a batch or a
-  LiteLLM delivery), `hardcount_usage_unbilled_total{reason="after_close"}`
-  counts it, and a WARN
-  line names the customer, meter and timestamp. There is no list of such
-  events yet.
-- **What is not flagged `after_close`.** Usage on a canceled subscription
-  (it is `outside_subscription`). And usage
-  stamped before a spend-threshold invoice that is not paid yet: if that
-  invoice is voided before the period-end invoice is built, the period-end
-  invoice bills all the period's usage again, late events included. So such an
-  event is flagged only after a paid spend-threshold invoice, which cannot
-  be voided.
-- **Writing off or voiding a spend-threshold invoice.**
-  - A spend-threshold invoice bills the usage up to when it fired, and no
-    base fee. The base fee is billed as it would be with no spend threshold.
-  - One issued by a Hardcount build from before 2026-10-23 also carries the
-    base fee of a plan billed in arrears. The period-end invoice does not
-    bill that base fee again, and what follows applies to it as to the
-    usage.
-  - A spend-threshold invoice leaves out the usage of a `max` or `last`
-    meter. The period-end invoice bills that usage for the whole period.
-
-  What happens to the charges on the spend-threshold invoice depends on what
-  you do with it, and when:
-  - **Write it off** (mark uncollectible): they stay billed on it. The
-    period-end invoice does not bill them again, and if the customer pays
-    the written-off invoice later, it simply reads paid. Writing off means
-    you give up the money.
-  - **Void it before the period-end invoice is built**: the period-end
-    invoice bills them instead, from the period start. Do not also bill
-    them with a one-off invoice.
-  - **Void it after the period-end invoice is built**: they are billed
-    nowhere. That invoice does not change. If they should be charged,
-    bill them with a one-off invoice. A void that arrives while that invoice
-    is being saved waits for it, and then counts as after.
-
-  Before 2026-10-23 a write-off behaved like a void here, and the
-  period-end invoice billed the window again. If you relied on that, void
-  the spend-threshold invoice instead, before the period-end invoice is built.
-- **During the grace the subscription still shows the ended period.** Spend
-  thresholds and the current credit balance do not count the new period's
-  usage until the invoice is built.
-- **A credit grant that expires at or after a period ends** still pays that
-  period's invoice. It is retired once the period's close has run and its
-  invoice has drawn on it, and it stays in the ledger balance until then.
-  No later invoice draws from it
-  ([ADR-071 §2](../../adr/071-credit-expiry-retires-the-block.md)).
-
-## Check
+**Check:**
 
 ```bash
-# When is this subscription's period due, and is it failing?
+SUB=<subscription id>
 curl -sS "$API/v1/subscriptions/$SUB" -H "Authorization: Bearer $KEY" \
   | jq '{status, current_billing_period_end, next_billing_at, cancel_at, billing_failure}'
 # The setting in force is logged at boot, in nanoseconds (3600000000000 = 1 hour):
 #   {"msg":"invoice grace period","invoice_grace_period":3600000000000,...}
 ```
 
-Due means `next_billing_at` (or a `cancel_at` inside the period) is at
-least `INVOICE_GRACE_PERIOD` in the past. If it is, and `billing_failure`
-is set, go to [Billing failing](billing-failing.md).
+The subscription is due once `next_billing_at`, or a `cancel_at` inside
+its current period, is at least `INVOICE_GRACE_PERIOD` in the past.
+`billing_failure` is set when an attempt to bill it failed.
 
-For usage that missed an invoice, look for the after-close signal:
+**Fix:**
+
+- **Not due yet:** wait for the grace period and the next billing run.
+- **Due, with a `billing_failure`:** go to [Billing failing](billing-failing.md).
+- **Due, with no `billing_failure`:** go to
+  [A subscription is due but not billed](background-job-stuck.md#a-subscription-is-due-but-not-billed).
+- **A test needs a period closed right after it ends:** run a test server
+  with `INVOICE_GRACE_PERIOD=0`. The setting applies to every
+  subscription. `retry-billing` refuses a subscription whose billing is not
+  failing, so it cannot close a healthy one early.
+
+**Verify:** the check above shows `next_billing_at` in the next period, and
+the invoice exists, dated at the period end.
+
+## Usage is missing from a built invoice
+
+**Why:** a built invoice never changes. An event stamped inside its period
+that arrives later is stored, and only a one-off invoice, one you make by
+hand, can bill it.
+
+- Hardcount flags such an event. The API's answer to the request that sent
+  it carries `billing_status: "after_close"`, and the answer to a batch or
+  a LiteLLM delivery has an `after_close` count.
+  `hardcount_usage_unbilled_total{reason="after_close"}` counts it (the
+  counter only grows), and a WARN line in Hardcount's log names its
+  customer, meter and time. There is no list of such events yet.
+- The flag says only that the period was invoiced. It does not check that
+  the plan priced the event's meter.
+- A spend-threshold invoice bills a period's usage early, and the period's
+  own invoice then bills only the usage stamped after it. Usage stamped
+  before the spend-threshold invoice but arriving after it is on neither.
+  While that invoice is not paid, such usage is not flagged, so the counter
+  misses it
+  ([Spend thresholds](../../concepts/invoices.md#spend-thresholds-an-invoice-made-early)).
+  The steps below find it too.
+
+**Check:** `METRICS_TOKEN` is the token your server asks for on `/metrics`
+([Settings](../../settings.md)). On Docker Compose, Hardcount's log is
+`docker compose logs hardcount-api`.
 
 ```bash
-# How many events arrived after their period's invoice, by origin:
+# How many events arrived after their period's invoice, by their origin label:
 curl -sS "$API/metrics" -H "Authorization: Bearer $METRICS_TOKEN" | grep '^hardcount_usage_unbilled_total{' | grep 'reason="after_close"'
 # Which ones: the WARN line per event.
 #   {"level":"WARN","msg":"usage event arrived after its period was invoiced — stored, billed on no invoice","customer_id":...,"meter_id":...,"timestamp":...}
 ```
 
-## Fix
+**Fix:** bill the difference once, on a one-off invoice. These steps are
+for a customer with one subscription. With more, the usage call in step 3
+covers all of them: compare only the rows of this subscription's plan.
 
-**Usage that missed a built invoice.** Compare the customer's usage for the
-invoice's period with the invoice's usage lines. Pass the period
-explicitly. Without `from` and `to`, this endpoint returns the current
-cycle, which is the next one once the invoice's period has closed:
+1. **List the customer's invoices,** and keep the ones that are not voided:
+   - the period's own invoice: the one built when the period ended. For a
+     plan whose base fee is billed in advance (at the start of each
+     period), it carries the next period's dates;
+   - any spend-threshold invoice of the period (`billing_reason`
+     `threshold`);
+   - any one-off invoice (`billing_reason` `manual`) that already billed
+     some of this usage, whatever its memo. The memo of step 4 names the
+     period's invoice.
 
-```bash
-curl -sS "$API/v1/customers/$CUSTOMER/usage?from=$BILLING_PERIOD_START&to=$BILLING_PERIOD_END" \
-  -H "Authorization: Bearer $KEY"
-```
+   If the period's own invoice is not there yet, stop: it will bill this
+   usage. If step 4 made a draft before, finalize that draft (step 5)
+   rather than make another.
 
-- `$BILLING_PERIOD_START` and `$BILLING_PERIOD_END` are the invoice's
-  `billing_period_start` and `billing_period_end` (RFC3339).
-- This endpoint prices only meters on the customer's active or trialing
-  subscriptions. For a canceled subscription it returns
-  `422 customer_has_no_subscription` without a window, and `meters: []`
-  with one. In that case list the raw events:
-  `GET /v1/usage-events?customer_id=$CUSTOMER&meter_id=$METER&from=$BILLING_PERIOD_START&to=$BILLING_PERIOD_END`
-  (`from` inclusive, `to` exclusive, like the period).
-- Bill the difference with a one-off invoice: `POST /v1/invoices`, then
-  `POST /v1/invoices/{id}/line-items`, then
-  `POST /v1/invoices/{id}/finalize`.
-- For a max or last meter, the late events may change nothing; check the
-  events before you bill.
-- An event flagged `after_close` is billed on no invoice, so bill it if
-  the plan the customer was on in that period priced its meter. The flag
-  does not check that: it says only that the period was invoiced. A late
-  event that is not flagged may still be on the period-end invoice;
-  compare before you bill.
+   ```bash
+   CUSTOMER=<customer id>
+   # With more than 100 invoices, add &offset=100, 200, ...
+   curl -sS "$API/v1/invoices?customer_id=$CUSTOMER&limit=100" -H "Authorization: Bearer $KEY" \
+     | jq -c '.data[] | {id, invoice_number, status, billing_reason, billing_period_start, billing_period_end, memo, subtotal_cents, total_amount_cents}'
+   ```
 
-**A pipeline that often delivers later than the grace.** Raise
-`INVOICE_GRACE_PERIOD` above its worst delay (at most `72h`) and restart.
-Every period-end invoice then comes that much later.
+2. **Read the usage lines of the period's own and spend-threshold
+   invoices:**
 
-**A manual test or a script that needs a period closed right after it ends.**
-Run with `INVOICE_GRACE_PERIOD=0`. (`retry-billing` refuses a subscription
-whose billing is not failing, so it cannot close a healthy one early.)
+   ```bash
+   curl -sS "$API/v1/invoices/<invoice id>" -H "Authorization: Bearer $KEY" \
+     | jq -c '.line_items[] | select(.line_type == "usage")
+         | {price_id, quantity, amount_cents, billing_period_start, billing_period_end}'
+   ```
 
-## Verify
+3. **Price the usage stored for the period.** `FROM` is the earliest
+   `billing_period_start` of the step 2 lines, and `TO` the latest
+   `billing_period_end` (`from` inclusive, `to` exclusive). If the
+   invoices have no usage line, use the dates of the period's own invoice.
+   For a plan billed in advance, use the dates of the subscription's
+   invoice built one period earlier: they are this period's.
 
-After the grace and the next billing tick, `hardcount_billing_due_subscriptions`
-falls back and the invoice exists, dated at the period end.
+   ```bash
+   FROM=<earliest billing_period_start>; TO=<latest billing_period_end>
+   curl -sS -G "$API/v1/customers/$CUSTOMER/usage" -H "Authorization: Bearer $KEY" \
+     --data-urlencode "from=$FROM" --data-urlencode "to=$TO" \
+     | jq -c '.meters[] | .prices[] | {price_id, plan_id, quantity, amount_cents, no_price}'
+   ```
+
+   For each `price_id`, this `amount_cents` less the step 2 lines with that
+   `price_id` is what missed the invoices. Add up the differences above
+   zero, and subtract the `subtotal_cents` of the one-off invoices from
+   step 1 (their `total_amount_cents` if your prices include tax). The
+   rest is the total to bill. Hardcount works out its tax when you
+   finalize.
+   - A `no_price` row is usage no price took. It is not part of the total:
+     see [Usage with no price](usage-with-no-price.md).
+   - A difference below zero is a correction that arrived late. It is not
+     part of the total: see [Usage below zero](usage-below-zero.md).
+   - This call prices at the plan's prices now. If they changed since that
+     period, work out the difference in `quantity` at the old prices.
+   - It prices only active or trialing subscriptions. For a canceled one it
+     answers `meters: []`: list the events instead, with
+     `GET /v1/usage-events?customer_id=$CUSTOMER&meter_id=<meter id>&from=$FROM&to=$TO`,
+     and price them as the step 2 lines did.
+
+4. **Create one one-off invoice for the total.** `N` goes into the memo
+   and the key, so each one-off invoice for this period gets its own. If
+   the command gets no answer, send it again within 24 hours: the
+   `Idempotency-Key` returns the same draft. After that, start again from
+   step 1.
+
+   ```bash
+   INVOICE=<the period's invoice id>; NUMBER=<its invoice_number>
+   N=<one-off invoices that step 1 kept, plus 1>; CENTS=<the total>
+   jq -n --arg c "$CUSTOMER" --arg m "Usage that arrived after $NUMBER was built ($N)" \
+     --argjson cents "$CENTS" '{customer_id: $c, memo: $m, line_items: [{description: $m,
+       line_type: "usage", quantity: 1, unit_amount_cents: $cents}]}' > late.json
+   curl -sS -X POST "$API/v1/invoices" -H "Authorization: Bearer $KEY" \
+     -H "Content-Type: application/json" -H "Idempotency-Key: late-usage-$INVOICE-$N" \
+     -d @late.json | jq '{id, status, total_amount_cents}'
+   ```
+
+   **You see:** a `draft` (`hc_inv_…`) whose `total_amount_cents` is
+   `CENTS`.
+
+5. **Check the draft's amount, then finalize it.** Finalizing charges the
+   customer at once: prepaid credit first, then the saved card.
+
+   ```bash
+   curl -sS -X POST "$API/v1/invoices/<draft id>/finalize" -H "Authorization: Bearer $KEY" \
+     | jq '{status, payment_status, amount_due_cents}'
+   ```
+
+   **You see:** `"status": "finalized"`, and the amount due.
+
+**To stop it happening again:** if a pipeline often delivers later than
+the grace, raise `INVOICE_GRACE_PERIOD` above its worst delay (a duration
+such as `3h`, at most `72h`) and restart. Every period-end invoice then
+comes that much later.
+
+**Verify:** step 1's list shows the one-off invoice, `finalized` or `paid`,
+with its memo.
+
+## Other things the grace delays
+
+- **Dunning's final step.** Dunning is Hardcount's retrying of a failed
+  payment. When the retries run out while a period's grace is running, the
+  final pause or cancel waits until that grace ends. The invoice page shows
+  that time as "Final step", and the Dunning page as "Final step in …".
+- **A cancel or plan change scheduled for a date.** It takes effect when
+  Hardcount builds that period's invoice, up to one grace period after the
+  date. Until then the subscription is `active` on its old plan.
+  `subscription.canceled` is sent then, with `canceled_at` at the scheduled
+  date. A scheduled end of a collection pause (a pause in charging the
+  customer) that falls after a period end waits for that period's invoice
+  too.
+- **The subscription's period.** During the grace the subscription still
+  shows the ended period. Spend thresholds and the current credit balance
+  do not count the new period's usage until the invoice is built.
 
 Related: [ADR-120](../../adr/120-invoice-grace-period-for-late-usage.md).
