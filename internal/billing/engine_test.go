@@ -648,15 +648,16 @@ func (m *mockSubs) CancelAtTrialEnd(_ context.Context, _, id string, observedTri
 // ApplyDuePendingItemPlansAtomic mirrors the postgres store: for every item on
 // the subscription whose pending change is due (effective_at <= now), swap
 // plan_id ← pending_plan_id and clear the pending fields in one pass. Returns
-// the applied items so the engine can audit which swaps landed at this cycle.
-// It records the call; the store's events are tested on Postgres.
-func (m *mockSubs) ApplyDuePendingItemPlansAtomic(_ context.Context, _, id string, now, appliedAt time.Time) ([]domain.SubscriptionItem, error) {
+// every item as the swap left it and the changes it applied, so the engine
+// bills the items and audits the swaps. It records the call; the store's
+// events are tested on Postgres.
+func (m *mockSubs) ApplyDuePendingItemPlansAtomic(_ context.Context, _, id string, now, appliedAt time.Time) (subscription.AppliedPlanChanges, error) {
 	m.applyCalls = append(m.applyCalls, struct{ gate, appliedAt time.Time }{now, appliedAt})
 	s, ok := m.subs[id]
 	if !ok {
-		return nil, errs.ErrNotFound
+		return subscription.AppliedPlanChanges{}, errs.ErrNotFound
 	}
-	var applied []domain.SubscriptionItem
+	var swapped []subscription.AppliedPlanChange
 	for i := range s.Items {
 		it := s.Items[i]
 		if it.PendingPlanID == "" || it.PendingPlanEffectiveAt == nil || it.PendingPlanEffectiveAt.After(now) {
@@ -668,7 +669,7 @@ func (m *mockSubs) ApplyDuePendingItemPlansAtomic(_ context.Context, _, id strin
 		it.PendingPlanID = ""
 		it.PendingPlanEffectiveAt = nil
 		s.Items[i] = it
-		applied = append(applied, it)
+		swapped = append(swapped, subscription.AppliedPlanChange{ItemID: it.ID, OldPlanID: oldPlan, NewPlanID: it.PlanID})
 		// Mirror the ADR-101 interval writer: seal the old plan's
 		// lifetime at the swap instant and reopen under the new plan,
 		// so the closing window bills the OUTGOING plan. Materialize
@@ -712,7 +713,7 @@ func (m *mockSubs) ApplyDuePendingItemPlansAtomic(_ context.Context, _, id strin
 		})
 	}
 	m.subs[id] = s
-	return applied, nil
+	return subscription.AppliedPlanChanges{Items: slices.Clone(s.Items), Swapped: swapped}, nil
 }
 
 func (m *mockSubs) ListWithThresholdsForClock(_ context.Context, _, _, _ string, _ int) ([]domain.Subscription, error) {

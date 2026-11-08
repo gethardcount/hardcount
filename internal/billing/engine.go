@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -487,14 +488,14 @@ type SubscriptionReader interface {
 	ClosePeriod(ctx context.Context, tenantID, id string, expected subscription.PeriodSnapshot, periodStart, periodEnd, nextBillingAt time.Time, anchorDay int) error
 	// ApplyDuePendingItemPlansAtomic swaps plan_id ← pending_plan_id for every
 	// item on the subscription whose pending_plan_effective_at <= now, in one
-	// statement. Returns the swapped items only, not the items that were not
-	// due. Called at the cycle boundary so the just-closed period is
+	// statement. Called at the cycle boundary so the just-closed period is
 	// billed on the pre-change plan and the next period uses the new plan.
-	// Returns nil + no error when no items are due (caller proceeds with the
-	// existing plan). In the same transaction it queues one
+	// It returns every live item as the swap left it, read on the swap's
+	// transaction, and the changes it applied: none when no change was due.
+	// In the same transaction it queues one
 	// subscription.pending_change.applied per swapped item, stamped
 	// appliedAt.
-	ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, subscriptionID string, now, appliedAt time.Time) ([]domain.SubscriptionItem, error)
+	ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, subscriptionID string, now, appliedAt time.Time) (subscription.AppliedPlanChanges, error)
 
 	// EnqueueEventTx queues eventType for the subscription on the caller's
 	// tx, carrying the subscription as tx reads it, and extra beside it. The
@@ -2528,10 +2529,10 @@ func usageLineDescription(meter domain.Meter, price domain.PlanPrice) string {
 
 // applyDueScheduledPlanChanges applies any item plan changes scheduled
 // to take effect at or before this cycle's close, BEFORE the caller
-// reads plans — so the new cycle bills on the new plans. Extracted from
-// billOnePeriod (behavior-preserving). When a swap applied, it returns the
-// subscription with only the swapped items, so the close leaves the other
-// items unbilled (#1620); otherwise it returns sub unchanged.
+// reads plans — so the new cycle bills on the new plans. When a change was
+// due, it returns sub with every live item as the swap left it: the close
+// bills each one, the swapped items on their new plans (#1620). Otherwise it
+// returns sub unchanged.
 func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Subscription, now time.Time) (domain.Subscription, error) {
 	// If any item has a scheduled plan change whose effective_at falls
 	// within (or at) the cycle being processed, apply them all BEFORE
@@ -2554,61 +2555,47 @@ func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Su
 	if sub.CurrentBillingPeriodEnd != nil {
 		gate = *sub.CurrentBillingPeriodEnd
 	}
-	anyDue := false
-	for _, it := range sub.Items {
-		if pendingPlanDue(it, gate) {
-			anyDue = true
-			break
-		}
+	if !slices.ContainsFunc(sub.Items, func(it domain.SubscriptionItem) bool { return pendingPlanDue(it, gate) }) {
+		return sub, nil
 	}
-	if anyDue {
-		// Snapshot the items whose pending change is due before the
-		// swap: the audit rows below record the plan each one leaves.
-		// The outgoing plan itself is captured in
-		// subscription_item_changes by the DB trigger (migration 0029) —
-		// the segment-aware base-fee loop further down reads that
-		// history rather than carrying a snapshot map through this
-		// function.
-		dueItems := make([]domain.SubscriptionItem, 0)
-		for _, it := range sub.Items {
-			if pendingPlanDue(it, gate) {
-				dueItems = append(dueItems, it)
-			}
-		}
 
-		// SQL filter inside ApplyDuePendingItemPlansAtomic uses the
-		// gate value to select rows: WHERE pending_plan_effective_at
-		// <= $gate. Same semantics as the Go-side check above so
-		// in-memory and DB views agree. The store queues one
-		// subscription.pending_change.applied per swapped item in the
-		// swap's transaction, stamped with this close's instant.
-		applied, err := e.subs.ApplyDuePendingItemPlansAtomic(ctx, sub.TenantID, sub.ID, gate, now)
-		if err != nil && !errors.Is(err, errs.ErrNotFound) {
-			return sub, fmt.Errorf("apply pending item plans: %w", err)
-		}
-		if applied != nil {
-			// applied holds only the swapped items: the other items of
-			// the subscription drop out of this close (#1620).
-			sub.Items = applied
-			slog.Info("applied scheduled item plan changes",
-				"subscription_id", sub.ID,
-				"items_changed", len(applied),
-			)
+	// SQL filter inside ApplyDuePendingItemPlansAtomic uses the gate value
+	// to select rows: WHERE pending_plan_effective_at <= $gate. Same
+	// semantics as the Go-side check above so in-memory and DB views agree.
+	// The store queues one subscription.pending_change.applied per swapped
+	// item in the swap's transaction, stamped with this close's instant.
+	applied, err := e.subs.ApplyDuePendingItemPlansAtomic(ctx, sub.TenantID, sub.ID, gate, now)
+	if errors.Is(err, errs.ErrNotFound) {
+		return sub, nil
+	}
+	if err != nil {
+		return sub, fmt.Errorf("apply pending item plans: %w", err)
+	}
+	// Bill the items the swap's transaction read. That read ran after the
+	// swap, under the subscription row lock, so it holds every change the
+	// swap applied and no state from before it: an item whose change was
+	// canceled after sub was read keeps its plan, and an item another writer
+	// changed in between shows that change.
+	sub.Items = applied.Items
+	if len(applied.Swapped) == 0 {
+		return sub, nil
+	}
+	slog.InfoContext(ctx, "applied scheduled item plan changes",
+		"subscription_id", sub.ID,
+		"items_changed", len(applied.Swapped),
+	)
 
-			// The swap and its events committed. Record the evidence of each
-			// swap in the audit log.
-			newPlanByItem := make(map[string]string, len(applied))
-			for _, it := range applied {
-				newPlanByItem[it.ID] = it.PlanID
-			}
-			if e.auditLogger != nil {
-				for _, was := range dueItems {
-					_ = e.auditLogger.Log(ctx, sub.TenantID, domain.AuditActionSubscriptionPendingChangeApplied, "subscription", sub.ID, sub.Code, map[string]any{
-						"item_id":     was.ID,
-						"old_plan_id": was.PlanID,
-						"new_plan_id": newPlanByItem[was.ID],
-					})
-				}
+	// The swap and its events committed. Record the evidence of each swap
+	// in the audit log: one row per item the swap moved, like the events.
+	if e.auditLogger != nil {
+		for _, ch := range applied.Swapped {
+			if err := e.auditLogger.Log(ctx, sub.TenantID, domain.AuditActionSubscriptionPendingChangeApplied, "subscription", sub.ID, sub.Code, map[string]any{
+				"item_id":     ch.ItemID,
+				"old_plan_id": ch.OldPlanID,
+				"new_plan_id": ch.NewPlanID,
+			}); err != nil {
+				slog.ErrorContext(ctx, "audit row for an applied plan change not written",
+					"subscription_id", sub.ID, "item_id", ch.ItemID, "error", err)
 			}
 		}
 	}

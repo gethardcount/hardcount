@@ -1,6 +1,10 @@
 # Keeps the pinned actions and base images moving. Without this the pins
 # stay frozen at the day they were written. One grouped pull request a
 # month per ecosystem. Go and npm dependencies are updated by hand.
+# The image updates wait until a release is 14 days old (`cooldown`), the
+# repo's minimum age for any version it pins. Dependabot reads that age only
+# from Docker Hub. For the gcr.io distroless digest, check it by hand before
+# merging (see the Dockerfile).
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -11,10 +15,13 @@ updates:
       actions:
         patterns: ["*"]
 
+  # Dockerfiles: the base images, and the API image's distroless digest.
   - package-ecosystem: docker
     directories: ["/", "/deploy/compose"]
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 14
     groups:
       base-images:
         patterns: ["*"]
@@ -24,4 +31,21 @@ updates:
       # Node's major version moves with CI's node-version (ci.yml), by hand:
       # the dashboard image must build on the Node CI tests on.
       - dependency-name: node
+        update-types: ["version-update:semver-major"]
+
+  # Compose files (Postgres, Redis, nginx). The docker ecosystem above does
+  # not read them.
+  - package-ecosystem: docker-compose
+    directories: ["/", "/deploy/compose"]
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 14
+    groups:
+      compose-images:
+        patterns: ["*"]
+    ignore:
+      # A new Postgres major cannot start on the old one's data volume. It
+      # moves by hand, with an upgrade note.
+      - dependency-name: postgres
         update-types: ["version-update:semver-major"]

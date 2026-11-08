@@ -51,7 +51,7 @@ services:
     # drop billable events), and /v1/auth counts in the hardcount-api process
     # while Redis is down (a blip must not lock out login or lift its
     # limit) — see internal/api/router.go. Used for rate limiting only.
-    image: redis:7-alpine
+    image: redis:8.10.2-alpine
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]

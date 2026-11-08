@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
+import { useTenantSettings } from '@/hooks/useTenantSettings'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -145,10 +146,7 @@ export default function ApiKeysPage() {
   // for the "why tenant TZ" rationale. UTC fallback covers the
   // before-fetch race; the column is NOT NULL with default 'UTC' so
   // every loaded settings row has a real value.
-  const { data: tenantSettings } = useQuery({
-    queryKey: ['settings'],
-    queryFn: () => api.getSettings(),
-  })
+  const { data: tenantSettings } = useTenantSettings()
   const tenantTZ = tenantSettings?.timezone || 'UTC'
 
   const { data: keysData, isLoading: loading, error: loadError, refetch } = useQuery({
@@ -446,10 +444,7 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
   // exposed there. Fall back to UTC if settings haven't loaded yet
   // (covers the dialog-open-before-fetch race; UTC is the DB
   // default so no tenant operates without a value in practice).
-  const { data: settings } = useQuery({
-    queryKey: ['settings'],
-    queryFn: () => api.getSettings(),
-  })
+  const { data: settings } = useTenantSettings()
   const tenantTZ = settings?.timezone || 'UTC'
 
   const form = useForm<CreateApiKeyData>({

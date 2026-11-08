@@ -6,6 +6,7 @@
 **Amended:** 2026-10-08 (a panicked tick is released as not completed).
 **Amended:** 2026-10-19 (a panic stops one step, not the tick; a panicked tick waits one full interval).
 **Amended:** 2026-11-05 (`invoice.finalized` is queued in the transaction that inserts the invoice).
+**Amended:** 2026-11-08 (the boundary plan apply returns every live item, and its audit rows follow the swapped items).
 **Partly superseded:** by [ADR-115](115-one-closer-for-the-billing-period.md) on 2026-08-30 (the billing-period watermark compare-and-swap).
 **Amends:** ADR-006 (background scheduler; the leader gate it assumed), ADR-072 (transport lease model — unchanged, now composed with a leader fence), ADR-073 (boot contract — `VerifyAdvisoryLockTopology` retired)
 **Plan of record:** [docs/dev/records/ha-readiness-2026-07-06.md](../dev/records/ha-readiness-2026-07-06.md) (2026-08-30 header) · velox-ops `ha-program-2026-08-30.md`
@@ -428,3 +429,15 @@ leader's apply swaps no row, and its threshold fire rolls back at the period
 check or the invoice's unique index, so it queues nothing. A tick whose
 transaction commits cannot lose the event to a lost lease or a crash after
 the commit.
+
+## Amendment 2026-11-08 — the boundary plan apply returns every item
+
+`ApplyDuePendingItemPlansAtomic` now returns every live item of the
+subscription, read on its transaction after the swap, beside the changes it
+applied (`subscription.AppliedPlanChanges`). The period close bills those
+items, so an item without a due change is no longer left off the invoice
+(#1620). The effect table's guard for the audit rows now holds for
+`Swapped`: it lists only the rows the swap's `UPDATE … RETURNING` moved, so
+a stale leader's apply lists none and writes no audit row. The engine writes
+one audit row per entry, naming the plan the item left as read under the
+subscription row lock, as the store's events do.
