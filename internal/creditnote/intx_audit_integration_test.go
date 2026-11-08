@@ -39,7 +39,7 @@ func seedRefundableCN(t *testing.T, db *postgres.DB, tenantID, suffix, stripeRef
 
 	now := time.Now().UTC()
 	issued := now
-	inv, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID:         cust.ID,
 		InvoiceNumber:      "INV-REFUNDAUDIT-" + suffix,
 		Status:             domain.InvoicePaid,
@@ -52,7 +52,7 @@ func seedRefundableCN(t *testing.T, db *postgres.DB, tenantID, suffix, stripeRef
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour),
 		BillingPeriodEnd:   now,
 		IssuedAt:           &issued,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
@@ -99,7 +99,7 @@ func seedDraftCN(t *testing.T, db *postgres.DB, tenantID, suffix string) domain.
 
 	now := time.Now().UTC()
 	issued := now
-	inv, err := invoice.NewPostgresStore(db).Create(ctx, tenantID, domain.Invoice{
+	inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID:         cust.ID,
 		InvoiceNumber:      "INV-CASAUDIT-" + suffix,
 		Status:             domain.InvoiceVoided,
@@ -111,7 +111,7 @@ func seedDraftCN(t *testing.T, db *postgres.DB, tenantID, suffix string) domain.
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour),
 		BillingPeriodEnd:   now,
 		IssuedAt:           &issued,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}

@@ -154,16 +154,6 @@ func (m *mockInvoiceUpdater) StampBelowMinimum(_ context.Context, _, id string, 
 	return inv, true, nil
 }
 
-func (m *mockInvoiceUpdater) UpdateStatus(_ context.Context, _, id string, status domain.InvoiceStatus) (domain.Invoice, error) {
-	inv, ok := m.invoices[id]
-	if !ok {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	inv.Status = status
-	m.invoices[id] = inv
-	return inv, nil
-}
-
 func (m *mockInvoiceUpdater) GetByStripePaymentIntentID(_ context.Context, _, piID string) (domain.Invoice, error) {
 	id, ok := m.byPI[piID]
 	if !ok {
@@ -348,19 +338,6 @@ func (m *mockInvoiceUpdater) SetPaymentCard(_ context.Context, _, id, brand, las
 	inv.PaymentCardLast4 = last4
 	m.invoices[id] = inv
 	return nil
-}
-
-func (m *mockInvoiceUpdater) ApplyCreditNote(_ context.Context, _, id string, amountCents int64) (domain.Invoice, error) {
-	inv, ok := m.invoices[id]
-	if !ok {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	inv.AmountDueCents -= amountCents
-	if inv.AmountDueCents < 0 {
-		inv.AmountDueCents = 0
-	}
-	m.invoices[id] = inv
-	return inv, nil
 }
 
 type mockWebhookStore struct {

@@ -11,7 +11,6 @@ import { showApiError } from '@/lib/formErrors'
 import { addCalendarMonthInTZ } from '@/lib/dates'
 import { cn } from '@/lib/utils'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
-import { Layout } from '@/components/Layout'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
@@ -206,38 +205,32 @@ export default function TestClockDetailPage() {
   usePageTitle(clock?.name)
 
   if (clockQ.isLoading) {
-    return (
-      <Layout>
-        <DetailSkeleton to="/test-clocks" parentLabel="Test clocks" />
-      </Layout>
-    )
+    return <DetailSkeleton to="/test-clocks" parentLabel="Test clocks" />
   }
   if (clockQ.error || !clock) {
     // A 404 is "not found", not a load failure: Retry can't bring a deleted
     // clock back, so it gets the Back link instead.
     const notFound = !clockQ.error || (clockQ.error instanceof ApiError && clockQ.error.status === 404)
     return (
-      <Layout>
-        <Card className="mt-6">
-          {!notFound ? (
-            <CardContent className="p-0">
-              <LoadError what="this test clock" error={clockQ.error} onRetry={() => clockQ.refetch()} />
-            </CardContent>
-          ) : (
-            <CardContent className="p-8 text-center">
-              <p className="text-sm text-destructive mb-3">Test clock not found</p>
-              <Link to="/test-clocks">
-                <Button variant="outline" size="sm">Back to Test clocks</Button>
-              </Link>
-            </CardContent>
-          )}
-        </Card>
-      </Layout>
+      <Card className="mt-6">
+        {!notFound ? (
+          <CardContent className="p-0">
+            <LoadError what="this test clock" error={clockQ.error} onRetry={() => clockQ.refetch()} />
+          </CardContent>
+        ) : (
+          <CardContent className="p-8 text-center">
+            <p className="text-sm text-destructive mb-3">Test clock not found</p>
+            <Link to="/test-clocks">
+              <Button variant="outline" size="sm">Back to Test clocks</Button>
+            </Link>
+          </CardContent>
+        )}
+      </Card>
     )
   }
 
   return (
-    <Layout>
+    <>
       <div>
         <Link to="/test-clocks" className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground transition-colors">
           <ChevronLeft size={14} /> Back to Test clocks
@@ -444,7 +437,7 @@ export default function TestClockDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Layout>
+    </>
   )
 }
 

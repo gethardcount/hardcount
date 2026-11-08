@@ -88,15 +88,16 @@ func TestInvoiceList_AttentionCostIsPerPage_RealStore(t *testing.T) {
 			now := time.Now().UTC()
 			in.AmountDueCents, in.AmountPaidCents, in.PaidAt = 0, 5000, &now
 		}
-		inv, err := seedInv.Create(ctx, tenantID, in)
+		inv, err := seedInv.CreateWithLineItems(ctx, tenantID, in, nil)
 		if err != nil {
 			t.Fatalf("create invoice %s: %v", key, err)
 		}
 		return inv.ID
 	}
 
-	// One row per batched fact. Create queues a finalized, pending invoice for
-	// collection (collectionQueuedAtFinalize), so a ready card reads "scheduled".
+	// One row per batched fact. CreateWithLineItems queues a finalized, pending
+	// invoice for collection (collectionQueuedAtFinalize), so a ready card reads
+	// "scheduled".
 	scheduled := newInvoice("scheduled", newCustomer("ready", "ready@acme.test", true), "", domain.InvoiceFinalized, domain.PaymentPending)
 
 	pausedCust := newCustomer("paused", "paused@acme.test", true)

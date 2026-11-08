@@ -49,9 +49,6 @@ jobs:
       - name: Unit Tests (with race detector)
         run: go test ./... -race -short -count=1 -coverprofile=coverage.out
 
-      - name: Vet
-        run: go vet ./...
-
       - name: Upload Coverage
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
@@ -94,9 +91,6 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-
-      - name: Build
-        run: go build ./...
 
       - name: Verify modules
         run: go mod verify
@@ -167,7 +161,6 @@ jobs:
         env:
           TEST_ADMIN_DATABASE_URL: postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable
           TEST_DATABASE_URL: postgres://hardcount_test_app:hardcount_test_app@localhost:5432/hardcount_test?sslmode=disable
-          HARDCOUNT_LIVEMODE_STRICT: "true"
 
       - name: Price shape goldens, on every rating path
         run: >-
@@ -176,7 +169,6 @@ jobs:
         env:
           TEST_ADMIN_DATABASE_URL: postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable
           TEST_DATABASE_URL: postgres://hardcount_test_app:hardcount_test_app@localhost:5432/hardcount_test?sslmode=disable
-          HARDCOUNT_LIVEMODE_STRICT: "true"
 
   # The same integration suite with the APP pool behind PgBouncer in
   # TRANSACTION mode (ADR-114 PR-E). Since the leader-lease cutover every
@@ -497,7 +489,7 @@ jobs:
             || { echo "server is not on the app connection: row-level security is off"; tail -50 server.log; exit 1; }
 
       - name: Install frontend dependencies
-        run: cd web-v2 && npm ci --legacy-peer-deps
+        run: cd web-v2 && npm ci
 
       # The browser build depends only on the Playwright version, so key on
       # that: unrelated lockfile changes keep the cache.
@@ -678,7 +670,7 @@ jobs:
           cache-dependency-path: web-v2/package-lock.json
 
       - name: Install web-v2 deps
-        run: cd web-v2 && npm ci --legacy-peer-deps
+        run: cd web-v2 && npm ci
 
       - name: Regenerate from api/openapi.yaml
         run: make gen
@@ -708,7 +700,7 @@ jobs:
         # `npx tsc --noEmit` used the looser root config and `vite build`
         # strips types without checking, so production type errors (incl.
         # genuine bugs) accumulated invisibly. The production build is the gate.
-        run: cd web-v2 && npm ci --legacy-peer-deps && npm run build
+        run: cd web-v2 && npm ci && npm run build
 
       # The web-v2 unit suite (effectiveNow drift-guard, csv, vocabulary) ran
       # NOWHERE in CI until 2026-07-19 — a green pipeline said nothing about

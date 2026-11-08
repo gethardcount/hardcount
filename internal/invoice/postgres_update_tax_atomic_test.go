@@ -14,7 +14,7 @@ import (
 )
 
 // TestUpdateTaxAtomic_RejectsNonDraft is the symmetric counterpart to
-// TestAddLineItemAtomic_RejectsNonDraft: the draft-only invariant is
+// TestAddLineItemAtomicAudited_RejectsNonDraft: the draft-only invariant is
 // re-asserted inside the locking tx (the SELECT ... FOR UPDATE in
 // UpdateTaxAtomic), so a caller cannot stamp tax onto a finalized invoice —
 // even if it raced a concurrent Finalize. Tax is mutable while a draft and
@@ -28,7 +28,7 @@ func TestUpdateTaxAtomic_RejectsNonDraft(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "UpdateTax NonDraft")
 	invID := seedDraftInvoice(t, db, tenantID)
 
-	if _, err := store.UpdateStatus(ctx, tenantID, invID, domain.InvoiceFinalized); err != nil {
+	if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, invID, domain.InvoiceFinalized, nil); err != nil {
 		t.Fatalf("finalize invoice: %v", err)
 	}
 
@@ -48,7 +48,7 @@ func TestUpdateTaxAtomic_RejectsNonDraft(t *testing.T) {
 }
 
 // TestUpdateTaxAtomic_ConcurrentSerializes is the lost-update regression for
-// UpdateTaxAtomic, mirroring TestAddLineItemAtomic_ConcurrentAdds. Every call
+// UpdateTaxAtomic, mirroring TestAddLineItemAtomicAudited_ConcurrentAdds. Every call
 // bumps tax_retry_count by 1 under the SELECT ... FOR UPDATE row lock, so N
 // concurrent calls on one draft invoice must serialize: each increment is
 // applied on top of the prior committed value, leaving tax_retry_count == N.

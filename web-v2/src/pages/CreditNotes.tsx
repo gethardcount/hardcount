@@ -17,7 +17,6 @@ import { downloadCSV } from '@/lib/csv'
 import { CREDIT_NOTE_CSV_HEADERS, creditNoteCsvRow } from '@/lib/creditNoteCsv'
 import { creditNoteStatFigures, creditNotesListView } from '@/lib/creditNoteStats'
 import { canIssueCreditNote } from '@/lib/creditNoteCeilings'
-import { Layout } from '@/components/Layout'
 import { ScrollPane } from '@/components/ui/scroll-pane'
 import { SimulatedBadge } from '@/components/TestClockBadge'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
@@ -291,7 +290,7 @@ export default function CreditNotesPage() {
   }
 
   return (
-    <Layout>
+    <>
       {/* Header */}
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div className="min-w-0 flex-1 basis-72">
@@ -685,7 +684,7 @@ export default function CreditNotesPage() {
           onSent={() => { setSendTarget(null); toast.success('Credit note email sent') }}
         />
       )}
-    </Layout>
+    </>
   )
 }
 

@@ -48,12 +48,12 @@ func TestClawbackForClock_GatesWallClock_IssuesInFrozenTime(t *testing.T) {
 	mkPaidClawback := func(cust domain.Customer, num string) domain.CreditNote {
 		t.Helper()
 		issued := now
-		inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 			CustomerID: cust.ID, InvoiceNumber: num + "-INV", Status: domain.InvoicePaid,
 			PaymentStatus: domain.PaymentSucceeded, Currency: "USD",
 			SubtotalCents: 10000, TotalAmountCents: 10000, AmountDueCents: 0, AmountPaidCents: 10000,
 			BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &issued,
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("invoice %s: %v", num, err)
 		}

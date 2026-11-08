@@ -28,11 +28,6 @@ type CustomerGetter interface {
 	GetBillingProfile(ctx context.Context, tenantID, customerID string) (domain.CustomerBillingProfile, error)
 }
 
-// SettingsGetter reads tenant settings for PDF company info.
-type SettingsGetter interface {
-	Get(ctx context.Context, tenantID string) (domain.TenantSettings, error)
-}
-
 // CreditNoteLaneCap is how many credit notes the timeline's CN lane
 // fetches — the creditnote store's hard clamp. The lister interface
 // carries no total, so the handler discloses `truncated` when a fetch
@@ -132,11 +127,6 @@ type PaymentCanceler interface {
 	ExpireCheckoutSessions(ctx context.Context, tenantID string, inv domain.Invoice)
 }
 
-// BillingProfileGetter reads customer billing profile for PDF.
-type BillingProfileGetter interface {
-	GetBillingProfile(ctx context.Context, tenantID, customerID string) (domain.CustomerBillingProfile, error)
-}
-
 // DunningResolver resolves active dunning runs when an invoice is voided or
 // paid: Service.AfterVoid on every void, and this handler on a write-off or
 // an offline payment.
@@ -181,7 +171,6 @@ type EmailEventRow struct {
 	DeliveryState string
 	CreatedAt     time.Time
 	DispatchedAt  *time.Time
-	LastError     string
 	To            string // resolved from payload
 	// AttemptNumber pairs a dunning_warning email with the retry
 	// attempt it warns about (payload attempt_number = run.AttemptCount
@@ -201,7 +190,7 @@ type EmailEventRow struct {
 	// SendFailure classifies a failed row's error into one the activity
 	// line can name in plain words (activity.SendFailure*); empty when the
 	// row did not fail or its error has no plain-words name. The raw error
-	// stays in LastError and never reaches the screen.
+	// is not carried here, so it never reaches the screen.
 	SendFailure string
 	// SkipReason is the state the invoice reached that made the dispatcher
 	// skip a queued email (email_outbox.skip_reason): paid, voided,
@@ -242,7 +231,7 @@ var validRefundReasons = map[string]bool{
 type Handler struct {
 	svc             *Service
 	customers       CustomerGetter
-	settings        SettingsGetter
+	settings        TenantSettingsReader
 	creditNotes     CreditNoteLister
 	pdfCreditNotes  IssuedCreditNoteLister
 	charger         PaymentCharger
@@ -280,12 +269,11 @@ type HandlerDeps struct {
 	Charger           PaymentCharger
 	PaymentSetups     PaymentSetupGetter
 	Dunning           DunningResolver
-	EmailEvents       EmailEventLister
 	DunningTimeline   DunningTimelineFetcher
 	RefundIssuer      RefundIssuer
 }
 
-func NewHandler(svc *Service, customers CustomerGetter, settings SettingsGetter, deps HandlerDeps) *Handler {
+func NewHandler(svc *Service, customers CustomerGetter, settings TenantSettingsReader, deps HandlerDeps) *Handler {
 	return &Handler{
 		svc:             svc,
 		customers:       customers,
@@ -295,7 +283,6 @@ func NewHandler(svc *Service, customers CustomerGetter, settings SettingsGetter,
 		charger:         deps.Charger,
 		paymentSetups:   deps.PaymentSetups,
 		dunning:         deps.Dunning,
-		emailEvents:     deps.EmailEvents,
 		dunningTimeline: deps.DunningTimeline,
 		refundIssuer:    deps.RefundIssuer,
 	}
@@ -2299,7 +2286,7 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// One shared context builder across emailed/downloaded/hosted PDFs.
-	bt, ci, cnInfos := BuildPDFContext(r.Context(), h.customers, h.settings, h.pdfCreditNotes, tenantID, &inv)
+	bt, ci, cnInfos := BuildPDFContext(r.Context(), h.customers, h.settings, h.pdfCreditNotes, tenantID, inv)
 
 	pdfBytes, err := RenderPDF(r.Context(), inv, items, bt, cnInfos, ci)
 	if err != nil {

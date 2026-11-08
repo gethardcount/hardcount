@@ -21,7 +21,6 @@ import { billingProfileCard, profileOrAbsent } from '@/lib/billingProfileLoad'
 import { isBeforeCivilToday, startOfDayInTZ, startOfNextDayInTZ } from '@/lib/dates'
 import { Checkbox } from '@/components/ui/checkbox'
 import { MarginCard } from '@/components/MarginCard'
-import { Layout } from '@/components/Layout'
 import { SendSetupLinkDialog } from '@/components/SendSetupLinkDialog'
 import { PriceOverridesCard } from '@/components/PriceOverridesCard'
 import { CostDashboard } from '@/components/CostDashboard'
@@ -384,33 +383,21 @@ export default function CustomerDetailPage() {
   usePageTitle(customer?.display_name)
 
   if (loading) {
-    return (
-      <Layout>
-        <DetailSkeleton to="/customers" parentLabel="Customers" />
-      </Layout>
-    )
+    return <DetailSkeleton to="/customers" parentLabel="Customers" />
   }
 
   // A failed refresh after a load keeps the page (StaleNotice below);
   // only a page that never loaded becomes the error screen.
   if (error && !customer) {
-    return (
-      <Layout>
-        <LoadError what="this customer" error={loadError} onRetry={() => refetch()} className="py-16" />
-      </Layout>
-    )
+    return <LoadError what="this customer" error={loadError} onRetry={() => refetch()} className="py-16" />
   }
 
   if (!customer) {
-    return (
-      <Layout>
-        <p className="text-sm text-muted-foreground py-16 text-center">Customer not found</p>
-      </Layout>
-    )
+    return <p className="text-sm text-muted-foreground py-16 text-center">Customer not found</p>
   }
 
   return (
-    <Layout>
+    <>
       <DetailBreadcrumb to="/customers" parentLabel="Customers" currentLabel={customer.display_name} />
       {loadError && <StaleNotice what="this customer" onRetry={() => refetch()} />}
 
@@ -1255,7 +1242,7 @@ export default function CustomerDetailPage() {
         />
       )}
 
-    </Layout>
+    </>
   )
 }
 

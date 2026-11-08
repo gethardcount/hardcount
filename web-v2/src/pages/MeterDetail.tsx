@@ -14,7 +14,6 @@ import {
   METER_AGGREGATIONS, METER_HAS_USAGE_SENTENCE, METER_NAME_UNIT_SENTENCE, METER_NO_USAGE_SENTENCE,
   meterAggregationHelp, meterAggregationLabel, meterHasUsageMessage,
 } from '@/lib/meterLabels'
-import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { Callout } from '@/components/Callout'
 
@@ -75,31 +74,19 @@ export default function MeterDetailPage() {
   usePageTitle(meter?.name)
 
   if (loading) {
-    return (
-      <Layout>
-        <DetailSkeleton to="/pricing?tab=meters" parentLabel="Meters" />
-      </Layout>
-    )
+    return <DetailSkeleton to="/pricing?tab=meters" parentLabel="Meters" />
   }
 
   if (meterError) {
-    return (
-      <Layout>
-        <LoadError what="this meter" error={meterError} onRetry={() => refetch()} className="py-16" />
-      </Layout>
-    )
+    return <LoadError what="this meter" error={meterError} onRetry={() => refetch()} className="py-16" />
   }
 
   if (!meter) {
-    return (
-      <Layout>
-        <p className="text-sm text-muted-foreground py-16 text-center">Meter not found</p>
-      </Layout>
-    )
+    return <p className="text-sm text-muted-foreground py-16 text-center">Meter not found</p>
   }
 
   return (
-    <Layout>
+    <>
       <DetailBreadcrumb to="/pricing?tab=meters" parentLabel="Meters" currentLabel={meter.name} />
 
       {/* Header */}
@@ -238,7 +225,7 @@ export default function MeterDetailPage() {
         />
       )}
 
-    </Layout>
+    </>
   )
 }
 

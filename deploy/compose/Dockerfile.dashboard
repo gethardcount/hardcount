@@ -18,9 +18,8 @@ FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /repo/web-v2
 COPY web-v2/package.json web-v2/package-lock.json ./
 # The same command CI's frontend job runs: `npm ci` installs exactly what
-# the lockfile says. --legacy-peer-deps because the lockfile was resolved
-# with it (web-v2/.npmrc).
-RUN npm ci --legacy-peer-deps
+# the lockfile says.
+RUN npm ci
 
 COPY web-v2/ ./
 COPY api/openapi.yaml /repo/api/openapi.yaml

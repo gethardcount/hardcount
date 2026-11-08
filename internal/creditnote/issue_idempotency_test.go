@@ -8,7 +8,7 @@ import (
 )
 
 // TestIssue_IdempotentNoDoubleApply covers the medium-severity audit finding:
-// Issue() on an unpaid invoice reduces amount_due via ApplyCreditNote, which is
+// Issue() on an unpaid invoice reduces amount_due via ApplyCreditNoteTx, which is
 // not idempotent. The draft→issued flip used to happen LAST, so a concurrent or
 // retried Issue() that both passed the draft check double-reduced amount_due.
 // The draft→issued CAS now runs first: exactly one call wins and applies the
@@ -65,7 +65,7 @@ func TestIssue_IdempotentNoDoubleApply(t *testing.T) {
 
 // TestIssue_CASLoserDoesNotApply exercises the race directly: a note that is
 // already 'issued' in the store (as if a concurrent winner flipped it between
-// our Get and our CAS) must lose the CAS and skip ApplyCreditNote entirely.
+// our Get and our CAS) must lose the CAS and skip ApplyCreditNoteTx entirely.
 func TestIssue_CASLoserDoesNotApply(t *testing.T) {
 	store := newMemStore()
 	invoices := &memInvoiceReader{

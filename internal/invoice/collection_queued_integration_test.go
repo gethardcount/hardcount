@@ -48,15 +48,15 @@ func TestFinalizeWritesQueueCollection(t *testing.T) {
 		return got.AutoChargePending
 	}
 
-	t.Run("Create finalized → queued; draft → not", func(t *testing.T) {
-		fin, err := store.Create(ctx, tenantID, base(domain.InvoiceFinalized))
+	t.Run("CreateWithLineItems finalized → queued; draft → not", func(t *testing.T) {
+		fin, err := store.CreateWithLineItems(ctx, tenantID, base(domain.InvoiceFinalized), nil)
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
 		if !queued(t, fin.ID) {
-			t.Error("Create(finalized) must queue collection in the INSERT")
+			t.Error("CreateWithLineItems(finalized) must queue collection in the INSERT")
 		}
-		draft, err := store.Create(ctx, tenantID, base(domain.InvoiceDraft))
+		draft, err := store.CreateWithLineItems(ctx, tenantID, base(domain.InvoiceDraft), nil)
 		if err != nil {
 			t.Fatalf("create draft: %v", err)
 		}
@@ -65,28 +65,18 @@ func TestFinalizeWritesQueueCollection(t *testing.T) {
 		}
 	})
 
-	t.Run("CreateWithLineItems finalized → queued", func(t *testing.T) {
-		inv, err := store.CreateWithLineItems(ctx, tenantID, base(domain.InvoiceFinalized), nil)
-		if err != nil {
-			t.Fatalf("create: %v", err)
-		}
-		if !queued(t, inv.ID) {
-			t.Error("CreateWithLineItems(finalized) must queue collection in the INSERT")
-		}
-	})
-
-	t.Run("UpdateStatus draft→finalized → queued; void → retired", func(t *testing.T) {
-		draft, err := store.Create(ctx, tenantID, base(domain.InvoiceDraft))
+	t.Run("UpdateStatusWithReversalPrior draft→finalized → queued; void → retired", func(t *testing.T) {
+		draft, err := store.CreateWithLineItems(ctx, tenantID, base(domain.InvoiceDraft), nil)
 		if err != nil {
 			t.Fatalf("create draft: %v", err)
 		}
-		if _, err := store.UpdateStatus(ctx, tenantID, draft.ID, domain.InvoiceFinalized); err != nil {
+		if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, draft.ID, domain.InvoiceFinalized, nil); err != nil {
 			t.Fatalf("finalize: %v", err)
 		}
 		if !queued(t, draft.ID) {
-			t.Error("UpdateStatus(finalized) must queue collection in the same UPDATE")
+			t.Error("a status flip to finalized must queue collection in the same UPDATE")
 		}
-		if _, err := store.UpdateStatus(ctx, tenantID, draft.ID, domain.InvoiceVoided); err != nil {
+		if _, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, draft.ID, domain.InvoiceVoided, nil); err != nil {
 			t.Fatalf("void: %v", err)
 		}
 		if queued(t, draft.ID) {
@@ -95,7 +85,7 @@ func TestFinalizeWritesQueueCollection(t *testing.T) {
 	})
 
 	t.Run("FinalizeWithDates draft→finalized → queued", func(t *testing.T) {
-		draft, err := store.Create(ctx, tenantID, base(domain.InvoiceDraft))
+		draft, err := store.CreateWithLineItems(ctx, tenantID, base(domain.InvoiceDraft), nil)
 		if err != nil {
 			t.Fatalf("create draft: %v", err)
 		}

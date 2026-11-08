@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo, type ReactNode } from 'react'
+import { Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { listPathFor } from '@/lib/modeSwitch'
-import { useQuery } from '@tanstack/react-query'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   LogOut, AlertTriangle, Menu, X,
   Sun, Moon, Search, ChevronsUpDown, MessageSquareWarning, Loader2,
@@ -196,10 +196,36 @@ function ModeToggle({ livemode, busy, onToggle }: { livemode: boolean; busy: boo
 // toggle — see handleToggleMode.
 const MODE_INDEPENDENT_PARAMS = ['tab'] as const
 
-export function Layout({ children }: { children: ReactNode }) {
+// The shell of every signed-in page: the sidebar, the mode banners and the
+// phone top bar, with the open page in the content area. main.tsx renders it
+// once, as the layout route around those pages, so it stays mounted while
+// the operator moves between them.
+export function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const mainRef = useRef<HTMLElement | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // The phone menu closes when the page changes, also on the browser's Back
+  // button. Set during render, as React advises for state that follows a prop.
+  const [menuPath, setMenuPath] = useState(location.pathname)
+  if (menuPath !== location.pathname) {
+    setMenuPath(location.pathname)
+    setSidebarOpen(false)
+  }
+  // A new page opens at the top of the content pane, which outlives it.
+  useLayoutEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 })
+  }, [location.pathname])
+  // A page change refreshes the data on screen that is older than its stale
+  // time: the sidebar counts and the setup checklist below, and the
+  // workspace settings when the new page reads them. The shell used to
+  // remount on every page change, which did this.
+  // It runs after the old page's queries have stopped, and joins a fetch the
+  // new page has started instead of cancelling it.
+  useEffect(() => {
+    void queryClient.refetchQueries({ type: 'active', stale: true }, { cancelRefetch: false })
+  }, [location.pathname, queryClient])
   const [commandOpen, setCommandOpen] = useState(false)
   const { dark, toggle: toggleDark } = useDarkMode()
   const { user, logout, setMode } = useAuth()
@@ -277,9 +303,8 @@ export function Layout({ children }: { children: ReactNode }) {
   }, [])
 
   // Sidebar nav badges (open invoices count, active dunning count).
-  // Stale data is fine — these are background hints; RQ's
-  // staleWhileRevalidate behavior gives the operator a near-real-time
-  // count without per-mount thrash.
+  // Stale data is fine — these are background hints; the page-change
+  // refresh above gives the operator a near-real-time count.
   const analyticsQuery = useQuery({
     queryKey: ['layout', 'analytics-overview'],
     queryFn: () => api.getAnalyticsOverview(),
@@ -503,7 +528,7 @@ export function Layout({ children }: { children: ReactNode }) {
           scrollbar to fall back on either — the shell is exactly viewport
           height, so the browser draws none, and macOS hides overlay scrollbars
           until you are already scrolling. */}
-      <ScrollPane as="main" className="flex-1 bg-background">
+      <ScrollPane as="main" ref={mainRef} className="flex-1 bg-background">
         {/* Header stack — mode/safety banner + top-bar, pinned together so
             whichever banner is live (Stripe-missing hard blocker in live
             mode, test-mode strip otherwise) can never scroll out of sight.
@@ -568,7 +593,17 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </div>
         <div className={cn(CONTENT_BAND, 'p-4 md:p-8')}>
-          {children}
+          {/* A page whose code is still downloading shows a spinner here,
+              inside the shell. */}
+          <Suspense
+            fallback={
+              <div role="status" aria-label="Loading page" className="flex justify-center py-16">
+                <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </div>
       </ScrollPane>
 

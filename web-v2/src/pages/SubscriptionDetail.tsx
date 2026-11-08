@@ -11,7 +11,6 @@ import { api, formatCents, formatCentsBare, prorationText, formatDate, formatDat
 import { civilDateFrom, formatCivilDate, formatCivilPeriod, startOfDayInTZ } from '@/lib/dates'
 import { showApiError } from '@/lib/formErrors'
 import { amountInputError, dollarsToWholeCents, wholeUnits } from '@/lib/priceInput'
-import { Layout } from '@/components/Layout'
 import { Combobox, type ComboboxOption } from '@/components/Combobox'
 import { TestClockBanner } from '@/components/TestClockBanner'
 import { Callout } from '@/components/Callout'
@@ -327,29 +326,17 @@ export default function SubscriptionDetailPage() {
   usePageTitle(sub?.display_name)
 
   if (loading) {
-    return (
-      <Layout>
-        <DetailSkeleton to="/subscriptions" parentLabel="Subscriptions" />
-      </Layout>
-    )
+    return <DetailSkeleton to="/subscriptions" parentLabel="Subscriptions" />
   }
 
   // A failed refresh after a load keeps the page (StaleNotice below);
   // only a page that never loaded becomes the error screen.
   if (error && !sub) {
-    return (
-      <Layout>
-        <LoadError what="this subscription" error={loadError} onRetry={() => refetch()} className="py-16" />
-      </Layout>
-    )
+    return <LoadError what="this subscription" error={loadError} onRetry={() => refetch()} className="py-16" />
   }
 
   if (!sub) {
-    return (
-      <Layout>
-        <p className="text-sm text-muted-foreground py-16 text-center">Subscription not found</p>
-      </Layout>
-    )
+    return <p className="text-sm text-muted-foreground py-16 text-center">Subscription not found</p>
   }
 
   const firstItemPlan = items[0] ? planById(items[0].plan_id) : undefined
@@ -442,7 +429,7 @@ export default function SubscriptionDetailPage() {
   }
 
   return (
-    <Layout>
+    <>
       <DetailBreadcrumb to="/subscriptions" parentLabel="Subscriptions" currentLabel={sub.display_name} />
       {loadError && <StaleNotice what="this subscription" onRetry={() => refetch()} />}
 
@@ -1478,7 +1465,7 @@ export default function SubscriptionDetailPage() {
           onSaved={(title) => { setShowThresholdsDialog(false); invalidateAll(); toast.success(title) }}
         />
       )}
-    </Layout>
+    </>
   )
 }
 
