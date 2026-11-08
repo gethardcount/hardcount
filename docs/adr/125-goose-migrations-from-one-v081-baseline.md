@@ -1,7 +1,7 @@
 # ADR-125: Run migrations with goose from one v0.8.1 baseline
 
 **Date:** 2026-10-18
-**Status:** Accepted (2026-10-18). The cut-over is built; it ships in v0.9.0. Amended 2026-10-22 ([#1354](https://github.com/gethardcount/hardcount/pull/1354)) and 2026-10-28 ([#1409](https://github.com/gethardcount/hardcount/pull/1409)): the takeover of a v0.8.x database and the upgrade from a build of `main` are dropped. v0.9.0 installs fresh only and refuses an older database. The text below about taking over a v0.8.x database is history. Amended 2026-10-30 ([#1499](https://github.com/gethardcount/hardcount/pull/1499)): the trigger for replacing `hardcount-migrate-safety` fired, and an `upgrade` CI job now checks that invoices read the same after an upgrade from the previous release ([amendment](#amendment-2026-10-30-an-upgrade-job-checks-that-invoices-survive-an-upgrade)).
+**Status:** Accepted (2026-10-18). The cut-over is built; it ships in v0.9.0. Amended 2026-10-22 ([#1354](https://github.com/gethardcount/hardcount/pull/1354)) and 2026-10-28 ([#1409](https://github.com/gethardcount/hardcount/pull/1409)): the takeover of a v0.8.x database and the upgrade from a build of `main` are dropped. v0.9.0 installs fresh only and refuses an older database. The text below about taking over a v0.8.x database is history. Amended 2026-10-30 ([#1499](https://github.com/gethardcount/hardcount/pull/1499)): the trigger for replacing `hardcount-migrate-safety` fired, and an `upgrade` CI job now checks that invoices read the same after an upgrade from the previous release ([amendment](#amendment-2026-10-30-an-upgrade-job-checks-that-invoices-survive-an-upgrade)). Amended 2026-11-08 ([#1619](https://github.com/gethardcount/hardcount/pull/1619)): the `migrations` job applies HEAD on Postgres 15 and 18 instead of 14 ([amendment](#amendment-2026-11-08-postgres-15-and-18-replace-14)).
 **Supersedes:** [ADR-124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md), which was never built
 **Amends:** [ADR-073](073-selfhost-boot-and-bootstrap-contract.md) (decision 3, the migration runner, is replaced) and [ADR-107](107-unknown-is-terminal-until-a-human.md) (migration 0009's rollback stops shipping)
 
@@ -205,10 +205,8 @@ An INVALID index is one Postgres keeps but never uses.
      the backup over it. The next `hardcount migrate` must refuse and change
      nothing.
    - HEAD applies on Postgres 14. If it fails, the docs stop calling 14
-     the oldest version that should work. *(Amended 2026-11-08: Postgres 14
-     reaches end of life on 2026-11-12. This check now applies HEAD on
-     Postgres 18, the newest major, and the docs no longer list 14 as
-     supported.)*
+     the oldest version that should work. *(Amended 2026-11-08: now
+     Postgres 15 and 18. See the amendment at the end.)*
 10. **Rollout.** Four PRs, in order:
     1. This ADR.
     2. The cut-over: code, baseline, tests, the `migrations` job and the
@@ -436,3 +434,23 @@ why. The list starts empty.
 
 **Status.** The job is not a required check, and the `docker` job does not
 wait for it. Making it required is a repository setting (#1232).
+
+## Amendment 2026-11-08: Postgres 15 and 18 replace 14
+
+**Why.** Postgres 14 reaches end of life on 2026-11-12, and the docs no
+longer list it as supported. Decision 9's check on 14 guarded the oldest
+version the docs expect to work. That version is now 15.
+
+**Decision.** The `migrations` job applies HEAD on two more majors, each
+under the Compose setup, and checks that each reports up to date:
+
+- Postgres 15, the oldest major the docs expect to work.
+- Postgres 18, the newest Postgres major.
+
+A failure on either fails the job, so the PR cannot merge as it is. Fix the
+migration, or stop calling that version expected to work, in the docs and
+this check, in the same PR.
+
+**Not covered.** The tests run only on 16, which the Compose stack also
+ships. Postgres 17 is not run. No migration uses syntax newer than 15, and
+the check on 15 fails a migration that does.

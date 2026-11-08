@@ -15,7 +15,7 @@ import (
 // Real-Postgres tests of the goose runner (ADR-125). Each names the
 // mutation that must turn it red; the migrations CI job covers the rest
 // (each role setup, the limited user's timeout, the restore drill,
-// Postgres 18).
+// Postgres 15 and 18).
 
 const widgetsFile = `-- +goose Up
 CREATE TABLE widgets (id int NOT NULL);

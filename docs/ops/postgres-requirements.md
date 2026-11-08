@@ -160,9 +160,9 @@ Hardcount's migrations create the indexes its queries need. Check `pg_stat_user_
 |---|---|---|
 | Postgres 16 | ✅ Tested | CI, every PR (`postgres:16-alpine`) |
 | AWS RDS for Postgres 16 | ✅ Exercised | The AWS benchmark rig. Set `rds.force_ssl=1` and use `sslmode=require` in the database URLs. |
-| Postgres 18 | ⚠️ Expected | CI applies the migrations on `postgres:18-alpine` for every PR; the tests run only on 16 |
-| Postgres 15, 17 | ⚠️ Expected | Not run in CI. CI runs 16 and 18, on each side of 17. It applied the migrations on 14, below 15, until 2026-11-08. |
-| Postgres 14 | ❌ Not supported | End of life on 2026-11-12. Move to 15 or newer; 16 is the tested version. |
+| Postgres 15, 18 | ⚠️ Expected | CI applies the migrations on `postgres:15-alpine` and `postgres:18-alpine` for every PR; the tests run only on 16 |
+| Postgres 17 | ⚠️ Expected | No migration uses syntax newer than 15; not run in CI |
+| Postgres 14 | ❌ Not supported | End of life on 2026-11-12. Move to 16, the tested version. |
 | Google Cloud SQL for Postgres | ⚠️ Expected | Standard Postgres; not tested |
 | Aurora Postgres | ⚠️ Expected | Its storage works differently, which may slow long billing runs; not tested |
 | TimescaleDB | ⚠️ Untested | Compatible with Postgres; turning `usage_events` into a hypertable is untested |
