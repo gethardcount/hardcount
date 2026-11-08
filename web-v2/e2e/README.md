@@ -77,10 +77,13 @@ the screen, and that the main things an operator does work end to end.
   Trying again in a moment." at once, then load the customer by itself.
 - `workspace-settings.spec.ts` holds back the account settings. Create plan
   and Grant credits must stay disabled until they load, then send the
-  account currency. It also saves a new time zone and currency in Settings,
-  and the Usage page and Create plan must use them without a reload. The
-  browser answers the settings reads and the save, so the account's real
-  settings never change.
+  account currency. Grant credits must say it is loading. When the read
+  fails, it must say so, with a Retry that loads it. The spec also saves a
+  new time zone and currency in Settings. The Usage page and Create plan
+  must use them without a reload, also after a switch to the other mode,
+  and Home must read its figures again. The browser answers the settings
+  reads, the save and the mode switch, so the account's real settings and
+  the shared session's mode never change.
 - `global.setup.ts` runs first. It seeds data through the API (code in
   `fixtures/`) and signs in once through the login page. The other tests reuse
   that session.

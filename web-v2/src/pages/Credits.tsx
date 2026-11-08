@@ -687,8 +687,8 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
   // The customer's billing currency: the caller's when it knows it, else the
   // picked customer's (lib/customerCurrency). Undefined with no customer
   // picked, or while a read is loading or failed.
-  const resolvedCurrency = useCustomerCurrency(effectiveCustomerId || undefined)
-  const customerCurrency = effectiveCustomerId ? (currency ?? resolvedCurrency?.currency) : undefined
+  const currencyRead = useCustomerCurrency(effectiveCustomerId || undefined)
+  const customerCurrency = effectiveCustomerId ? (currency ?? currencyRead.currency?.currency) : undefined
   // A deduction draws on the credit in one currency, so it offers only the
   // currencies with a positive balance. Same key as the customer page's
   // balance, so the read is shared.
@@ -710,8 +710,9 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
       ?? deductable[0])?.currency
     : (pickedCurrency ?? customerCurrency)
   const [currencyError, setCurrencyError] = useState('')
-  // A grant waits for its currency: the customer's, once every read behind it
-  // has loaded (the account settings too), or one the operator picks.
+  // A grant waits for its currency: the customer's, once the reads behind it
+  // have loaded, or one the operator picks. Under the picker, the dialog says
+  // it is loading, or that a read failed, so the disabled button has a reason.
   const grantWaitsForCurrency = !isDeduct && !!effectiveCustomerId && !dialogCurrency
   // The confirm step names the customer; with the server-searched picker
   // there's no local list to look it up in, so fetch the picked one.
@@ -851,6 +852,14 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                     ? 'Removed from the balance in this currency only.'
                     : "Pays only this customer's invoices in this currency. It is never converted."}
                 </p>
+                {grantWaitsForCurrency && (currencyRead.failure ? (
+                  <LoadError what="this customer's currency" error={currencyRead.failure.error}
+                    onRetry={currencyRead.failure.retry} className="py-3">
+                    You can also pick a currency above.
+                  </LoadError>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Loading this customer's currency…</p>
+                ))}
                 {currencyError && <p className="text-destructive text-sm">{currencyError}</p>}
               </div>
 

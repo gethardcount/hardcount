@@ -39,3 +39,16 @@ export function invalidateMoneySurfaces(
   qc.invalidateQueries({ queryKey: ['subscription-invoices'] })
   qc.invalidateQueries({ queryKey: ['command-palette', 'invoices'] })
 }
+
+// The reads the server scopes to, or orders by, the account's default
+// currency: Home's figures and revenue chart (GET /v1/analytics/overview and
+// /revenue-chart), the Dunning page's at-risk total and the credit note
+// totals (the default currency first). A Settings save that changes the
+// default currency invalidates them, so no page keeps the old currency's
+// figures.
+export function invalidateDefaultCurrencyFigures(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ['dashboard-overview'] })
+  qc.invalidateQueries({ queryKey: ['dashboard-chart'] })
+  qc.invalidateQueries({ queryKey: ['dunning-stats'] })
+  qc.invalidateQueries({ queryKey: ['credit-notes', 'stats'] })
+}

@@ -13,7 +13,9 @@ import { tenantSettingsQuery } from '@/hooks/useTenantSettings'
 // It sits inside AuthProvider in main.tsx, so useAuth resolves, and mounts
 // before sign-in. Its query therefore stays on the query client from before
 // sign-in, a cache of its own: a Settings save does not reach it, so the save
-// sets the module value itself (pages/Settings.tsx).
+// sets the module value itself (pages/Settings.tsx). A test/live switch
+// remounts it onto that mode's client, which a save does reach: it writes
+// both modes' caches, so the remount sets the saved zone, not an older one.
 export function TenantTimezoneBootstrap() {
   const { user } = useAuth()
   const { data } = useQuery({ ...tenantSettingsQuery, enabled: !!user })

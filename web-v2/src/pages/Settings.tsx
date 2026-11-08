@@ -8,7 +8,8 @@ import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api, setTenantTimezone, formatTaxRate, type StripeProviderCredentials } from '@/lib/api'
 import { updateTenantSettings } from '@/lib/gen/queries.gen'
-import { tenantSettingsQuery } from '@/hooks/useTenantSettings'
+import { tenantSettingsQuery, writeSavedSettings } from '@/hooks/useTenantSettings'
+import { useBothModeQueryClients } from '@/contexts/modeQueryClients'
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { taxExampleAmounts } from '@/lib/taxExample'
 import { dollarsToWholeCents, percentRate } from '@/lib/priceInput'
@@ -177,6 +178,7 @@ export default function SettingsPage() {
   const livemode = user?.livemode ?? false
   const sharedNotice = sharedSettingsNotice(livemode)
   const queryClient = useQueryClient()
+  const modeClients = useBothModeQueryClients()
 
   const formMethods = useForm<SettingsFormData>({
     resolver: zodResolver(settingsSchema),
@@ -301,12 +303,15 @@ export default function SettingsPage() {
       setNextInvoiceSeq(updated.next_invoice_sequence)
       // Every page reads the settings query, so the saved values reach
       // them at once: the currency a new plan is created in, the zone of
-      // date filters, the seller on a draft invoice.
-      queryClient.setQueryData(tenantSettingsQuery.queryKey, updated)
+      // date filters, the seller on a draft invoice. Test and live mode
+      // share the settings, so the save goes into both modes' caches, and
+      // a new default currency refreshes the figures scoped to it.
+      writeSavedSettings(modeClients, updated)
       // formatDate and formatDateTime read the zone from a module value.
-      // TenantTimezoneBootstrap sets it from its own copy of the settings,
-      // which this save does not reach (it mounts before sign-in, so its
-      // query lives in the signed-out query client). Set it here.
+      // Until the first mode switch, TenantTimezoneBootstrap reads its own
+      // copy of the settings, which this save does not reach (it mounts
+      // before sign-in, so its query lives in the signed-out query client).
+      // Set it here.
       setTenantTimezone(updated.timezone ? normalizeTimezone(updated.timezone) : null)
       toast.success('Settings saved')
     } catch (err) {
