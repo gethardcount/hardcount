@@ -21,9 +21,9 @@ type AuditWriter interface {
 
 // Handler serves the tenant-facing Stripe connection endpoints. Mount under
 // /v1/settings/stripe with auth middleware that populates the tenant ctx.
-// The mode in the body or path names the connection. The service decides
-// whether the caller may manage that mode: a dashboard session manages both,
-// and an API key only its own.
+// The mode in the body or path names the connection. The service refuses a
+// mode other than the caller's own: an API key's, or the mode a dashboard
+// session is in.
 type Handler struct {
 	svc         *Service
 	auditLogger AuditWriter

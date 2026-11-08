@@ -17,12 +17,11 @@ import (
 // internal path returns plaintext secrets for making Stripe API calls.
 //
 // All operations run under TxBypass and filter by (tenant_id, livemode)
-// explicitly in WHERE clauses. RLS is skipped because this store is the
-// single boundary that administers credentials across BOTH modes for the
-// same tenant — a dashboard session in one mode still manages the other
-// mode's connection. Callers (service, resolver, webhook verifier) are
-// responsible for authorizing tenant and mode access before invoking store
-// methods; the Service's request-facing methods check the mode.
+// explicitly in WHERE clauses. GetByID must: the inbound Stripe webhook finds
+// its row by endpoint id before it knows the tenant or mode. Callers (service,
+// resolver, webhook verifier) are responsible for authorizing tenant and mode
+// access before invoking store methods: the Service's request-facing methods
+// let a caller manage only its own mode's connection.
 type Store struct {
 	db  *postgres.DB
 	enc *crypto.Encryptor
@@ -220,12 +219,11 @@ func (s *Store) ClearKeyRejected(ctx context.Context, tenantID string, livemode 
 }
 
 // ListByTenant returns the public view (no secrets) for all modes connected
-// under the tenant. Never more than two rows (test + live).
+// under the tenant. Never more than two rows (test + live). Service.List
+// keeps only the caller's own mode.
 func (s *Store) ListByTenant(ctx context.Context, tenantID string) ([]domain.StripeProviderCredentials, error) {
-	// Settings/credentials UI needs to show both modes side by side, but the
-	// tenant ctx carries only one livemode at a time. Bypass RLS and scope
-	// by tenant_id explicitly — the handler enforces that the caller's auth
-	// matches tenantID before we reach here.
+	// Scoped by tenant_id explicitly, like every method here: the handler
+	// enforces that the caller's auth matches tenantID before we reach here.
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err

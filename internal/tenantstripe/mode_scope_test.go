@@ -14,9 +14,10 @@ func principal(kt hardcountauth.KeyType, live bool) context.Context {
 	return hardcountauth.WithKeyType(postgres.WithLivemode(context.Background(), live), kt)
 }
 
-// TestCheckMode pins who manages which mode's Stripe connection. A dashboard
-// session manages both modes, from either mode. An API key manages only its
-// own mode. A caller with no mode on its ctx is refused.
+// TestCheckMode pins who manages which mode's Stripe connection. Every caller
+// manages only the connection of its own mode: an API key the mode it was
+// made in, a dashboard session the mode it is in. A caller with no mode on its
+// ctx is refused.
 func TestCheckMode(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -28,9 +29,12 @@ func TestCheckMode(t *testing.T) {
 		{"test key, live connection", principal(hardcountauth.KeyTypeSecret, false), true, errs.ErrForbidden},
 		{"live key, live connection", principal(hardcountauth.KeyTypeSecret, true), true, nil},
 		{"live key, test connection", principal(hardcountauth.KeyTypeSecret, true), false, errs.ErrForbidden},
-		{"test-mode session, live connection", principal(hardcountauth.KeyTypeSession, false), true, nil},
-		{"live-mode session, test connection", principal(hardcountauth.KeyTypeSession, true), false, nil},
+		{"test-mode session, test connection", principal(hardcountauth.KeyTypeSession, false), false, nil},
+		{"test-mode session, live connection", principal(hardcountauth.KeyTypeSession, false), true, errs.ErrForbidden},
+		{"live-mode session, live connection", principal(hardcountauth.KeyTypeSession, true), true, nil},
+		{"live-mode session, test connection", principal(hardcountauth.KeyTypeSession, true), false, errs.ErrForbidden},
 		{"key with no mode", hardcountauth.WithKeyType(context.Background(), hardcountauth.KeyTypeSecret), false, postgres.ErrLivemodeUnset},
+		{"session with no mode", hardcountauth.WithKeyType(context.Background(), hardcountauth.KeyTypeSession), true, postgres.ErrLivemodeUnset},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -49,25 +53,29 @@ func TestCheckMode(t *testing.T) {
 }
 
 // TestService_RefusesOtherModeBeforeWriting: each write the service takes from
-// a request checks the mode before anything else. The service here has no
-// store, so a write that skipped the check would reach the nil store and
-// panic instead of returning ErrForbidden.
+// a request checks the mode before anything else, for a key and a session
+// alike. The service here has no store, so a write that skipped the check
+// would reach the nil store and panic instead of returning ErrForbidden.
 func TestService_RefusesOtherModeBeforeWriting(t *testing.T) {
 	svc := NewService(nil, nil)
-	ctx := principal(hardcountauth.KeyTypeSecret, false)
 	const tenantID = "hc_ten_mode_scope"
-
-	_, err := svc.Connect(ctx, tenantID, ConnectInput{Livemode: true, SecretKey: fakeSKLive, PublishableKey: fakePKLive})
-	if !errors.Is(err, errs.ErrForbidden) {
-		t.Errorf("Connect live with a test key = %v, want ErrForbidden", err)
+	for _, tc := range []struct {
+		name string
+		kt   hardcountauth.KeyType
+	}{{"test key", hardcountauth.KeyTypeSecret}, {"test-mode session", hardcountauth.KeyTypeSession}} {
+		ctx := principal(tc.kt, false)
+		_, err := svc.Connect(ctx, tenantID, ConnectInput{Livemode: true, SecretKey: fakeSKLive, PublishableKey: fakePKLive})
+		if !errors.Is(err, errs.ErrForbidden) {
+			t.Errorf("Connect live with a %s = %v, want ErrForbidden", tc.name, err)
+		}
+		if _, err := svc.SetWebhookSecret(ctx, tenantID, true, fakeWHSec); !errors.Is(err, errs.ErrForbidden) {
+			t.Errorf("SetWebhookSecret live with a %s = %v, want ErrForbidden", tc.name, err)
+		}
+		if err := svc.Delete(ctx, tenantID, true); !errors.Is(err, errs.ErrForbidden) {
+			t.Errorf("Delete live with a %s = %v, want ErrForbidden", tc.name, err)
+		}
 	}
-	if _, err := svc.SetWebhookSecret(ctx, tenantID, true, fakeWHSec); !errors.Is(err, errs.ErrForbidden) {
-		t.Errorf("SetWebhookSecret live with a test key = %v, want ErrForbidden", err)
-	}
-	if err := svc.Delete(ctx, tenantID, true); !errors.Is(err, errs.ErrForbidden) {
-		t.Errorf("Delete live with a test key = %v, want ErrForbidden", err)
-	}
-	if _, err := svc.List(hardcountauth.WithKeyType(context.Background(), hardcountauth.KeyTypeSecret), tenantID); !errors.Is(err, postgres.ErrLivemodeUnset) {
+	if _, err := svc.List(hardcountauth.WithKeyType(context.Background(), hardcountauth.KeyTypeSession), tenantID); !errors.Is(err, postgres.ErrLivemodeUnset) {
 		t.Errorf("List with no mode on ctx = %v, want ErrLivemodeUnset", err)
 	}
 }

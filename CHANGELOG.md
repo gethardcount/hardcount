@@ -40,7 +40,7 @@ original text.
 
 ### Security
 
-- **An API key can change only its own mode's Stripe connection.** `/v1/settings/stripe` answers `403` when a key names the other mode, and a key's list holds only its own mode. The dashboard still manages both modes. Account settings, which both modes share, now change only from the dashboard ([authentication](docs/api/authentication.md), [#1618](https://github.com/gethardcount/hardcount/pull/1618)).
+- **An API key can change only its own mode's Stripe connection.** `/v1/settings/stripe` answers `403` when a key names the other mode, and a key lists only its own. A dashboard session follows the mode it is in. Account settings, which both modes share, now change only from the dashboard ([authentication](docs/api/authentication.md), [#1618](https://github.com/gethardcount/hardcount/pull/1618)).
 
 ## [0.9.2] - 2026-11-02
 

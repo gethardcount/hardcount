@@ -291,11 +291,11 @@ components:
     StripeConnectionForbidden:
       description: |
         The request names the Stripe connection of the other mode than the
-        API key's own. A test key manages only the test-mode connection,
-        and a live key only the live-mode one; a dashboard session manages
-        both. The same 403 answers a usage-only key (`hc_ingest_…`), which
-        lacks `apikey:write`, and a browser request from a page on another
-        site (`cross-site request blocked`).
+        caller's own. A test key manages only the test-mode connection, and
+        a live key only the live-mode one. A dashboard session manages the
+        connection of the mode it is in. The same 403 answers a usage-only
+        key (`hc_ingest_…`), which lacks `apikey:write`, and a browser
+        request from a page on another site (`cross-site request blocked`).
       content:
         application/json:
           schema:
@@ -304,7 +304,7 @@ components:
             error:
               type: authentication_error
               code: forbidden
-              message: "a test-mode API key can manage only the test-mode Stripe connection: use a live-mode key or the dashboard for live mode"
+              message: "a test-mode request can manage only the test-mode Stripe connection: for live mode, use a live-mode key or switch the dashboard to live mode"
               request_id: req_dbjg652q3gpgqfoq5cd0
     BodyNotAllowed:
       description: |
@@ -27896,9 +27896,9 @@ paths:
       operationId: connectStripe
       description: |
         Saves your own Stripe keys for one mode, the one `livemode` in the
-        body picks. An API key can connect only its own mode: a test key
-        test mode, a live key live mode. A dashboard session can connect
-        either. Calling it again for the
+        body picks. The caller can connect only its own mode: a test key
+        test mode, a live key live mode, and a dashboard session the mode
+        it is in. Calling it again for the
         same mode replaces the keys; a webhook secret saved before is kept
         when the body sends none. Key prefixes must match the mode:
         `sk_test_`/`rk_test_` and `pk_test_` for test, `sk_live_`/`rk_live_`
@@ -27995,9 +27995,9 @@ paths:
       description: |
         Used by the dashboard; not part of the integration API.
 
-        Returns the Stripe connections the caller manages, live first. A
-        dashboard session gets both modes, so at most two rows. An API key
-        gets only its own mode's connection. No secret values are returned,
+        Returns the Stripe connection of the caller's own mode: a key's
+        mode, or the mode a dashboard session is in. The list is empty
+        when that mode is not connected. No secret values are returned,
         only prefixes and last four characters.
       responses:
         "200":
@@ -28010,8 +28010,8 @@ paths:
                 properties:
                   data:
                     type: array
-                    maxItems: 2
-                    description: One connection per connected mode the caller manages, live first. Empty when none is connected.
+                    maxItems: 1
+                    description: The caller's own mode's connection. Empty when that mode is not connected.
                     items:
                       $ref: "#/components/schemas/StripeConnection"
               example:
@@ -28043,9 +28043,9 @@ paths:
       operationId: setStripeWebhookSecret
       description: |
         Saves the `whsec_` signing secret for a mode that is already
-        connected, without entering the API keys again. An API key can set
-        it only for its own mode; a dashboard session can set either.
-        Hardcount does not call
+        connected, without entering the API keys again. The caller can set
+        it only for its own mode: a key's mode, or the mode a dashboard
+        session is in. Hardcount does not call
         Stripe here; the secret is checked on each incoming webhook.
         Until a secret is saved, Stripe webhooks for the mode are refused.
         Writes an audit row (never the secret).
@@ -28145,9 +28145,9 @@ paths:
       description: |
         Used by the dashboard; not part of the integration API.
 
-        Deletes the saved Stripe keys and webhook secret for the mode. An
-        API key can disconnect only its own mode; a dashboard session can
-        disconnect either.
+        Deletes the saved Stripe keys and webhook secret for the mode. The
+        caller can disconnect only its own mode: a key's mode, or the mode
+        a dashboard session is in.
         Hardcount cannot reach Stripe in that mode until you connect again,
         and Stripe webhooks for it are refused. Connecting again creates a
         connection with a new `id`, so the webhook URL in Stripe must change

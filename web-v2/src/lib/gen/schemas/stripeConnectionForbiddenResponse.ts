@@ -15,10 +15,10 @@ import type { Error } from './error';
 
 /**
  * The request names the Stripe connection of the other mode than the
- * API key's own. A test key manages only the test-mode connection,
- * and a live key only the live-mode one; a dashboard session manages
- * both. The same 403 answers a usage-only key (`hc_ingest_…`), which
- * lacks `apikey:write`, and a browser request from a page on another
- * site (`cross-site request blocked`).
+ * caller's own. A test key manages only the test-mode connection, and
+ * a live key only the live-mode one. A dashboard session manages the
+ * connection of the mode it is in. The same 403 answers a usage-only
+ * key (`hc_ingest_…`), which lacks `apikey:write`, and a browser
+ * request from a page on another site (`cross-site request blocked`).
  */
 export type StripeConnectionForbiddenResponse = Error;

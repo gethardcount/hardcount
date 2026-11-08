@@ -38,7 +38,9 @@ key only live data. A key made in test mode is a test key.
 
 The Stripe connection follows the same rule. Each mode has its own, and a
 key sees and changes only its own mode's connection
-(`/v1/settings/stripe`). A test key that names live mode gets `403`.
+(`/v1/settings/stripe`). A test key that names live mode gets `403`. The
+dashboard works the same way: **Settings → Payments** shows the connection
+of the mode the dashboard is in, and the Test/Live toggle switches it.
 
 ## Key types
 
@@ -56,9 +58,7 @@ session can:
 
 - manage team members (`/v1/members`);
 - change the account settings (`PUT /v1/settings`), which test and live
-  mode share. A key can read them;
-- manage the Stripe connections of both modes, as **Settings → Payments**
-  does. A key manages only its own mode's.
+  mode share. A key can read them.
 
 ### Which key goes where
 
@@ -95,7 +95,7 @@ A test key leaks only test data, and test mode cannot charge a real card.
 | `403` | `forbidden` | `insufficient permissions: this key type does not have customer:read access` | The key's type cannot call this route; the message names the permission |
 | `403` | `forbidden` | `this endpoint requires a dashboard session — sign in to the dashboard to manage team membership` | `/v1/members` takes only a dashboard session |
 | `403` | `forbidden` | `this endpoint requires a dashboard session — sign in to the dashboard to change account settings` | `PUT /v1/settings` takes only a dashboard session |
-| `403` | `forbidden` | `a test-mode API key can manage only the test-mode Stripe connection: use a live-mode key or the dashboard for live mode` | A test key named live mode on `/v1/settings/stripe`. A live key that names test mode gets the same message with the modes swapped. |
+| `403` | `forbidden` | `a test-mode request can manage only the test-mode Stripe connection: for live mode, use a live-mode key or switch the dashboard to live mode` | A test key, or the dashboard in test mode, named live mode on `/v1/settings/stripe`. A request in live mode that names test mode gets the same message with the modes swapped. |
 | `403` | `forbidden` | `cross-site request blocked` | A browser sent a change from another site with the dashboard's cookie. A request with a Bearer key and no cookie is never refused this way. |
 | `503` | `authentication_unavailable` | `authentication is temporarily unavailable — retry shortly` | Hardcount could not reach its database to check the key. It says nothing about your key. Retry the same request. |
 

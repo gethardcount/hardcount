@@ -17404,9 +17404,9 @@ export const getConnectStripeUrl = () => {
 
 /**
  * Saves your own Stripe keys for one mode, the one `livemode` in the
- * body picks. An API key can connect only its own mode: a test key
- * test mode, a live key live mode. A dashboard session can connect
- * either. Calling it again for the
+ * body picks. The caller can connect only its own mode: a test key
+ * test mode, a live key live mode, and a dashboard session the mode
+ * it is in. Calling it again for the
  * same mode replaces the keys; a webhook secret saved before is kept
  * when the body sends none. Key prefixes must match the mode:
  * `sk_test_`/`rk_test_` and `pk_test_` for test, `sk_live_`/`rk_live_`
@@ -17495,9 +17495,9 @@ export const getListStripeConnectionsUrl = () => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Returns the Stripe connections the caller manages, live first. A
- * dashboard session gets both modes, so at most two rows. An API key
- * gets only its own mode's connection. No secret values are returned,
+ * Returns the Stripe connection of the caller's own mode: a key's
+ * mode, or the mode a dashboard session is in. The list is empty
+ * when that mode is not connected. No secret values are returned,
  * only prefixes and last four characters.
  * @summary List Stripe connections
  */
@@ -17601,9 +17601,9 @@ export const getSetStripeWebhookSecretUrl = (mode: 'test' | 'live',) => {
 
 /**
  * Saves the `whsec_` signing secret for a mode that is already
- * connected, without entering the API keys again. An API key can set
- * it only for its own mode; a dashboard session can set either.
- * Hardcount does not call
+ * connected, without entering the API keys again. The caller can set
+ * it only for its own mode: a key's mode, or the mode a dashboard
+ * session is in. Hardcount does not call
  * Stripe here; the secret is checked on each incoming webhook.
  * Until a secret is saved, Stripe webhooks for the mode are refused.
  * Writes an audit row (never the secret).
@@ -17681,9 +17681,9 @@ export const getDisconnectStripeUrl = (mode: 'test' | 'live',) => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Deletes the saved Stripe keys and webhook secret for the mode. An
- * API key can disconnect only its own mode; a dashboard session can
- * disconnect either.
+ * Deletes the saved Stripe keys and webhook secret for the mode. The
+ * caller can disconnect only its own mode: a key's mode, or the mode
+ * a dashboard session is in.
  * Hardcount cannot reach Stripe in that mode until you connect again,
  * and Stripe webhooks for it are refused. Connecting again creates a
  * connection with a new `id`, so the webhook URL in Stripe must change

@@ -77,48 +77,29 @@ type ConnectInput struct {
 	WebhookSecret  string `json:"webhook_secret,omitempty"`
 }
 
-// modeScope is which modes' Stripe connections the caller manages.
-type modeScope struct {
-	bothModes bool
-	livemode  bool // the one mode, when bothModes is false
-}
-
-// scopeOf returns the caller's scope. A dashboard session manages both
-// modes, because Settings → Payments shows and edits both connections side
-// by side. Any other caller, an API key, manages only the mode it was made
-// in, as it does with all other data. A ctx with no mode returns
+// checkMode returns errs.ErrForbidden when livemode is not the caller's own
+// mode. Each mode has its own Stripe connection, and a caller manages only
+// the one of its own mode, as it does with all other data: an API key the
+// mode it was made in, a dashboard session the mode it is in. Settings →
+// Payments shows that mode's connection, and the Test/Live toggle switches
+// the mode. Every write this service takes from a request calls checkMode
+// first, before it validates or writes anything. So the write, the
+// post-connect retry count and the handler's audit row all run in the mode
+// of the connection they change. A ctx with no mode returns
 // postgres.ErrLivemodeUnset: that is a bug at the entry point, and nothing
 // guesses a mode in its place.
-func scopeOf(ctx context.Context) (modeScope, error) {
-	if hardcountauth.GetKeyType(ctx) == hardcountauth.KeyTypeSession {
-		return modeScope{bothModes: true}, nil
-	}
-	own, err := postgres.Livemode(ctx)
-	if err != nil {
-		return modeScope{}, err
-	}
-	return modeScope{livemode: own}, nil
-}
-
-func (m modeScope) allows(livemode bool) bool {
-	return m.bothModes || m.livemode == livemode
-}
-
-// checkMode returns errs.ErrForbidden when the caller may not change the
-// Stripe connection of livemode. Every write this service takes from a
-// request calls it first, before it validates or writes anything.
 func checkMode(ctx context.Context, livemode bool) error {
-	scope, err := scopeOf(ctx)
+	own, err := postgres.Livemode(ctx)
 	if err != nil {
 		return err
 	}
-	if scope.allows(livemode) {
+	if own == livemode {
 		return nil
 	}
-	own, other := modeLabel(scope.livemode), modeLabel(livemode)
+	ownLabel, other := modeLabel(own), modeLabel(livemode)
 	return errs.Forbidden(fmt.Sprintf(
-		"a %s-mode API key can manage only the %s-mode Stripe connection: use a %s-mode key or the dashboard for %s mode",
-		own, own, other, other))
+		"a %s-mode request can manage only the %s-mode Stripe connection: for %s mode, use a %s-mode key or switch the dashboard to %s mode",
+		ownLabel, ownLabel, other, other, other))
 }
 
 func modeLabel(livemode bool) string {
@@ -236,15 +217,14 @@ func (s *Service) runPostConnectRetry(tenantID string, livemode bool, expected i
 		"duration_ms", time.Since(start).Milliseconds())
 }
 
-// List returns the public views of the connections the caller manages: both
-// modes for a dashboard session, and only its own mode for an API key.
-// Handlers enforce that the caller's auth key tenant matches tenantID before
-// calling.
+// List returns the public view of the caller's own mode's connection (see
+// checkMode), as a list of at most one. Handlers enforce that the caller's
+// auth key tenant matches tenantID before calling.
 func (s *Service) List(ctx context.Context, tenantID string) ([]domain.StripeProviderCredentials, error) {
 	if tenantID == "" {
 		return nil, errs.Required("tenant_id")
 	}
-	scope, err := scopeOf(ctx)
+	own, err := postgres.Livemode(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +233,7 @@ func (s *Service) List(ctx context.Context, tenantID string) ([]domain.StripePro
 		return nil, err
 	}
 	return slices.DeleteFunc(all, func(c domain.StripeProviderCredentials) bool {
-		return !scope.allows(c.Livemode)
+		return c.Livemode != own
 	}), nil
 }
 

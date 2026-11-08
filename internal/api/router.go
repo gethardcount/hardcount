@@ -1896,10 +1896,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// to one mode, so a key may read them but only the dashboard changes
 		// them.
 		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings", settingsH.Routes(auth.RequireSession("change account settings")))
-		// Each mode has its own Stripe connection. A key manages only its
-		// own mode's; the dashboard manages both. tenantstripe.Service
-		// enforces this, not a middleware, because the mode comes from the
-		// body or the path.
+		// Each mode has its own Stripe connection, and a caller manages only
+		// its own mode's: a key the mode it was made in, a dashboard session
+		// the mode it is in. tenantstripe.Service enforces this, not a
+		// middleware, because the mode comes from the body or the path.
 		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/stripe", tenantStripeH.Routes())
 		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/email", emailSettingsH.Routes())
 		r.With(auth.Require(auth.PermInvoiceRead)).Mount("/analytics", analyticsH.Routes())
