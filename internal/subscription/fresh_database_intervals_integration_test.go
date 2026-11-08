@@ -57,7 +57,7 @@ func TestIntervals_FreshDatabaseNeedsNoBackfill(t *testing.T) {
 	if _, err := store.SetItemPendingPlan(ctx, tenantID, active.Items[0].ID, planB.ID, ivPE); err != nil {
 		t.Fatalf("schedule plan change: %v", err)
 	}
-	if _, err := store.ApplyDuePendingItemPlansAtomic(ctx, tenantID, active.ID, ivPE); err != nil {
+	if _, err := store.ApplyDuePendingItemPlansAtomic(ctx, tenantID, active.ID, ivPE, ivPE); err != nil {
 		t.Fatalf("apply scheduled plan change: %v", err)
 	}
 	if err := store.RemoveItem(at(9*day), tenantID, added.ID); err != nil {

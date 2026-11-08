@@ -187,7 +187,6 @@ type Handler struct {
 	tzLocator   TenantLocator
 	netTerms    NetTermsReader
 	tax         ProrationTaxApplier
-	events      domain.EventDispatcher
 	auditLogger auditRecorder
 	// finalizeAudit writes the finalize audit row for a proration invoice
 	// born finalized. Its name holds "audit" so audit.MustWired refuses to
@@ -277,11 +276,6 @@ func planIDsForAudit(sub domain.Subscription) []string {
 	return ids
 }
 
-// SetEventDispatcher wires the outbound webhook dispatcher. When nil the
-// handler still functions — events just aren't emitted, which is only the
-// right behavior in narrow unit tests.
-func (h *Handler) SetEventDispatcher(d domain.EventDispatcher) { h.events = d }
-
 // SetProrationDeps sets optional dependencies for proration: the plan reader
 // and the invoice side. A proration credit is a credit note
 // (SetCreditNoteIssuer).
@@ -348,44 +342,6 @@ func (h *Handler) respondSub(w http.ResponseWriter, r *http.Request, status int,
 // *creditnote.Service; wired from router.go.
 func (h *Handler) SetCreditNoteIssuer(i CreditNoteIssuer) {
 	h.creditNotes = i
-}
-
-// fireEvent queues a subscription event after the change's transaction has
-// committed, and logs when the queue insert fails. Nothing sends the event
-// again: an insert failure, a crash or a cancelled request between the commit
-// and this insert loses it. The store's transition writers queue their events
-// in the transaction instead (ADR-040);
-// internal/arch/webhook_emit_catalog_test.go lists the sites that still come
-// through here.
-//
-// The event carries sub (ADR-131), which the caller read after the change,
-// with its items. sub must be that read: an event built from a guess would
-// tell receivers something the API does not show.
-func (h *Handler) fireEvent(ctx context.Context, tenantID, eventType string, sub domain.Subscription, extra map[string]any) {
-	if h.events == nil {
-		return
-	}
-	if err := h.events.Dispatch(ctx, tenantID, eventType, domain.SubscriptionWebhookData(sub, extra)); err != nil {
-		slog.ErrorContext(ctx, "dispatch subscription event",
-			"event_type", eventType,
-			"subscription_id", sub.ID,
-			"tenant_id", tenantID,
-			"error", err,
-		)
-	}
-}
-
-// fireItemEvent sends an item event: the subscription read after the change,
-// and item_id naming the item (gone from items on a removal). When the read
-// fails there is no true resource to send, so the event is left out, loudly.
-func (h *Handler) fireItemEvent(ctx context.Context, tenantID, eventType, subID, itemID string) {
-	sub, err := h.svc.Get(ctx, tenantID, subID)
-	if err != nil {
-		slog.ErrorContext(ctx, "subscription item event not sent: the subscription could not be read after the change",
-			"event_type", eventType, "subscription_id", subID, "item_id", itemID, "error", err)
-		return
-	}
-	h.fireEvent(ctx, tenantID, eventType, sub, map[string]any{"item_id": itemID})
 }
 
 func (h *Handler) Routes() chi.Router {
@@ -668,9 +624,8 @@ func (h *Handler) scheduleCancel(w http.ResponseWriter, r *http.Request) {
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
 	}
 
-	// The subscription carries cancel_at, cancel_at_period_end and
-	// cancel_effective_at (ADR-069: when it actually cancels).
-	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionCancelScheduled, sub, nil)
+	// subscription.cancel_scheduled is queued in the schedule's transaction
+	// (PostgresStore.ScheduleCancellation).
 
 	h.respondSub(w, r, http.StatusOK, sub)
 }
@@ -698,12 +653,8 @@ func (h *Handler) pauseCollection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The subscription's pause_collection holds behavior and resumes_at.
-	// Dunning's pause sends the same event from its own transaction
-	// (PostgresStore.SetDunningPause), with triggered_by dunning.
-	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionCollectionPaused, sub, map[string]any{
-		"triggered_by": "operator",
-	})
+	// subscription.collection_paused (triggered_by operator) is queued in
+	// the pause's transaction (PostgresStore.SetPauseCollection).
 
 	h.respondSub(w, r, http.StatusOK, sub)
 }
@@ -807,10 +758,8 @@ func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// The new trial end is the subscription's trial_end_at.
-	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionTrialExtended, sub, map[string]any{
-		"triggered_by": "operator",
-	})
+	// subscription.trial_extended (triggered_by operator) is queued in the
+	// extension's transaction (PostgresStore.ExtendTrial).
 
 	h.respondSub(w, r, http.StatusOK, sub)
 }
@@ -844,10 +793,8 @@ func (h *Handler) resumeCollection(w http.ResponseWriter, r *http.Request) {
 	// triggered_by="operator" because today's only caller is this
 	// handler; engine's cycle-scan auto-resume writes its own audit row
 	// with triggered_by="schedule" directly via Engine.SetAuditLogger.
-
-	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionCollectionResumed, sub, map[string]any{
-		"triggered_by": "operator",
-	})
+	// subscription.collection_resumed (triggered_by operator) is queued in
+	// the resume's transaction (PostgresStore.ClearPauseCollection).
 
 	h.respondSub(w, r, http.StatusOK, sub)
 }
@@ -994,7 +941,8 @@ func (h *Handler) clearScheduledCancel(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionCancelCleared, sub, nil)
+	// subscription.cancel_cleared is queued in the clear's transaction
+	// (PostgresStore.ClearScheduledCancellation).
 
 	h.respondSub(w, r, http.StatusOK, sub)
 }
@@ -1084,19 +1032,8 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, id), tenantID, domain.AuditActionUpdate, "subscription", id, subBefore.Code, payload)
 	}
 
-	// subscription.item.added carries the subscription read after the add,
-	// with the new item. When the read fails there is no true resource to
-	// send, so the event is left out, loudly.
-	if h.events != nil {
-		if subAfter, err := h.svc.Get(r.Context(), tenantID, id); err == nil {
-			h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionItemAdded, subAfter, map[string]any{
-				"item_id": item.ID,
-			})
-		} else {
-			slog.ErrorContext(r.Context(), "subscription.item.added not sent: the subscription could not be read after the add",
-				"subscription_id", id, "item_id", item.ID)
-		}
-	}
+	// subscription.item.added is queued in the add's transaction
+	// (Service.AddItemTx).
 
 	respond.JSON(w, r, http.StatusCreated, item)
 }
@@ -1258,20 +1195,10 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		_ = h.auditLogger.Log(h.auditCtx(ctx, tenantID, subID), tenantID, domain.AuditActionSubscriptionItemUpdated, "subscription", subID, auditSub.Code, payload)
 	}
 
-	// Event dispatch. Quantity changes and immediate plan changes are
-	// observable-now → subscription.item.updated. A scheduled plan change
-	// (Immediate=false, NewPlanID set) is an intent, not a mutation of the
-	// current cycle → subscription.pending_change.scheduled; the applied
-	// event fires at the cycle boundary from billing.Engine.
-	// The item in the subscription's items holds the new quantity or plan,
-	// or the scheduled one (pending_plan_id, pending_plan_effective_at).
-	if h.events != nil {
-		eventType := domain.EventSubscriptionItemUpdated
-		if input.NewPlanID != "" && !input.Immediate {
-			eventType = domain.EventSubscriptionPendingChangeScheduled
-		}
-		h.fireItemEvent(r.Context(), tenantID, eventType, subID, result.Item.ID)
-	}
+	// subscription.item.updated, or subscription.pending_change.scheduled
+	// for a scheduled plan change, is queued in the change's transaction
+	// (Service.changeItemUnderLock, or applyCrossIntervalPlanSwapTx for a
+	// swap to another billing interval).
 
 	respond.JSON(w, r, http.StatusOK, result)
 }
@@ -1297,9 +1224,9 @@ func (h *Handler) cancelPendingItemChange(w http.ResponseWriter, r *http.Request
 		})
 	}
 
-	if h.events != nil {
-		h.fireItemEvent(r.Context(), tenantID, domain.EventSubscriptionPendingChangeCanceled, subID, item.ID)
-	}
+	// subscription.pending_change.canceled is queued in the clear's
+	// transaction, and only when it canceled a change
+	// (PostgresStore.ClearItemPendingPlan).
 
 	respond.JSON(w, r, http.StatusOK, item)
 }
@@ -1385,9 +1312,8 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 		_ = h.auditLogger.Log(h.auditCtx(ctx, tenantID, subID), tenantID, domain.AuditActionUpdate, "subscription", subID, subBefore.Code, payload)
 	}
 
-	if h.events != nil {
-		h.fireItemEvent(r.Context(), tenantID, domain.EventSubscriptionItemRemoved, subID, itemID)
-	}
+	// subscription.item.removed is queued in the removal's transaction
+	// (Service.RemoveItemTx).
 
 	w.WriteHeader(http.StatusNoContent)
 }

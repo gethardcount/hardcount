@@ -76,9 +76,7 @@ func newEventRig(t *testing.T, db *postgres.DB, name string, withKeeper bool) *e
 	t.Helper()
 	r := newItemRaceRig(t, db, name, 5, withKeeper)
 	close(r.gate.release) // nothing here holds a change open
-	outbox := webhook.NewOutboxStore(db)
-	r.store.SetOutboxEnqueuer(outbox)
-	r.h.SetEventDispatcher(webhook.NewOutboxDispatcher(outbox))
+	r.store.SetOutboxEnqueuer(webhook.NewOutboxStore(db))
 	stopper := &stopAfterCommit{}
 	r.h.SetAuditLogger(stopper)
 	r.h.svc.SetAuditLogger(stopper)
@@ -431,16 +429,13 @@ func TestCancelPendingItemChange_EventOnlyWhenAChangeIsCanceled(t *testing.T) {
 		// The billing run applies the change at the period end, between the
 		// cancel's read of the item and its clear.
 		racing := &applyFirst{PostgresStore: r.store, apply: func() {
-			if _, err := r.store.ApplyDuePendingItemPlansAtomic(r.ctx, r.tenantID, r.subID, proPeriodEnd); err != nil {
+			if _, err := r.store.ApplyDuePendingItemPlansAtomic(r.ctx, r.tenantID, r.subID, proPeriodEnd, proPeriodEnd); err != nil {
 				t.Errorf("apply the change: %v", err)
 			}
 		}}
 		svc := svcWithStore(racing)
 		svc.SetPlanReader(r.h.svc.plans)
-		h := NewHandler(svc)
-		h.SetEventDispatcher(webhook.NewOutboxDispatcher(webhook.NewOutboxStore(db)))
-
-		rr := r.cancelPending(t, h, r.itemID)
+		rr := r.cancelPending(t, NewHandler(svc), r.itemID)
 		checkStatus(t, "cancel", rr, http.StatusConflict)
 		var body struct {
 			Error struct {

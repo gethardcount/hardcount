@@ -144,6 +144,7 @@ func wantResumedAt(t *testing.T, ev pauseEvent, row domain.AuditEntry, lifted ti
 
 const (
 	pausedDunning   = domain.EventSubscriptionCollectionPaused + `/"dunning"`
+	pausedOperator  = domain.EventSubscriptionCollectionPaused + `/"operator"`
 	resumedPayment  = domain.EventSubscriptionCollectionResumed + `/"payment"`
 	resumedSchedule = domain.EventSubscriptionCollectionResumed + `/"schedule"`
 
@@ -208,8 +209,9 @@ func TestLiftedPause_ANewPauseAnnouncesItsResume(t *testing.T) {
 			t.Fatalf("operator pause: %v", err)
 		}
 
-		// The operator's own collection_paused is sent by the handler.
-		evs := r.wantPauseEvents(pausedDunning, resumedPayment)
+		// The operator's own collection_paused is queued in the same
+		// transaction, after the lifted pause's resume.
+		evs := r.wantPauseEvents(pausedDunning, resumedPayment, pausedOperator)
 		rows := r.wantPauseAudit(logger, auditPausedDunning, auditResumedPayment, auditPausedOperator)
 		wantResumedAt(t, evs[1], rows[1], paid)
 	})

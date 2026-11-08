@@ -28,7 +28,6 @@ func (f *thresholdFixture) wireEvents() {
 	outbox := webhook.NewOutboxStore(f.db)
 	f.invStore.SetOutboxEnqueuer(outbox)
 	f.subStore.SetOutboxEnqueuer(outbox)
-	f.engine.SetEventDispatcher(webhook.NewOutboxDispatcher(outbox))
 }
 
 // finalizedEvents returns the data of every invoice.finalized outbox row of

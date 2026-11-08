@@ -1299,7 +1299,8 @@ func (s *Service) AddItem(ctx context.Context, tenantID, subscriptionID string, 
 // that bill one meter are checked one after the other, and an add that
 // waited on a plan swap or a period close sees what it wrote. The result
 // carries that state: the handler prices the add from it, never from its own
-// read before the tx.
+// read before the tx. subscription.item.added is queued on tx, so it commits
+// or rolls back with the add and its proration.
 func (s *Service) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, input AddItemInput) (ItemChangeResult, error) {
 	qty, err := addItemQuantity(input)
 	if err != nil {
@@ -1328,6 +1329,9 @@ func (s *Service) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscript
 		Quantity:       qty,
 	})
 	if err != nil {
+		return ItemChangeResult{}, err
+	}
+	if err := s.enqueueItemEventTx(ctx, tx, tenantID, subscriptionID, domain.EventSubscriptionItemAdded, item.ID); err != nil {
 		return ItemChangeResult{}, err
 	}
 	return ItemChangeResult{Item: item, EffectiveAt: now, pricedFrom: itemChangeBase{sub: sub}}, nil
@@ -1516,7 +1520,9 @@ func (s *Service) checkItemChange(ctx context.Context, tenantID, subscriptionID,
 // subscription row lock (#1270). It is the first statement of the change on
 // the caller's tx: UpdateItemTx's, or UpdateItem's own for a change that
 // prorates nothing. checked is the item the caller ran its checks on, before
-// the tx.
+// the tx. It queues the change's event on the same tx:
+// subscription.item.updated for a change to this period,
+// subscription.pending_change.scheduled for a scheduled one.
 //
 // A change that committed in between is seen here, not overwritten: a
 // quantity change is priced from the quantity and plan the item holds now,
@@ -1550,6 +1556,9 @@ func (s *Service) changeItemUnderLock(ctx context.Context, tx *sql.Tx, tenantID,
 		if err != nil {
 			return ItemChangeResult{}, err
 		}
+		if err := s.enqueueItemEventTx(ctx, tx, tenantID, subscriptionID, domain.EventSubscriptionItemUpdated, updated.ID); err != nil {
+			return ItemChangeResult{}, err
+		}
 		return ItemChangeResult{Item: updated, EffectiveAt: now, pricedFrom: pricedFrom}, nil
 	}
 
@@ -1578,13 +1587,32 @@ func (s *Service) changeItemUnderLock(ctx context.Context, tx *sql.Tx, tenantID,
 		if err != nil {
 			return ItemChangeResult{}, err
 		}
+		// An intent for the next period, not a change to this one. The
+		// billing run sends subscription.pending_change.applied when it
+		// applies it.
+		if err := s.enqueueItemEventTx(ctx, tx, tenantID, subscriptionID, domain.EventSubscriptionPendingChangeScheduled, updated.ID); err != nil {
+			return ItemChangeResult{}, err
+		}
 		return ItemChangeResult{Item: updated, EffectiveAt: effectiveAt, pricedFrom: pricedFrom}, nil
 	}
 	updated, err := s.store.ApplyItemPlanImmediatelyTx(ctx, tx, tenantID, item.ID, input.NewPlanID, now)
 	if err != nil {
 		return ItemChangeResult{}, err
 	}
+	if err := s.enqueueItemEventTx(ctx, tx, tenantID, subscriptionID, domain.EventSubscriptionItemUpdated, updated.ID); err != nil {
+		return ItemChangeResult{}, err
+	}
 	return ItemChangeResult{Item: updated, EffectiveAt: now, pricedFrom: pricedFrom}, nil
+}
+
+// enqueueItemEventTx queues an item event on the change's tx (ADR-040). It
+// carries the subscription as tx reads it after the change, and item_id
+// naming the item: on a removal the item is no longer in items. A
+// proration the handler writes on the same tx afterwards writes invoices
+// and credit notes, not the subscription, so the event still shows what
+// GET returns after the commit.
+func (s *Service) enqueueItemEventTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, eventType, itemID string) error {
+	return s.store.EnqueueEventTx(ctx, tx, tenantID, subscriptionID, eventType, map[string]any{"item_id": itemID})
 }
 
 // lockItemForChange locks the subscription row on tx and returns the
@@ -1698,7 +1726,8 @@ func mapPeriodMoved(err error) error {
 // here — the handler runs them POST-commit, because Stripe calls must never ride
 // a DB tx. A created new invoice is carried back on the result for that
 // post-commit FinalizeOnCreateInvoice. Caller has validated the swap (active
-// sub, plan exists + differs, same-cadence, different interval).
+// sub, plan exists + differs, same-cadence, different interval). Its last
+// write queues subscription.item.updated on the same tx.
 func (s *Service) applyCrossIntervalPlanSwapTx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -1857,6 +1886,10 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 			}
 		}
 	}
+	// Last: the event shows the new plan and the new period the swap wrote.
+	if err := s.enqueueItemEventTx(ctx, tx, tenantID, subscriptionID, domain.EventSubscriptionItemUpdated, itemID); err != nil {
+		return ItemChangeResult{}, err
+	}
 	return res, nil
 }
 
@@ -1922,7 +1955,9 @@ func (s *Service) finishReliefThenCollect(ctx context.Context, sub domain.Subscr
 }
 
 // CancelPendingItemChange clears a scheduled plan change on a single item.
-// Idempotent — a no-op if nothing was scheduled.
+// Idempotent: with nothing scheduled it returns the unchanged item and sends
+// no event. subscription.pending_change.canceled is queued only by a clear
+// that canceled a change (Store.ClearItemPendingPlan).
 func (s *Service) CancelPendingItemChange(ctx context.Context, tenantID, subscriptionID, itemID string) (domain.SubscriptionItem, error) {
 	item, err := s.store.GetItem(ctx, tenantID, itemID)
 	if err != nil {
@@ -1947,12 +1982,30 @@ func (s *Service) CancelPendingItemChange(ctx context.Context, tenantID, subscri
 		return domain.SubscriptionItem{}, err
 	}
 	if after.PendingPlanID == "" {
-		if after.PlanID == item.PendingPlanID {
-			return domain.SubscriptionItem{}, errs.InvalidState("the pending plan change already took effect when the billing period ended")
-		}
-		return after, nil
+		return pendingChangeGone(item, after)
 	}
-	return s.store.ClearItemPendingPlan(ctx, tenantID, itemID)
+	cleared, err := s.store.ClearItemPendingPlan(ctx, tenantID, itemID)
+	if !errors.Is(err, ErrNoPendingChange) {
+		return cleared, err
+	}
+	// Another cancel, or the boundary apply, committed between the read
+	// above and the clear's lock.
+	after, err = s.store.GetItem(ctx, tenantID, itemID)
+	if err != nil {
+		return domain.SubscriptionItem{}, err
+	}
+	return pendingChangeGone(item, after)
+}
+
+// pendingChangeGone answers a cancel of the change item had scheduled when
+// after, a later read of the item, has none: it took effect (the item is on
+// the scheduled plan) and the cancel is refused, or another cancel cleared
+// it and after is returned unchanged.
+func pendingChangeGone(item, after domain.SubscriptionItem) (domain.SubscriptionItem, error) {
+	if after.PlanID == item.PendingPlanID {
+		return domain.SubscriptionItem{}, errs.InvalidState("the pending plan change already took effect when the billing period ended")
+	}
+	return after, nil
 }
 
 // RemoveItem deletes an item. Removing the only remaining item on an active
@@ -1980,7 +2033,8 @@ func (s *Service) RemoveItem(ctx context.Context, tenantID, subscriptionID, item
 // Its first statement locks the subscription row, and the checks run on the
 // state read under that lock (#1270). The result carries that state: Item is
 // the item as it was removed, EffectiveAt the removal instant, and the
-// handler prices the removal credit from them.
+// handler prices the removal credit from them. subscription.item.removed is
+// queued on tx.
 func (s *Service) RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, itemID string) (ItemChangeResult, error) {
 	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
 	sub, item, err := s.lockItemForChange(ctx, tx, tenantID, subscriptionID, itemID)
@@ -1997,6 +2051,9 @@ func (s *Service) RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscr
 		return ItemChangeResult{}, errUnbilledPeriod(sub)
 	}
 	if err := s.store.RemoveItemTx(ctx, tx, tenantID, itemID); err != nil {
+		return ItemChangeResult{}, err
+	}
+	if err := s.enqueueItemEventTx(ctx, tx, tenantID, subscriptionID, domain.EventSubscriptionItemRemoved, itemID); err != nil {
 		return ItemChangeResult{}, err
 	}
 	return ItemChangeResult{Item: item, EffectiveAt: now, pricedFrom: itemChangeBase{sub: sub, item: item}}, nil

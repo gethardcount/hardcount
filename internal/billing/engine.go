@@ -78,7 +78,6 @@ type Engine struct {
 	taxCalcStore    TaxCalculationWriter
 	clock           clock.Clock
 	testClocks      TestClockReader
-	events          domain.EventDispatcher
 	noPMNotifier    NoPaymentMethodNotifier
 	stripeReady     StripeReadiness
 	invoiceEmailer  InvoiceEmailer
@@ -488,12 +487,20 @@ type SubscriptionReader interface {
 	ClosePeriod(ctx context.Context, tenantID, id string, expected subscription.PeriodSnapshot, periodStart, periodEnd, nextBillingAt time.Time, anchorDay int) error
 	// ApplyDuePendingItemPlansAtomic swaps plan_id ← pending_plan_id for every
 	// item on the subscription whose pending_plan_effective_at <= now, in one
-	// statement. Returns the refreshed items (including any that weren't due,
-	// untouched). Called at the cycle boundary so the just-closed period is
+	// statement. Returns the swapped items only, not the items that were not
+	// due. Called at the cycle boundary so the just-closed period is
 	// billed on the pre-change plan and the next period uses the new plan.
 	// Returns nil + no error when no items are due (caller proceeds with the
-	// existing plan).
-	ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, subscriptionID string, now time.Time) ([]domain.SubscriptionItem, error)
+	// existing plan). In the same transaction it queues one
+	// subscription.pending_change.applied per swapped item, stamped
+	// appliedAt.
+	ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, subscriptionID string, now, appliedAt time.Time) ([]domain.SubscriptionItem, error)
+
+	// EnqueueEventTx queues eventType for the subscription on the caller's
+	// tx, carrying the subscription as tx reads it, and extra beside it. The
+	// threshold fire queues subscription.threshold_crossed with it on the
+	// fire's transaction, so the event commits with the fire.
+	EnqueueEventTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, eventType string, extra map[string]any) error
 
 	// FireScheduledCancellationTx is the terminal cycle close (ADR-115): on
 	// the closer's tx it flips a sub with a due cancel_at / cancel_at_period_end
@@ -939,17 +946,6 @@ func (e *Engine) ReverseTax(ctx context.Context, tenantID string, req tax.Revers
 // (useful in narrow unit tests that don't exercise test-mode timing).
 func (e *Engine) SetTestClockReader(r TestClockReader) {
 	e.testClocks = r
-}
-
-// SetEventDispatcher wires the outbound webhook dispatcher. The engine sends
-// subscription.pending_change.applied at the cycle boundary, when a
-// scheduled item plan change takes effect, and
-// subscription.threshold_crossed when a spend threshold fires. Both are
-// queued after their transaction commits. Without a dispatcher neither is
-// sent (narrow billing unit tests). An invoice the engine creates queues
-// its invoice.finalized itself, in the invoice store.
-func (e *Engine) SetEventDispatcher(d domain.EventDispatcher) {
-	e.events = d
 }
 
 // SetNoPaymentMethodNotifier wires the customer-notification dispatcher
@@ -2547,16 +2543,13 @@ func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Su
 		}
 	}
 	if anyDue {
-		// Snapshot the item IDs whose pending change is due BEFORE the
-		// atomic swap — ApplyDuePendingItemPlansAtomic returns the full
-		// refreshed item set (due + not-due) with pending_plan_id
-		// cleared, so we can't tell post-hoc which rows actually
-		// changed. This pre-swap list is what we fire
-		// subscription.pending_change.applied events for. The outgoing
-		// plan itself is captured in subscription_item_changes by the
-		// DB trigger (migration 0029) — the segment-aware base-fee
-		// loop further down reads that history rather than carrying a
-		// snapshot map through this function.
+		// Snapshot the items whose pending change is due before the
+		// swap: the audit rows below record the plan each one leaves.
+		// The outgoing plan itself is captured in
+		// subscription_item_changes by the DB trigger (migration 0029) —
+		// the segment-aware base-fee loop further down reads that
+		// history rather than carrying a snapshot map through this
+		// function.
 		dueItems := make([]domain.SubscriptionItem, 0)
 		for _, it := range sub.Items {
 			if pendingPlanDue(it, gate) {
@@ -2567,8 +2560,10 @@ func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Su
 		// SQL filter inside ApplyDuePendingItemPlansAtomic uses the
 		// gate value to select rows: WHERE pending_plan_effective_at
 		// <= $gate. Same semantics as the Go-side check above so
-		// in-memory and DB views agree.
-		applied, err := e.subs.ApplyDuePendingItemPlansAtomic(ctx, sub.TenantID, sub.ID, gate)
+		// in-memory and DB views agree. The store queues one
+		// subscription.pending_change.applied per swapped item in the
+		// swap's transaction, stamped with this close's instant.
+		applied, err := e.subs.ApplyDuePendingItemPlansAtomic(ctx, sub.TenantID, sub.ID, gate, now)
 		if err != nil && !errors.Is(err, errs.ErrNotFound) {
 			return sub, fmt.Errorf("apply pending item plans: %w", err)
 		}
@@ -2579,22 +2574,12 @@ func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Su
 				"items_changed", len(applied),
 			)
 
-			// Post-swap the plan swap is durable. Two INDEPENDENT consequences
-			// follow, and they are deliberately no longer nested one inside the
-			// other: the outbound webhook, and the audit row.
-			//
-			// The audit emission used to live inside `if e.events != nil`, so a
-			// deployment with no event dispatcher wired wrote NO AUDIT ROW for a
-			// plan swap that really happened — audit coverage silently riding on
-			// webhook wiring, which is a completely different concern. Evidence
-			// that a mutation occurred must not depend on whether anyone is
-			// listening for it.
+			// The swap and its events committed. Record the evidence of each
+			// swap in the audit log.
 			newPlanByItem := make(map[string]string, len(applied))
 			for _, it := range applied {
 				newPlanByItem[it.ID] = it.PlanID
 			}
-
-			// EVIDENCE: the swap happened; record it. Independent of the webhook.
 			if e.auditLogger != nil {
 				for _, was := range dueItems {
 					_ = e.auditLogger.Log(ctx, sub.TenantID, domain.AuditActionSubscriptionPendingChangeApplied, "subscription", sub.ID, sub.Code, map[string]any{
@@ -2602,35 +2587,6 @@ func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Su
 						"old_plan_id": was.PlanID,
 						"new_plan_id": newPlanByItem[was.ID],
 					})
-				}
-			}
-
-			// NOTIFICATION: one event per transitioned item, only on a successful
-			// swap so a half-applied state doesn't lie to webhook consumers.
-			// Each carries the subscription read right after the swap
-			// (ADR-131): the new plan is the item's plan_id; the plan it left
-			// is gone from it, so it rides beside it.
-			if e.events != nil {
-				swapped, err := e.subs.Get(ctx, sub.TenantID, sub.ID)
-				if err != nil {
-					slog.Error("subscription.pending_change.applied not sent: the subscription could not be read after the swap",
-						"subscription_id", sub.ID, "tenant_id", sub.TenantID, "error", err)
-				} else {
-					for _, was := range dueItems {
-						payload := domain.SubscriptionWebhookData(swapped, map[string]any{
-							"item_id":     was.ID,
-							"old_plan_id": was.PlanID,
-							"applied_at":  now.UTC(),
-						})
-						if err := e.events.Dispatch(ctx, sub.TenantID, domain.EventSubscriptionPendingChangeApplied, payload); err != nil {
-							slog.Error("dispatch subscription.pending_change.applied",
-								"subscription_id", sub.ID,
-								"item_id", was.ID,
-								"tenant_id", sub.TenantID,
-								"error", err,
-							)
-						}
-					}
 				}
 			}
 		}

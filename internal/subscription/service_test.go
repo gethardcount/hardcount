@@ -29,6 +29,32 @@ type memStore struct {
 	subs               map[string]domain.Subscription
 	items              map[string]domain.SubscriptionItem
 	itemChanges        []domain.SubscriptionItemChange
+	// events records each EnqueueEventTx call: the item events the service
+	// queues on the change's tx. The store's own writers queue the
+	// lifecycle events, which the real-Postgres tests check.
+	events []capturedEvent
+}
+
+// EnqueueEventTx records the event with the subscription as the memStore
+// holds it. WithTenantTx runs no real tx, so a failed change keeps it; the
+// rollback is tested on Postgres.
+func (m *memStore) EnqueueEventTx(ctx context.Context, _ *sql.Tx, tenantID, subscriptionID, eventType string, extra map[string]any) error {
+	sub, err := m.Get(ctx, tenantID, subscriptionID)
+	if err != nil {
+		return err
+	}
+	m.events = append(m.events, capturedEvent{tenantID: tenantID, eventType: eventType, payload: domain.SubscriptionWebhookData(sub, extra)})
+	return nil
+}
+
+// firstEvent returns the first recorded event of eventType.
+func (m *memStore) firstEvent(eventType string) (capturedEvent, bool) {
+	for _, e := range m.events {
+		if e.eventType == eventType {
+			return e, true
+		}
+	}
+	return capturedEvent{}, false
 }
 
 func newMemStore() *memStore {
@@ -782,6 +808,9 @@ func (m *memStore) ClearItemPendingPlan(ctx context.Context, tenantID, itemID st
 	it, ok := m.items[itemID]
 	if !ok || it.TenantID != tenantID {
 		return domain.SubscriptionItem{}, errs.ErrNotFound
+	}
+	if it.PendingPlanID == "" {
+		return domain.SubscriptionItem{}, ErrNoPendingChange
 	}
 	it.PendingPlanID = ""
 	it.PendingPlanEffectiveAt = nil

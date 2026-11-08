@@ -876,8 +876,8 @@ type failableSubAdapter struct {
 	moved atomic.Int32
 }
 
-func (a *failableSubAdapter) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, id string, now time.Time) ([]domain.SubscriptionItem, error) {
-	items, err := a.subStoreAdapter.ApplyDuePendingItemPlansAtomic(ctx, tenantID, id, now)
+func (a *failableSubAdapter) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, id string, now, appliedAt time.Time) ([]domain.SubscriptionItem, error) {
+	items, err := a.subStoreAdapter.ApplyDuePendingItemPlansAtomic(ctx, tenantID, id, now, appliedAt)
 	if a.afterApply != nil {
 		a.afterApply()
 	}

@@ -412,6 +412,25 @@ type mockSubs struct {
 	// handle when the test wires the real audit logger. The mock stores
 	// ignore the handle.
 	db *postgres.DB
+	// applyCalls records each ApplyDuePendingItemPlansAtomic call's gate and
+	// appliedAt.
+	applyCalls []struct{ gate, appliedAt time.Time }
+	// events records each EnqueueEventTx call. The mock does not roll it back
+	// with a failed WithTenantTx; tests of that run on Postgres.
+	events []mockSubEvent
+}
+
+// mockSubEvent is one EnqueueEventTx call.
+type mockSubEvent struct {
+	subscriptionID string
+	eventType      string
+	extra          map[string]any
+}
+
+// EnqueueEventTx records the event the engine queues on the closer's tx.
+func (m *mockSubs) EnqueueEventTx(_ context.Context, _ *sql.Tx, _, subscriptionID, eventType string, extra map[string]any) error {
+	m.events = append(m.events, mockSubEvent{subscriptionID: subscriptionID, eventType: eventType, extra: extra})
+	return nil
 }
 
 // WithTenantTx models the closer tx: fn runs against the in-memory row, and
@@ -630,7 +649,9 @@ func (m *mockSubs) CancelAtTrialEnd(_ context.Context, _, id string, observedTri
 // the subscription whose pending change is due (effective_at <= now), swap
 // plan_id ← pending_plan_id and clear the pending fields in one pass. Returns
 // the applied items so the engine can audit which swaps landed at this cycle.
-func (m *mockSubs) ApplyDuePendingItemPlansAtomic(_ context.Context, _, id string, now time.Time) ([]domain.SubscriptionItem, error) {
+// It records the call; the store's events are tested on Postgres.
+func (m *mockSubs) ApplyDuePendingItemPlansAtomic(_ context.Context, _, id string, now, appliedAt time.Time) ([]domain.SubscriptionItem, error) {
+	m.applyCalls = append(m.applyCalls, struct{ gate, appliedAt time.Time }{now, appliedAt})
 	s, ok := m.subs[id]
 	if !ok {
 		return nil, errs.ErrNotFound
@@ -2656,30 +2677,12 @@ func TestEffectiveNowForInvoice_OneOffCustomerPath(t *testing.T) {
 	}
 }
 
-// capturingEventDispatcher records every Dispatch call for event-firing tests.
-type capturingEventDispatcher struct {
-	events []struct {
-		tenantID  string
-		eventType string
-		payload   map[string]any
-	}
-}
-
-func (d *capturingEventDispatcher) Dispatch(_ context.Context, tenantID, eventType string, payload map[string]any) error {
-	d.events = append(d.events, struct {
-		tenantID  string
-		eventType string
-		payload   map[string]any
-	}{tenantID, eventType, payload})
-	return nil
-}
-
-// TestRunCycle_FiresPendingChangeAppliedEvent locks in P0 #2: when a due
-// pending item plan change rolls in at the cycle boundary, the engine must
-// emit subscription.pending_change.applied per swapped item so downstream
-// systems (analytics, revrec, customer notifications) don't have to poll for
-// state diffs to know the change landed.
-func TestRunCycle_FiresPendingChangeAppliedEvent(t *testing.T) {
+// TestRunCycle_AppliesPendingChangeAtTheClose: when a due pending item plan
+// change rolls in at the cycle boundary, the engine applies it at the
+// period end and stamps it with the close's instant. The store queues
+// subscription.pending_change.applied with that instant in the swap's
+// transaction (TestCycleClose_ContextEndsAfterPlanChangeApplies_PendingChangeAppliedIsQueued).
+func TestRunCycle_AppliesPendingChangeAtTheClose(t *testing.T) {
 	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 	effectiveAt := periodEnd
@@ -2712,45 +2715,20 @@ func TestRunCycle_FiresPendingChangeAppliedEvent(t *testing.T) {
 
 	invoices := &mockInvoices{}
 	usage := &mockUsage{totals: map[string]int64{}}
-	dispatcher := &capturingEventDispatcher{}
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
-	engine.SetEventDispatcher(dispatcher)
 
 	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 
-	var applied map[string]any
-	for _, ev := range dispatcher.events {
-		if ev.eventType == domain.EventSubscriptionPendingChangeApplied {
-			applied = ev.payload
-			if ev.tenantID != "t1" {
-				t.Errorf("tenant_id: got %q, want t1", ev.tenantID)
-			}
-			break
-		}
+	// The gate is the period end, and the close's instant is its boundary
+	// (NextBillingAt), not the clock: a late close stamps the contracted
+	// instant (playbook class J).
+	if len(subs.applyCalls) != 1 || !subs.applyCalls[0].gate.Equal(periodEnd) || !subs.applyCalls[0].appliedAt.Equal(periodEnd) {
+		t.Fatalf("apply calls %+v, want one with gate and appliedAt %v", subs.applyCalls, periodEnd)
 	}
-	if applied == nil {
-		types := make([]string, 0, len(dispatcher.events))
-		for _, ev := range dispatcher.events {
-			types = append(types, ev.eventType)
-		}
-		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionPendingChangeApplied, types)
-	}
-	if applied["item_id"] != "si_1" {
-		t.Errorf("item_id: got %v, want si_1", applied["item_id"])
-	}
-	if applied["old_plan_id"] != "pln_old" {
-		t.Errorf("old_plan_id: got %v, want pln_old", applied["old_plan_id"])
-	}
-	if err := domain.CheckWebhookData(domain.EventSubscriptionPendingChangeApplied, applied); err != nil {
-		t.Error(err)
-	}
-	// The new plan is the item's plan in the subscription the event carries.
-	sub, _ := applied[domain.WebhookResourceSubscription].(map[string]any)
-	items, _ := sub["items"].([]any)
-	if len(items) != 1 || items[0].(map[string]any)["plan_id"] != "pln_new" {
-		t.Errorf("subscription items: got %v, want si_1 on pln_new", items)
+	if it := subs.subs["sub_1"].Items[0]; it.PlanID != "pln_new" || it.PendingPlanID != "" {
+		t.Errorf("item after the close: plan %q pending %q, want pln_new and none", it.PlanID, it.PendingPlanID)
 	}
 }
 
@@ -2847,10 +2825,10 @@ func TestRunCycle_TaxProviderErrorDefersInvoice(t *testing.T) {
 	}
 }
 
-// TestRunCycle_NoPendingChangeNoAppliedEvent ensures the event is gated on an
-// actual swap — a subscription billing on its existing plan with no pending
-// change must not emit a spurious applied event.
-func TestRunCycle_NoPendingChangeNoAppliedEvent(t *testing.T) {
+// TestRunCycle_NoPendingChange_AppliesNothing: a subscription billing on its
+// existing plan with no pending change runs no apply, so the store has
+// nothing to announce.
+func TestRunCycle_NoPendingChange_AppliesNothing(t *testing.T) {
 	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 
@@ -2875,18 +2853,14 @@ func TestRunCycle_NoPendingChangeNoAppliedEvent(t *testing.T) {
 	}
 	invoices := &mockInvoices{}
 	usage := &mockUsage{totals: map[string]int64{}}
-	dispatcher := &capturingEventDispatcher{}
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
-	engine.SetEventDispatcher(dispatcher)
 
 	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 
-	for _, ev := range dispatcher.events {
-		if ev.eventType == domain.EventSubscriptionPendingChangeApplied {
-			t.Fatalf("applied event fired without a pending change: %+v", ev)
-		}
+	if len(subs.applyCalls) != 0 {
+		t.Fatalf("apply calls %+v without a pending change, want none", subs.applyCalls)
 	}
 }
 
@@ -2924,9 +2898,7 @@ func TestRunCycle_CancelAtPeriodEnd_FiresAtBoundary(t *testing.T) {
 		},
 	}
 	invoices := &mockInvoices{}
-	dispatcher := &capturingEventDispatcher{}
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
-	engine.SetEventDispatcher(dispatcher)
 
 	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -2949,17 +2921,9 @@ func TestRunCycle_CancelAtPeriodEnd_FiresAtBoundary(t *testing.T) {
 	if updated.NextBillingAt != nil {
 		t.Error("next_billing_at must be nil on canceled sub")
 	}
-
-	// subscription.canceled (canceled_by=schedule) moved IN-TX to the
-	// store's FireScheduledCancellation writer (DispatchTx subscription
-	// subset, 2026-07-05) — the engine must NOT also dispatch it
-	// post-commit (double-emit). In-tx enqueue + provenance payload proven
-	// by the real-Postgres lifecycle_outbox_integration_test.go.
-	for _, ev := range dispatcher.events {
-		if ev.eventType == domain.EventSubscriptionCanceled {
-			t.Fatalf("%s must not be dispatched post-commit — it is enqueued in the cancel tx", domain.EventSubscriptionCanceled)
-		}
-	}
+	// subscription.canceled (canceled_by=schedule) is queued in the cancel
+	// tx by the store's FireScheduledCancellation writer, proven by the
+	// real-Postgres lifecycle_outbox_integration_test.go.
 }
 
 // TestRunCycle_CancelAt_FiresWhenTimestampReached covers the timestamp-based
@@ -3172,9 +3136,7 @@ func TestRunCycle_Trial_Active_SkipsBillingAndAdvancesCycle(t *testing.T) {
 		},
 	}
 	invoices := &mockInvoices{}
-	dispatcher := &capturingEventDispatcher{}
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
-	engine.SetEventDispatcher(dispatcher)
 
 	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -3221,12 +3183,10 @@ func TestRunCycle_Trial_Ended_AutoActivatesAndBills(t *testing.T) {
 		},
 	}
 	invoices := &mockInvoices{}
-	dispatcher := &capturingEventDispatcher{}
 	// Per-test fake clock (this sub's periodEnd is March 2026, not
 	// the April default used by billingTestClock).
 	clk := clock.NewFake(periodEnd.Add(time.Nanosecond))
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, clk))
-	engine.SetEventDispatcher(dispatcher)
 
 	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -3246,17 +3206,9 @@ func TestRunCycle_Trial_Ended_AutoActivatesAndBills(t *testing.T) {
 	if updated.ActivatedAt == nil {
 		t.Error("activated_at should be stamped after trial-end auto-flip")
 	}
-
-	// subscription.trial_ended moved IN-TX to the store's ActivateAfterTrial
-	// writer (DispatchTx subscription subset, 2026-07-05) — the engine must
-	// NOT also dispatch it post-commit (that would double-emit). The in-tx
-	// enqueue + payload is proven by the real-Postgres
+	// subscription.trial_ended is queued in the activation tx by the
+	// store's ActivateAfterTrial writer, proven by the real-Postgres
 	// lifecycle_outbox_integration_test.go.
-	for _, ev := range dispatcher.events {
-		if ev.eventType == domain.EventSubscriptionTrialEnded {
-			t.Fatalf("%s must not be dispatched post-commit — it is enqueued in the activation tx", domain.EventSubscriptionTrialEnded)
-		}
-	}
 }
 
 // TestRunCycle_Trial_Ended_InAdvance_CoversTrialEndPeriod locks in the
