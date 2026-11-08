@@ -33,7 +33,7 @@ original text.
 
 ### Added
 
-- **A restored database catches up with Stripe before Hardcount serves it.** Started on a restored database, Hardcount could charge or refund again money Stripe moved after the backup. Now the restore pauses billing, and Hardcount refuses to start until `hardcount restore catch-up` has applied Stripe's events since the backup. A payment whose invoice the restore lost is listed for you to handle. [Restore Hardcount](docs/ops/restore.md) is much shorter.
+- **A restored database catches up with Stripe before Hardcount serves it.** Started on a restored database, Hardcount could charge or refund again money Stripe moved after the backup. Now the restore pauses billing, and Hardcount refuses to start until `hardcount restore catch-up` has applied Stripe's events since the backup. A payment whose invoice the restore lost is listed for you to handle. [Restore Hardcount](docs/ops/restore.md) is much shorter. ([#1633](https://github.com/gethardcount/hardcount/pull/1633))
 
 ### Changed
 
