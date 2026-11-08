@@ -250,10 +250,17 @@ any corrections. The story of how the result was reached goes in an appendix.
 
 ## Code comments
 
-These rules cover comments in Go code. The reader is a contributor, a
-maintainer or an AI agent with the code open, so a comment adds only what the
-code cannot say. The rules above still apply: one idea per
-sentence, plain words and quiet emphasis.
+These rules cover comments in Go code. Each comment serves two readers with
+the code open:
+
+- **A Go developer new to this codebase.** They understand the comment on the
+  first read, without opening another file.
+- **A maintainer about to change the code.** The comment gives them the rules,
+  invariants and traps they would otherwise break, with the reason.
+
+Making a comment easier for the first reader never removes what the second
+needs. A comment adds only what the code cannot say. The rules above still
+apply: one idea per sentence, plain words and quiet emphasis.
 
 1. **Say why, not what.** Explain the reason, the rule the code keeps, or the
    trap it avoids. Do not repeat what the next line does. If a better name
@@ -374,6 +381,9 @@ sites and the design of a superseded ADR. A caller needs these 16:
   ```
 
   A comment at the end of a code line shows up here. Check each one by hand.
+- **Review with both readers.** One reviewer reads the new comments cold, as
+  a Go developer new to the codebase. Another reads them as the maintainer,
+  next to the old text, and checks that no rule or trap was lost.
 - **Truth and clarity stay apart**, as for docs (see
   [Changing existing docs safely](#changing-existing-docs-safely)). A
   rewording PR keeps every fact. A comment that disagrees with the code is
