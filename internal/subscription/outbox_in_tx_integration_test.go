@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -519,8 +520,15 @@ func TestApplyDuePlanChanges_OneEventPerSwappedItem(t *testing.T) {
 			if err != nil {
 				t.Fatalf("apply: %v", err)
 			}
-			if len(applied) != len(left) {
-				t.Errorf("apply returned %d items, want %d: only the swapped items", len(applied), len(left))
+			swapped := map[string]string{}
+			for _, ch := range applied.Swapped {
+				swapped[ch.ItemID] = ch.OldPlanID
+			}
+			if !maps.Equal(swapped, left) {
+				t.Errorf("apply reports the swaps %v (item → plan it left), want %v", swapped, left)
+			}
+			if len(applied.Items) != 2 {
+				t.Errorf("apply returned %d items, want the subscription's 2 live items, swapped or not", len(applied.Items))
 			}
 
 			if got := r.events(t, domain.EventSubscriptionPendingChangeApplied, r.subID, ""); len(got) != len(left) {

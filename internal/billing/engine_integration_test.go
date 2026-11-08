@@ -64,7 +64,7 @@ func (a *subStoreAdapter) ClosePeriod(ctx context.Context, tenantID, id string, 
 	return a.store.ClosePeriod(ctx, tenantID, id, expected, start, end, next, anchorDay)
 }
 
-func (a *subStoreAdapter) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, id string, now, appliedAt time.Time) ([]domain.SubscriptionItem, error) {
+func (a *subStoreAdapter) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, id string, now, appliedAt time.Time) (subscription.AppliedPlanChanges, error) {
 	return a.store.ApplyDuePendingItemPlansAtomic(ctx, tenantID, id, now, appliedAt)
 }
 

@@ -39,6 +39,8 @@ Hardcount uses two database users. The admin user runs migrations; the limited u
 
 Every whole-number setting above stops start-up when its value is not a whole number, such as `5s`.
 
+Hardcount reads `DATABASE_URL` and `APP_DATABASE_URL` the way `psql` does. In the user name and password, percent-encode each special character, such as `@` as `%40` and `/` as `%2F`. When the user name or password holds an unencoded `@`, Hardcount refuses to start, and the error names the setting. When a parameter such as `sslmode` appears twice, the last value counts. `DB_PASSWORD` needs no encoding: Hardcount encodes it.
+
 ## Server and network
 
 | Setting | What it does | Default |
@@ -132,7 +134,7 @@ These are read by Docker Compose from [`deploy/compose/.env`](../deploy/compose/
 
 | Setting | What it does | Default |
 |---|---|---|
-| `POSTGRES_PASSWORD` | Password of the database admin user. Compose builds `DATABASE_URL` from it. | Required: Compose will not start without it. |
+| `POSTGRES_PASSWORD` | Password of the database admin user. Compose builds `DATABASE_URL` from it. Keep it URL-safe: `openssl rand -hex 24`. | Required: Compose will not start without it. |
 | `HARDCOUNT_APP_DB_PASSWORD` | Password of the limited `hardcount_app` user. `postgres-init.sh` creates the user with it on the first start, and Compose builds `APP_DATABASE_URL` from it. Keep it URL-safe: `openssl rand -hex 24`. | Required: Compose will not start without it. |
 | `POSTGRES_DB`, `POSTGRES_USER` | Database name and admin user name. | `hardcount` and `hardcount` |
 | `HARDCOUNT_IMAGE` | The API image to run. | `hardcount-api:local`, built from the checkout |
