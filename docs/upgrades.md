@@ -29,6 +29,9 @@ refuses a database made by Velox, a 0.8.x release or a build of Velox's
 A Velox install on one VM does not get that far: its `.env` names `VELOX_*`
 settings, so `docker compose pull` (or `build`, from source) stops with
 `required variable HARDCOUNT_APP_DB_PASSWORD is missing a value`.
+A backup made by Velox cannot be restored into Hardcount either:
+`hardcount migrate status` reports `no migration record` for a Velox 0.8.x
+backup, and `made by Velox` for one from a later build.
 
 Install Hardcount fresh, with an empty database: a new VM, or a new Compose
 data volume. Start from [Install a pinned release](production-one-vm.md#1-install-a-pinned-release).
@@ -228,12 +231,12 @@ On one VM:
      can be charged again. Check each invoice on your list from step 3 in
      Stripe, and refund a second charge.
    - **Everything else.** Run the
-     [checks after a restore](ops/backup-considerations.md#checks-after-a-restore).
+     [checks after a restore](ops/restore.md#checks-after-a-restore).
 
 With a managed Postgres, stop every copy, restore the snapshot or the point
 in time you noted into the database, start the old release on every copy,
 and then do step 6. How a restore works, and what to check before you
-start: [Restore a backup](ops/backup-considerations.md#4-restore-a-backup).
+start: [Restore Hardcount](ops/restore.md).
 
 **Next:** [Versioning](versioning.md): what a release may change, and where
 it says so.
