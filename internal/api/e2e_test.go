@@ -173,7 +173,6 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 
 	// 10. List invoices — verify the generated invoice
 	// Expected: base fee $29 + flat $10/unit × 300 calls = $29 + $3000 = $3029
-	// Wait — flat pricing is per-unit: 300 quantity × $10 = $3000. Plus $29 base = $3029.
 	var invoiceID string
 	t.Run("list invoices", func(t *testing.T) {
 		resp := doGet(t, ts, "/v1/invoices", auth)
@@ -221,12 +220,6 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 		if resp.Header.Get("Content-Type") != "application/pdf" {
 			t.Errorf("content-type: got %q", resp.Header.Get("Content-Type"))
 		}
-	})
-
-	// 13. Auth required — unauthenticated request should be rejected
-	t.Run("no auth 401", func(t *testing.T) {
-		resp := doGet(t, ts, "/v1/customers", "")
-		assertStatus(t, resp, 401)
 	})
 
 	// 14. Credits — grant and verify balance

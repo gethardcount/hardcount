@@ -20,9 +20,6 @@ import (
 // SQL site; this one proves the engine reaches them with the right customer
 // under the right tenant and mode.
 func TestEngineIssuedInvoices_CarryTheIssuedDocumentCopy(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
 

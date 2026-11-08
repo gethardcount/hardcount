@@ -466,8 +466,9 @@ func TestSetDunningPause_QueuesCollectionPausedInTheTx(t *testing.T) {
 		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil); err != nil || outcome != DunningPauseAlreadyHeld {
 			t.Fatalf("SetDunningPause = %v, %v; want DunningPauseAlreadyHeld", outcome, err)
 		}
-		if evs := r.collectionPausedEvents(); len(evs) != 0 {
-			t.Errorf("%d subscription.collection_paused events queued, want none", len(evs))
+		// Only the operator's pause announced itself.
+		if evs := r.collectionPausedEvents(); len(evs) != 1 || evs[0]["triggered_by"] != "operator" {
+			t.Errorf("subscription.collection_paused events %v, want only the operator's", evs)
 		}
 	})
 

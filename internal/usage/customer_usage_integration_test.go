@@ -204,9 +204,6 @@ func (f *customerUsageFixture) seedSubIn(
 }
 
 func TestCustomerUsage_SingleMeterFlatParity(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newCustomerUsageFixture(t, "Customer Usage Single Meter")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()
@@ -261,9 +258,6 @@ func TestCustomerUsage_SingleMeterFlatParity(t *testing.T) {
 }
 
 func TestCustomerUsage_MultiDimDimensionMatchEcho(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newCustomerUsageFixture(t, "Customer Usage Multi Dim")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()
@@ -328,9 +322,6 @@ func TestCustomerUsage_MultiDimDimensionMatchEcho(t *testing.T) {
 }
 
 func TestCustomerUsage_CrossTenantIsolation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newCustomerUsageFixture(t, "Customer Usage Cross Tenant A")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 15*time.Second)
 	defer cancel()
@@ -350,9 +341,6 @@ func TestCustomerUsage_CrossTenantIsolation(t *testing.T) {
 }
 
 func TestCustomerUsage_NoSubscriptionRequiresExplicitWindow(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newCustomerUsageFixture(t, "Customer Usage No Sub")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 15*time.Second)
 	defer cancel()
@@ -399,9 +387,6 @@ func TestCustomerUsage_NoSubscriptionRequiresExplicitWindow(t *testing.T) {
 // Mutation: rate canceled subscriptions too (filterActiveSubs), and the
 // canceled subscription's 500 cents stay in the window's totals.
 func TestCustomerUsage_ExplicitWindowLeavesOutACanceledSubscription(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newCustomerUsageFixture(t, "Customer Usage Canceled Sub")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()
@@ -459,9 +444,6 @@ func TestCustomerUsage_ExplicitWindowLeavesOutACanceledSubscription(t *testing.T
 // falls outside the period with no bucket, or meter b's previous-period
 // usage shows in a bucket but in no total.
 func TestCustomerUsage_TwoSubscriptionsOnTheirOwnPeriods(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newCustomerUsageFixture(t, "Customer Usage Two Periods")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()
@@ -525,9 +507,6 @@ func TestCustomerUsage_TwoSubscriptionsOnTheirOwnPeriods(t *testing.T) {
 // balance's read), and the meter's total drops to the usage since the fire
 // while its buckets still add up to the whole period.
 func TestCustomerUsage_WholePeriodAfterAThresholdInvoice(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newCustomerUsageFixture(t, "Customer Usage After A Fire")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()

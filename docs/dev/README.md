@@ -20,10 +20,13 @@ Hardcount: the user and operator docs start at [docs/README.md](../README.md).
    database schema.
 7. [Code standard](code-standard.md): how we write code, tooling and the
    dashboard.
-8. [Writing style](writing-style.md): how to write docs and comments here.
-9. [Contributor glossary](glossary.md): words from the code, the database
-   and the operations docs.
-10. AI coding agents start at [CLAUDE.md](../../CLAUDE.md).
+8. [Writing style](writing-style.md): how to write docs here.
+9. [Code comments](code-comments.md): how to write comments in code (Go, TypeScript, scripts and CI).
+10. [Activity lines and UI words](activity-lines.md): how to word the text
+    the dashboard shows.
+11. [Contributor glossary](glossary.md): words from the code, the database
+    and the operations docs.
+12. AI coding agents start at [CLAUDE.md](../../CLAUDE.md).
 
 ## Background
 

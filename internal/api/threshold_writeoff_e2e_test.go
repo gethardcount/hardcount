@@ -90,7 +90,6 @@ func (r *lagRig) wantSubUsageBilledOnce() {
 // Mutation check: put 'uncollectible' back in the watermark predicate →
 // April's invoice bills 105c of usage in all three forms.
 func TestThresholdWriteOff_CloseBillsOnlyTheResidual(t *testing.T) {
-	skipShort(t)
 	for _, tc := range []struct {
 		name       string
 		grantCents int64
@@ -128,7 +127,7 @@ func TestThresholdWriteOff_CloseBillsOnlyTheResidual(t *testing.T) {
 			r.run(lagB.Add(2 * time.Hour))
 			if tc.pay != nil {
 				tc.pay(r, thr, lagB.Add(3*time.Hour))
-				if s := r.invoiceStatus(thr); s != string(domain.InvoicePaid) {
+				if s := flowStr(r.invoice(thr), "status"); s != string(domain.InvoicePaid) {
 					t.Fatalf("threshold invoice status after the late payment = %s, want paid", s)
 				}
 			}
@@ -162,7 +161,6 @@ func TestThresholdWriteOff_CloseBillsOnlyTheResidual(t *testing.T) {
 // the invoice was written off first and voided after (uncollectible → voided
 // is allowed), as long as the void lands before the close.
 func TestThresholdWriteOff_VoidStillReopensTheWindow(t *testing.T) {
-	skipShort(t)
 	for _, tc := range []struct {
 		name    string
 		actions []string
@@ -197,7 +195,6 @@ func TestThresholdWriteOff_VoidStillReopensTheWindow(t *testing.T) {
 // Mutation check: put 'uncollectible' back in the watermark predicate → the
 // final invoice bills the 100 calls again.
 func TestThresholdWriteOff_ImmediateCancelBillsOnlyTheResidual(t *testing.T) {
-	skipShort(t)
 	r, fireAt, thr := thresholdFired(t)
 	r.invoiceAction(thr, "mark-uncollectible", fireAt.Add(time.Hour))
 	r.cancelNow(fireAt.Add(2 * time.Hour))
@@ -228,7 +225,6 @@ func TestThresholdWriteOff_ImmediateCancelBillsOnlyTheResidual(t *testing.T) {
 // Mutation check: put 'uncollectible' back in the watermark predicate → the
 // swap invoice bills the 100 calls again.
 func TestThresholdWriteOff_CrossIntervalSwapBillsOnlyTheResidual(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_advance", false)
 	r.ingest(time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC), 100)
 	fireAt := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)

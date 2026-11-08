@@ -29,6 +29,32 @@ type memStore struct {
 	subs               map[string]domain.Subscription
 	items              map[string]domain.SubscriptionItem
 	itemChanges        []domain.SubscriptionItemChange
+	// events records each EnqueueEventTx call: the item events the service
+	// queues on the change's tx. The store's own writers queue the
+	// lifecycle events, which the real-Postgres tests check.
+	events []capturedEvent
+}
+
+// EnqueueEventTx records the event with the subscription as the memStore
+// holds it. WithTenantTx runs no real tx, so a failed change keeps it; the
+// rollback is tested on Postgres.
+func (m *memStore) EnqueueEventTx(ctx context.Context, _ *sql.Tx, tenantID, subscriptionID, eventType string, extra map[string]any) error {
+	sub, err := m.Get(ctx, tenantID, subscriptionID)
+	if err != nil {
+		return err
+	}
+	m.events = append(m.events, capturedEvent{tenantID: tenantID, eventType: eventType, payload: domain.SubscriptionWebhookData(sub, extra)})
+	return nil
+}
+
+// firstEvent returns the first recorded event of eventType.
+func (m *memStore) firstEvent(eventType string) (capturedEvent, bool) {
+	for _, e := range m.events {
+		if e.eventType == eventType {
+			return e, true
+		}
+	}
+	return capturedEvent{}, false
 }
 
 func newMemStore() *memStore {
@@ -782,6 +808,9 @@ func (m *memStore) ClearItemPendingPlan(ctx context.Context, tenantID, itemID st
 	it, ok := m.items[itemID]
 	if !ok || it.TenantID != tenantID {
 		return domain.SubscriptionItem{}, errs.ErrNotFound
+	}
+	if it.PendingPlanID == "" {
+		return domain.SubscriptionItem{}, ErrNoPendingChange
 	}
 	it.PendingPlanID = ""
 	it.PendingPlanEffectiveAt = nil
@@ -1753,9 +1782,12 @@ func TestUpdateItem_Scheduled(t *testing.T) {
 	})
 
 	t.Run("cancel pending clears scheduled change", func(t *testing.T) {
-		updated, err := svc.CancelPendingItemChange(ctx, "t1", sub.ID, itemID)
+		updated, canceled, err := svc.CancelPendingItemChange(ctx, "t1", sub.ID, itemID)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+		if !canceled {
+			t.Error("canceled = false, want true: a change was scheduled")
 		}
 		if updated.PendingPlanID != "" {
 			t.Errorf("pending_plan_id should be cleared: got %q", updated.PendingPlanID)
@@ -1769,9 +1801,12 @@ func TestUpdateItem_Scheduled(t *testing.T) {
 	})
 
 	t.Run("cancel with no pending is no-op", func(t *testing.T) {
-		updated, err := svc.CancelPendingItemChange(ctx, "t1", sub.ID, itemID)
+		updated, canceled, err := svc.CancelPendingItemChange(ctx, "t1", sub.ID, itemID)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+		if canceled {
+			t.Error("canceled = true, want false: nothing was scheduled")
 		}
 		if updated.PendingPlanID != "" {
 			t.Errorf("expected no pending: got %q", updated.PendingPlanID)
@@ -3713,7 +3748,7 @@ func TestSubMutators_StampSimTimeOnClockPinnedSub(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed pending plan: %v", err)
 		}
-		item, err := svc.CancelPendingItemChange(context.Background(), "t1", sub.ID, sub.Items[0].ID)
+		item, _, err := svc.CancelPendingItemChange(context.Background(), "t1", sub.ID, sub.Items[0].ID)
 		if err != nil {
 			t.Fatalf("CancelPendingItemChange: %v", err)
 		}

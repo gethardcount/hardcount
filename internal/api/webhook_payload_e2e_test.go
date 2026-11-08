@@ -593,7 +593,11 @@ func TestE2E_WebhookPayloads_CreditBalance(t *testing.T) {
 	customerID := flowStr(call("POST", "/v1/customers", map[string]any{
 		"external_id": "wp-credit", "display_name": "Webhook Payload Credit",
 	}).want(t, 201, "create customer").body, "id")
-	call("PUT", "/v1/settings", map[string]any{"credit_balance_low_threshold_cents": 1000}).want(t, 200, "set low threshold")
+	// Only a dashboard session changes settings.
+	flowDo(t, ts, "PUT", "/v1/settings", flowReq{
+		cookie: flowSignIn(t, db, ts, tenantID),
+		body:   map[string]any{"credit_balance_low_threshold_cents": 1000},
+	}).want(t, 200, "set low threshold")
 	events.next("setup")
 	balance := func(currency string) map[string]any {
 		t.Helper()

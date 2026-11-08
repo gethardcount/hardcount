@@ -260,7 +260,7 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"POST", "/v1/subscriptions/{id}/items"}:                           explicit("subscription.Handler.addItem → Log(update, subscription)."),
 	{"PATCH", "/v1/subscriptions/{id}/items/{itemID}"}:                 explicit("subscription.Handler.updateItem → Log(subscription.item_updated)."),
 	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}"}:                explicit("subscription.Handler.removeItem → Log(update, subscription)."),
-	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}/pending-change"}: explicit("subscription.Handler.cancelPendingItemChange → Log(update, subscription; metadata action=cancel_pending_item_plan_change)."),
+	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}/pending-change"}: explicit("subscription.Handler.cancelPendingItemChange → Log(update, subscription; metadata action=cancel_pending_item_plan_change). A call that canceled no change calls audit.MarkSkip."),
 
 	// --- invoices --------------------------------------------------------
 	{"POST", "/v1/invoices"}:                                                explicit("invoice.Service.Create → LogInTx(create, invoice) on the invoice's own tx."),

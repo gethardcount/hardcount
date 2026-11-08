@@ -413,3 +413,18 @@ amendment). The guard is unchanged and now holds by construction. A closer
 whose insert fails or rolls back queues nothing, and a closer whose
 transaction commits cannot lose the event to a lost lease or a crash after
 the commit.
+
+## Amendment 2026-11-08 — the engine's subscription events are queued in their transactions
+
+The effect table's `subscription.pending_change.applied` and
+`subscription.threshold_crossed` rows describe a dispatch after the commit,
+which is gone, with `Engine.SetEventDispatcher`. The subscription store
+queues `pending_change.applied` in `ApplyDuePendingItemPlansAtomic`'s
+transaction, one per swapped item, with the plan it left read under the
+subscription row lock. The threshold fire queues `threshold_crossed` on its
+fire transaction (`SubscriptionReader.EnqueueEventTx`), after the invoice
+insert (P1-01, ADR-040 amendment). The guards are unchanged: a stale
+leader's apply swaps no row, and its threshold fire rolls back at the period
+check or the invoice's unique index, so it queues nothing. A tick whose
+transaction commits cannot lose the event to a lost lease or a crash after
+the commit.

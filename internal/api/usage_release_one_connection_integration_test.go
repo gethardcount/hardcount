@@ -114,7 +114,6 @@ func TestRelease_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 	})
 
 	db.Pool.SetMaxOpenConns(1)
-	t.Cleanup(func() { db.Pool.SetMaxOpenConns(5) })
 	relCtx, relCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer relCancel()
 	res, err := usageSvc.Release(relCtx, tenantID, usage.ReleaseInput{
