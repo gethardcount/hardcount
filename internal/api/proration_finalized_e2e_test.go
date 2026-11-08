@@ -29,7 +29,6 @@ import (
 // createWithLineItemsInTx calls for every invoice born finalized → this test
 // fails on that count.
 func TestE2E_ProrationInvoice_FinalizedWebhookAndAuditRow(t *testing.T) {
-	skipShort(t)
 	changeAt := lagP0.AddDate(0, 0, 10)
 	cases := []struct {
 		name  string

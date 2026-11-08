@@ -18,7 +18,6 @@ import (
 // Real server over HTTP, real Postgres; the billing run is POST
 // /v1/billing/run.
 func TestManualInvoiceWithCycleWindow_CycleStillBills(t *testing.T) {
-	skipShort(t)
 	for _, tc := range []struct {
 		name       string
 		timing     string

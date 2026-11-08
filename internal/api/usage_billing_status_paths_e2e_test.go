@@ -20,7 +20,6 @@ import (
 // Mutation check: classify every event of the batch against the first
 // event's customer → results[1] answers outside_subscription.
 func TestBillingStatus_BatchClassifiesEachEventByItsCustomer(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	r.newSub("sub", r.planA, lagP0, nil)
 	r.must(http.MethodPost, "/v1/customers", lagP0, map[string]any{
@@ -111,7 +110,6 @@ func TestBillingStatus_TestClockPricesAtTheSimulatedPin(t *testing.T) {
 // Mutation check: classify the written rows by the split mapping's index →
 // the :output answers no_price (the 5-minute cache write's row).
 func TestBillingStatus_LiteLLMPreSplitCallIsClassifiedByItsOwnRows(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	tokens := r.newMeter("tokens", "sum")
 	plan := r.planPricing("plan_output", map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"token_type": "output"}})

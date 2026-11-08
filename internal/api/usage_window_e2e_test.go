@@ -208,7 +208,6 @@ func (r *lagRig) newTrialEndingAt(trialEnd time.Time) {
 // after the trial ended but before the expiry scan flipped it, agrees with
 // the invoice.
 func TestUsageWindow_TrialEndsMidDay_CloseBillsUsageFromTrialEnd(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	trialEnd := dayAt(18, 0)
 	r.newTrialEndingAt(trialEnd)
@@ -235,7 +234,6 @@ func TestUsageWindow_TrialEndsMidDay_CloseBillsUsageFromTrialEnd(t *testing.T) {
 // trial, canceled at 20:00 the day it ended. The final invoice bills only the
 // usage after the trial end.
 func TestUsageWindow_TrialEndsMidDay_CancelBillsUsageFromTrialEnd(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	trialEnd := dayAt(18, 0)
 	r.newTrialEndingAt(trialEnd)
@@ -259,7 +257,6 @@ func TestUsageWindow_TrialEndsMidDay_CancelBillsUsageFromTrialEnd(t *testing.T) 
 // three-day trial at 14:00 on day D. The period restarts at midnight of D and
 // the trial end is 14:00, so the usage of the morning is not billed.
 func TestUsageWindow_EndTrialEarly_BillsUsageFromTheEnd(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.newSub("trial", r.planA, dayAt(18, 0).Add(-24*time.Hour), map[string]any{"trial_days": 3})
 	r.ingest(dayAt(10, 0), 40)
@@ -281,7 +278,6 @@ func TestUsageWindow_EndTrialEarly_BillsUsageFromTheEnd(t *testing.T) {
 // TestUsageWindow_TrialEndsAtMidnight_Unchanged is the control: a trial that
 // ends at midnight leaves the first paid period's usage window as it was.
 func TestUsageWindow_TrialEndsAtMidnight_Unchanged(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.newTrialEndingAt(uwDay)
 	r.ingest(uwDay.Add(-14*time.Hour), 5) // in the trial, before the period
@@ -304,7 +300,6 @@ func TestUsageWindow_TrialEndsAtMidnight_Unchanged(t *testing.T) {
 // invoices: neither the fire's watermark nor the trial-end floor moves the
 // plan's pin.
 func TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	trialEnd := dayAt(18, 0)
 	r.newTrialEndingAt(trialEnd)
@@ -361,7 +356,6 @@ func TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce(t *testi
 // Mutation: pin every plan at the period start, and both bill the old
 // price.
 func TestUsageWindow_PriceEditDuringTrial_FirstPaidPeriodAtTheEdit(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.newTrialEndingAt(dayAt(18, 0))
 	plan := r.must(http.MethodGet, "/v1/plans/"+r.planA, dayAt(12, 0), nil, http.StatusOK)
@@ -390,7 +384,6 @@ func TestUsageWindow_PriceEditDuringTrial_FirstPaidPeriodAtTheEdit(t *testing.T)
 // threshold counts the item's usage from the trial end, the window the
 // invoice bills, not the trial usage before it.
 func TestUsageWindow_ItemThresholdAfterTrial_CountsUsageFromTrialEnd(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.newTrialEndingAt(dayAt(18, 0))
 	r.ingest(dayAt(10, 0), 40)
@@ -420,7 +413,6 @@ func TestUsageWindow_ItemThresholdAfterTrial_CountsUsageFromTrialEnd(t *testing.
 // same meter at 11:00, so its period starts at midnight. B bills its base for
 // the whole day (ADR-012) but its usage only from 10:00, where A's ended.
 func TestUsageWindow_CancelRecreateSameDay_BillsUsageOnce(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_advance", 0)
 	arrears := r.newPlan("plan_arrears", "in_arrears", 2000)
 	subA := r.newSub("sub-a", r.planA, dayAt(8, 0), nil)
@@ -451,7 +443,6 @@ func TestUsageWindow_CancelRecreateSameDay_BillsUsageOnce(t *testing.T) {
 // trial from 08:00, canceled at 10:00 (no invoice: trials are free). B starts
 // on the same meter at 11:00. The trial's usage is not B's.
 func TestUsageWindow_TrialCanceledRecreatedSameDay_TrialUsageNotBilled(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	subA := r.newSub("sub-a", r.planA, dayAt(8, 0), map[string]any{"trial_days": 1})
 	r.ingest(dayAt(9, 0), 100)
@@ -473,7 +464,6 @@ func TestUsageWindow_TrialCanceledRecreatedSameDay_TrialUsageNotBilled(t *testin
 // other subscription on the meter, B started at 11:00 bills the usage of its
 // whole first day, including 09:00 (ADR-012: the start day counts whole).
 func TestUsageWindow_NoPredecessor_StartDayUsageBilled(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.ingest(dayAt(9, 0), 30)
 	r.newSub("sub-b", r.planB, dayAt(11, 0), nil)
@@ -489,7 +479,6 @@ func TestUsageWindow_NoPredecessor_StartDayUsageBilled(t *testing.T) {
 // TestUsageWindow_PredecessorCanceledDayBefore_StartDayUsageBilled is a
 // control: A was canceled the day before, so nothing of day D is A's.
 func TestUsageWindow_PredecessorCanceledDayBefore_StartDayUsageBilled(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	dayBefore := uwDay.AddDate(0, 0, -1)
 	subA := r.newSub("sub-a", r.planA, dayBefore.Add(8*time.Hour), nil)
@@ -516,7 +505,6 @@ func TestUsageWindow_PredecessorCanceledDayBefore_StartDayUsageBilled(t *testing
 // 10:00 (a later subscription never moves an earlier one's window), and B
 // bills from 10:00 to its cancel.
 func TestUsageWindow_ItemRemovedThenMeterOnNewSub_EachBillsItsOwnPart(t *testing.T) {
-	skipShort(t)
 	r := newLagRig(t, "in_arrears", true)
 	subA := r.subID
 	r.ingest(time.Date(2026, 4, 5, 9, 0, 0, 0, time.UTC), 100)

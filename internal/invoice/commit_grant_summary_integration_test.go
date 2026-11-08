@@ -53,9 +53,6 @@ func grantSummaryFor(t *testing.T, h *commitHarness, ctx context.Context, grantI
 // TestGrantSummary_VoidRetiredIsNotUsed: $100 commit, $40 drawn, funding
 // invoice voided → the $60 the void retired is retired_cents, not used.
 func TestGrantSummary_VoidRetiredIsNotUsed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	h, ctx := newCommitHarness(t, "Grant Summary Void Retired")
 
 	inv := h.createCommitInvoice(t, ctx, 10000, 10000, nil)
@@ -90,9 +87,6 @@ func TestGrantSummary_VoidRetiredIsNotUsed(t *testing.T) {
 // TestGrantSummary_ReliefRetiredIsNotUsed: $100 commit paid, $40 drawn, a
 // credit note relieves $25 of it → retired 2500, used 4000, 3500 left.
 func TestGrantSummary_ReliefRetiredIsNotUsed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	h, ctx := newCommitHarness(t, "Grant Summary Relief Retired")
 
 	inv := h.createCommitInvoice(t, ctx, 10000, 10000, nil)

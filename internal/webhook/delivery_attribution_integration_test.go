@@ -24,9 +24,6 @@ import (
 // moment they are most likely to be reading old deliveries to work out what
 // that endpoint was.
 func TestListDeliveries_NamesTheEndpoint_EvenAfterDeletion(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test — requires postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 15*time.Second)
 	defer cancel()

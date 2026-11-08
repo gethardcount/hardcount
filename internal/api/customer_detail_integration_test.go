@@ -27,9 +27,6 @@ import (
 // like nonexistent (RLS hides the row), so there is still no existence
 // oracle — just an honest 404.
 func TestCustomerDetail_UnknownCustomer404s(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test — requires postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 15*time.Second)
 	defer cancel()
@@ -59,24 +56,21 @@ func TestCustomerDetail_UnknownCustomer404s(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/customers/{customer_id}/overview", h.overview)
 
-	routes := []string{"overview"}
-	do := func(customerID, route string) int {
-		req := httptest.NewRequest("GET", "/customers/"+customerID+"/"+route, nil).
+	do := func(customerID string) int {
+		req := httptest.NewRequest("GET", "/customers/"+customerID+"/overview", nil).
 			WithContext(auth.WithTenantID(ctx, tenantA))
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, req)
 		return rec.Code
 	}
 
-	for _, route := range routes {
-		if got := do("hc_cus_does_not_exist", route); got != http.StatusNotFound {
-			t.Errorf("%s: made-up id = %d, want 404", route, got)
-		}
-		if got := do(cB.ID, route); got != http.StatusNotFound {
-			t.Errorf("%s: cross-tenant id = %d, want 404 (indistinguishable from nonexistent)", route, got)
-		}
-		if got := do(cA.ID, route); got != http.StatusOK {
-			t.Errorf("%s: real customer = %d, want 200 — the existence check must not 404 the world", route, got)
-		}
+	if got := do("hc_cus_does_not_exist"); got != http.StatusNotFound {
+		t.Errorf("overview: made-up id = %d, want 404", got)
+	}
+	if got := do(cB.ID); got != http.StatusNotFound {
+		t.Errorf("overview: cross-tenant id = %d, want 404 (indistinguishable from nonexistent)", got)
+	}
+	if got := do(cA.ID); got != http.StatusOK {
+		t.Errorf("overview: real customer = %d, want 200 — the existence check must not 404 the world", got)
 	}
 }

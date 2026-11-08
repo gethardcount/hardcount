@@ -407,7 +407,7 @@ func TestE2E_LoginThrottle_InviteAcceptMarksTheBrowser(t *testing.T) {
 	inv := postWithCookie(t, ts, "/v1/members/invite", owner, map[string]any{"email": member})
 	assertStatus(t, inv, http.StatusCreated)
 	_ = inv.Body.Close()
-	token := inviteTokenFromOutbox(t, db)
+	token := flowEmailLinkToken(t, db, "member_invite", "invite_url")
 
 	// Someone guesses at the address before the account exists.
 	tripAccount(t, ts, member, "192.0.2")

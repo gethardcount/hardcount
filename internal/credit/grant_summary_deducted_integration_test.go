@@ -16,9 +16,6 @@ import (
 // Mutation-verify: return 0 for deducted_cents in ListGrantSummaries, or
 // drop the deduction arm of balanceWriteOffColumns → red.
 func TestGrantSummary_SplitsDeductedFromUsed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	_, ctx, tenantID, cust, _, svc, invoiceStore := expirySetup(t, "GrantSummaryDeducted")
 
 	first, err := svc.Grant(ctx, tenantID, credit.GrantInput{Currency: "USD", CustomerID: cust.ID, AmountCents: 10000, Description: "first"})

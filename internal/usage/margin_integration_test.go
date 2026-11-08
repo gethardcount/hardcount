@@ -18,9 +18,6 @@ import (
 // unattributed bucket — never allocated by heuristic. The headline (customer-level revenue vs
 // cost) is always computed.
 func TestMargin_AttributionHonesty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newCustomerUsageFixture(t, "Margin Attribution")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()
@@ -144,9 +141,6 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 // against $0.004 of provider cost read as "$30.00" and a 99.9% margin.
 // Mutation-verify: drop the RevenueCurrency == CostCurrency check → red.
 func TestMargin_CurrencyIsNamedAndNeverMixed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()
 	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-24 * time.Hour)
@@ -197,9 +191,6 @@ func TestMargin_CurrencyIsNamedAndNeverMixed(t *testing.T) {
 // whether any rate exists, so the page can say which setup is missing.
 // Mutation-verify: drop the CostedEvents > 0 check → red.
 func TestMargin_NoProviderCostMeansNoMargin(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newCustomerUsageFixture(t, "Margin no cost")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()

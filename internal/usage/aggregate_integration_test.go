@@ -31,9 +31,6 @@ import (
 //     "by_meter": [] rather than "by_meter": null and the React side
 //     can iterate without a null-check.
 func TestAggregateRespectsListFilters(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()
@@ -196,9 +193,6 @@ func TestAggregateRespectsListFilters(t *testing.T) {
 // Count meter its event count. Before the fix every meter was a plain SUM,
 // so three Storage readings of 140, 210 and 120 GB showed as 470 GB.
 func TestAggregateFollowsMeterMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()

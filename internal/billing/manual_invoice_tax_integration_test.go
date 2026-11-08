@@ -32,9 +32,6 @@ import (
 // the whole reason the manual provider rounds at the invoice level and
 // absorbs the residual on the last line.
 func TestManualInvoice_TaxComputedAtFinalize(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test needs postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 
@@ -164,9 +161,6 @@ func TestManualInvoice_TaxComputedAtFinalize(t *testing.T) {
 // cycle build path) and persists them, restoring subtotal − discount + tax ==
 // gross.
 func TestManualInvoice_TaxInclusive_TotalEqualsGross(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test needs postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 
