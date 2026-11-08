@@ -1319,6 +1319,7 @@ func (m *mockInvoices) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID st
 			continue
 		}
 		if updated, ok := byID[existing.ID]; ok {
+			m.lineItems[i].AmountCents = updated.AmountCents
 			m.lineItems[i].TaxRate = updated.TaxRate
 			m.lineItems[i].TaxAmountCents = updated.TaxAmountCents
 			m.lineItems[i].TotalAmountCents = updated.TotalAmountCents
