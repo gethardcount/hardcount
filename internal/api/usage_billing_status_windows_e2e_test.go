@@ -26,7 +26,6 @@ import (
 // not_on_plan. (The calls events are also outside the close's windows,
 // which start at the trial end.)
 func TestBillingStatus_TrialEndDayBeforeTheTrialEnd(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.newMeter("seats", "sum")
 	r.newTrialEndingAt(dayAt(18, 0))
@@ -54,7 +53,6 @@ func TestBillingStatus_TrialEndDayBeforeTheTrialEnd(t *testing.T) {
 // Mutation check: drop the scheduled cancel from classify → the event after
 // the cancel carries no status.
 func TestBillingStatus_AfterAScheduledMidPeriodCancel(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	cancelAt := lagB.AddDate(0, 0, 10)
 	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagP0.AddDate(0, 0, 5),
@@ -88,7 +86,6 @@ func TestBillingStatus_AfterAScheduledMidPeriodCancel(t *testing.T) {
 // Mutation checks: build the windows without the coverage ends, or classify
 // by the stretches, not the windows → the 09:30 event carries no status.
 func TestBillingStatus_BeforeAnotherSubscriptionsCoverageEnd(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_advance", 0)
 	arrears := r.newPlan("plan_arrears", "in_arrears", 2000)
 	subA := r.newSub("sub-a", r.planA, dayAt(8, 0), nil)
@@ -122,7 +119,6 @@ func TestBillingStatus_BeforeAnotherSubscriptionsCoverageEnd(t *testing.T) {
 // not the one window that holds it → the 09:00 model b event carries no
 // status.
 func TestBillingStatus_FirstDayReachBackKeepsTheEarlierPlan(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	tokens := r.newMeter("tokens", "sum")
 	planX := r.planPricing("plan_x", map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "a"}})
@@ -216,7 +212,6 @@ func TestBillingStatus_GraceEventBeforeTheNextPinIsNotFlagged(t *testing.T) {
 //
 // Mutation check: drop the count from Release → the counter does not move.
 func TestBillingStatus_HeldReleaseCountsTheUnbilledMetric(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	tokens := r.newMeter("tokens", "sum")
 	plan := r.planPricing("plan_held_metric", map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "gpt-4o", "token_type": "input"}})
@@ -244,7 +239,6 @@ func TestBillingStatus_HeldReleaseCountsTheUnbilledMetric(t *testing.T) {
 // Mutation check: answer the trial end of a trialing subscription with a
 // cancel at period end as its end → both events are outside_subscription.
 func TestBillingStatus_TrialCanceledAtPeriodEnd(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.newTrialEndingAt(dayAt(18, 0))
 	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", dayAt(10, 0),
@@ -287,7 +281,6 @@ func TestBillingStatus_TrialCanceledAtPeriodEnd(t *testing.T) {
 // cancel at period end as its end → the event is outside_subscription, and
 // then billed.
 func TestBillingStatus_TrialCancelUndoneAfterTheTrialEnd(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.newTrialEndingAt(dayAt(18, 0))
 	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", dayAt(10, 0),
@@ -311,7 +304,6 @@ func TestBillingStatus_TrialCancelUndoneAfterTheTrialEnd(t *testing.T) {
 // processed is not checked, so it carries no status (review round 4 on
 // #1390).
 func TestBillingStatus_TrialExtendedAfterItsEnd(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.newTrialEndingAt(dayAt(18, 0))
 
@@ -336,7 +328,6 @@ func TestBillingStatus_TrialExtendedAfterItsEnd(t *testing.T) {
 // the same kind of event is not_on_plan again. No invoice bills a seats
 // event.
 func TestBillingStatus_AnotherSubscriptionsGraceIsNotChecked(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	subA := r.subID
 	r.newMeter("seats", "sum")
@@ -365,7 +356,6 @@ func TestBillingStatus_AnotherSubscriptionsGraceIsNotChecked(t *testing.T) {
 // (ADR-012), so it bills an event answered outside_subscription at 09:00
 // that day (review round 4 on #1390).
 func TestBillingStatus_OutsideSubscription_DraftActivatedLaterThatDay(t *testing.T) {
-	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.newSub("draft", r.planA, dayAt(-6, 0), map[string]any{"status": "draft"})
 	out := r.postLabelled("calls", "d-0900", dayAt(9, 0), dayAt(9, 5), 9, nil)
@@ -390,7 +380,6 @@ func TestBillingStatus_OutsideSubscription_DraftActivatedLaterThatDay(t *testing
 // Mutation check: answer an invoiced period by the current plans' meters →
 // the April event is not_on_plan.
 func TestBillingStatus_AfterCloseOnAPlanSwappedAwayAtTheBoundary(t *testing.T) {
-	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	r.ingest(lagP0.AddDate(0, 0, 3), 5)
 	r.must(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, lagP0.AddDate(0, 0, 9),

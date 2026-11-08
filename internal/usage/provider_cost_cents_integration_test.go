@@ -22,9 +22,6 @@ import (
 // micro-dollars, converted exactly: micros = unit_cost_cents × quantity ×
 // 10^4, and cents = micros ÷ 10^4. The old words are refused by name.
 func TestProviderCost_InCents(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newProviderCostAuditFixture(t)
 
 	// $3.00 per 1M tokens is 0.0003 cents a token.

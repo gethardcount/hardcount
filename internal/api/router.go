@@ -360,9 +360,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		})
 	})
 	eventDispatcher := webhook.NewOutboxDispatcher(outboxStore)
-	// MarkPaid queues invoice.paid in the same transaction as the move from
-	// finalized to paid, so the event fires exactly once on every settlement
-	// path. The invoice store needs the outbox for that.
+	// The invoice store queues every invoice.* event in the transaction of
+	// its change: invoice.paid with the move to paid, so it fires exactly
+	// once on every settlement path, and invoice.finalized, .voided,
+	// .marked_uncollectible and .payment_recorded with theirs.
 	invoiceStore.SetOutboxEnqueuer(outboxStore)
 	// credit.balance_low, _depleted and _recovered are queued in every
 	// transaction that writes the ledger, through the same outbox (ADR-078).
@@ -830,15 +831,13 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// point it comes from (the operator handler, the dunning adapter, any
 	// future caller).
 	subSvc.SetAuditLogger(auditLogger)
-	// The invoice service audits and dispatches events itself.
-	// MarkUncollectible is reachable from the operator dashboard, from
-	// dunning's terminal action and from ResolveRun(invoice_not_collectible).
-	// All three go through the service, so each gives one audit row and one
-	// invoice.marked_uncollectible webhook event, whatever the trigger.
-	// RecordOfflinePayment uses the same wiring for its
-	// invoice.payment_recorded event.
+	// The invoice service audits its own transitions. MarkUncollectible is
+	// reachable from the operator dashboard, from dunning's terminal action
+	// and from ResolveRun(invoice_not_collectible). All three go through the
+	// service, so each gives one audit row, whatever the trigger. The
+	// invoice.* webhook events are queued by the invoice store, in the
+	// transaction of each change (invoiceStore.SetOutboxEnqueuer above).
 	invoiceSvc.SetAuditLogger(auditLogger)
-	invoiceSvc.SetEventDispatcher(eventDispatcher)
 
 	// Test clocks simulate frozen time, in test mode only. The clock service
 	// is built before the billing engine, so the engine can read clock state.
@@ -973,8 +972,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// different due date than its siblings.
 	subH.SetNetTermsReader(engine)
 	// A proration invoice created already finalized writes the engine's
-	// finalize audit row and sends its invoice.finalized payload (#1279).
-	// audit.MustWired below refuses to boot without it.
+	// finalize audit row (#1279). audit.MustWired below refuses to boot
+	// without it. Its invoice.finalized is queued by the invoice store, on
+	// the transaction that inserts it.
 	subH.SetInvoiceFinalizeRecorder(engine)
 	// With the engine wired, subscription.Service.Create emits the day-1
 	// invoice for an in_advance plan (ADR-031). It does nothing for

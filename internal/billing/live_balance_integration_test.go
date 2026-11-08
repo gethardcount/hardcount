@@ -50,9 +50,6 @@ func (a liveTestCredits) CreditSummary(ctx context.Context, tenantID, customerID
 
 func newLiveFixture(t *testing.T, name string, grantCents int64) *liveFixture {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	f := newThresholdFixture(t, name)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	lf := wireLive(t, f, ctx)
@@ -343,9 +340,6 @@ func TestLiveBalance_NonAdditiveBucketDeferredByFire_CountedFullWindow(t *testin
 // Usage after a fire is priced continuing the bucket's tiers, as the close
 // prices it (ADR-066 amendment), not restarting at the first tier.
 func TestLiveBalance_GraduatedTiersContinueAcrossFire(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	var lf *liveFixture
 	// 700 units on a ladder of 1,000 at 10c then 2c: the fire bills $70.00.
 	p := p21FireAt700(t, "Live Balance Tier Continuity", func(p *p21Fire) {
@@ -372,9 +366,6 @@ func TestLiveBalance_GraduatedTiersContinueAcrossFire(t *testing.T) {
 // opened, as the close prices it, not the version in force when the post-fire
 // window opened. A price edited mid-period applies from the next period.
 func TestLiveBalance_PricesAtThePeriodOpenAfterAFire(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
 	var lf *liveFixture
 	p := p21FireAt700(t, "Live Balance Period Pin", func(p *p21Fire) {
 		lf = wireLive(t, p.f, p.ctx)

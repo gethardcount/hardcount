@@ -19,13 +19,17 @@ Producers persist an event/email intent inside the business-op
 transaction; a background dispatcher drains the queue with retry +
 DLQ.
 
-> **Amendment (2026-08-30): the four money emails and 15 webhook event types are queued in the transaction; other emails and 26 webhook event types are queued after it.**
-> The paragraph above is true of 15 of the 41 webhook event types:
-> `invoice.paid`, `payment.succeeded`, `payment.failed`,
+> **Amendment (2026-08-30): the four money emails and 19 webhook event types are queued in the transaction; other emails and 22 webhook event types are queued after it.**
+> The paragraph above is true of 19 of the 41 webhook event types: the
+> five `invoice.*` events, `payment.succeeded`, `payment.failed`,
 > `payment.dispute_opened`, `payment.dispute_closed`,
 > `payment.refunded_in_stripe`, `subscription.created`, `.activated`,
 > `.canceled` and `.trial_ended`, `dunning.started`, and the four
-> `credit.*` events. The other 26 are queued after the commit on at least
+> `credit.*` events. `invoice.finalized`, `.voided`,
+> `.marked_uncollectible` and `.payment_recorded` joined them on
+> 2026-11-05: the invoice store queues each in the transaction of its
+> change, for an invoice born finalized and a finalized draft alike. The
+> other 22 are queued after the commit on at least
 > one path: `subscription.collection_paused` and `.collection_resumed` are
 > in the transaction on the dunning and scheduled-lift paths, and after the
 > commit only when an operator pauses or resumes. Post-commit events go

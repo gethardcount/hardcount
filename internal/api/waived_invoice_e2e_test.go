@@ -33,7 +33,6 @@ import (
 // Mutation seam: in subscription.creditUnusedTime, return an error when
 // domain.AllocateUnusedCredit places no share → the waived arm gets a 500.
 func TestE2E_RemoveItemAfterWaive_NoFurtherCredit(t *testing.T) {
-	skipShort(t)
 	removeAt := lagP0.AddDate(0, 0, 10)
 
 	t.Run("control: paid with money, the removal is credited", func(t *testing.T) {
@@ -79,7 +78,6 @@ func TestE2E_RemoveItemAfterWaive_NoFurtherCredit(t *testing.T) {
 // Mutation seam: sum total_amount_cents again in sumPaidRevenue or the
 // revenue chart → that figure reads 99.00.
 func TestE2E_Revenue_CountsWhatPaidTheInvoice(t *testing.T) {
-	skipShort(t)
 	db := testutil.SetupTestDB(t)
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
 	defer ts.Close()

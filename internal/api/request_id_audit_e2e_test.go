@@ -84,9 +84,6 @@ func TestE2E_AuditRequestIDIsServerMinted(t *testing.T) {
 		t.Fatalf("read audit row: %v", err)
 	}
 
-	if rowRequestID == forged {
-		t.Fatalf("audit_log.request_id is the CLIENT's forged value %q — the append-only log's correlation evidence is attacker-controlled", forged)
-	}
 	if strings.Contains(rowRequestID, forged) {
 		t.Fatalf("client-supplied value leaked into audit_log.request_id: %q", rowRequestID)
 	}

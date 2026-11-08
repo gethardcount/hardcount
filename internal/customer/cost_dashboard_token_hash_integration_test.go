@@ -24,9 +24,6 @@ import (
 // sat in the column unnoticed. So this asserts the token resolves AND that the
 // raw token appears nowhere in the row.
 func TestCostDashboardToken_HashLookupAndNoPlaintextAtRest(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test — requires postgres")
-	}
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	store := customer.NewPostgresStore(db)
@@ -102,9 +99,6 @@ func TestCostDashboardToken_HashLookupAndNoPlaintextAtRest(t *testing.T) {
 // resolving — a failure with no error anywhere, just 404s. The invoice twin
 // (migration 0107) carries the same pairing for the same reason.
 func TestHashCostDashboardToken_MatchesSQLBackfill(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test — requires postgres")
-	}
 	db := testutil.SetupTestDB(t)
 
 	token, err := customer.NewCostDashboardToken()

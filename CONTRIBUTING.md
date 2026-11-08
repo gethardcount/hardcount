@@ -217,7 +217,8 @@ internal/{domain}/
 ## Code style
 
 New and changed code follows the [code standard](docs/dev/code-standard.md).
-Comments and docs follow the [writing style](docs/dev/writing-style.md).
+Comments follow [Code comments](docs/dev/code-comments.md), and docs follow the
+[writing style](docs/dev/writing-style.md).
 `make lint` checks the rules a linter can.
 
 ## Frontend (web-v2)

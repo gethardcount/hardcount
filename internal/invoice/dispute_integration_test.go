@@ -35,7 +35,7 @@ func newDisputeHarness(t *testing.T, db *postgres.DB, name string) *disputeHarne
 	tenantID := testutil.CreateTestTenant(t, db, name)
 	store := invoice.NewPostgresStore(db)
 	store.SetOutboxEnqueuer(webhook.NewOutboxStore(db))
-	invID := seedFinalizedInvoice(t, db, store, ctx, tenantID)
+	invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 	pi := "pi_dsp_" + invID
 	if _, transitioned, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, pi,
 		time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), nil); err != nil || !transitioned {

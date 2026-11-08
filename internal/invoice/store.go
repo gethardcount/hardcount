@@ -49,8 +49,8 @@ type Store interface {
 	// FinalizeWithDates flips status to finalized AND re-stamps issued_at +
 	// due_at to the finalize moment. Used for operator-composed (manual)
 	// invoices so the issue/due dates anchor to issuance, not draft-create
-	// (Stripe finalized_at semantics). Cycle invoices keep their build-time
-	// dates via UpdateStatus.
+	// (Stripe finalized_at semantics). Cycle drafts keep their build-time
+	// dates via FinalizeDraft.
 	// taxedLineIDs are the lines Finalize read before computing tax; it
 	// refuses when the invoice's lines differ (#1298).
 	// onFinalized runs on the finalize tx after the flip, before commit (nil:
@@ -206,10 +206,10 @@ type Store interface {
 	GetOutstandingBalance(ctx context.Context, tenantID, customerID string) (OutstandingBalance, error)
 
 	// SetPublicToken writes (or overwrites) the hosted-invoice-URL token for
-	// an invoice. Called from Service.Finalize at first generation and from
-	// the rotate-public-token endpoint for explicit rotation. Invoice must
-	// exist and be non-draft; drafts never carry a token. Returns
-	// errs.ErrNotFound if the invoice is missing or still draft.
+	// an invoice. The rotate-public-token endpoint calls it; the finalize
+	// writes mint the first token themselves. Invoice must exist and be
+	// non-draft; drafts never carry a token. Returns errs.ErrNotFound if the
+	// invoice is missing or still draft.
 	SetPublicToken(ctx context.Context, tenantID, invoiceID, token string) error
 
 	// GetByPublicToken resolves the hosted-invoice-URL token to its invoice

@@ -542,10 +542,10 @@ func (h *Handler) applyResolutionToInvoice(ctx context.Context, tenantID, invoic
 		}
 	case domain.ResolutionInvoiceVoided:
 		// Void through the invoice SERVICE, the one void path: the in-flight
-		// guard, the status flip with the credit reversal, then every void's
-		// post-commit legs (AfterVoid): stop collection at Stripe, reverse
-		// the tax, send invoice.voided, and resolve this run. A refused void
-		// runs none of them, so a charge in flight keeps its PaymentIntent.
+		// guard, the status flip with the credit reversal and invoice.voided,
+		// then every void's post-commit legs (AfterVoid): stop collection at
+		// Stripe, reverse the tax, and resolve this run. A refused void runs
+		// none of them, so a charge in flight keeps its PaymentIntent.
 		// ResolveRun below then loses the resolve CAS and returns the run
 		// the void resolved.
 		if h.invoiceVoider == nil {

@@ -311,7 +311,7 @@ func TestCollectPayment_RefusedKey_SaysWhatToFix(t *testing.T) {
 	if !strings.Contains(body, `"code":"stripe_key_unusable"`) {
 		t.Errorf("body %s, want code stripe_key_unusable", body)
 	}
-	if !strings.Contains(body, "Settings → Payments") && !strings.Contains(body, `Settings → Payments`) {
+	if !strings.Contains(body, "Settings → Payments") {
 		t.Errorf("body %s, want the sentence naming Settings → Payments", body)
 	}
 	if strings.Contains(body, "Invalid API Key") {

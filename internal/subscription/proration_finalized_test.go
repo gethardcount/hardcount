@@ -16,14 +16,14 @@ import (
 )
 
 // finalizeRecorderMock records what the proration writer asks the billing
-// engine for: the finalize audit row (with the tx it rides) and the
-// invoice.finalized webhook, in call order.
+// engine for: the finalize audit row, with the tx it rides. The
+// invoice.finalized event is the invoice store's, queued on the insert's
+// transaction (internal/invoice/outbox_in_tx_integration_test.go).
 type finalizeRecorderMock struct {
-	auditErr   error
-	audits     []domain.Invoice
-	auditTxs   []*sql.Tx
-	dispatched []domain.Invoice
-	calls      []string
+	auditErr error
+	audits   []domain.Invoice
+	auditTxs []*sql.Tx
+	calls    []string
 }
 
 func (m *finalizeRecorderMock) EmitFinalizeAuditTx(_ context.Context, tx *sql.Tx, inv domain.Invoice) error {
@@ -34,11 +34,6 @@ func (m *finalizeRecorderMock) EmitFinalizeAuditTx(_ context.Context, tx *sql.Tx
 	m.audits = append(m.audits, inv)
 	m.auditTxs = append(m.auditTxs, tx)
 	return nil
-}
-
-func (m *finalizeRecorderMock) DispatchInvoiceFinalized(_ context.Context, _ string, inv domain.Invoice) {
-	m.calls = append(m.calls, "dispatch")
-	m.dispatched = append(m.dispatched, inv)
 }
 
 // prorationFinalizeRig is an upgrade (Basic → Pro, 15 of 30 days left)
@@ -79,11 +74,11 @@ func (r *prorationFinalizeRig) upgrade(t *testing.T) *httptest.ResponseRecorder 
 	return rr
 }
 
-// TestProration_FinalizedInvoice_AuditThenDispatchOnce (#1279): the finalize
-// row is written with the invoice on the item change's tx, then
-// invoice.finalized goes out once, after the commit, for the invoice the
-// change created.
-func TestProration_FinalizedInvoice_AuditThenDispatchOnce(t *testing.T) {
+// TestProration_FinalizedInvoice_AuditOnce (#1279): the finalize row is
+// written with the invoice on the item change's tx, once, for the invoice
+// the change created. Its invoice.finalized is the invoice store's, queued
+// on the same tx.
+func TestProration_FinalizedInvoice_AuditOnce(t *testing.T) {
 	r := newProrationFinalizeRig(t)
 	if rr := r.upgrade(t); rr.Code != http.StatusOK {
 		t.Fatalf("upgrade: %d %s", rr.Code, rr.Body.String())
@@ -98,18 +93,15 @@ func TestProration_FinalizedInvoice_AuditThenDispatchOnce(t *testing.T) {
 	if len(r.rec.audits) != 1 || r.rec.audits[0].ID != created.ID {
 		t.Errorf("finalize audit rows: %v, want one for %s", r.rec.audits, created.ID)
 	}
-	if len(r.rec.dispatched) != 1 || r.rec.dispatched[0].ID != created.ID {
-		t.Errorf("invoice.finalized dispatches: %v, want one for %s", r.rec.dispatched, created.ID)
-	}
-	if got := r.rec.calls; len(got) != 2 || got[0] != "audit" || got[1] != "dispatch" {
-		t.Errorf("call order %v, want [audit dispatch]: the row commits with the invoice, the webhook goes out after", got)
+	if got := r.rec.calls; len(got) != 1 || got[0] != "audit" {
+		t.Errorf("recorder calls %v, want [audit]", got)
 	}
 }
 
-// TestProration_DraftInvoice_NoAuditNoDispatch: tax deferred → the proration
-// invoice is born a draft. It gets neither the row nor the webhook here;
-// invoice.Service.Finalize writes both when it finalizes.
-func TestProration_DraftInvoice_NoAuditNoDispatch(t *testing.T) {
+// TestProration_DraftInvoice_NoAudit: tax deferred → the proration invoice is
+// born a draft. It gets no row here; invoice.Service.Finalize writes it when
+// it finalizes.
+func TestProration_DraftInvoice_NoAudit(t *testing.T) {
 	r := newProrationFinalizeRig(t)
 	r.h.SetProrationTaxApplier(&prorationTaxApplierMock{err: errors.New("tax provider unreachable")})
 	if rr := r.upgrade(t); rr.Code != http.StatusOK {
@@ -118,15 +110,15 @@ func TestProration_DraftInvoice_NoAuditNoDispatch(t *testing.T) {
 	if len(r.invoices.createdInvoices) != 1 || r.invoices.createdInvoices[0].Status != domain.InvoiceDraft {
 		t.Fatalf("created %v, want one draft proration invoice (tax pending)", r.invoices.createdInvoices)
 	}
-	if len(r.rec.audits) != 0 || len(r.rec.dispatched) != 0 {
-		t.Errorf("draft proration invoice: %d audit rows, %d dispatches, want none", len(r.rec.audits), len(r.rec.dispatched))
+	if len(r.rec.audits) != 0 {
+		t.Errorf("draft proration invoice: %d audit rows, want none", len(r.rec.audits))
 	}
 }
 
-// TestProration_DedupReplay_NoAuditNoDispatch: a replay of the same item
-// change finds the invoice the first attempt created; that attempt already
-// wrote the row and sent the webhook, so the replay sends nothing.
-func TestProration_DedupReplay_NoAuditNoDispatch(t *testing.T) {
+// TestProration_DedupReplay_NoAudit: a replay of the same item change finds
+// the invoice the first attempt created; that attempt already wrote the row,
+// so the replay writes nothing.
+func TestProration_DedupReplay_NoAudit(t *testing.T) {
 	r := newProrationFinalizeRig(t)
 	r.invoices.createInvoiceErr = errs.AlreadyExists("proration_source",
 		"proration invoice already exists for this item change").WithCode("invoice_proration_source_taken")
@@ -139,12 +131,14 @@ func TestProration_DedupReplay_NoAuditNoDispatch(t *testing.T) {
 	}
 }
 
-// TestProration_AuditFailure_RollsBackNoDispatch: the row shares the item
-// change's fate (ADR-090), so a failed audit write rolls the plan change back
-// and sends no webhook. The fake invoice store has no transaction; the
-// invoice row's rollback is proven against real Postgres in
-// proration_finalized_integration_test.go.
-func TestProration_AuditFailure_RollsBackNoDispatch(t *testing.T) {
+// TestProration_AuditFailure_RollsBack: the row shares the item change's
+// fate (ADR-090), so a failed audit write fails the upgrade and leaves the
+// item on its old plan. The rig's invoice store is a fake that ignores the
+// transaction and has no outbox, so this proves only the plan rollback.
+// TestCreateWithLineItemsTx_FinalizedInvoiceQueuesItsEventInTheSameTx
+// (internal/invoice/outbox_in_tx_integration_test.go) proves that a rollback
+// removes the invoice.finalized queued on the insert.
+func TestProration_AuditFailure_RollsBack(t *testing.T) {
 	r := newProrationFinalizeRig(t)
 	r.rec.auditErr = errors.New("audit insert failed")
 	rr := r.upgrade(t)
@@ -157,8 +151,5 @@ func TestProration_AuditFailure_RollsBackNoDispatch(t *testing.T) {
 	}
 	if item.PlanID != "plan_basic" {
 		t.Errorf("item plan after a failed finalize audit = %q, want plan_basic (the change rolls back)", item.PlanID)
-	}
-	if len(r.rec.dispatched) != 0 {
-		t.Errorf("invoice.finalized sent for an invoice that was rolled back: %v", r.rec.dispatched)
 	}
 }
