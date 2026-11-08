@@ -106,6 +106,10 @@ write the window in UTC, ending in `Z`.
    - Calls of a kind Hardcount does not bill, such as image calls, also
      make Hardcount's number lower. Sending them again changes nothing:
      the answer counts each such call in `skipped`.
+   - LiteLLM rounds its times to the millisecond, so a call that ended
+     within half a millisecond of `FROM` or `TO` can count on one side
+     only. Before you read a difference of one call as lost or extra, run
+     the Check again with the window a second wider.
 
 ## Fix
 
@@ -139,9 +143,10 @@ does.
    **You see:** nothing, when no price of the plan names `team_id`.
    Otherwise, leave that plan's customers out of the replay: add
    `AND end_user NOT IN ('<external id>', ...)` to the `WHERE` of
-   `replay.sql` in step 2. Bill their lost calls by hand: price their rows
-   in LiteLLM's spend log at the plan's prices. Bill the total on a
-   one-off invoice, as in steps 4 and 5 of
+   `replay.sql` in step 2. Bill their lost calls by hand:
+   [find them](#find-the-calls-hardcount-does-not-count) in LiteLLM's
+   spend log, and price only those rows at the plan's prices. Bill the
+   total on a one-off invoice, as in steps 4 and 5 of
    [Usage is missing from a built invoice](invoice-timing-late-usage.md#usage-is-missing-from-a-built-invoice).
    Give it its own memo and idempotency key there:
    `MEMO="LiteLLM calls not replayed, $FROM to $TO"` and
@@ -192,22 +197,25 @@ does.
      does not carry the route that tells Hardcount to skip them, so they
      would be billed.
 
-3. **Send the records.** Each is about 1 KB, and one request takes up to
-   32 MB, so send them in parts of 20,000. Each answer is saved next to its
-   part:
+3. **Send the records** in parts of 500. LiteLLM itself sends up to 512
+   calls in one request. A request has 30 seconds, and Hardcount stores a
+   part one call at a time. The loop saves each answer next to its part,
+   and sends only the parts with no answer that has an `accepted` count,
+   so you can run it again:
 
    ```bash
-   split -l 20000 replay.ndjson part-
+   split -l 500 replay.ndjson part-
    for f in part-*; do
+     grep -qs '"accepted"' "answer-$f" && continue
      curl -sS -X POST "$API/v1/integrations/litellm/spend" \
        -H "Authorization: Bearer $KEY" -H "Content-Type: application/x-ndjson" \
-       --data-binary @"$f" | tee "answer-$f"
-     echo
+       --data-binary @"$f" > "answer-$f"
+     echo "$f: $(cat "answer-$f")"
    done
    ```
 
    **You see:** one answer per part, such as
-   `{"accepted":8,"deduplicated":8,"held":0,"skipped":0,"cache_hits":0,"after_close":0,"no_price":3,"not_on_plan":0,"outside_subscription":0}`.
+   `part-aa: {"accepted":8,"deduplicated":8,"held":0,"skipped":0,"cache_hits":0,"after_close":0,"no_price":3,"not_on_plan":0,"outside_subscription":0}`.
    - `accepted` counts the new usage events, and `deduplicated` the ones
      Hardcount already held.
    - `after_close` counts the accepted events whose period was already
@@ -216,26 +224,24 @@ does.
      They become usage events, dated when each call ended, once you create
      the customer and release them
      ([held usage](../../integrations/litellm.md#usage-for-a-customer-hardcount-does-not-know-yet)).
+     If that period's invoice is already built when you release them, the
+     release answer counts them in `outside_open_period`, and no invoice
+     bills them: step 4.
    - `no_price` counts events that no price of the plan takes:
      [Usage with no price](usage-with-no-price.md).
    - A part failed when its answer has no `accepted` count, such as an
-     `error` object or an empty answer. This sends each failed part again.
-     Rows already stored come back `deduplicated`:
-
-     ```bash
-     for a in $(grep -L '"accepted"' answer-part-*); do
-       f=${a#answer-}
-       curl -sS -X POST "$API/v1/integrations/litellm/spend" \
-         -H "Authorization: Bearer $KEY" -H "Content-Type: application/x-ndjson" \
-         --data-binary @"$f" | tee "$a"
-       echo
-     done
-     ```
+     `error` object or an empty answer. Run the loop again until it prints
+     nothing. Calls already stored come back `deduplicated`.
+   - A part that fails again and again with `ingest_unavailable` after
+     about 30 seconds is too big for your database's speed. Split it, such
+     as `split -l 100 part-ac part-ac- && rm part-ac`, and run the loop
+     again.
 
 4. **Bill what missed its invoice.** A call whose period was already
-   invoiced when you sent it is stored, and no invoice bills it. For each
-   customer the Check found short, apart from those step 1 left out,
-   follow
+   invoiced when you sent it is stored, and no invoice bills it. Take each
+   customer the Check found short, apart from those step 1 left out. Take
+   also each customer whose held calls you released after their period's
+   invoice was built. For each, follow
    [Usage is missing from a built invoice](invoice-timing-late-usage.md#usage-is-missing-from-a-built-invoice).
    Its step 1 says whether that period's invoice is built yet, and its
    step 3 works out the amount.
@@ -269,6 +275,61 @@ Run the Check again: each customer's totals now match. The exceptions are
 a customer for whom step 2 of the Check found more in Hardcount, one with
 rows held or skipped, and one that step 1 of the Fix left out.
 
+## Find the calls Hardcount does not count
+
+This lists one customer's spend-log rows in the window that Hardcount has
+no usage event for in that window. Price only these rows when you bill
+calls by hand: Hardcount already bills the others. It uses `FROM`, `TO`
+and `TOKENS` from the Check.
+
+1. **List the calls Hardcount holds in the window.** Each event's
+   idempotency key is the call's ID, then `:` and the kind of token:
+
+   ```bash
+   CUSTOMER=<the customer's Hardcount id>; offset=0; : > hardcount-ids.txt
+   while :; do
+     page=$(curl -sSf -G "$API/v1/usage-events" -H "Authorization: Bearer $KEY" \
+       --data-urlencode "customer_id=$CUSTOMER" --data-urlencode "meter_id=$TOKENS" \
+       --data-urlencode "from=$FROM" --data-urlencode "to=$TO" \
+       --data-urlencode "limit=100" --data-urlencode "offset=$offset") \
+       || { rm hardcount-ids.txt; echo "The list failed: run this again."; break; }
+     jq -r '.data[].idempotency_key | sub(":[^:]*$"; "")' <<<"$page" >> hardcount-ids.txt
+     [ "$(jq '.data | length' <<<"$page")" -lt 100 ] && break
+     offset=$((offset + 100))
+   done
+   ```
+
+2. **List the customer's rows that are not among them.** Save this as
+   `missing.sql`. It has the filters of `replay.sql`, and it also matches
+   a long call ID by its SHA-256, as Hardcount keys it:
+
+   ```sql
+   CREATE TEMP TABLE hardcount_ids (id text);
+   \copy hardcount_ids FROM 'hardcount-ids.txt'
+   SELECT request_id, model, "endTime", prompt_tokens, completion_tokens,
+          metadata->'usage_object' AS usage_object
+   FROM "LiteLLM_SpendLogs"
+   WHERE end_user = :'end_user'
+     AND "endTime" >= :'from' AND "endTime" < :'to'
+     AND "startTime" >= (:'from')::timestamp - interval '1 hour'
+     AND coalesce(status, '') <> 'failure'
+     AND coalesce(cache_hit, '') <> 'True'
+     AND NOT (call_type = 'pass_through_endpoint' AND request_id LIKE 'vertex-ai-live-%')
+     AND request_id NOT IN (SELECT id FROM hardcount_ids)
+     AND 'sha256-' || encode(sha256(convert_to(request_id, 'UTF8')), 'hex')
+         NOT IN (SELECT id FROM hardcount_ids)
+   ORDER BY "endTime";
+   ```
+
+   ```bash
+   psql "$LITELLM_DATABASE_URL" -v ON_ERROR_STOP=1 -v from="$FROM" -v to="$TO" \
+     -v end_user="<external id>" -f missing.sql
+   ```
+
+   **You see:** one row per call that Hardcount does not count in the
+   window, with its tokens. If step 1 printed `The list failed`, this
+   stops with an error on `hardcount-ids.txt`: run step 1 again.
+
 ## If you replayed with an earlier version of this page
 
 Its records had no `endTime`. Each call it sent that Hardcount did not hold
@@ -282,8 +343,11 @@ nothing. If both periods price the calls the same, the customer paid the
 right amount one period late, and you can leave it. Otherwise, for each
 such customer:
 
-1. Bill the calls on a one-off invoice for their own period, priced as that
-   period priced them, as in steps 4 and 5 of
+1. Send the window's calls again with the [Fix](#fix), then
+   [find the calls Hardcount does not count](#find-the-calls-hardcount-does-not-count)
+   in the window: they are the calls dated in another period. Bill only
+   those on a one-off invoice for their own period, priced as that period
+   priced them, as in steps 4 and 5 of
    [Usage is missing from a built invoice](invoice-timing-late-usage.md#usage-is-missing-from-a-built-invoice).
    Give it its own memo and idempotency key there, with `N` counting only
    such invoices: `MEMO="Replayed calls that belong to $NUMBER ($N)"` and
