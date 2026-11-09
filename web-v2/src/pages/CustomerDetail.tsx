@@ -32,7 +32,10 @@ import { customerNeedsPaymentMethod } from '@/lib/paymentReadiness'
 import { NO_CARD_SENTENCE, NO_CARD_TITLE } from '@/lib/subscriptionNotices'
 import { cardLabel, removeCardSentence } from '@/lib/paymentMethodCopy'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
+import { NO_ANSWER_TITLE, outcomeUnknown } from '@/lib/errorCopy'
 import { useCustomerCurrency, useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
+import { useTenantSettings } from '@/hooks/useTenantSettings'
+import { paymentTermOptions } from '@/lib/paymentTerms'
 import { invoiceCurrencyPin, type CustomerCurrency } from '@/lib/customerCurrency'
 import { creditTotalsLine, invoiceCreditNote, outstandingIncludesCredit } from '@/lib/customerCredits'
 import { CustomerCreditsSection } from '@/components/customer/CustomerCreditsSection'
@@ -1228,6 +1231,7 @@ export default function CustomerDetailPage() {
           customerCurrency={customerCurrency}
           hasCard={paymentMethodsList === undefined ? undefined : paymentMethods.some(pm => pm.is_default)}
           onClose={() => setShowNewInvoice(false)}
+          onFailed={() => invalidateMoneySurfaces(queryClient, { customerId: id })}
           onCreated={({ invoice, result }) => {
             setShowNewInvoice(false)
             // Finalizing (Save & send) applies the customer's credit to the
@@ -1699,16 +1703,6 @@ const COMPOSER_LINE_TYPES: { value: string; label: string }[] = [
   { value: 'usage', label: 'Usage' },
 ]
 
-// Payment-term presets → net_payment_term_days. Net 30 is the default; the
-// backend computes due_at = issued_at + N at create time.
-const PAYMENT_TERM_OPTIONS: { value: string; label: string }[] = [
-  { value: '0', label: 'Due on receipt' },
-  { value: '7', label: 'Net 7' },
-  { value: '14', label: 'Net 14' },
-  { value: '30', label: 'Net 30' },
-  { value: '60', label: 'Net 60' },
-]
-
 type ComposerLine = {
   description: string
   quantity: string         // string-bound input; coerced at submit time
@@ -1732,7 +1726,14 @@ const blankLine = (): ComposerLine => ({
   commitExpiresAt: '',
 })
 
-function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onClose, onCreated }: {
+// What New invoice says when the create's answer is lost. The dialog sends
+// one Idempotency-Key per opening, so saving again returns the invoice the
+// first try made. A changed form is refused under that key (422), so the
+// sentence asks for no changes.
+const NEW_INVOICE_NO_ANSWER =
+  "The server didn't answer, so the invoice may have been made. Save again without changes: that can't make a second invoice."
+
+function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onClose, onCreated, onFailed }: {
   customerId: string
   customer: Customer
   customerCurrency: CustomerCurrency
@@ -1741,23 +1742,35 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
   hasCard: boolean | undefined
   onClose: () => void
   onCreated: (result: { invoice: Invoice; result: NewInvoiceResult }) => void
+  // Reads the customer's invoices again: a try that failed may still have
+  // made the invoice, and the list behind the dialog must show it.
+  onFailed: () => void
 }) {
   // Default currency: the customer's currency (lib/customerCurrency), so a
   // customer on a EUR plan opens in EUR. When the billing profile or a live
   // plan sets it, the server refuses any other (409), so the picker is fixed.
-  const initialCurrency = customerCurrency.currency.toUpperCase()
   const currencyPin = invoiceCurrencyPin(customerCurrency)
-  const [currency, setCurrency] = useState(initialCurrency)
+  const [currency, setCurrency] = useState(customerCurrency.currency)
   const [memo, setMemo] = useState('')
   // Service period (optional) — the inclusive dates this invoice covers.
   // Industry-standard (Stripe invoiceitem.period); shows as the invoice
   // "Period" and feeds revenue recognition. Stored half-open (ADR-058).
   const [periodStart, setPeriodStart] = useState('')
   const [periodEnd, setPeriodEnd] = useState('')
-  // Payment terms in days from issue → due date. Net 30 is the default;
-  // Net 0 means due on receipt. Passed straight through as
-  // net_payment_term_days (the backend computes due_at = issued_at + N).
-  const [paymentTermDays, setPaymentTermDays] = useState(30)
+  // Payment terms in days from issue to due date; 0 means due on receipt.
+  // They start at the account's terms (Settings, Payment terms), the terms
+  // the billing engine gives every invoice it makes. Until the settings load,
+  // the dialog sends nothing, because any start value would be a guess. Sent
+  // as net_payment_term_days; the server sets due_at to issued_at plus N days.
+  const settings = useTenantSettings()
+  const accountTermDays = settings.data?.net_payment_terms
+  const termOptions = accountTermDays === undefined ? [] : paymentTermOptions(accountTermDays)
+  const [pickedTermDays, setPickedTermDays] = useState<number>()
+  const paymentTermDays = pickedTermDays ?? accountTermDays
+  // One Idempotency-Key per dialog open, sent with every submit from it. A
+  // click after a lost answer then gets the first invoice back instead of a
+  // second one. The dialog unmounts on close, so the next open makes a new key.
+  const [idemKey] = useState(() => crypto.randomUUID())
   const [lines, setLines] = useState<ComposerLine[]>([blankLine()])
   // Anchor date validation on the customer's simulated "now" when clock-pinned:
   // a customer frozen at 2027 must reject a 2026 credit-expiry (past in sim
@@ -1767,6 +1780,8 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
   const [errors, setErrors] = useState<{
     lines?: Record<number, { description?: string; quantity?: string; unitAmount?: string; commit?: string }>
     form?: string
+    // The form message is a lost answer: the invoice may exist.
+    noAnswer?: boolean
     period?: string
   }>({})
   const [submitting, setSubmitting] = useState<null | 'draft' | 'send'>(null)
@@ -1888,10 +1903,12 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
   // together or not at all. Finalize/send remain separate transitions
   // (Stripe-parity); if one of those fails after the draft exists, the
   // partial-success branch below tells the operator what survived.
-  // Single-flight: the backend deliberately allows coexisting one-off invoices
-  // for the same (customer, period) and no Idempotency-Key is sent — a same-tick
-  // double-click creates TWO invoices (and, on 'send', two finalized invoices +
-  // two emails). The ref collapses the double-fire the lagging `isBusy` cannot.
+  // Single-flight: the server allows any number of one-off invoices for the
+  // same customer and period, so it never refuses a repeat by itself. The
+  // dialog's Idempotency-Key makes a repeated create return the first
+  // invoice, but a same-tick double-click would still run each step after it
+  // twice, such as the finalize and the email. The ref collapses that
+  // double-fire, which the lagging `isBusy` cannot.
   // Service period (optional): both-or-neither, start on/before end. The
   // operator enters INCLUSIVE dates; store half-open [start, endExclusive)
   // (ADR-058) so the invoice reads "Jun 1 – Jun 30" — endExclusive = end+1d,
@@ -1918,11 +1935,12 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
 
   // askToSend checks the form, then asks before finalizing (confirmSend).
   const askToSend = () => {
-    if (!validate() || validatePeriod() === null) return
+    if (paymentTermDays === undefined || !validate() || validatePeriod() === null) return
     setConfirmSend(true)
   }
 
   const submit = useSingleFlight(async (action: 'draft' | 'send') => {
+    if (paymentTermDays === undefined) return
     const cleaned = validate()
     if (!cleaned) return
     const period = validatePeriod()
@@ -1938,7 +1956,7 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
         net_payment_term_days: paymentTermDays,
         memo: memo.trim() || undefined,
         line_items: cleaned,
-      })
+      }, idemKey)
 
       // One outcome, one toast (shown by onCreated). The email step is
       // best-effort: a failed send must not unwind a finalized invoice, and
@@ -1966,6 +1984,10 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
 
       onCreated({ invoice, result })
     } catch (err) {
+      // A failed try may still have made the invoice, as when its answer was
+      // lost on the way back. Read the customer's invoices again, so the list
+      // behind the dialog shows one that landed.
+      onFailed()
       const message = err instanceof Error ? err.message : 'Failed to create invoice'
       // Partial-success messaging: if we got an invoice ID but failed mid-flight
       // (line item add, finalize, etc.) tell the operator what survived so they
@@ -1974,6 +1996,8 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
         setErrors({
           form: `Draft ${invoice.invoice_number} created, but a later step failed: ${message}. Open the invoice detail page to continue.`,
         })
+      } else if (outcomeUnknown(err)) {
+        setErrors({ form: NEW_INVOICE_NO_ANSWER, noAnswer: true })
       } else {
         setErrors({ form: message })
       }
@@ -2010,7 +2034,7 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
               <Select
                 items={GEO_CURRENCIES.map(c => ({ value: c.code, label: `${c.symbol} ${c.code} — ${c.label}` }))}
                 value={currency}
-                onValueChange={(v) => setCurrency((v ?? 'USD').toUpperCase())}
+                onValueChange={(v) => { if (v) setCurrency(v) }}
                 disabled={currencyPin !== null}
               >
                 <SelectTrigger id="composer-currency" className="w-full">
@@ -2032,24 +2056,31 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
             <div className="space-y-2">
               <Label htmlFor="composer-terms">Payment terms</Label>
               <Select
-                items={PAYMENT_TERM_OPTIONS}
-                value={String(paymentTermDays)}
-                onValueChange={(v) => setPaymentTermDays(Number(v ?? '30'))}
+                items={termOptions}
+                value={paymentTermDays === undefined ? null : String(paymentTermDays)}
+                onValueChange={(v) => { if (v) setPickedTermDays(Number(v)) }}
+                disabled={paymentTermDays === undefined}
               >
                 <SelectTrigger id="composer-terms" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {PAYMENT_TERM_OPTIONS.map(o => (
+                  {termOptions.map(o => (
                     <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">
-                {paymentTermDays === 0
-                  ? 'Payable on receipt.'
-                  : `Due ${paymentTermDays} days after the invoice is issued.`}
-              </p>
+              {paymentTermDays === undefined && settings.isError ? (
+                <LoadError what="the account's payment terms" error={settings.error} onRetry={() => { void settings.refetch() }} className="py-2" />
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {paymentTermDays === undefined
+                    ? "Loading the account's payment terms…"
+                    : paymentTermDays === 0
+                      ? 'Payable on receipt.'
+                      : `Due ${paymentTermDays} days after the invoice is issued.`}
+                </p>
+              )}
             </div>
           </div>
 
@@ -2275,11 +2306,14 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
             </div>
           </div>
 
-          {errors.form && (
+          {errors.form && (errors.noAnswer ? (
+            // Uncertain, not failed, so not drawn as an error (lib/errorCopy).
+            <Callout tone="amber" title={NO_ANSWER_TITLE} role="status">{errors.form}</Callout>
+          ) : (
             <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
               {errors.form}
             </div>
-          )}
+          ))}
         </div>
 
         <DialogFooter>
@@ -2290,13 +2324,13 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
             type="button"
             variant="outline"
             onClick={() => submit('draft')}
-            disabled={isBusy}
+            disabled={isBusy || paymentTermDays === undefined}
           >
             {submitting === 'draft'
               ? <><Loader2 size={14} className="animate-spin mr-2" />Saving draft...</>
               : 'Save draft'}
           </Button>
-          <Button type="button" onClick={askToSend} disabled={isBusy}>
+          <Button type="button" onClick={askToSend} disabled={isBusy || paymentTermDays === undefined}>
             {submitting === 'send'
               ? <><Loader2 size={14} className="animate-spin mr-2" />Finalizing...</>
               : 'Save & send'}
