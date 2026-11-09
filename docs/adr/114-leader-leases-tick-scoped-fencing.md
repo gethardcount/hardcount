@@ -441,3 +441,15 @@ items, so an item without a due change is no longer left off the invoice
 a stale leader's apply lists none and writes no audit row. The engine writes
 one audit row per entry, naming the plan the item left as read under the
 subscription row lock, as the store's events do.
+
+## Amendment 2026-11-09 — the dunning webhooks are queued in their run writes
+
+The effect table's `dunning.*` row names `fireEvent` callers, which are gone,
+with `dunning.Service.SetEventDispatcher`. The dunning store queues
+`dunning.escalated` in the escalation's transaction (`EscalateRun`), and
+`dunning.resolved` in the transaction of the resolve's compare-and-set, for
+its winner only (`ResolveRun`) (P1-01, ADR-040 amendment). The guards are
+unchanged: a stale tick's escalation write applies to no row, and a resolver
+that loses the compare-and-set writes nothing, so neither queues an event. A
+tick whose write commits cannot lose its event to a lost lease or a crash
+after the commit.

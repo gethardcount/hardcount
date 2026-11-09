@@ -77,16 +77,6 @@ func (o *faultyOutbox) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, eventT
 	return o.outbox.Enqueue(ctx, tx, tenantID, eventType, payload)
 }
 
-// Dispatch is the post-commit path as router.go wires it on main
-// (webhook.OutboxDispatcher: an insert in a transaction of its own).
-func (o *faultyOutbox) Dispatch(ctx context.Context, tenantID, eventType string, payload map[string]any) error {
-	if o.fails(eventType) {
-		return errOutboxDown
-	}
-	_, err := o.outbox.EnqueueStandalone(ctx, tenantID, eventType, payload)
-	return err
-}
-
 // writeOffPolicy writes the invoice off when retries run out, and leaves the
 // subscription alone.
 var writeOffPolicy = finalActions{name: "write off", sub: domain.SubActionNone, inv: domain.InvActionMarkUncollectible}
@@ -108,7 +98,6 @@ func newEventFixture(t *testing.T, db *postgres.DB, name, failType string) *even
 	}, noRetry{t})
 	outbox := &faultyOutbox{outbox: webhook.NewOutboxStore(db), failType: failType}
 	f.runs.SetOutboxEnqueuer(outbox)
-	f.svc.SetEventDispatcher(outbox)
 	return &eventFixture{exhaustFixture: f, stopper: stopper, outbox: outbox}
 }
 

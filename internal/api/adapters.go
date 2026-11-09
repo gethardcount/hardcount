@@ -1243,8 +1243,9 @@ func (a *bounceReporterAdapter) ReportBounce(ctx context.Context, tenantID, emai
 		}
 		if err := a.svc.MarkEmailBounced(ctx, tenantID, m.CustomerID, reason); err != nil {
 			// Ignore the error: the sender has already logged the bounce.
-			// A failure here only means the badge does not update. It is
-			// not a correctness issue.
+			// A failure here means neither the badge nor the
+			// customer.email_bounced event is saved, because the two
+			// commit together. It is not a correctness issue.
 			_ = err
 		}
 	}

@@ -29,8 +29,8 @@ func TestEmailSuppression_WebhookCarriesTheCustomer(t *testing.T) {
 	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), false), tenantID)
 
 	store := customer.NewPostgresStore(db)
+	store.SetOutboxEnqueuer(webhook.NewOutboxStore(db))
 	svc := customer.NewService(store)
-	svc.SetEventDispatcher(webhook.NewOutboxDispatcher(webhook.NewOutboxStore(db)))
 	r := chi.NewRouter()
 	r.Mount("/v1/customers", customer.NewHandler(svc).Routes())
 

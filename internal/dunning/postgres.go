@@ -30,8 +30,11 @@ type OutboxEnqueuer interface {
 	Enqueue(ctx context.Context, tx *sql.Tx, tenantID, eventType string, payload map[string]any) (string, error)
 }
 
-// SetOutboxEnqueuer wires dunning.started into StartRun's transaction.
-// Optional: when unset (narrow tests), no event is enqueued.
+// SetOutboxEnqueuer wires the dunning.* webhook events into the transactions
+// of the run writes they report: dunning.started (StartRun), .escalated
+// (EscalateRun) and .resolved (ResolveRun). Optional: when unset (narrow
+// tests), no event is enqueued. Production boot refuses an unset one
+// (webhook.MustWiredOutbox).
 func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 
 func NewPostgresStore(db *postgres.DB) *PostgresStore {
@@ -692,8 +695,10 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunListFilter) ([]d
 
 // ResolveRun applies the run's resolved fields as a CAS — only when the row is not
 // already 'resolved' — and returns whether THIS call won the transition. Same field
-// set as UpdateRun plus the `state <> 'resolved'` guard; the RowsAffected==1 result
-// is the exactly-once gate the service uses to fire the resolve side-effects once.
+// set as UpdateRun plus the `state <> 'resolved'` guard. The winner's transaction
+// also queues dunning.resolved, carrying the run as this write left it (ADR-040,
+// ADR-131), so the resolve and its event commit together and a loser queues
+// nothing. A failed insert fails the resolve, and the run stays as it was.
 func (s *PostgresStore) ResolveRun(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, fromActiveOnly bool) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -703,26 +708,42 @@ func (s *PostgresStore) ResolveRun(ctx context.Context, tenantID string, run dom
 
 	now := clock.Now(ctx)
 	// A resolved run waits on no payment (#1289).
-	res, err := tx.ExecContext(ctx, `
+	written, err := scanRun(tx.QueryRowContext(ctx, `
 		UPDATE invoice_dunning_runs SET state=$1, reason=$2, attempt_count=$3,
 			last_attempt_at=$4, next_action_at=$5, paused=$6, resolved_at=$7, resolution=$8, updated_at=$9,
 			awaiting_payment_intent_id = NULL
-		WHERE id=$10 AND state <> 'resolved' AND (NOT $11 OR state = 'active')`,
+		WHERE id=$10 AND state <> 'resolved' AND (NOT $11 OR state = 'active')
+		RETURNING `+runColumns,
 		run.State, postgres.NullableString(run.Reason), run.AttemptCount,
 		postgres.NullableTime(run.LastAttemptAt), postgres.NullableTime(run.NextActionAt),
 		run.Paused, postgres.NullableTime(run.ResolvedAt), postgres.NullableString(string(run.Resolution)),
-		now, run.ID, fromActiveOnly)
+		now, run.ID, fromActiveOnly))
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
+	if err := s.enqueueRunEvent(ctx, tx, tenantID, domain.EventDunningResolved, written, nil); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
-	return n == 1, nil
+	return true, nil
+}
+
+// enqueueRunEvent queues a dunning.* webhook event on tx, carrying run as
+// GET /v1/dunning/runs/{id} returns it, with extra beside it (ADR-131).
+// Without an outbox (narrow tests) it queues nothing.
+func (s *PostgresStore) enqueueRunEvent(ctx context.Context, tx *sql.Tx, tenantID, eventType string, run domain.InvoiceDunningRun, extra map[string]any) error {
+	if s.outbox == nil {
+		return nil
+	}
+	if _, err := s.outbox.Enqueue(ctx, tx, tenantID, eventType, domain.DunningRunWebhookData(run, extra)); err != nil {
+		return fmt.Errorf("enqueue %s: %w", eventType, err)
+	}
+	return nil
 }
 
 // UpdateRunIfActive applies the run's fields only when the row is still
@@ -762,6 +783,29 @@ func (s *PostgresStore) ResolveRun(ctx context.Context, tenantID string, run dom
 // mean the run no longer waits on that payment. Only RecordRetryInFlight
 // sets it.
 func (s *PostgresStore) UpdateRunIfActive(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, then func(tx *sql.Tx) error) (bool, error) {
+	return s.writeRunIfActive(ctx, tenantID, run, expectedAttempts, nil, then)
+}
+
+// EscalateRun is UpdateRunIfActive for the escalation, run being the
+// escalated run. When the write applies, its transaction also queues
+// dunning.escalated, carrying the run as the write left it with extra
+// beside it (ADR-040, ADR-131). A failed insert fails the escalation, so the
+// two commit together or not at all. The event is queued before then's
+// SAVEPOINT: an email failure skips only the email.
+func (s *PostgresStore) EscalateRun(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, extra map[string]any, then func(tx *sql.Tx) error) (bool, error) {
+	if run.State != domain.DunningEscalated {
+		return false, fmt.Errorf("dunning run %s: EscalateRun writes an escalated run, not one in state %q", run.ID, run.State)
+	}
+	return s.writeRunIfActive(ctx, tenantID, run, expectedAttempts, func(tx *sql.Tx, written domain.InvoiceDunningRun) error {
+		return s.enqueueRunEvent(ctx, tx, tenantID, domain.EventDunningEscalated, written, extra)
+	}, then)
+}
+
+// writeRunIfActive is the guarded write of UpdateRunIfActive and EscalateRun.
+// onWrite (nil = none) runs on the transaction right after the write applies,
+// with the row it wrote, and its error fails the whole write. then runs after
+// it, under the email SAVEPOINT.
+func (s *PostgresStore) writeRunIfActive(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, onWrite func(tx *sql.Tx, written domain.InvoiceDunningRun) error, then func(tx *sql.Tx) error) (bool, error) {
 	if err := refuseStrandingWrite(run); err != nil {
 		return false, err
 	}
@@ -772,23 +816,28 @@ func (s *PostgresStore) UpdateRunIfActive(ctx context.Context, tenantID string, 
 	defer postgres.Rollback(tx)
 
 	now := clock.Now(ctx)
-	res, err := tx.ExecContext(ctx, `
+	written, err := scanRun(tx.QueryRowContext(ctx, `
 		UPDATE invoice_dunning_runs SET state=$1, reason=$2, attempt_count=$3,
 			last_attempt_at=$4, next_action_at=$5, paused=$6, resolved_at=$7, resolution=$8, updated_at=$9,
 			awaiting_payment_intent_id = NULL
-		WHERE id=$10 AND state = 'active' AND attempt_count = $11`,
+		WHERE id=$10 AND state = 'active' AND attempt_count = $11
+		RETURNING `+runColumns,
 		run.State, postgres.NullableString(run.Reason), run.AttemptCount,
 		postgres.NullableTime(run.LastAttemptAt), postgres.NullableTime(run.NextActionAt),
 		run.Paused, postgres.NullableTime(run.ResolvedAt), postgres.NullableString(string(run.Resolution)),
-		now, run.ID, expectedAttempts)
+		now, run.ID, expectedAttempts))
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
+	if onWrite != nil {
+		if err := onWrite(tx, written); err != nil {
+			return false, err
+		}
 	}
-	if n == 1 && then != nil {
+	if then != nil {
 		if _, err := tx.ExecContext(ctx, "SAVEPOINT dunning_email"); err != nil {
 			return false, err
 		}
@@ -805,7 +854,7 @@ func (s *PostgresStore) UpdateRunIfActive(ctx context.Context, tenantID string, 
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
-	return n == 1, nil
+	return true, nil
 }
 
 // refuseStrandingWrite is the liveness invariant both store implementations

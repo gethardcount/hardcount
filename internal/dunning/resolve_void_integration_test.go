@@ -20,6 +20,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/webhook"
 )
 
 // countingStopper is the Stripe leg of a void, counted per invoice.
@@ -31,24 +32,6 @@ func (c *countingStopper) StopCollection(_ context.Context, _ string, inv domain
 
 // ExpireCheckoutSessions is a write-off's leg; these tests void.
 func (*countingStopper) ExpireCheckoutSessions(context.Context, string, domain.Invoice) {}
-
-// recordingEvents records the outbound webhook events dunning sends.
-type recordingEvents struct{ types []string }
-
-func (r *recordingEvents) Dispatch(_ context.Context, _, eventType string, _ map[string]any) error {
-	r.types = append(r.types, eventType)
-	return nil
-}
-
-func (r *recordingEvents) count(eventType string) int {
-	n := 0
-	for _, t := range r.types {
-		if t == eventType {
-			n++
-		}
-	}
-	return n
-}
 
 // An operator resolves a dunning run as invoice_voided. The dunning handler
 // voids through the real invoice service, whose post-commit legs stop
@@ -65,13 +48,13 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 	tenantID := testutil.CreateTestTenant(t, db, "Resolve Void One Path")
 
 	dstore := dunning.NewPostgresStore(db)
+	dstore.SetOutboxEnqueuer(webhook.NewOutboxStore(db))
 	invStore := invoice.NewPostgresStore(db)
 
 	type rig struct {
 		inv     domain.Invoice
 		run     domain.InvoiceDunningRun
 		stopper *countingStopper
-		events  *recordingEvents
 		router  chi.Router
 	}
 	newRig := func(t *testing.T, tag string) rig {
@@ -82,9 +65,7 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 		if err != nil {
 			t.Fatalf("create customer: %v", err)
 		}
-		events := &recordingEvents{}
 		dsvc := dunning.NewService(dstore, nil, clock.Real())
-		dsvc.SetEventDispatcher(events)
 		policy, err := dsvc.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
 			Name: "resolve-void-" + tag, Enabled: true, RetryDays: []int{3, 3, 3},
 			FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
@@ -114,13 +95,28 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 		if err != nil || run.State != domain.DunningActive {
 			t.Fatalf("start dunning: state %s, %v", run.State, err)
 		}
-		events.types = nil // StartDunning's own event is not under test
 
 		h := dunning.NewHandler(dsvc)
 		h.SetInvoiceVoider(invSvc)
 		router := chi.NewRouter()
 		router.Mount("/v1/dunning", h.Routes())
-		return rig{inv: inv, run: run, stopper: stopper, events: events, router: router}
+		return rig{inv: inv, run: run, stopper: stopper, router: router}
+	}
+	// resolvedWebhooks counts the queued dunning.resolved events about the run.
+	resolvedWebhooks := func(t *testing.T, runID string) int {
+		t.Helper()
+		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		var n int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT count(*) FROM webhook_outbox WHERE event_type = $1 AND payload->'dunning_run'->>'id' = $2`,
+			domain.EventDunningResolved, runID).Scan(&n); err != nil {
+			t.Fatalf("count dunning.resolved outbox rows: %v", err)
+		}
+		return n
 	}
 	resolve := func(r rig) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/v1/dunning/runs/"+r.run.ID+"/resolve",
@@ -174,7 +170,7 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 		if n := resolvedEvents(t, r.run.ID); n != 1 {
 			t.Errorf("resolved timeline events = %d, want 1 (the void's resolve and the handler's collide on the CAS)", n)
 		}
-		if n := r.events.count(domain.EventDunningResolved); n != 1 {
+		if n := resolvedWebhooks(t, r.run.ID); n != 1 {
 			t.Errorf("dunning.resolved events = %d, want 1", n)
 		}
 	})
@@ -198,7 +194,7 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 		if run.State != domain.DunningActive {
 			t.Errorf("run state=%s, want active: the invoice is still collectible", run.State)
 		}
-		if n := r.events.count(domain.EventDunningResolved); n != 0 {
+		if n := resolvedWebhooks(t, r.run.ID); n != 0 {
 			t.Errorf("dunning.resolved events = %d, want 0", n)
 		}
 	})

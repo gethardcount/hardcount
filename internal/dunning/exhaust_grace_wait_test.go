@@ -69,7 +69,7 @@ type graceWaitHarness struct {
 	holds  *countingHolds
 	writer *capturingUncollect
 	emails *recordingEmailNotifier
-	events *captureDispatcher
+	events *webhookRecorder
 }
 
 func newGraceWaitHarness(subAction domain.DunningSubscriptionAction) *graceWaitHarness {
@@ -79,8 +79,8 @@ func newGraceWaitHarness(subAction domain.DunningSubscriptionAction) *graceWaitH
 		holds:  &countingHolds{},
 		writer: &capturingUncollect{},
 		emails: &recordingEmailNotifier{},
-		events: &captureDispatcher{},
 	}
+	h.events = &h.store.webhooks
 	twoAxisPolicy(h.store, subAction, domain.InvActionMarkUncollectible)
 	h.svc = NewService(h.store, &noopRetrier{}, nil)
 	h.svc.SetSubscriptionPauser(h.action, stubInvGet{inv: unpaidInv()})
@@ -89,7 +89,6 @@ func newGraceWaitHarness(subAction domain.DunningSubscriptionAction) *graceWaitH
 	h.svc.SetInvoiceUncollectibleMarker(h.writer)
 	h.svc.SetEmailNotifier(h.emails)
 	h.svc.SetCustomerEmailFetcher(stubCustomerEmail{})
-	h.svc.SetEventDispatcher(h.events)
 	return h
 }
 

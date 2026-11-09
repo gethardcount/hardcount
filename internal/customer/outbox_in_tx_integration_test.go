@@ -67,16 +67,6 @@ func (o *faultyOutbox) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, eventT
 	return o.outbox.Enqueue(ctx, tx, tenantID, eventType, payload)
 }
 
-// Dispatch is the post-commit path as router.go wires it on main
-// (webhook.OutboxDispatcher: an insert in a transaction of its own).
-func (o *faultyOutbox) Dispatch(ctx context.Context, tenantID, eventType string, payload map[string]any) error {
-	if o.fails(eventType) {
-		return errOutboxDown
-	}
-	_, err := o.outbox.EnqueueStandalone(ctx, tenantID, eventType, payload)
-	return err
-}
-
 // suppressionRig is one tenant's customer, with the customer store and
 // service wired as router.go wires them.
 type suppressionRig struct {
@@ -94,9 +84,9 @@ func newSuppressionRig(t *testing.T, db *postgres.DB, name, failType string) *su
 	tenantID := testutil.CreateTestTenant(t, db, name)
 	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), false), tenantID)
 	store := customer.NewPostgresStore(db)
+	store.SetOutboxEnqueuer(&faultyOutbox{outbox: webhook.NewOutboxStore(db), failType: failType})
 	stopper := &stopAfterWrite{PostgresStore: store, stop: func() {}}
 	svc := customer.NewService(stopper)
-	svc.SetEventDispatcher(&faultyOutbox{outbox: webhook.NewOutboxStore(db), failType: failType})
 	c, err := svc.Create(ctx, tenantID, customer.CreateInput{
 		ExternalID: "outbox-suppression", DisplayName: "Suppression Co", Email: "ap@suppression.test",
 	})

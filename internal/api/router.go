@@ -394,6 +394,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// the event commits with its change, a crash after the commit cannot
 	// drop an event that a provisioning webhook consumer depends on.
 	subStore.SetOutboxEnqueuer(outboxStore)
+	// customer.email_bounced and .email_complained are queued in the
+	// transaction of the suppression write each reports, so a bounce or a
+	// complaint that is saved always sends its event.
+	customerStore.SetOutboxEnqueuer(outboxStore)
 	// Prepaid commits are funded at finalize (ADR-078 D2). FinalizeWithDates
 	// grants the commit block through credit.Service, in the finalize
 	// coordinator transaction.
@@ -441,8 +445,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	settingsH.SetAuditLogger(auditLogger)
 	stripeClient := payment.NewLiveStripeClient(stripeClients)
 	dunningStore := dunning.NewPostgresStore(db)
-	// StartRun queues dunning.started in its transaction, with the run and
-	// its timeline event, so all three commit or none do.
+	// Every dunning.* event is queued in the transaction of the run write it
+	// reports: StartRun queues dunning.started with the run and its timeline
+	// event, the escalation queues dunning.escalated, and the resolve's
+	// compare-and-set queues dunning.resolved for its winner.
 	dunningStore.SetOutboxEnqueuer(outboxStore)
 	dunningSvc := dunning.NewService(dunningStore, nil, clk) // retrier set below after stripeAdapter created
 	dunningH := dunning.NewHandler(dunningSvc)
@@ -542,14 +548,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	dunningSvc.SetSubscriptionPauser(&subscriptionPauserAdapter{svc: subSvc}, invoiceStore)
 	dunningSvc.SetSubscriptionCanceler(&subscriptionCancelerAdapter{svc: subSvc})
 	dunningSvc.SetSubscriptionStateReader(&subscriptionStateAdapter{svc: subSvc})
-	dunningSvc.SetEventDispatcher(eventDispatcher)
 	// The dunning service reads each customer's dunning_policy_id, to pick the
 	// effective policy at StartDunning (ADR-036).
 	dunningSvc.SetCustomerPolicyReader(customerSvc)
-	// The customer service emits customer.email_bounced when bounce reporting
-	// fires. It needs the same webhook dispatcher as the other domain
-	// services.
-	customerSvc.SetEventDispatcher(eventDispatcher)
 	webhookH := payment.NewHandler(stripeAdapter, tenantStripeSvc)
 
 	invoiceSvc := invoice.NewService(invoiceStore, clk, settingsStore)
@@ -1169,7 +1170,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// with no outbox queues none of its events, so a dropped setter line would
 	// boot and send nothing. Every component that holds an outbox joins this
 	// list; TestMustWiredOutbox_CoversEveryOutboxHolder pins it.
-	webhook.MustWiredOutbox(invoiceStore, creditStore, subStore, dunningStore, creditNoteSvc)
+	webhook.MustWiredOutbox(invoiceStore, creditStore, subStore, dunningStore, customerStore, creditNoteSvc)
 
 	// Invoice finalize commits the Stripe Tax calculation into a
 	// tax_transaction, so the tenant's Stripe Tax reports show the final

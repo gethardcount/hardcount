@@ -228,7 +228,6 @@ type Service struct {
 	invoiceGet       InvoiceGetter
 	chargeHolds      ChargeHoldClaimer
 	retryHolds       RetryHoldReleaser
-	events           domain.EventDispatcher
 	emailNotifier    EmailNotifier
 	customerEmail    CustomerEmailFetcher
 	custPolicy       CustomerPolicyReader
@@ -355,47 +354,6 @@ func (s *Service) SetEmailNotifier(notifier EmailNotifier) {
 // SetCustomerEmailFetcher configures customer email resolution for dunning notifications.
 func (s *Service) SetCustomerEmailFetcher(fetcher CustomerEmailFetcher) {
 	s.customerEmail = fetcher
-}
-
-// SetEventDispatcher configures outbound webhook event firing.
-func (s *Service) SetEventDispatcher(events domain.EventDispatcher) {
-	s.events = events
-}
-
-// fireEvent queues a webhook event after the run's transaction has committed,
-// and logs when the queue insert fails. Nothing sends the event again: an
-// insert failure, a crash or a cancelled ctx between the commit and this
-// insert loses it. StartRun queues dunning.started in its transaction
-// instead (ADR-040); internal/arch/webhook_emit_catalog_test.go lists the
-// sites that still come through here.
-func (s *Service) fireEvent(ctx context.Context, tenantID, eventType string, payload map[string]any) {
-	if s.events == nil {
-		return
-	}
-	if err := s.events.Dispatch(ctx, tenantID, eventType, payload); err != nil {
-		slog.Error("dispatch dunning event",
-			"event_type", eventType,
-			"tenant_id", tenantID,
-			"error", err,
-		)
-	}
-}
-
-// fireRunEvent sends a dunning.* event carrying the run as
-// GET /v1/dunning/runs/{id} returns it, read after the change committed
-// (ADR-131). When the read fails there is no true resource to send, so the
-// event is left out, loudly.
-func (s *Service) fireRunEvent(ctx context.Context, tenantID, eventType, runID string, extra map[string]any) {
-	if s.events == nil {
-		return
-	}
-	run, err := s.store.GetRun(ctx, tenantID, runID)
-	if err != nil {
-		slog.ErrorContext(ctx, "dunning webhook event not sent: the run could not be read after the change",
-			"event_type", eventType, "tenant_id", tenantID, "run_id", runID, "error", err)
-		return
-	}
-	s.fireEvent(ctx, tenantID, eventType, domain.DunningRunWebhookData(run, extra))
 }
 
 // StartDunning initiates a dunning run for a failed invoice payment.
@@ -1595,8 +1553,9 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	// Guarded escalation write. If a settle resolved this run during the
 	// (successful) terminal action, don't clobber resolved→escalated or emit a
 	// contradictory dunning.escalated on top of the settle's dunning.resolved.
-	// The timeline row, escalation email, and webhook below fire only when THIS
-	// call actually escalated the run.
+	// The store queues dunning.escalated in this write's transaction, only
+	// when the write applies (ADR-040), and the timeline row below is written
+	// only then too.
 	// The escalation email rides this write's transaction (ADR-040); it
 	// renders what actually applied to this invoice, not what the policy
 	// asked for. Built before the write — plain reads — and enqueued by the
@@ -1605,7 +1564,15 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	if s.emailNotifier != nil && s.customerEmail != nil {
 		escalateTx = s.buildDunningEscalationTx(ctx, tenantID, run, outcome)
 	}
-	if applied, err := s.store.UpdateRunIfActive(ctx, tenantID, run, run.AttemptCount, escalateTx); err != nil {
+	if applied, err := s.store.EscalateRun(ctx, tenantID, run, run.AttemptCount, map[string]any{
+		// The policy's two configured actions, and separately what actually
+		// landed. Subscribers reconciling their own records need the second:
+		// a one-off invoice under a cancel policy escalates with nothing
+		// canceled, and an aggregate "final_action" could not say so.
+		"final_subscription_action": string(policy.FinalSubscriptionAction),
+		"final_invoice_action":      string(policy.FinalInvoiceAction),
+		"applied":                   outcome.Reason(),
+	}, escalateTx); err != nil {
 		return err
 	} else if !applied {
 		slog.Info("dunning exhaust: run resolved or escalated by another processor during the terminal action — not escalating",
@@ -1634,16 +1601,6 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		"final_invoice_action", policy.FinalInvoiceAction,
 		"applied", outcome.Reason(),
 	)
-
-	s.fireRunEvent(ctx, tenantID, domain.EventDunningEscalated, run.ID, map[string]any{
-		// The policy's two configured actions, and separately what actually
-		// landed. Subscribers reconciling their own records need the second:
-		// a one-off invoice under a cancel policy escalates with nothing
-		// canceled, and an aggregate "final_action" could not say so.
-		"final_subscription_action": string(policy.FinalSubscriptionAction),
-		"final_invoice_action":      string(policy.FinalInvoiceAction),
-		"applied":                   outcome.Reason(),
-	})
 
 	return nil
 }
@@ -1890,7 +1847,8 @@ func (s *Service) ResolveRun(ctx context.Context, tenantID, runID string, resolu
 
 	// Resolve via the shared CAS path so an operator resolve racing an automated
 	// resolver (a card settle or the scheduler) fires dunning.resolved exactly once —
-	// the CAS winner owns the timeline row + the outbound webhook.
+	// the CAS winner's transaction queues the outbound webhook, and the winner
+	// writes the timeline row.
 	return s.resolveRunNow(ctx, tenantID, run, resolution, string(resolution))
 }
 
@@ -1911,8 +1869,9 @@ func (s *Service) invoiceIn(ctx context.Context, tenantID, invoiceID string, wan
 }
 
 // resolveRunNow transitions an already-loaded run to resolved with the given
-// resolution: stamps state/resolution/resolved_at, clears next_action_at, writes
-// the DunningEventResolved row, persists, and fires EventDunningResolved. Binds
+// resolution: stamps state/resolution/resolved_at, clears next_action_at,
+// persists (the store queues EventDunningResolved in that transaction), and
+// writes the DunningEventResolved row. Binds
 // the clock to the invoice so resolved_at lands in simulated time on clock-pinned
 // invoices. Shared by ResolveByInvoice, the processRun success branch, and the
 // processRun paid-pre-check so the transition is identical across all of them.
@@ -1963,8 +1922,8 @@ func (s *Service) resolveRunAt(ctx context.Context, tenantID string, run domain.
 		return run, nil
 	}
 
-	// Only the CAS winner writes the (non-idempotent) resolved timeline row + fires
-	// the outbound dunning.resolved webhook.
+	// Only the CAS winner writes the (non-idempotent) resolved timeline row. The
+	// store queued its dunning.resolved webhook in the CAS's transaction.
 	_, _ = s.store.CreateEvent(ctx, tenantID, domain.InvoiceDunningEvent{
 		RunID:        run.ID,
 		InvoiceID:    run.InvoiceID,
@@ -1974,8 +1933,6 @@ func (s *Service) resolveRunAt(ctx context.Context, tenantID string, run domain.
 		Reason:       eventReason,
 		CreatedAt:    now,
 	})
-
-	s.fireRunEvent(ctx, tenantID, domain.EventDunningResolved, run.ID, nil)
 	return run, nil
 }
 
