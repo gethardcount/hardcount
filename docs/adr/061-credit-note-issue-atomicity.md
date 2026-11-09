@@ -10,7 +10,7 @@ over deferral) and it shipped.
 
 ## Summary
 
-`creditnote.Service.Issue()` commits the `draft` to `issued` status change and the internal money effect in one database transaction: a credit grant for a paid invoice, or an `amount_due` reduction for an unpaid one. If the effect fails, both roll back and the note stays `draft`, so a customer is never shown a credit they did not receive. The external effects (Stripe refund, tax reversal at the provider) run after commit with idempotency keys. Amended 2026-06-25: tax reversal does not use `webhook_outbox`, because its rows would reach customer endpoints. A scheduler sweep, `RetryPendingCreditNoteTaxReversal`, retries failed reversals with the same key. Amended 2026-10-19: a note that leaves an unpaid invoice with nothing due marks it paid in the same transaction, unless a charge hold is set.
+`creditnote.Service.Issue()` commits the `draft` to `issued` status change and the internal money effect in one database transaction: a credit grant for a paid invoice, or an `amount_due` reduction for an unpaid one. If the effect fails, both roll back and the note stays `draft`, so a customer is never shown a credit they did not receive. The external effects (Stripe refund, tax reversal at the provider) run after commit with idempotency keys. Amended 2026-06-25: tax reversal does not use `webhook_outbox`, because its rows would reach customer endpoints. A scheduler sweep, `RetryPendingCreditNoteTaxReversal`, retries failed reversals with the same key. Amended 2026-10-19: a note that leaves an unpaid invoice with nothing due marks it paid in the same transaction, unless a charge hold is set. Amended 2026-11-09: `create()` takes its invoice row `FOR KEY SHARE` before it numbers the note, so it keeps one lock order with a cancel's or plan swap's relief void.
 
 ## Context
 
@@ -286,7 +286,7 @@ The alternative was to store the returned amount as the note's `credit_amount_ce
 
 ### What did not change
 
-- `create()` takes no invoice row lock. Its amount-due cap is an early refusal only: a draft reserves nothing, so two drafts that each fit can together exceed what is due. `Issue()` is where a note is fitted to the invoice. A row lock in `create()` would also invert the lock order of transactions that draft several notes (they take the per-invoice advisory locks first). (Amended 2026-11-09: `create()` now takes its invoice row `FOR KEY SHARE`, which inverts no order. See the [amendment](#amendment-2026-11-09-create-takes-its-invoice-row-for-key-share).)
+- `create()` reserves nothing on the invoice. Its amount-due cap is an early refusal only: a draft reserves nothing, so two drafts that each fit can together exceed what is due. `Issue()` is where a note is fitted to the invoice. `create()` takes no row lock that blocks `Issue()` or a refund: such a lock would invert the lock order of transactions that draft several notes (they take the per-invoice advisory locks first). Since 2026-11-09 it takes the row `FOR KEY SHARE`, which blocks neither; see the [amendment](#amendment-2026-11-09-create-takes-its-invoice-row-for-key-share).
 - No backfill. The widened doctor check lists any invoice the old clamp over-relieved; the remedy is a manual credit grant for the excess.
 
 ### Sizing: a note may cover applied credits (same day, second change)
@@ -361,7 +361,8 @@ Now both paths place what fits and log the rest at ERROR: the example returns th
 **Why "What did not change" above still holds.**
 
 - A key share does not conflict with the `FOR NO KEY UPDATE` that `Issue()` and the refund paths take, so it reverses no lock order of a transaction that takes the per-invoice advisory locks first.
-- It conflicts only with `FOR UPDATE`. A void, a finalize or a charge claim takes that in its own transaction, and takes neither the credit-note lock nor the number row. Such a writer now waits for a create from its credit-note lock onward, not only from its insert.
+- It conflicts only with `FOR UPDATE`. An operator void, a finalize or a charge claim takes that in its own transaction, and takes neither the credit-note lock nor the number row. Such a writer now waits for a create from its credit-note lock onward, not only from its insert.
+- The relief void of a cancel or plan swap does take `FOR UPDATE` and then credit-note locks and the number row, in one transaction. It never asks for the credit-note lock of the invoice it voided, because a voided invoice leaves the relief's allocation (`reliefTx`). So a create on that invoice waits for the void's row lock before it takes the number row, and the two cannot wait for each other.
 - The amount-due cap is still only an early refusal: the lock reserves nothing.
 
 Commit relief (`CreateUnderInvoiceLockDynamicTx`) does not take the row early. It runs only on a paid commit invoice, which no void can take.

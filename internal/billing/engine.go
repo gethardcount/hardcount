@@ -3942,7 +3942,8 @@ func (e *Engine) BillCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscr
 	return inv, r, afterCommit, nil
 }
 
-// startFinalOnCancelSpan starts the trace span of a cancel's final invoice.
+// startFinalOnCancelSpan starts a trace span for billing a cancel: the final
+// invoice, and in BillCancelTx also the relief.
 func startFinalOnCancelSpan(ctx context.Context, name string, sub domain.Subscription) (context.Context, trace.Span) {
 	return telemetry.Tracer("billing").Start(ctx, name,
 		trace.WithAttributes(
