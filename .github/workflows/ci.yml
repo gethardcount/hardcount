@@ -637,6 +637,13 @@ jobs:
       - name: quickstart.sh acts only on its own install
         run: scripts/ci/quickstart-own-install.sh
 
+      # The Compose stack's two nginx configs. nginx -t must accept each, a
+      # link's token must reach neither access log, and the dashboard's pages
+      # must carry the security headers. It runs them in the nginx image the
+      # stack names, which it pulls from Docker Hub.
+      - name: nginx configs pass nginx -t, redact tokens and send the headers
+        run: scripts/ci/nginx-config-check.sh
+
       # ShellCheck is pinned to a release and to the SHA-256 of its
       # linux.x86_64 archive. The release publishes no checksums file, so the
       # hash is the asset digest GitHub's release API reports. Bump the
