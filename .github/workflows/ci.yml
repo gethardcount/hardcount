@@ -625,9 +625,13 @@ jobs:
           tar -xJf "$RUNNER_TEMP/$name.tar.xz" -C "$RUNNER_TEMP" "$name/shellcheck"
           echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
 
-      # The scripts back up, restore and install Hardcount. A quoting bug in
-      # one, such as an unquoted path that splits at a space, is easy to miss
-      # in review. Local command: scripts/ci/shellcheck.sh.
+      # The scripts back up, restore and install Hardcount. This step fails on
+      # a ShellCheck finding of severity warning or error. Examples: an
+      # unquoted $(command) (SC2046), `local x=$(command)` hiding a failed
+      # command (SC2155), an unused variable (SC2034), an unquoted $@ (SC2068).
+      # It does not fail on an unquoted variable, such as a path that splits
+      # at a space (SC2086). ShellCheck rates SC2086 as info, below this gate.
+      # Local command: scripts/ci/shellcheck.sh.
       - name: ShellCheck every shell script
         run: scripts/ci/shellcheck.sh
 
