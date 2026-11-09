@@ -27,6 +27,7 @@ original text.
   - **A restore that replaces your live database** runs `hardcount restore catch-up` before it starts Hardcount. After a snapshot or point-in-time restore, it runs `hardcount restore begin` first ([Restore Hardcount](docs/ops/restore.md)).
   - **A copy,** such as a staging database refreshed from a live dump, must never run the catch-up: it writes to your live Stripe account. Remove the mark with `DELETE FROM restore_catchup;` instead, and follow the rules for starting a copy ([Back up Hardcount](docs/ops/backup-considerations.md#4-run-the-restore-drill)).
 - If a webhook endpoint listens for only one of `payment_method.attached` and `payment_method.updated`, subscribe it to both. A Stripe event that changes nothing on a saved card now sends no webhook. One Stripe Checkout setup session sends two Stripe events for its card, so the card can arrive as either webhook ([Payment methods](docs/api/webhook-events.md#payment-methods-datapayment_method)).
+- A subscription whose cycle close kept failing on a long Stripe Tax error, until billing parked it, stays parked after the upgrade. Its log line `bill subscription failed` reads `invalid byte sequence for encoding "UTF8"` (SQLSTATE 22021). Call `POST /v1/subscriptions/{id}/retry-billing` for each one.
 
 ### Added
 
@@ -38,6 +39,7 @@ original text.
 
 ### Fixed
 
+- **A cut to fit no longer splits a character.** A long error or webhook answer cut inside an accented letter or emoji, or an answer that is not text, made Postgres refuse the write. A cycle close then failed on every retry, a failed email or webhook was retried without end, a test clock stayed advancing, and a delivered webhook was sent again. ([#1644](https://github.com/gethardcount/hardcount/pull/1644))
 - **An error toast that names the failed action, such as "Failed to void", says "Result unknown" after a bare server error.** A 502 or 504 from the proxy, or a 500 with no reason, read as a failure with "Try again", though the action may have gone through. Now the warning says to refresh and check before trying again. An error shown inside a dialog is unchanged, except in Issue credit note. ([#1640](https://github.com/gethardcount/hardcount/pull/1640))
 - **Issue credit note no longer makes a second note after a lost answer.** The dialog showed raw text such as "Failed to fetch". Closed and opened again, it still offered the old amounts and sent a new request key, so a second try made a second note, and with it a second card refund. Now it says the result is unknown, counts a note that landed, and keeps the key until an answer settles the try. ([#1640](https://github.com/gethardcount/hardcount/pull/1640))
 - **`quickstart.sh` takes its settings only from its `.env`.** Compose took a setting exported in the shell over the `.env`, so after `set -a; . ./.env` for a server install, the quick start ran with that server's port, `APP_ENV` and encryption key. From a clean shell it then could not open its own data. ([#1635](https://github.com/gethardcount/hardcount/pull/1635))
