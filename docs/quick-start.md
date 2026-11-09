@@ -248,6 +248,8 @@ expected. Use the two links instead.
 | What you see | What to do |
 |---|---|
 | "deploy/compose/.env was not written by quickstart.sh" | This folder holds a Hardcount install made by hand, such as one from [Production on one VM](production-one-vm.md). The quick start leaves it alone. Clone Hardcount into another folder and run `./quickstart.sh` there. If port 8080 is taken, start it with `HARDCOUNT_PORT=9000`. |
+| "the quick start in … already uses Docker Compose project hardcount-quickstart" | Every quick start uses that project, so two folders cannot share it. Use Hardcount from the folder the message names, or run `./quickstart.sh destroy` there first. If that folder no longer exists, the message gives the command that deletes its data. |
+| "Docker still holds the data of a quick start" | An earlier quick start's database is still in Docker, and this folder has no `.env` that can open it. Run `./quickstart.sh` in the folder that holds its `.env`. If you do not need that data, run the command the message gives, then `./quickstart.sh` again. |
 | A message that a port is already in use | Run `./quickstart.sh destroy`, then `HARDCOUNT_PORT=9000 ./quickstart.sh`. The dashboard is then at `http://localhost:9000`. |
 | "Hardcount did not become healthy in three minutes." | Read the log lines it prints above that message. |
 | "The first login was created earlier, and its password is shown only once." | The file that kept the password, `quickstart-credentials.json`, was removed. If you still have the password, sign in with it. If not, run `./quickstart.sh destroy` and start again. |
