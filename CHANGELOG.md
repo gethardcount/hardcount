@@ -34,11 +34,11 @@ original text.
 ### Fixed
 
 - **A refund of another account's payment, on a Stripe account two Hardcount accounts share, is acknowledged.** Its webhook failed, and Stripe sent it again for three days. ([#1633](https://github.com/gethardcount/hardcount/pull/1633))
-- **`quickstart.sh` acts only on the install it made.** In a folder whose `.env` was made by hand, such as a server install, `destroy` deleted that install's database and its `.env`, which holds the encryption key. Now every command refuses that `.env`, names its own Compose project, and `destroy` asks first. ([#PR])
+- **`quickstart.sh` acts only on the install it made.** In a folder whose `.env` was made by hand, such as a server install, `destroy` deleted that install's database and its `.env`, which holds the encryption key. Now every command refuses that `.env`, names its own Compose project, and `destroy` asks first. ([#1635](https://github.com/gethardcount/hardcount/pull/1635))
 
 ### Security
 
-- **The quick start listens only on this computer.** It served the dashboard and API on every network interface, over plain HTTP, with a live key already made. A new quick-start `.env` sets `NGINX_HTTP_PORT=127.0.0.1:8080`. From another machine, use an SSH tunnel ([quick start](docs/quick-start.md)). ([#PR])
+- **The quick start listens only on this computer.** It served the dashboard and API on every network interface, over plain HTTP, with a live key already made. A new quick-start `.env` sets `NGINX_HTTP_PORT=127.0.0.1:8080`. From another machine, use an SSH tunnel ([quick start](docs/quick-start.md)). ([#1635](https://github.com/gethardcount/hardcount/pull/1635))
 
 ## [0.9.3] - 2026-11-09
 
