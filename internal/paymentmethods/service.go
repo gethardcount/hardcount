@@ -348,12 +348,15 @@ func (s *Service) Detach(ctx context.Context, tenantID, customerID, pmID string)
 }
 
 // AttachForWebhook is AttachFromSetupIntent for payment.Stripe.HandleWebhook:
-// it returns the card as the API shows it (domain.PaymentMethodView), which
-// the payment_method.* webhooks carry, so payment/ does not have to know
-// about PaymentMethod. It returns nil for a card already removed, which
-// stays removed: the API does not list it, so no event may carry it.
-func (s *Service) AttachForWebhook(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool) (*domain.PaymentMethodView, error) {
-	pm, err := s.AttachFromSetupIntent(ctx, tenantID, customerID, stripePaymentMethodID, makeDefault)
+// it returns the card as the API shows it (domain.PaymentMethodView), so
+// payment/ does not have to know about PaymentMethod. It returns nil for a
+// card already removed, which stays removed: the API does not list it.
+//
+// eventType is the payment_method.* event the attach reports, and extra
+// its fields beside the card. The store queues it in the attach's
+// transaction when the attach changed the card (PostgresStore.Upsert).
+func (s *Service) AttachForWebhook(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool, eventType string, extra map[string]any) (*domain.PaymentMethodView, error) {
+	pm, err := s.attach(ctx, tenantID, customerID, stripePaymentMethodID, makeDefault, eventType, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -364,10 +367,11 @@ func (s *Service) AttachForWebhook(ctx context.Context, tenantID, customerID, st
 	return &view, nil
 }
 
-// AttachFromSetupIntent is the entry point the P5 webhook handler uses:
-// after setup_intent.succeeded, we know the PM and customer, and we
-// persist the row here. Called with an RLS ctx already staged to the
-// right tenant+livemode by the webhook handler.
+// AttachFromSetupIntent saves a card Stripe holds for the customer as a
+// payment_methods row: the attach the webhook makes after
+// setup_intent.succeeded (through AttachForWebhook), for callers that send
+// no webhook event. Called with an RLS ctx already staged to the right
+// tenant+livemode.
 //
 // makeDefault is set for a card saved through a Hardcount setup flow (the
 // operator's Add payment method link, the customer's payment-update link):
@@ -387,7 +391,16 @@ func (s *Service) AttachForWebhook(ctx context.Context, tenantID, customerID, st
 // audit row follows. When the attach moved the default from another card,
 // a default_changed audit row follows the attached one, as Set as default
 // and Remove's auto-promote write, so the log shows the charged card changed.
+//
+// It queues no webhook event. The webhook's attach, which reports one, is
+// AttachForWebhook.
 func (s *Service) AttachFromSetupIntent(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool) (PaymentMethod, error) {
+	return s.attach(ctx, tenantID, customerID, stripePaymentMethodID, makeDefault, "", nil)
+}
+
+// attach is AttachFromSetupIntent with the webhook event the store queues in
+// the attach's transaction ("" for none).
+func (s *Service) attach(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool, eventType string, extra map[string]any) (PaymentMethod, error) {
 	card, err := s.stripe.FetchPaymentMethodCard(ctx, stripePaymentMethodID)
 	if err != nil {
 		return PaymentMethod{}, fmt.Errorf("fetch card metadata: %w", err)
@@ -401,7 +414,7 @@ func (s *Service) AttachFromSetupIntent(ctx context.Context, tenantID, customerI
 		CardExpMonth:          card.ExpMonth,
 		CardExpYear:           card.ExpYear,
 		CardFingerprint:       card.Fingerprint,
-	}, makeDefault)
+	}, makeDefault, eventType, extra)
 	if err != nil {
 		return PaymentMethod{}, err
 	}

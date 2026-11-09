@@ -67,26 +67,6 @@ func (o *pevOutbox) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, eventType
 	return o.outbox.Enqueue(ctx, tx, tenantID, eventType, payload)
 }
 
-// afterCommit is how these six events reach the outbox before this change:
-// a second insert after the change committed (domain.EventDispatcher). With
-// stopped set, the process stops right after that commit (a crash, a deploy,
-// a lost lease), so the second insert never runs.
-type afterCommit struct {
-	outbox  *pevOutbox
-	stopped bool
-}
-
-func (d *afterCommit) Dispatch(ctx context.Context, tenantID, eventType string, payload map[string]any) error {
-	if d.stopped {
-		return errors.New("the process stopped right after the commit")
-	}
-	if d.outbox.fails(eventType) {
-		return errEventInsertFailed
-	}
-	_, err := d.outbox.outbox.EnqueueStandalone(ctx, tenantID, eventType, payload)
-	return err
-}
-
 // pevCards answers the adapter's card reads. The card a Checkout saved is
 // savedPM. The card a payment was made with is unknown, so no card stamp
 // writes the invoice after its settle commits and the invoice GET returns
@@ -126,16 +106,15 @@ const pevStripeCustomer = "cus_stripe_pev"
 // pevRig is one tenant with one customer, and the payment adapter wired as
 // router.go wires it.
 type pevRig struct {
-	db          *postgres.DB
-	ctx         context.Context
-	tenantID    string
-	customerID  string
-	invoices    *invoice.PostgresStore
-	pms         *paymentmethods.Service
-	outbox      *pevOutbox
-	cards       *pevCards
-	stripe      *payment.Stripe
-	afterCommit *afterCommit
+	db         *postgres.DB
+	ctx        context.Context
+	tenantID   string
+	customerID string
+	invoices   *invoice.PostgresStore
+	pms        *paymentmethods.Service
+	outbox     *pevOutbox
+	cards      *pevCards
+	stripe     *payment.Stripe
 }
 
 func newPEVRig(t *testing.T, db *postgres.DB, name string) *pevRig {
@@ -153,6 +132,7 @@ func newPEVRig(t *testing.T, db *postgres.DB, name string) *pevRig {
 	invoices := invoice.NewPostgresStore(db)
 	invoices.SetOutboxEnqueuer(outbox)
 	pmStore := paymentmethods.NewPostgresStore(db)
+	pmStore.SetOutboxEnqueuer(outbox)
 	pms := paymentmethods.NewService(pmStore, pevPMStripe{}, nil)
 	cards := &pevCards{}
 
@@ -161,11 +141,9 @@ func newPEVRig(t *testing.T, db *postgres.DB, name string) *pevRig {
 	s.SetCardFetcher(cards)
 	s.SetAnomalyRecorder(invoices)
 	s.SetPaymentMethodAttacher(pms)
-	ac := &afterCommit{outbox: outbox, stopped: true}
-	s.SetEventDispatcher(ac)
 
 	return &pevRig{db: db, ctx: ctx, tenantID: tenantID, customerID: cust.ID, invoices: invoices,
-		pms: pms, outbox: outbox, cards: cards, stripe: s, afterCommit: ac}
+		pms: pms, outbox: outbox, cards: cards, stripe: s}
 }
 
 // newInvoice creates a finalized invoice of pevDue, waiting for a card
@@ -443,7 +421,6 @@ func TestPaymentEvents_EventInsertFails_NothingIsSaved(t *testing.T) {
 
 	t.Run("a second charge on a paid invoice", func(t *testing.T) {
 		r := newPEVRig(t, db, "pev-fail-dup")
-		r.afterCommit.stopped = false
 		inv := r.paid(t, r.newInvoice(t, "INV-FAIL-DUP"), "pi_first")
 		r.outbox.failOn(domain.EventPaymentDuplicateCharge)
 		err := r.stripe.SettleSucceeded(r.ctx, r.tenantID, inv, "pi_second", pevDue, payment.SourceWebhook)
@@ -465,7 +442,6 @@ func TestPaymentEvents_EventInsertFails_NothingIsSaved(t *testing.T) {
 
 	t.Run("a charge for less than the invoice owed", func(t *testing.T) {
 		r := newPEVRig(t, db, "pev-fail-short")
-		r.afterCommit.stopped = false
 		inv := r.newInvoice(t, "INV-FAIL-SHORT")
 		r.outbox.failOn(domain.EventPaymentAmountMismatch)
 		err := r.stripe.SettleSucceeded(r.ctx, r.tenantID, inv, "pi_short", pevDue-1000, payment.SourceWebhook)
@@ -493,7 +469,6 @@ func TestPaymentEvents_EventInsertFails_NothingIsSaved(t *testing.T) {
 
 	t.Run("a charge in another currency", func(t *testing.T) {
 		r := newPEVRig(t, db, "pev-fail-currency")
-		r.afterCommit.stopped = false
 		before := r.newInvoice(t, "INV-FAIL-CURRENCY")
 		r.outbox.failOn(domain.EventPaymentCurrencyMismatch)
 		err := r.stripe.HandleWebhook(r.ctx, r.tenantID, otherCurrencySucceeded("evt_pev_fail_eur", "pi_eur", before.ID))
@@ -513,7 +488,6 @@ func TestPaymentEvents_EventInsertFails_NothingIsSaved(t *testing.T) {
 
 	t.Run("a card saved by a setup session", func(t *testing.T) {
 		r := newPEVRig(t, db, "pev-fail-attached")
-		r.afterCommit.stopped = false
 		r.outbox.failOn(domain.EventPaymentMethodAttached)
 		ev := r.setupIntentSucceeded(t, "evt_pev_fail_seti", "pm_saved")
 		if err := r.stripe.HandleWebhook(r.ctx, r.tenantID, ev); !errors.Is(err, errEventInsertFailed) {
@@ -540,7 +514,6 @@ func TestPaymentEvents_SameChangeTwice_OneEvent(t *testing.T) {
 
 	t.Run("a second charge seen by the webhook, then by the reconciler", func(t *testing.T) {
 		r := newPEVRig(t, db, "pev-twice-dup")
-		r.afterCommit.stopped = false
 		inv := r.paid(t, r.newInvoice(t, "INV-TWICE-DUP"), "pi_first")
 		if err := r.stripe.SettleSucceeded(r.ctx, r.tenantID, inv, "pi_second", pevDue, payment.SourceWebhook); err != nil {
 			t.Fatalf("webhook: %v", err)
@@ -560,7 +533,6 @@ func TestPaymentEvents_SameChangeTwice_OneEvent(t *testing.T) {
 
 	t.Run("one second charge reported twice at once", func(t *testing.T) {
 		r := newPEVRig(t, db, "pev-race-dup")
-		r.afterCommit.stopped = false
 		inv := r.paid(t, r.newInvoice(t, "INV-RACE-DUP"), "pi_first")
 		settle := func() error {
 			return r.stripe.SettleSucceeded(r.ctx, r.tenantID, inv, "pi_second", pevDue, payment.SourceWebhook)
@@ -575,7 +547,6 @@ func TestPaymentEvents_SameChangeTwice_OneEvent(t *testing.T) {
 
 	t.Run("a short charge delivered again", func(t *testing.T) {
 		r := newPEVRig(t, db, "pev-twice-short")
-		r.afterCommit.stopped = false
 		inv := r.newInvoice(t, "INV-TWICE-SHORT")
 		for i := range 2 {
 			if err := r.stripe.SettleSucceeded(r.ctx, r.tenantID, inv, "pi_short", pevDue-1000, payment.SourceWebhook); err != nil {
@@ -589,7 +560,6 @@ func TestPaymentEvents_SameChangeTwice_OneEvent(t *testing.T) {
 
 	t.Run("a setup intent delivered again", func(t *testing.T) {
 		r := newPEVRig(t, db, "pev-twice-seti")
-		r.afterCommit.stopped = false
 		// Stripe sends the event again when it did not get the first
 		// delivery's answer. To the handler that is a second event for the
 		// same card.
@@ -605,7 +575,6 @@ func TestPaymentEvents_SameChangeTwice_OneEvent(t *testing.T) {
 
 	t.Run("a card added beside the default, recorded twice", func(t *testing.T) {
 		r := newPEVRig(t, db, "pev-twice-beside")
-		r.afterCommit.stopped = false
 		if _, err := r.pms.AttachFromSetupIntent(r.ctx, r.tenantID, r.customerID, "pm_default", false); err != nil {
 			t.Fatalf("attach the default card: %v", err)
 		}
@@ -625,7 +594,6 @@ func TestPaymentEvents_SameChangeTwice_OneEvent(t *testing.T) {
 
 	t.Run("a setup session's second event for its card", func(t *testing.T) {
 		r := newPEVRig(t, db, "pev-session-pair")
-		r.afterCommit.stopped = false
 		// One setup session sends checkout.session.completed and
 		// setup_intent.succeeded for one card. Here the Checkout's is
 		// handled first and saves the card as the customer's first, so the

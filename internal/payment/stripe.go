@@ -115,7 +115,6 @@ type Stripe struct {
 	dunningRetryFail   DunningRetryFailure
 	paymentSetups      PaymentSetupStore
 	cardFetcher        CardFetcher
-	events             domain.EventDispatcher
 	emailReceipt       EmailReceipt
 	customerEmail      CustomerEmailResolver
 	emailPaymentFailed EmailPaymentFailed
@@ -158,10 +157,13 @@ type AuditEmitter interface {
 func (s *Stripe) SetAuditLogger(a AuditEmitter) { s.audit = a }
 
 // PaymentAnomalyRecorder persists the durable payment-anomaly marker the
-// dashboard attention classifier reads (ADR-068). Implemented by
-// *invoice.PostgresStore; wired via SetAnomalyRecorder in router.go.
+// dashboard attention classifier reads (ADR-068), and queues the anomaly's
+// webhook event (kind) with data in the same transaction, once per kind and
+// charge: it returns false, having written nothing, when the marker already
+// names this kind and PaymentIntent. Implemented by *invoice.PostgresStore;
+// wired via SetAnomalyRecorder in router.go.
 type PaymentAnomalyRecorder interface {
-	RecordPaymentAnomaly(ctx context.Context, tenantID, invoiceID, kind, paymentIntentID string, capturedCents int64) error
+	RecordPaymentAnomaly(ctx context.Context, tenantID, invoiceID, kind, paymentIntentID string, capturedCents int64, data map[string]any) (bool, error)
 }
 
 // SetAnomalyRecorder wires the durable anomaly marker store.
@@ -307,7 +309,10 @@ type InvoiceUpdater interface {
 	// paid-flip, so that event (the only one bearing the Stripe payment_intent_id)
 	// is crash-safe instead of fire-and-forget post-commit. SettleSucceeded uses
 	// this; non-card settlement paths keep MarkPaidReportingTransition.
-	MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error)
+	// capturedCents is the amount Stripe captured (0 = unknown): when it
+	// differs from the amount due, the same transaction records the anomaly
+	// and queues payment.amount_mismatch (ADR-068).
+	MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, capturedCents int64, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error)
 	// MarkPaymentFailedReportingTransition records one report that a
 	// PaymentIntent failed. It moves the invoice only for the attempt the
 	// invoice is waiting on, and reports whether this was the first notice
@@ -410,11 +415,6 @@ func (s *Stripe) SetEmailPaymentFailed(sender EmailPaymentFailed, customerEmail 
 	}
 }
 
-// SetEventDispatcher configures outbound webhook event firing.
-func (s *Stripe) SetEventDispatcher(events domain.EventDispatcher) {
-	s.events = events
-}
-
 // SetBreaker wires a global circuit breaker around Stripe calls. When
 // set, ChargeInvoice short-circuits with breaker.ErrOpen if the breaker
 // is rejecting — the Stripe call is not made, the charge hold is released,
@@ -438,10 +438,15 @@ func (s *Stripe) SetBreaker(b *breaker.Breaker) {
 // paymentmethods.Service can keep its richer AttachFromSetupIntent
 // method — returning (PaymentMethod, error) — for tests and direct
 // callers, while this package imports nothing from paymentmethods. It
-// returns the card as the API shows it, which payment_method.* carries, or
-// nil when the card was already removed and stays removed (a late event).
+// returns the card as the API shows it, or nil when the card was already
+// removed and stays removed (a late event).
+//
+// eventType is the payment_method.* event the attach reports, with extra
+// beside the card. The attacher queues it in the attach's transaction, and
+// only when the attach changed the card, so a redelivery sends nothing a
+// second time; a removed card sends nothing.
 type PaymentMethodAttacher interface {
-	AttachForWebhook(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool) (*domain.PaymentMethodView, error)
+	AttachForWebhook(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool, eventType string, extra map[string]any) (*domain.PaymentMethodView, error)
 }
 
 // SetPaymentMethodAttacher configures the handler that processes
@@ -546,28 +551,6 @@ func IsUnknownPaymentFailure(err error) bool {
 	// A wrapped non-PaymentError from our own code shouldn't happen; if it
 	// does we'd rather trip the breaker than miss a real incident.
 	return true
-}
-
-// fireEvent queues an outbound webhook event after the business transaction
-// has committed. A queue insert failure is logged, not returned: the change is
-// already saved, so failing the request would not undo it. Nothing sends the
-// event again, so an insert failure, a crash or a cancelled ctx between the
-// commit and this insert loses it. invoice.paid, payment.succeeded,
-// payment.failed and the dispute events are queued in their transaction
-// instead (ADR-040). The payment anomaly events still come after the commit,
-// through escalatePaymentAnomaly. internal/arch/webhook_emit_catalog_test.go
-// lists every site that queues an event after its commit.
-func (s *Stripe) fireEvent(ctx context.Context, tenantID, eventType string, payload map[string]any) {
-	if s.events == nil {
-		return
-	}
-	if err := s.events.Dispatch(ctx, tenantID, eventType, payload); err != nil {
-		slog.Error("dispatch event",
-			"event_type", eventType,
-			"tenant_id", tenantID,
-			"error", err,
-		)
-	}
 }
 
 // ChargeInvoice creates a Stripe PaymentIntent for a finalized invoice.
@@ -1772,7 +1755,10 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 		ctx = hardcountauth.WithCustomerActor(ctx, customerID)
 	}
 
-	pm, err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, pmID, fromHardcountSetup)
+	// payment_method.attached is queued in the attach's transaction, with the
+	// card as it commits, when the attach changed the card (ADR-040, ADR-131).
+	pm, err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, pmID, fromHardcountSetup,
+		domain.EventPaymentMethodAttached, map[string]any{"stripe_payment_method_id": pmID})
 	if err != nil {
 		return fmt.Errorf("attach payment method: %w", err)
 	}
@@ -1790,11 +1776,6 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 		"customer_id", customerID,
 		"stripe_pm_id", pmID,
 	)
-
-	s.fireEvent(ctx, tenantID, domain.EventPaymentMethodAttached, domain.PaymentMethodWebhookData(*pm, map[string]any{
-		"stripe_payment_method_id": pmID,
-	}))
-
 	return nil
 }
 
@@ -2159,11 +2140,15 @@ func (s *Stripe) handlePaymentSucceeded(ctx context.Context, tenantID string, ev
 	// absorbing silently is the one wrong option).
 	// The event names the charge's currency in upper case, as Hardcount writes
 	// every currency; the invoice beside it carries its own.
+	// A failed anomaly write fails the webhook, before the settle, so Stripe
+	// delivers it again and the redelivery records both.
 	if event.Currency != "" && !strings.EqualFold(event.Currency, inv.Currency) {
 		chargeCurrency := strings.ToUpper(event.Currency)
-		s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentCurrencyMismatch, event.PaymentIntentID, captured,
+		if err := s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentCurrencyMismatch, event.PaymentIntentID, captured,
 			map[string]any{"charge_currency": chargeCurrency},
-			fmt.Sprintf("charge settled in %s but the invoice is labeled %s", chargeCurrency, strings.ToUpper(inv.Currency)))
+			fmt.Sprintf("charge settled in %s but the invoice is labeled %s", chargeCurrency, strings.ToUpper(inv.Currency))); err != nil {
+			return err
+		}
 	}
 	return s.SettleSucceeded(ctx, tenantID, inv, event.PaymentIntentID, captured, SourceWebhook)
 }
@@ -2359,9 +2344,11 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 // the reconciler's hosted sweep for a paid session whose webhooks were lost —
 // without the sweep's call, Hardcount recorded the payment but showed "no payment
 // method" and sent the next invoice to card-less dunning, asking for a card
-// the customer had just given. A card already on file with the same Stripe
-// payment method is left alone, so a webhook and the sweep both reporting one
-// session write one audit row and one payment_method.updated event.
+// the customer had just given. A default card already on file with the same
+// Stripe payment method is left alone, so a webhook and the sweep both
+// reporting one session write one audit row. payment_method.updated is
+// queued in the attach's transaction, and only when the attach changed the
+// card, so a card both report sends one event, the default or not.
 func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, stripeCustomerID, purpose string) error {
 	if s.paymentSetups == nil {
 		slog.Warn("payment setup store not configured, cannot update payment status")
@@ -2427,10 +2414,15 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 	// the newest on the Stripe customer, so it never takes the default by
 	// itself: for a setup-mode session, setup_intent.succeeded carries the
 	// exact card and is the one writer that makes it the default.
+	//
+	// payment_method.updated rides the attach's transaction, with the card as
+	// it commits (ADR-040, ADR-131). A card the operator removed before this
+	// event arrived stays removed and sends nothing: the API does not list it.
 	var recorded *domain.PaymentMethodView
 	cardRemoved := false
 	if s.pmAttacher != nil && card.PaymentMethodID != "" {
-		pm, err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, card.PaymentMethodID, false)
+		pm, err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, card.PaymentMethodID, false,
+			domain.EventPaymentMethodUpdated, map[string]any{"stripe_customer_id": stripeCustomerID})
 		if err != nil {
 			return fmt.Errorf("record the checkout's card: %w", err)
 		}
@@ -2508,12 +2500,9 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 		"card_last4", setup.CardLast4,
 	)
 
-	// payment_method.updated carries the card as recorded above (ADR-131).
-	// Every production wiring records one: the attacher is always wired, and
-	// Stripe names the card it lists. Without a recorded card there is no
-	// resource to send, so the event is left out, loudly. A card the
-	// operator removed before this event arrived stays removed: the API does
-	// not list it, so no event names it either.
+	// Every production wiring records the card: the attacher is always wired,
+	// and Stripe names the card it lists. Without a recorded card the attach
+	// queued no payment_method.updated, so say so, loudly.
 	if cardRemoved {
 		slog.InfoContext(ctx, "payment_method.updated not sent: the checkout's card was removed and stays removed",
 			"customer_id", customerID, "stripe_customer_id", stripeCustomerID, "stripe_pm_id", card.PaymentMethodID)
@@ -2522,11 +2511,6 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 	if recorded == nil {
 		slog.ErrorContext(ctx, "payment_method.updated not sent: the checkout's card was not recorded as a payment method",
 			"customer_id", customerID, "stripe_customer_id", stripeCustomerID, "attacher_wired", s.pmAttacher != nil)
-		return nil
 	}
-	s.fireEvent(ctx, tenantID, domain.EventPaymentMethodUpdated, domain.PaymentMethodWebhookData(*recorded, map[string]any{
-		"stripe_customer_id": stripeCustomerID,
-	}))
-
 	return nil
 }

@@ -99,7 +99,7 @@ func TestThresholdWriteOff_CloseBillsOnlyTheResidual(t *testing.T) {
 			r.invoiceAction(thr, "record-payment", at)
 		}},
 		{"card charge settles after the close", 0, func(r *lagRig, thr string, at time.Time) {
-			if _, won, err := invoice.NewPostgresStore(r.db).MarkPaidCardSettlementTransition(uwCtx(at), r.tenantID, thr, "pi_settles_late", at, nil); err != nil || !won {
+			if _, won, err := invoice.NewPostgresStore(r.db).MarkPaidCardSettlementTransition(uwCtx(at), r.tenantID, thr, "pi_settles_late", at, 0, nil); err != nil || !won {
 				r.t.Fatalf("card settle on the written-off invoice: won=%v err=%v, want the uncollectible → paid transition", won, err)
 			}
 		}},

@@ -19,13 +19,11 @@ Producers persist an event/email intent inside the business-op
 transaction; a background dispatcher drains the queue with retry +
 DLQ.
 
-> **Amendment (2026-08-30): the four money emails and 35 webhook event types are queued in the transaction; other emails and 6 webhook event types are queued after it.**
-> The paragraph above is true of 35 of the 41 webhook event types: the
-> five `invoice.*` events, the 16 `subscription.*` events,
-> `payment.succeeded`, `payment.failed`, `payment.dispute_opened`,
-> `payment.dispute_closed`, `payment.refunded_in_stripe`, the three
-> `dunning.*` events, the two `customer.*` events, and the four `credit.*`
-> events.
+> **Amendment (2026-08-30): the four money emails and all 41 webhook event types are queued in the transaction; other emails are queued after it.**
+> The paragraph above is true of all 41 webhook event types: the five
+> `invoice.*` events, the 16 `subscription.*` events, the nine `payment.*`
+> events, the two `payment_method.*` events, the three `dunning.*` events,
+> the two `customer.*` events, and the four `credit.*` events.
 > `invoice.finalized`, `.voided`, `.marked_uncollectible` and
 > `.payment_recorded` joined them on 2026-11-05: the invoice store queues
 > each in the transaction of its change, for an invoice born finalized and
@@ -38,17 +36,21 @@ DLQ.
 > 2026-11-09. The dunning store queues `dunning.escalated` in the
 > escalation's transaction, and `dunning.resolved` in the transaction of
 > the resolve's compare-and-set, for its winner only. The customer store
-> queues each suppression event with its write. The other 6 are queued
-> after the commit: the four payment anomalies
-> (`payment.duplicate_charge`, `.amount_mismatch`, `.currency_mismatch`
-> and `.received_on_voided_invoice`), and `payment_method.attached` and
-> `.updated`. Post-commit events go
+> queues each suppression event with its write. The four payment anomalies
+> (`payment.duplicate_charge`, `.amount_mismatch`, `.currency_mismatch` and
+> `.received_on_voided_invoice`) and `payment_method.attached` and
+> `.updated` joined them on 2026-11-09 too. The invoice store writes an
+> anomaly's marker and queues its event in one transaction, once per kind
+> and charge, and records `payment.amount_mismatch` in the card settle's
+> transaction. The payment-methods store queues a card's event with the
+> attach that changed the card. Before, these events went
 > through `domain.EventDispatcher` → `webhook.OutboxDispatcher.Dispatch` →
 > `OutboxStore.EnqueueStandalone`, a second transaction opened on the
 > caller's context. A crash, a rolling deploy, a client disconnect, the
 > 30-second route timeout or a lost leader lease between the two commits
-> loses the event, and nothing sends it again. The fix is under way;
-> `internal/arch/webhook_emit_catalog_test.go` lists the remaining sites.
+> lost the event, and nothing sent it again. No producer uses that path
+> now, and `internal/arch/webhook_emit_catalog_test.go` fails a new site
+> that queues an event after its commit.
 > (Corrected 2026-11-05. This paragraph first said that every webhook
 > producer enqueues inside the business transaction.)
 > The paragraph above has never been

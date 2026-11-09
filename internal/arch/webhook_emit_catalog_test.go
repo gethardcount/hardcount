@@ -45,10 +45,9 @@ import (
 // standalone sink call with a constant, or a call of a helper. A helper is a
 // function whose only calls queue a fixed event type, so each caller of a
 // helper holds a site too. The test does not see a new call of a function
-// that holds a site and does other work too, such as
-// payment.Stripe.SettleSucceeded: the call reaches a site already counted.
-// A PR
-// that moves such a site must list that function's callers in its site-set.
+// that holds a site and does other work too: the call reaches a site
+// already counted. A PR that moves such a site must list that function's
+// callers in its site-set.
 // The walk follows calls, so a helper passed as a function value is not
 // followed.
 
@@ -69,14 +68,7 @@ var standaloneSinkNames = map[string]bool{"Dispatch": true, "EnqueueStandalone":
 // into its transaction, lower its count or delete its entry. When an event
 // type leaves the list, mark it "Always sent" in docs/api/webhook-events.md
 // (TestAlwaysSentMarksMatchTheBacklog checks the two agree).
-var standaloneWebhookBacklog = map[string]int{
-	"payment.Stripe.RecordCheckoutCard payment_method.updated":          1,
-	"payment.Stripe.SettleSucceeded payment.amount_mismatch":            1,
-	"payment.Stripe.SettleSucceeded payment.duplicate_charge":           2,
-	"payment.Stripe.SettleSucceeded payment.received_on_voided_invoice": 1,
-	"payment.Stripe.handlePaymentSucceeded payment.currency_mismatch":   1,
-	"payment.Stripe.handleSetupIntentSucceeded payment_method.attached": 1,
-}
+var standaloneWebhookBacklog = map[string]int{}
 
 // webhookDynamicEmitAllowlist names the functions that hand the webhook
 // package an event type that is not a constant, each with its reason. The

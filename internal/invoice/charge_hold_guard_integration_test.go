@@ -252,7 +252,7 @@ func TestChargeHold_ChargeStillSettlesItself(t *testing.T) {
 
 	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-HOLD-SELF")
 	claimAuto(t, store, ctx, tenantID, inv.ID)
-	paid, transitioned, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, inv.ID, "pi_self_settle", time.Now().UTC(), nil)
+	paid, transitioned, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, inv.ID, "pi_self_settle", time.Now().UTC(), 0, nil)
 	if err != nil {
 		t.Fatalf("the charge holding the hold could not settle itself: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestRecordOfflinePayment_CardSettledAfterReadIsRefused(t *testing.T) {
 
 	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-OFFLINE-AFTER-CARD")
 	racer := &raceAfterGet{PostgresStore: store, race: func() {
-		if _, ok, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, inv.ID, "pi_card_won", time.Now().UTC(), nil); err != nil || !ok {
+		if _, ok, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, inv.ID, "pi_card_won", time.Now().UTC(), 0, nil); err != nil || !ok {
 			t.Fatalf("card settle: ok=%v err=%v", ok, err)
 		}
 	}}

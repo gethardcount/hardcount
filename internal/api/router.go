@@ -350,11 +350,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Outbound events go through the webhook_outbox table, which the
 	// dispatcher worker (cmd/hardcount/main.go) drains into events and their
 	// deliveries. The outbox is always on (ADR-040), because dispatching
-	// directly gives up every retry guarantee. The components given
-	// outboxStore below queue their events in the transaction of the change.
-	// The producers given eventDispatcher queue theirs after that transaction
-	// commits, so a crash in between loses the event;
-	// internal/arch/webhook_emit_catalog_test.go lists those sites.
+	// directly gives up every retry guarantee. Every component given
+	// outboxStore below queues its events in the transaction of the change
+	// each reports, so a crash after the commit cannot lose one.
 	outboxStore := webhook.NewOutboxStore(db)
 	// Queue-depth gauges, which the Grafana and runbook alerts watch. The
 	// counts run on a TxBypass transaction because they span tenants. Under
@@ -377,7 +375,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 			return n, nil
 		})
 	})
-	eventDispatcher := webhook.NewOutboxDispatcher(outboxStore)
 	// The invoice store queues every invoice.* event in the transaction of
 	// its change: invoice.paid with the move to paid, so it fires exactly
 	// once on every settlement path, and invoice.finalized, .voided,
@@ -398,6 +395,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// transaction of the suppression write each reports, so a bounce or a
 	// complaint that is saved always sends its event.
 	customerStore.SetOutboxEnqueuer(outboxStore)
+	// payment_method.attached and .updated are queued in the transaction of
+	// the attach each reports, so a card that is saved always sends its event.
+	paymentMethodsStore.SetOutboxEnqueuer(outboxStore)
 	// Prepaid commits are funded at finalize (ADR-078 D2). FinalizeWithDates
 	// grants the commit block through credit.Service, in the finalize
 	// coordinator transaction.
@@ -484,12 +484,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 
 	stripeAdapter := payment.NewStripe(stripeClient, invoiceStore, webhookStore, paymentSetupStore, dunningSvc)
 	stripeAdapter.SetCardFetcher(stripeClient)
-	stripeAdapter.SetEventDispatcher(eventDispatcher)
 	// Payment anomalies are stored on the invoice (ADR-068). The settle path
-	// records a duplicate charge, an amount mismatch or a paid voided invoice
-	// on the invoice row. The dashboard attention banner shows them as
-	// Critical, even on an invoice in a terminal state, where it otherwise
-	// returns early.
+	// records a duplicate charge, an amount mismatch, a charge in another
+	// currency or a paid voided invoice on the invoice row, and the invoice
+	// store queues the anomaly's webhook event in that write's transaction.
+	// The dashboard attention banner shows them as Critical, even on an
+	// invoice in a terminal state, where it otherwise returns early.
 	stripeAdapter.SetAnomalyRecorder(invoiceStore)
 	// The checkout-session store is the claim ledger. The adapter keeps it in
 	// step with checkout.session.completed, and at settle time tries to
@@ -1170,7 +1170,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// with no outbox queues none of its events, so a dropped setter line would
 	// boot and send nothing. Every component that holds an outbox joins this
 	// list; TestMustWiredOutbox_CoversEveryOutboxHolder pins it.
-	webhook.MustWiredOutbox(invoiceStore, creditStore, subStore, dunningStore, customerStore, creditNoteSvc)
+	webhook.MustWiredOutbox(invoiceStore, creditStore, subStore, dunningStore, customerStore, paymentMethodsStore, creditNoteSvc)
 
 	// Invoice finalize commits the Stripe Tax calculation into a
 	// tax_transaction, so the tenant's Stripe Tax reports show the final

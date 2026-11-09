@@ -25,6 +25,7 @@ original text.
 - Hardcount now refuses to start on a database `scripts/restore.sh` restored, or `hardcount restore begin` marked, and the restore pauses billing and dunning. A script that does this must change:
   - **A restore that replaces your live database** runs `hardcount restore catch-up` before it starts Hardcount. After a snapshot or point-in-time restore, it runs `hardcount restore begin` first ([Restore Hardcount](docs/ops/restore.md)).
   - **A copy,** such as a staging database refreshed from a live dump, must never run the catch-up: it writes to your live Stripe account. Remove the mark with `DELETE FROM restore_catchup;` instead, and follow the rules for starting a copy ([Back up Hardcount](docs/ops/backup-considerations.md#4-run-the-restore-drill)).
+- If a webhook endpoint listens for only one of `payment_method.attached` and `payment_method.updated`, subscribe it to both. A Stripe event that changes nothing on a saved card now sends no webhook. One Stripe Checkout setup session sends two Stripe events for its card, so the card can arrive as either webhook ([Payment methods](docs/api/webhook-events.md#payment-methods-datapayment_method)).
 
 ### Added
 
@@ -33,7 +34,7 @@ original text.
 ### Fixed
 
 - **A refund of another account's payment, on a Stripe account two Hardcount accounts share, is acknowledged.** Its webhook failed, and Stripe sent it again for three days. ([#1633](https://github.com/gethardcount/hardcount/pull/1633))
-- **Dunning and customer webhook events are no longer lost to a crash, a deploy or a dropped request.** `dunning.escalated`, `dunning.resolved`, `customer.email_bounced` and `customer.email_complained` were queued just after their change was saved, and a crash or a cancelled request in between dropped them. Each is now saved with its change. A bounce from your SMTP server that cannot be saved is logged at ERROR, because nothing sends it again. ([#1636](https://github.com/gethardcount/hardcount/pull/1636))
+- **Dunning, customer, payment and payment-method webhook events are no longer lost to a crash, a deploy or a dropped request.** Ten event types, among them `dunning.resolved`, `customer.email_bounced`, `payment.duplicate_charge` and `payment_method.attached`, were queued just after their change was saved, and a crash or a cancelled request in between dropped them. Each is now saved with its change. Each payment anomaly is sent once per charge, not once per report. A bounce from your SMTP server that cannot be saved is logged at ERROR, because nothing sends it again. ([#1636](https://github.com/gethardcount/hardcount/pull/1636), [#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM))
 
 ## [0.9.3] - 2026-11-09
 

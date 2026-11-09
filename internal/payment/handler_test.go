@@ -542,7 +542,7 @@ func (m *mockInvoiceUpdaterHandler) MarkPaidReportingTransition(_ context.Contex
 // does inside its transaction (nil tx: these fakes have none). A fake that
 // accepted the hook and dropped it would make every settlement-email
 // assertion in this package read zero and pass forever.
-func (m *mockInvoiceUpdaterHandler) MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id, piID string, paidAt time.Time, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
+func (m *mockInvoiceUpdaterHandler) MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id, piID string, paidAt time.Time, _ int64, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
 	inv, transitioned, err := m.MarkPaidReportingTransition(ctx, tenantID, id, piID, paidAt)
 	if err == nil && transitioned && then != nil {
 		_ = then(nil, inv)

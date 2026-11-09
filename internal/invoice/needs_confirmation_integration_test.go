@@ -86,7 +86,7 @@ func TestRetryBlockingDecline_ConfirmIsTheNewestAnswerAHardDeclineIsFinal_RealSt
 	}
 	if _, _, err := r.pms.Upsert(ctx, r.tenantID, paymentmethods.PaymentMethod{
 		CustomerID: custD, StripePaymentMethodID: "pm_d2", Type: "card", CardFingerprint: "fp_pm_d2",
-	}, true); err != nil {
+	}, true, "", nil); err != nil {
 		t.Fatalf("add default card: %v", err)
 	}
 	if got := pageRead(invD); len(got) != 0 {
