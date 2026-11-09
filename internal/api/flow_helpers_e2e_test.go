@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"github.com/stripe/stripe-go/v82/webhook"
 	"gopkg.in/yaml.v3"
 
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/user"
@@ -247,6 +249,14 @@ func flowSignIn(t *testing.T, db *postgres.DB, ts *httptest.Server, tenantID str
 		t.Fatalf("add an owner to %s: %v", tenantID, err)
 	}
 	return login(t, ts, email, password)
+}
+
+// callerCtx is the ctx the auth middleware gives a request from tenantID in
+// one mode. A test that calls a store straight away, such as storing Stripe
+// keys with tenantstripe.Store.Upsert, passes it so the write runs under
+// row-level security as that tenant and mode.
+func callerCtx(tenantID string, live bool) context.Context {
+	return auth.WithTenantID(postgres.WithLivemode(context.Background(), live), tenantID)
 }
 
 // flowCount runs a COUNT query outside row-level security.
