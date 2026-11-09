@@ -1167,7 +1167,7 @@ func (s *PostgresStore) MarkPaid(ctx context.Context, tenantID, id string, strip
 // catch — fires them once, not twice. invoice.paid itself is already
 // once-only (enqueued inside this tx, after the no-op branch returns).
 func (s *PostgresStore) MarkPaidReportingTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, bool, error) {
-	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, settleOther, nil, nil)
+	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, settleOther, 0, nil, nil)
 }
 
 // MarkPaidOffline is MarkPaid for an operator-recorded payment (cheque,
@@ -1182,7 +1182,7 @@ func (s *PostgresStore) MarkPaidReportingTransition(ctx context.Context, tenantI
 // path gets a check: the card settlement and the credit-covered settles run
 // inside the charge's own hold and must always be able to record it.
 func (s *PostgresStore) MarkPaidOffline(ctx context.Context, tenantID, id string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
-	inv, _, err := s.markPaidReportingTransition(ctx, tenantID, id, "", paidAt, settleOffline, check, nil)
+	inv, _, err := s.markPaidReportingTransition(ctx, tenantID, id, "", paidAt, settleOffline, 0, check, nil)
 	return inv, err
 }
 
@@ -1203,8 +1203,17 @@ func (s *PostgresStore) MarkPaidOffline(ctx context.Context, tenantID, id string
 // failover in that gap lost the receipt for good — the transition gate then
 // suppresses every later attempt). It receives the freshly-written row
 // because the receipt's amount is the amount actually booked here.
-func (s *PostgresStore) MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
-	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, settleCard, nil, then)
+//
+// capturedCents is the amount Stripe captured (0 = unknown). When it differs
+// from the amount due under the row lock, the transition also records the
+// anomaly (ADR-068) and queues payment.amount_mismatch, both in this
+// transaction: the books record amount_paid = amount_due, so the difference
+// must be reported, and nothing checks it again once the invoice is paid.
+// The anomaly marker is written before the paid flip, so invoice.paid and
+// payment.succeeded carry the row as it commits. A failed insert of that
+// event fails the transition, as one of invoice.paid does.
+func (s *PostgresStore) MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, capturedCents int64, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
+	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, settleCard, capturedCents, nil, then)
 }
 
 // settleKind says which paid flip markPaidLockedTx writes: the effects that
@@ -1225,11 +1234,15 @@ const (
 
 // markPaidReportingTransition is the shared core. settleCard also enqueues
 // payment.succeeded on the SAME tx as the paid-flip (gated on the
-// transition, so exactly-once); settleOffline marks the payment out of band. Both event enqueues live inside this one tx, so
+// transition, so exactly-once), and payment.amount_mismatch when the
+// captured amount differs from the amount due; settleOffline marks the
+// payment out of band. Every event enqueue lives inside this one tx, so
 // they are atomic with finalized/uncollectible→paid: tx rolls back → no events;
 // commits → the dispatcher delivers.
 // check (nil = none) is MarkPaidOffline's refusal, run under the row lock.
-func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, kind settleKind, check func(tx *sql.Tx, locked domain.Invoice) error, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
+// capturedCents is the card settlement's captured amount (0 for the others
+// and when unknown); see MarkPaidCardSettlementTransition.
+func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, kind settleKind, capturedCents int64, check func(tx *sql.Tx, locked domain.Invoice) error, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Invoice{}, false, err
@@ -1266,9 +1279,10 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 	// subscription lock that closer holds (the dunning-pause release), so
 	// the closer must not wait for it.
 	var status, taxStatus string
+	var amountDue int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT status, tax_status FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, id,
-	).Scan(&status, &taxStatus); err != nil {
+		`SELECT status, tax_status, amount_due_cents FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, id,
+	).Scan(&status, &taxStatus, &amountDue); err != nil {
 		if err == sql.ErrNoRows {
 			return domain.Invoice{}, false, errs.ErrNotFound
 		}
@@ -1333,9 +1347,31 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 		))
 	}
 
+	// Amount truth-check (ADR-068): the paid flip books amount_paid =
+	// amount_due, so a card charge that captured another amount (a Checkout
+	// session paid after a credit note changed the due) is recorded as an
+	// anomaly in this transaction. Nothing checks it again: a redelivery of
+	// the charge finds the invoice paid. The marker goes first, so the paid
+	// flip's RETURNING row, which every event below carries, includes it.
+	mismatch := false
+	if kind == settleCard && capturedCents > 0 && capturedCents != amountDue {
+		stamped, err := recordPaymentAnomalyTx(ctx, tx, id, domain.EventPaymentAmountMismatch, stripePaymentIntentID, capturedCents)
+		if err != nil {
+			return domain.Invoice{}, false, err
+		}
+		mismatch = stamped
+	}
 	inv, err := s.markPaidLockedTx(ctx, tx, tenantID, id, stripePaymentIntentID, paidAt, kind)
 	if err != nil {
 		return domain.Invoice{}, false, err
+	}
+	if mismatch {
+		if err := s.enqueueInvoiceEventTx(ctx, tx, tenantID, domain.EventPaymentAmountMismatch, inv, map[string]any{
+			"incoming_payment_intent_id": stripePaymentIntentID,
+			"captured_cents":             capturedCents,
+		}); err != nil {
+			return domain.Invoice{}, false, err
+		}
 	}
 	// An offline payment's event says which status the invoice was paid
 	// from, which the paid row no longer holds. That is the status read
@@ -4502,26 +4538,65 @@ func buildInvWhere(f ListFilter) (string, []any) {
 }
 
 // RecordPaymentAnomaly stamps the durable payment-anomaly marker (ADR-068)
-// the dashboard attention banner reads. Single-slot, last-wins — the audit
-// log carries the history; the banner needs "money is wrong on THIS
-// invoice + which PI".
-func (s *PostgresStore) RecordPaymentAnomaly(ctx context.Context, tenantID, invoiceID, kind, paymentIntentID string, capturedCents int64) error {
+// the dashboard attention banner reads, and queues the anomaly's webhook
+// event, kind, with data, in the same transaction. The marker is one slot:
+// the latest anomaly wins.
+//
+// It records each anomaly once per kind and charge: when the marker already
+// names this kind and this PaymentIntent, it writes nothing, queues nothing
+// and returns false. So a Stripe redelivery, the reconciler and the webhook
+// reporting one charge send one event between them.
+//
+// data is the event's data as the caller builds it: the invoice as the
+// caller read it, which the event documents (docs/api/webhook-events.md),
+// and the charge's fields. A failed insert fails the call, and the marker
+// rolls back with it.
+func (s *PostgresStore) RecordPaymentAnomaly(ctx context.Context, tenantID, invoiceID, kind, paymentIntentID string, capturedCents int64, data map[string]any) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(ctx, `
+	stamped, err := recordPaymentAnomalyTx(ctx, tx, invoiceID, kind, paymentIntentID, capturedCents)
+	if err != nil || !stamped {
+		return false, err
+	}
+	if s.outbox != nil {
+		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, kind, data); err != nil {
+			return false, fmt.Errorf("enqueue %s: %w", kind, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// recordPaymentAnomalyTx is the marker write, a compare-and-set on tx: it
+// stamps kind, the PaymentIntent and the captured amount unless the marker
+// already holds this kind and this PaymentIntent, and reports whether it
+// wrote. Two callers stamping the same anomaly at once serialize on the row
+// lock, and the second finds the marker set and writes nothing.
+func recordPaymentAnomalyTx(ctx context.Context, tx *sql.Tx, invoiceID, kind, paymentIntentID string, capturedCents int64) (bool, error) {
+	var id string
+	err := tx.QueryRowContext(ctx, `
 		UPDATE invoices SET
 			payment_anomaly_kind = $1,
 			payment_anomaly_payment_intent_id = $2,
 			payment_anomaly_captured_cents = $3,
 			updated_at = now()
 		WHERE id = $4
-	`, kind, paymentIntentID, capturedCents, invoiceID); err != nil {
-		return err
+		  AND NOT (payment_anomaly_kind IS NOT DISTINCT FROM $1
+		       AND payment_anomaly_payment_intent_id IS NOT DISTINCT FROM $2)
+		RETURNING id
+	`, kind, paymentIntentID, capturedCents, invoiceID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
 	}
-	return tx.Commit()
+	if err != nil {
+		return false, fmt.Errorf("record payment anomaly %s: %w", kind, err)
+	}
+	return true, nil
 }
 
 // StreamForExport walks EVERY invoice in the date range in ONE snapshot

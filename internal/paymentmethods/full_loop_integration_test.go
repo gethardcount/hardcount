@@ -214,7 +214,7 @@ func (r *setupDefaultRig) upsert(custID, pm, fingerprint string, makeDefault boo
 	got, _, err := r.store.Upsert(r.ctx, r.tenantID, paymentmethods.PaymentMethod{
 		CustomerID: custID, StripePaymentMethodID: pm, Type: "card",
 		CardBrand: "visa", CardLast4: "4242", CardExpMonth: 12, CardExpYear: 2034, CardFingerprint: fingerprint,
-	}, makeDefault)
+	}, makeDefault, "", nil)
 	if err != nil {
 		r.t.Fatalf("upsert %s (makeDefault=%v): %v", pm, makeDefault, err)
 	}
@@ -345,7 +345,7 @@ func TestUpsert_MakeDefault_ConcurrentWithBeside_RealStore(t *testing.T) {
 				_, _, err := r.store.Upsert(r.ctx, r.tenantID, paymentmethods.PaymentMethod{
 					CustomerID: c, StripePaymentMethodID: pmB, Type: "card",
 					CardBrand: "visa", CardLast4: "4242", CardExpMonth: 12, CardExpYear: 2034, CardFingerprint: fpB,
-				}, makeDefault)
+				}, makeDefault, "", nil)
 				if err != nil {
 					errsCh <- fmt.Errorf("upsert makeDefault=%v: %w", makeDefault, err)
 				}

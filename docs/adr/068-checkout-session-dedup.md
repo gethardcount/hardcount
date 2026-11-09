@@ -1,11 +1,11 @@
 # ADR-068: Checkout session dedup — claim-first ledger, choke-point closes, loud anomaly settlement
 
 **Date:** 2026-07-02
-**Status:** Accepted (shipped in P2b-a; two build-time adversarial panels — 3 lenses each — amended the plan's sketch, see plan §4.2; amended by [ADR-100](100-currency-coherence-guard-ring.md) on 2026-07-26 and on 2026-10-11)
+**Status:** Accepted (shipped in P2b-a; two build-time adversarial panels — 3 lenses each — amended the plan's sketch, see plan §4.2; amended by [ADR-100](100-currency-coherence-guard-ring.md) on 2026-07-26, on 2026-10-11 and on 2026-11-09)
 
 ## Summary
 
-Hardcount records a hosted Stripe Checkout session (the customer's payment page) in `checkout_sessions` before creating it, so an invoice has at most one open session. The Stripe call uses an idempotency key from that record and a 1-hour expiry, and paying, voiding or reducing the amount due closes the record in the same transaction. A second charge on a paid invoice, a captured amount that differs from the amount due, or a payment on a voided invoice raises a critical alert; the operator does any refund. Amended 2026-10-11: a hosted session and a Hardcount charge (auto-charge, dunning retry or Collect) now exclude each other, and a reconciler sweep records how each session ended. Status: active, amended 2026-10-11; [ADR-100](100-currency-coherence-guard-ring.md) added a currency-mismatch alert at settle.
+Hardcount records a hosted Stripe Checkout session (the customer's payment page) in `checkout_sessions` before creating it, so an invoice has at most one open session. The Stripe call uses an idempotency key from that record and a 1-hour expiry, and paying, voiding or reducing the amount due closes the record in the same transaction. A second charge on a paid invoice, a captured amount that differs from the amount due, or a payment on a voided invoice raises a critical alert; the operator does any refund. Amended 2026-10-11: a hosted session and a Hardcount charge (auto-charge, dunning retry or Collect) now exclude each other, and a reconciler sweep records how each session ended. Status: active, amended 2026-10-11 and 2026-11-09 (each alert's record and its webhook event are saved together, once per charge); [ADR-100](100-currency-coherence-guard-ring.md) added a currency-mismatch alert at settle.
 
 ## Context
 
@@ -167,3 +167,31 @@ backstop.
 completes a hosted session and that payment's webhook is lost: the
 `completed` row's invoice is paid, so the sweep does not look at it and no
 duplicate alert fires.
+
+## Amendment 2026-11-09: an anomaly's marker and its event are one write
+
+**What changed.** The "loud anomaly settlement" above is no longer
+best-effort. The marker and the outbound event used to be two separate
+writes, each logged and skipped on failure. A crash or a failed insert
+could leave a marker with no event, an event with no marker, or neither.
+Now:
+
+- **One transaction.** The invoice store writes the marker and queues the
+  event (`payment.duplicate_charge`, `.received_on_voided_invoice`,
+  `.currency_mismatch`) in the same transaction
+  (`invoice.PostgresStore.RecordPaymentAnomaly`). `payment.amount_mismatch`
+  is written in the card settle's own transaction, before the paid flip, so
+  `invoice.paid` and `payment.succeeded` carry the marker too
+  (`MarkPaidCardSettlementTransition` takes the captured amount).
+- **Once per kind and charge.** The marker write is a compare-and-set: it
+  writes nothing, and queues nothing, when the marker already names this
+  kind and this PaymentIntent. A Stripe redelivery, the reconciler and the
+  webhook reporting one charge send one event between them. The marker is
+  one slot, so a charge reported again after another anomaly on the same
+  invoice is sent again.
+- **A failed write fails the call.** `SettleSucceeded` and the webhook
+  return the error: Stripe delivers the event again, or the reconciler
+  retries on its next run, and the retry records both. For
+  `payment.amount_mismatch` that fails the whole settle, as a failed
+  `invoice.paid` insert does. A payment on a voided invoice is still
+  absorbed once its anomaly is recorded.

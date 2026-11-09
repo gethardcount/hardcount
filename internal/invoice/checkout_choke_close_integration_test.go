@@ -106,7 +106,7 @@ func TestChokePointCloses(t *testing.T) {
 			pay     func(store *invoice.PostgresStore, tenantID, invID string, at time.Time) error
 		}{
 			{"card settlement", false, func(store *invoice.PostgresStore, tenantID, invID string, at time.Time) error {
-				_, _, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_card", at, nil)
+				_, _, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_card", at, 0, nil)
 				return err
 			}},
 			{"reconciler mark paid", false, func(store *invoice.PostgresStore, tenantID, invID string, at time.Time) error {
