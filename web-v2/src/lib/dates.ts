@@ -7,12 +7,17 @@ import type { EffectiveNow } from './effectiveNow'
 // timezone, returning UTC ISO 8601 timestamps suitable for the wire.
 // See ADR-010 for the model.
 //
-// All helpers fall back to 'UTC' if no tenant TZ is set (e.g. before
-// /v1/settings has loaded). The fallback matches the DB default and
-// keeps the dashboard usable during the boot window.
+// A helper whose result is sent to the server takes the zone as a required
+// argument: the caller passes the settings query's zone (useTenantTimezone).
+// A display helper may leave the zone out and get the account zone that
+// AccountSettingsGate set (tenantTZ). Before the settings load there is no
+// account zone, and tenantTZ throws: guessing UTC moved a credit's expiry or
+// a date by the account's offset, with no error.
 
 function tenantTZ(): string {
-  return getTenantTimezone() || 'UTC'
+  const tz = getTenantTimezone()
+  if (!tz) throw new Error('No account time zone yet: the account settings have not loaded. Render under AccountSettingsGate, or pass the zone.')
+  return tz
 }
 
 // endOfDayInTZ returns UTC ISO 8601 of "yyyy-mm-dd at 23:59:59.999
@@ -20,9 +25,8 @@ function tenantTZ(): string {
 // and for API key expiry, so the operator-intended last moment of the
 // day matches regardless of who's viewing or where they are physically.
 // Credit expiry uses startOfNextDayInTZ instead (see there).
-export function endOfDayInTZ(yyyymmdd: string, timezone?: string): string {
-  const tz = timezone || tenantTZ()
-  return fromZonedTime(`${yyyymmdd} 23:59:59.999`, tz).toISOString()
+export function endOfDayInTZ(yyyymmdd: string, timezone: string): string {
+  return fromZonedTime(`${yyyymmdd} 23:59:59.999`, timezone).toISOString()
 }
 
 // startOfNextDayInTZ returns UTC ISO 8601 of the midnight in tenant TZ that
@@ -33,11 +37,10 @@ export function endOfDayInTZ(yyyymmdd: string, timezone?: string): string {
 // endOfDayInTZ (23:59:59.999) fell 1 ms short of it. The day step runs on
 // UTC civil fields, never a browser-local Date, so the browser's own zone
 // can't move it. creditExpiryLabel reads the stored instant back.
-export function startOfNextDayInTZ(yyyymmdd: string, timezone?: string): string {
-  const tz = timezone || tenantTZ()
+export function startOfNextDayInTZ(yyyymmdd: string, timezone: string): string {
   const [y, m, d] = yyyymmdd.split('-').map(Number)
   const next = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
-  return fromZonedTime(`${next} 00:00:00.000`, tz).toISOString()
+  return fromZonedTime(`${next} 00:00:00.000`, timezone).toISOString()
 }
 
 // creditExpiryLabel reads a credit's stored expires_at. When it is a midnight
@@ -59,9 +62,8 @@ export function creditExpiryLabel(expiresAtISO: string, timezone?: string): stri
 // in tenant TZ". Used for date-range filters ("from May 1") so the
 // "from" boundary matches the operator's mental model of "from the
 // start of that day".
-export function startOfDayInTZ(yyyymmdd: string, timezone?: string): string {
-  const tz = timezone || tenantTZ()
-  return fromZonedTime(`${yyyymmdd} 00:00:00.000`, tz).toISOString()
+export function startOfDayInTZ(yyyymmdd: string, timezone: string): string {
+  return fromZonedTime(`${yyyymmdd} 00:00:00.000`, timezone).toISOString()
 }
 
 // civilDateAgo returns the yyyy-mm-dd civil date N days or months before
@@ -86,13 +88,12 @@ export function civilDateAgo(amount: number, unit: 'day' | 'month', timezone?: s
 // returns end-of-day-in-tenant-TZ as UTC ISO. The day-arithmetic
 // uses a browser-local Date with explicit y/m/d construction (TZ-
 // safe for day-grade math), then re-grounds in tenant TZ.
-export function addDaysInTZ(days: number, timezone?: string): string {
-  const tz = timezone || tenantTZ()
-  const todayStr = formatInTimeZone(new Date(), tz, 'yyyy-MM-dd')
+export function addDaysInTZ(days: number, timezone: string): string {
+  const todayStr = formatInTimeZone(new Date(), timezone, 'yyyy-MM-dd')
   const [y, m, d] = todayStr.split('-').map(Number)
   const target = new Date(y, m - 1, d + days)
   const targetStr = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-${String(target.getDate()).padStart(2, '0')}`
-  return endOfDayInTZ(targetStr, tz)
+  return endOfDayInTZ(targetStr, timezone)
 }
 
 // addCalendarMonthInTZ steps an instant forward one CALENDAR month on the
@@ -167,7 +168,7 @@ export function formatYMDInTZ(iso: string, timezone?: string): string {
 // startOfNextDayInTZ resolves it to tonight's midnight. Taking today from
 // toISOString() (the UTC date) instead would make a New York evening count as
 // tomorrow, and refuse today.
-export function isBeforeCivilToday(yyyymmdd: string, nowMs: number, timezone?: string): boolean {
+export function isBeforeCivilToday(yyyymmdd: string, nowMs: number, timezone: string): boolean {
   return yyyymmdd < formatYMDInTZ(new Date(nowMs).toISOString(), timezone)
 }
 
@@ -195,9 +196,8 @@ export function calendarDaysUntil(iso: string, now: EffectiveNow, timezone?: str
 // picker floor whose date is later resolved with startOfDayInTZ in the same
 // zone: the pause dialog's earliest resume date is civilDateFrom(now, 1),
 // because start of today is already past and the server refuses it.
-export function civilDateFrom(nowMs: number, days: number, timezone?: string): string {
-  const tz = timezone || tenantTZ()
-  const [y, m, d] = formatInTimeZone(new Date(nowMs), tz, 'yyyy-MM-dd').split('-').map(Number)
+export function civilDateFrom(nowMs: number, days: number, timezone: string): string {
+  const [y, m, d] = formatInTimeZone(new Date(nowMs), timezone, 'yyyy-MM-dd').split('-').map(Number)
   const target = new Date(y, m - 1, d + days)
   return formatYMD(target)
 }

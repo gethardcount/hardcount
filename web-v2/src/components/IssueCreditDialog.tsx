@@ -1,8 +1,14 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { api, formatCents, getCurrencySymbol, type CreditNote } from '@/lib/api'
+import { issueCreditFailure, type IssueCreditFailure } from '@/lib/actionOutcomes'
 import { creditNoteCeilings, hasCardPayment } from '@/lib/creditNoteCeilings'
+import { NO_ANSWER_TITLE } from '@/lib/errorCopy'
+import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { amountInputError, dollarsToWholeCents } from '@/lib/priceInput'
+import type { RetryKeys } from '@/lib/retryKeys'
 import { useSingleFlight } from '@/hooks/useSingleFlight'
+import { Callout } from '@/components/Callout'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -28,12 +34,17 @@ export interface CreditableInvoice {
 // invoice is picked. Before, the Credit Notes page had a second dialog of its
 // own that drifted: a Max that ignored earlier notes, a refund option the
 // server always refused, and amounts in the workspace currency (D-13).
-export function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCreated }: {
+export function IssueCreditDialog({ invoice, existingCreditNotes, retryKeys, onClose, onCreated }: {
   invoice: CreditableInvoice
   existingCreditNotes: CreditNote[]
+  // The Idempotency-Keys of the page that opens the dialog, one per invoice.
+  // They outlive the dialog, so a try after a result unknown sends the same
+  // key, also after the dialog was closed and opened again.
+  retryKeys: RetryKeys
   onClose: () => void
   onCreated: () => void
 }) {
+  const queryClient = useQueryClient()
   const isPaid = invoice.status === 'paid'
 
   // `amount_paid_cents > 0` does not imply a card was charged: an offline
@@ -46,7 +57,7 @@ export function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCre
   const [credit, setCredit] = useState('')
   const [outOfBand, setOutOfBand] = useState('')
   const [reason, setReason] = useState('')
-  const [submitError, setSubmitError] = useState('')
+  const [failure, setFailure] = useState<IssueCreditFailure | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
   // Each box is read exactly (dollarsToWholeCents) or refused under it:
@@ -133,12 +144,6 @@ export function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCre
   const canSubmit =
     reasonOk && amountOk && channelsOk && allocationMatches && !refundOverCap && !amountOverCreditable && !submitting
 
-  // One Idempotency-Key per dialog open, sent with every submit from it. A
-  // retry after a lost answer (a timeout while Stripe is slow) then gets the
-  // first request's credit note back instead of making a second one. The
-  // dialog unmounts on close, so the next open makes a new key.
-  const [idemKey] = useState(() => crypto.randomUUID())
-
   // Single-flight: the per-invoice lock only enforces the over-credit CAP, not
   // dedup — a double-fire that still fits under the remaining creditable amount
   // issues a SECOND credit note (a real second card refund / balance credit).
@@ -146,8 +151,11 @@ export function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCre
     e.preventDefault()
     if (!canSubmit) return
     setSubmitting(true)
-    setSubmitError('')
+    setFailure(null)
     try {
+      // The invoice's key stays the same until an answer says what became of
+      // a try. A try after a lost answer (a timeout while Stripe is slow)
+      // then gets the first try's note back instead of a second note.
       await api.createCreditNote({
         invoice_id: invoice.id,
         reason: reason.trim(),
@@ -160,10 +168,18 @@ export function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCre
           : {}),
         auto_issue: true,
         lines: [{ description: reason.trim(), quantity: 1, unit_amount_cents: amountCents }],
-      }, idemKey)
+      }, retryKeys.keyFor(invoice.id))
+      retryKeys.settle(invoice.id)
       onCreated()
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Failed to create credit note')
+      // A failed try may still have made the note. Read the invoice's notes
+      // again, so the amounts above count one that landed. Neither page
+      // polls them on its own.
+      invalidateMoneySurfaces(queryClient, { invoiceId: invoice.id })
+      const f = issueCreditFailure(err, retryKeys.unknown(invoice.id))
+      if (f.settles) retryKeys.settle(invoice.id)
+      else if (f.unknown) retryKeys.markUnknown(invoice.id)
+      setFailure(f)
     } finally {
       setSubmitting(false)
     }
@@ -317,9 +333,12 @@ export function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCre
             </div>
           )}
 
-          {submitError && (
-            <p className="text-xs text-destructive">{submitError}</p>
-          )}
+          {failure && (failure.unknown ? (
+            // Uncertain, not failed, so not drawn as an error (lib/errorCopy).
+            <Callout tone="amber" title={NO_ANSWER_TITLE} role="status">{failure.message}</Callout>
+          ) : (
+            <p className="text-xs text-destructive">{failure.message}</p>
+          ))}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>

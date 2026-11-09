@@ -22,6 +22,10 @@ vi.mock('@/lib/gen/queries.gen', () => ({
   useGetCustomerMargin: () => ({ data: emptyReport, isError: false, refetch: vi.fn() }),
 }))
 
+vi.mock('@/hooks/useTenantTimezone', () => ({
+  useTenantTimezone: () => 'UTC',
+}))
+
 vi.mock('@/hooks/useClockFrozenMap', () => ({
   useEffectiveNow: () => Date.parse('2026-10-16T12:00:00Z'),
 }))

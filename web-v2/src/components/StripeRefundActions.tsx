@@ -65,8 +65,8 @@ export function StripeRefundActions({ invoice, refunds, creditNotes, primary, on
   onChanged: () => void
 }) {
   const flagged = flaggedStripeRefunds(refunds)
-  // One Idempotency-Key per Record dialog opening, as Issue credit note does:
-  // a retry after a lost answer gets the first note back.
+  // One Idempotency-Key per Record dialog opening: a retry after a lost
+  // answer gets the first note back.
   const [recordTarget, setRecordTarget] = useState<{ refund: InvoiceStripeRefund; key: string } | null>(null)
   const [attachTarget, setAttachTarget] = useState<{ refund: InvoiceStripeRefund; note: CreditNote } | null>(null)
   const [dismissTarget, setDismissTarget] = useState<InvoiceStripeRefund | null>(null)

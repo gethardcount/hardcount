@@ -122,7 +122,8 @@ export function marginWindowFor(
     now: EffectiveNow
     customFrom: string
     customTo: string
-    timezone?: string
+    // The account's zone: custom dates are sent as its day bounds.
+    timezone: string
   },
 ): MarginWindow {
   switch (preset) {

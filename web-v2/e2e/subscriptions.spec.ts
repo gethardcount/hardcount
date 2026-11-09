@@ -470,10 +470,13 @@ test('extend a trial, end it now (the first period is invoiced), then pause coll
   const main = page.getByRole('main')
   await expect(summaryCell(page, 'Trial')).toContainText(`14-day trial · ends ${day(subscription.trial_end_at!, zone)}`)
 
-  // Extend: the dialog offers a week past the current trial end.
+  // Extend: the dialog offers a week past the current trial end, and names
+  // the account's time zone its times are in.
   await main.getByRole('button', { name: 'Extend trial' }).click()
+  const extendDialog = page.getByRole('dialog', { name: 'Extend trial' })
+  await expect(extendDialog).toContainText(`Times are in your account's time zone (${zone}).`)
   const extending = apiCall(page, 'POST', /\/extend-trial$/)
-  await page.getByRole('dialog', { name: 'Extend trial' }).getByRole('button', { name: 'Extend', exact: true }).click()
+  await extendDialog.getByRole('button', { name: 'Extend', exact: true }).click()
   expect((await extending).ok()).toBe(true)
   const extended = await getSub(subscription.id)
   const endsOn = day(extended.trial_end_at!, zone)

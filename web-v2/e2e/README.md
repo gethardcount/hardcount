@@ -54,8 +54,9 @@ the screen, and that the main things an operator does work end to end.
   browser), a credit note before and
   after an offline payment, void and write-off, and the credit notes page.
   Each journey checks the dashboard and the customer's payment page against
-  the API. New invoice must wait for the account's payment terms and start
-  at them: the browser holds the settings read, then answers it with Net 15.
+  the API. The customer's page must wait for the account settings, and New
+  invoice must then start at their payment terms: the browser holds the
+  settings read, then answers it with Net 15.
   When the browser loses the answer to a Save draft, Add line item or Issue
   credit note, a second click must make one invoice, line or note. For an
   invoice and a line, both clicks must send the same Idempotency-Key, and
@@ -69,6 +70,16 @@ the screen, and that the main things an operator does work end to end.
   recorded. CI connects no Stripe, so the refund and the server's answers to
   those buttons are stubbed in the browser; each test checks what the
   buttons send.
+  When the browser loses the answer to Issue credit note, the dialog must
+  say the result is unknown and count the note that landed. A try after
+  closing and reopening it, on the invoice page and the credit notes page,
+  must send the same Idempotency-Key and make no second note. Other values
+  under that key are refused, and the next try must make a new note. After
+  a lost answer, a 503 that the server gives before it reads the key must
+  not drop the key, and the dialog must still say the result is unknown. A
+  server error that the server sends again for the key (Idempotent-Replayed)
+  means the try has ended: the dialog must say to check the amounts, and the
+  next try must make a new note. The browser gives these two answers.
 - `activity.spec.ts` takes screenshots of the activity cards for people to
   compare: the invoice and subscription Activity cards, a Dunning run and the
   customer's Sent emails, at 1440px and 390px wide. It runs each story for a
@@ -92,15 +103,21 @@ the screen, and that the main things an operator does work end to end.
   shows inside it, not on a blank screen. A new page opens at the top, a page
   change refreshes sidebar counts older than 30 seconds, and the phone menu
   closes when the page changes, also on Back.
-- `workspace-settings.spec.ts` holds back the account settings. Create plan
-  and Grant credits must stay disabled until they load, then send the
-  account currency. Grant credits must say it is loading. When the read
-  fails, it must say so, with a Retry that loads it. The spec also saves a
-  new time zone and currency in Settings. The Usage page and Create plan
-  must use them without a reload, also after a switch to the other mode,
-  and Home must read its figures again. The browser answers the settings
+- `workspace-settings.spec.ts` holds back the account settings. The Pricing
+  page and a customer's page must wait until they load. Create plan and
+  Grant credits must then send the account currency. When a read Grant
+  credits needs fails, the dialog must say so, with a Retry that loads it.
+  The spec also saves a new time zone and currency in Settings. The Usage
+  page and Create plan must use them without a reload, also after a switch
+  to the other mode, and Home must read its figures again. The browser answers the settings
   reads, the save and the mode switch, so the account's real settings and
   the shared session's mode never change.
+- `time-zones.spec.ts` answers the settings read with a zone other than the
+  account's. A signed-in page must wait for the settings, then send a credit
+  expiry as a midnight in that zone. When the read fails, the page must say
+  so, with a Retry that loads it. With the browser in Los Angeles, on a test
+  clock, the expiry picker's first day and its Today must be the clock's day
+  in the account zone.
 - `global.setup.ts` runs first. It seeds data through the API (code in
   `fixtures/`) and signs in once through the login page. The other tests reuse
   that session.

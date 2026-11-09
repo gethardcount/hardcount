@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
-import { useTenantSettings } from '@/hooks/useTenantSettings'
+import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { api, formatDate, type ApiKeyInfo } from '@/lib/api'
 import { timeAgo, sinceMs, untilMs, daysUntil, wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
-import { addDaysInTZ, endOfDayInTZ, formatExpiryHintInTZ } from '@/lib/dates'
+import { addDaysInTZ, civilDateFrom, endOfDayInTZ, formatExpiryHintInTZ } from '@/lib/dates'
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { StatusBadge } from '@/components/StatusBadge'
 import { NoticeRow } from '@/components/NoticeRow'
@@ -143,11 +143,8 @@ export default function ApiKeysPage() {
   const queryClient = useQueryClient()
 
   // Tenant timezone for displaying expires_at — see CreateKeyDialog
-  // for the "why tenant TZ" rationale. UTC fallback covers the
-  // before-fetch race; the column is NOT NULL with default 'UTC' so
-  // every loaded settings row has a real value.
-  const { data: tenantSettings } = useTenantSettings()
-  const tenantTZ = tenantSettings?.timezone || 'UTC'
+  // for the "why tenant TZ" rationale.
+  const tenantTZ = useTenantTimezone()
 
   const { data: keysData, isLoading: loading, error: loadError, refetch } = useQuery({
     queryKey: ['api-keys'],
@@ -440,12 +437,8 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
   const [customDateError, setCustomDateError] = useState('')
 
   // Tenant timezone is the canonical clock for date-grade picks
-  // (matches Stripe / Auth0). Fetch from /v1/settings — already
-  // exposed there. Fall back to UTC if settings haven't loaded yet
-  // (covers the dialog-open-before-fetch race; UTC is the DB
-  // default so no tenant operates without a value in practice).
-  const { data: settings } = useTenantSettings()
-  const tenantTZ = settings?.timezone || 'UTC'
+  // (matches Stripe / Auth0), from the account settings.
+  const tenantTZ = useTenantTimezone()
 
   const form = useForm<CreateApiKeyData>({
     resolver: zodResolver(createApiKeySchema),
@@ -490,16 +483,12 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
     { value: 'custom', label: 'Custom' },
   ]
 
-  // Min date for custom picker = tomorrow at start-of-day. Without
-  // setHours(0,0,0,0), `tomorrow` carries the current wall-clock time
-  // and the DayPicker's `before: minDate` matcher inconsistently
-  // disables today depending on time-of-day — so today could leak
-  // through. A 0-day-from-now expiry is also a foot-gun for prod
-  // workflows, hence the tomorrow-or-later floor (matches GitHub PAT
-  // minimum and the FLOW K2 doc bullet).
-  const tomorrow = new Date(wallClockNow())
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  tomorrow.setHours(0, 0, 0, 0)
+  // The custom picker's first day is tomorrow in the tenant zone. A
+  // 0-day-from-now expiry is a foot-gun for prod workflows, hence the
+  // tomorrow-or-later floor (matches GitHub PAT minimum and the FLOW K2
+  // doc bullet). A key is never on a test clock, so now is the wall clock.
+  const now = wallClockNow()
+  const tomorrow = civilDateFrom(now, 1, tenantTZ)
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
@@ -580,7 +569,9 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
                     onChange={(d) => { setCustomDate(d); setCustomDateError('') }}
                     placeholder="Select expiration date"
                     className="w-56"
-                    minDate={tomorrow}
+                    timeZone={tenantTZ}
+                    now={now}
+                    min={tomorrow}
                   />
                 </div>
               )}

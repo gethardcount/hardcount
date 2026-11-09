@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { StaleNotice } from '@/components/StaleNotice'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
+import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { useSingleFlight } from '@/hooks/useSingleFlight'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -1777,6 +1778,9 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
   // time), which a wall-clock "today" would wrongly accept as "future". Surfaced
   // by the no-restricted-syntax relative-time gate (ADR-086 Phase 4).
   const now = useEffectiveNow(customer?.test_clock_id)
+  // The commit expiry and the service period are days of the account's
+  // zone, sent as instants there.
+  const tz = useTenantTimezone()
   const [errors, setErrors] = useState<{
     lines?: Record<number, { description?: string; quantity?: string; unitAmount?: string; commit?: string }>
     form?: string
@@ -1868,10 +1872,10 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
             // "Today" is judged in tenant TZ, the zone startOfNextDayInTZ
             // resolves the expiry in below: valid through the picked day, so
             // today is a valid pick, as in the grant dialog.
-            if (isBeforeCivilToday(l.commitExpiresAt, now)) {
+            if (isBeforeCivilToday(l.commitExpiresAt, now, tz)) {
               errs.commit = 'Credit expiry must be today or later'
             } else {
-              commitExpires = startOfNextDayInTZ(l.commitExpiresAt)
+              commitExpires = startOfNextDayInTZ(l.commitExpiresAt, tz)
             }
           }
         }
@@ -1928,8 +1932,8 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
     const next = new Date(ey, em - 1, ed + 1)
     const endExclusive = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
     return {
-      billing_period_start: startOfDayInTZ(periodStart),
-      billing_period_end: startOfDayInTZ(endExclusive),
+      billing_period_start: startOfDayInTZ(periodStart, tz),
+      billing_period_end: startOfDayInTZ(endExclusive, tz),
     }
   }
 
