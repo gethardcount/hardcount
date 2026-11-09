@@ -27,11 +27,12 @@ import (
 // Event* constants declared there. This test closes the other half: it
 // follows every call that hands an event type to the webhook package (the
 // outbox Enqueue/EnqueueStandalone and the dispatchers' Dispatch), through
-// every wrapper that passes its own parameter on (fireEvent, dispatchEvent,
-// enqueueLifecycle, escalatePaymentAnomaly and so on), and requires the
-// event type at each call to be a constant whose value is in the catalog. A
-// string literal or another package's constant is checked by value, so
-// neither can slip past.
+// every wrapper that passes its own parameter on (enqueueLifecycle,
+// enqueueInvoiceEventTx, escalatePaymentAnomaly and so on) and through the
+// interfaces a wrapper's receiver implements (payment.PaymentAnomalyRecorder,
+// paymentmethods.Store), and requires the event type at each call to be a
+// constant whose value is in the catalog. A string literal or another
+// package's constant is checked by value, so neither can slip past.
 //
 // The same walk tells the two ways an event reaches the outbox apart. Enqueue
 // inserts the row on the caller's transaction, so the event commits with its
@@ -45,10 +46,9 @@ import (
 // standalone sink call with a constant, or a call of a helper. A helper is a
 // function whose only calls queue a fixed event type, so each caller of a
 // helper holds a site too. The test does not see a new call of a function
-// that holds a site and does other work too, such as
-// payment.Stripe.SettleSucceeded: the call reaches a site already counted.
-// A PR
-// that moves such a site must list that function's callers in its site-set.
+// that holds a site and does other work too: the call reaches a site
+// already counted. A PR that moves such a site must list that function's
+// callers in its site-set.
 // The walk follows calls, so a helper passed as a function value is not
 // followed.
 
@@ -69,14 +69,7 @@ var standaloneSinkNames = map[string]bool{"Dispatch": true, "EnqueueStandalone":
 // into its transaction, lower its count or delete its entry. When an event
 // type leaves the list, mark it "Always sent" in docs/api/webhook-events.md
 // (TestAlwaysSentMarksMatchTheBacklog checks the two agree).
-var standaloneWebhookBacklog = map[string]int{
-	"payment.Stripe.RecordCheckoutCard payment_method.updated":          1,
-	"payment.Stripe.SettleSucceeded payment.amount_mismatch":            1,
-	"payment.Stripe.SettleSucceeded payment.duplicate_charge":           2,
-	"payment.Stripe.SettleSucceeded payment.received_on_voided_invoice": 1,
-	"payment.Stripe.handlePaymentSucceeded payment.currency_mismatch":   1,
-	"payment.Stripe.handleSetupIntentSucceeded payment_method.attached": 1,
-}
+var standaloneWebhookBacklog = map[string]int{}
 
 // webhookDynamicEmitAllowlist names the functions that hand the webhook
 // package an event type that is not a constant, each with its reason. The
@@ -335,8 +328,49 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 		return out, true
 	}
 
+	// sameNamed returns the method named like fn of every interface that
+	// fn's receiver implements. A call through one of those interfaces may
+	// reach fn, so the walk treats it as a call of fn.
+	var ifaces []*types.Interface
+	for _, p := range pkgs {
+		for _, name := range p.Types.Scope().Names() {
+			if tn, ok := p.Types.Scope().Lookup(name).(*types.TypeName); ok {
+				if it, ok := tn.Type().Underlying().(*types.Interface); ok {
+					ifaces = append(ifaces, it)
+				}
+			}
+		}
+	}
+	sameNamed := func(fn *types.Func) []*types.Func {
+		sig := fn.Type().(*types.Signature)
+		if sig.Recv() == nil {
+			return nil
+		}
+		rt := sig.Recv().Type()
+		if _, ok := rt.(*types.Pointer); !ok {
+			rt = types.NewPointer(rt)
+		}
+		var out []*types.Func
+		for _, it := range ifaces {
+			if !types.Implements(rt, it) {
+				continue
+			}
+			for i := 0; i < it.NumMethods(); i++ {
+				if m := it.Method(i); m.Name() == fn.Name() {
+					out = append(out, m)
+				}
+			}
+		}
+		return out
+	}
+
 	// A wrapper that passes its own parameter to a sink is a sink, and it is
-	// standalone when that sink is.
+	// standalone when that sink is. So is the method of each interface the
+	// wrapper's receiver implements: payment.PaymentAnomalyRecorder for
+	// invoice.PostgresStore.RecordPaymentAnomaly, paymentmethods.Store for
+	// paymentmethods.PostgresStore.Upsert. Without that step a call through
+	// the interface reaches no sink, and the event types its callers pass go
+	// unchecked.
 	for changed := true; changed; {
 		changed = false
 		for _, c := range calls {
@@ -352,11 +386,14 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 				if !ok {
 					continue
 				}
-				if add(c.encl, pi) {
-					changed = true
-				}
-				if standalone[fn][idx] && markStandalone(c.encl, pi) {
-					changed = true
+				alone := standalone[fn][idx]
+				for _, w := range append([]*types.Func{c.encl}, sameNamed(c.encl)...) {
+					if add(w, pi) {
+						changed = true
+					}
+					if alone && markStandalone(w, pi) {
+						changed = true
+					}
 				}
 			}
 		}
@@ -368,16 +405,6 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 	// to send the event, so each call of a helper is a site in its caller.
 	// An interface method that a helper's receiver implements is a helper
 	// too, as for the sinks.
-	var ifaces []*types.Interface
-	for _, p := range pkgs {
-		for _, name := range p.Types.Scope().Names() {
-			if tn, ok := p.Types.Scope().Lookup(name).(*types.TypeName); ok {
-				if it, ok := tn.Type().Underlying().(*types.Interface); ok {
-					ifaces = append(ifaces, it)
-				}
-			}
-		}
-	}
 	outerCalls := map[*types.Func][]call{}
 	for _, c := range calls {
 		if c.encl != nil && c.outer {
@@ -428,27 +455,12 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 			}
 			helpers[fn] = evs
 			changed = true
-			sig := fn.Type().(*types.Signature)
-			if sig.Recv() == nil {
-				continue
-			}
-			rt := sig.Recv().Type()
-			if _, ok := rt.(*types.Pointer); !ok {
-				rt = types.NewPointer(rt)
-			}
-			for _, it := range ifaces {
-				if !types.Implements(rt, it) {
-					continue
+			for _, m := range sameNamed(fn) {
+				if helpers[m] == nil {
+					helpers[m] = map[string]bool{}
 				}
-				for i := 0; i < it.NumMethods(); i++ {
-					if m := it.Method(i); m.Name() == fn.Name() {
-						if helpers[m] == nil {
-							helpers[m] = map[string]bool{}
-						}
-						for v := range evs {
-							helpers[m][v] = true
-						}
-					}
+				for v := range evs {
+					helpers[m][v] = true
 				}
 			}
 		}
@@ -489,6 +501,12 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 			where := rel + ":" + strconv.Itoa(pos.Line)
 			if values, ok := constValues(c, arg); ok {
 				for _, v := range values {
+					if v == "" {
+						// "No event": paymentmethods.Store.Upsert queues
+						// nothing for it, and OutboxStore.Enqueue refuses
+						// it, so it never reaches an endpoint.
+						continue
+					}
 					checked++
 					if !domain.KnownWebhookEventTypes[v] {
 						problems = append(problems, where+": sends "+v+", which is not in domain.KnownWebhookEventTypes (an endpoint that names it gets 422 unknown event type)")
@@ -561,13 +579,31 @@ func TestWebhookEmitSitesSendACatalogEvent(t *testing.T) {
 	sort.Strings(helperNames)
 	t.Logf("%d helpers, whose callers hold sites too: %s", len(helperNames), strings.Join(helperNames, ", "))
 	var names []string
+	isSink := map[string]bool{}
 	for fn := range sinks {
-		names = append(names, fn.Pkg().Name()+"."+funcName(fn))
+		name := fn.Pkg().Name() + "." + funcName(fn)
+		names = append(names, name)
+		isSink[name] = true
 	}
 	sort.Strings(names)
 	t.Logf("%d emit sites checked through %d functions: %s", checked, len(names), strings.Join(names, ", "))
 	if checked < 30 {
 		t.Fatalf("checked only %d emit sites; the call graph walk is not finding them", checked)
+	}
+	// The walk reaches these wrappers only through a consumer-defined
+	// interface that another wrapper's receiver implements. If it stops
+	// following such interfaces, the event types their callers pass are no
+	// longer checked, and nothing else fails.
+	for _, want := range []string{
+		"payment.PaymentAnomalyRecorder.RecordPaymentAnomaly",
+		"payment.Stripe.escalatePaymentAnomaly",
+		"paymentmethods.Store.Upsert",
+		"paymentmethods.Service.AttachForWebhook",
+		"payment.PaymentMethodAttacher.AttachForWebhook",
+	} {
+		if !isSink[want] {
+			t.Errorf("%s does not reach the webhook package in the walk; it hands its event type on to a wrapper behind an interface, so the walk must follow that interface", want)
+		}
 	}
 }
 

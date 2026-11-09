@@ -26,7 +26,11 @@ type Store interface {
 	// for good (ADR-126). replacedDefault reports that another card was the
 	// default and this one took its place. A card already removed (detached)
 	// stays removed: the row is returned unchanged.
-	Upsert(ctx context.Context, tenantID string, pm PaymentMethod, makeDefault bool) (out PaymentMethod, replacedDefault bool, err error)
+	//
+	// eventType ("" for none) is the payment_method.* webhook event the write
+	// reports, queued in its transaction with the card and extra as its
+	// data, only when the write changed what the API shows of the card.
+	Upsert(ctx context.Context, tenantID string, pm PaymentMethod, makeDefault bool, eventType string, extra map[string]any) (out PaymentMethod, replacedDefault bool, err error)
 
 	// SetDefault atomically clears any existing default for (customerID)
 	// and flags pmID as the new default. Fails with ErrNotFound if pmID is
@@ -55,10 +59,26 @@ type Store interface {
 }
 
 type PostgresStore struct {
-	db *postgres.DB
+	db     *postgres.DB
+	outbox OutboxEnqueuer
 }
 
 func NewPostgresStore(db *postgres.DB) *PostgresStore { return &PostgresStore{db: db} }
+
+// OutboxEnqueuer inserts a webhook-event row on the caller's tx, so the event
+// commits or rolls back with the change that caused it (ADR-040
+// transactional outbox). Satisfied by *webhook.OutboxStore; declared here so
+// this store needs no webhook import. Same seam as the invoice, subscription
+// and dunning stores.
+type OutboxEnqueuer interface {
+	Enqueue(ctx context.Context, tx *sql.Tx, tenantID, eventType string, payload map[string]any) (string, error)
+}
+
+// SetOutboxEnqueuer wires payment_method.attached and .updated into the
+// transaction of the attach each reports (Upsert). Optional: when unset
+// (narrow tests), no event is queued. Production boot refuses an unset one
+// (webhook.MustWiredOutbox).
+func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 
 const pmSelectCols = `id, tenant_id, livemode, customer_id, stripe_payment_method_id,
 	type, COALESCE(card_brand,''), COALESCE(card_last4,''),
@@ -200,7 +220,19 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, pmID string) (Payment
 // twice (or more) and the default-PM semantics drift across the
 // duplicates. Skipped when fingerprint is empty (legacy rows /
 // non-card types) — those keep current behavior.
-func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentMethod, makeDefault bool) (PaymentMethod, bool, error) {
+//
+// eventType (payment_method.attached or .updated, "" for none) is queued in
+// this transaction with the card as it commits (ADR-131) and extra beside
+// it, so the card and its event are saved together or not at all. It is
+// queued only when the write changed what the API shows of the card: a new
+// row, or a change to its default flag, brand, last 4 digits or expiry. A
+// Stripe event delivered again, or the hosted sweep reporting a card the
+// webhook already saved, changes nothing and sends nothing, so a receiver
+// never gets one change twice under two event ids. The second of the two
+// events one setup session sends for its card sends one only if it changes
+// the card, for example by making it the default. A removed card sends
+// nothing either. A failed insert fails the attach.
+func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentMethod, makeDefault bool, eventType string, extra map[string]any) (PaymentMethod, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return PaymentMethod{}, false, err
@@ -235,6 +267,23 @@ func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentM
 	case errors.Is(err, sql.ErrNoRows):
 	default:
 		return PaymentMethod{}, false, fmt.Errorf("check removed card: %w", err)
+	}
+
+	// The card as it stands before this write, if it is saved already: the
+	// event below is queued only when the write changes it. Read under the
+	// lock, so a concurrent attach of the same card has committed first.
+	var before PaymentMethod
+	saved := true
+	switch err := scanPM(tx.QueryRowContext(ctx, `
+		SELECT `+pmSelectCols+` FROM payment_methods
+		WHERE tenant_id = $1 AND stripe_payment_method_id = $2
+		  AND detached_at IS NULL`,
+		tenantID, pm.StripePaymentMethodID), &before); {
+	case err == nil:
+	case errors.Is(err, sql.ErrNoRows):
+		saved = false
+	default:
+		return PaymentMethod{}, false, fmt.Errorf("read saved card: %w", err)
 	}
 
 	// Dedupe-by-fingerprint: detach any active row for this customer
@@ -364,10 +413,26 @@ func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentM
 		return PaymentMethod{}, false, fmt.Errorf("upsert payment method: %w", err)
 	}
 
+	if eventType != "" && s.outbox != nil && (!saved || changedForTheAPI(before, out)) {
+		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, eventType, domain.PaymentMethodWebhookData(out.View(), extra)); err != nil {
+			return PaymentMethod{}, false, fmt.Errorf("enqueue %s: %w", eventType, err)
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return PaymentMethod{}, false, err
 	}
 	return out, replacedDefault, nil
+}
+
+// changedForTheAPI reports whether the card's write changed a field the API
+// shows, and the payment_method.* events carry (PaymentMethod.View): its
+// default flag or its card details. The id, customer, type and creation
+// time of a saved card do not change on a write.
+func changedForTheAPI(before, after PaymentMethod) bool {
+	return before.IsDefault != after.IsDefault ||
+		before.CardBrand != after.CardBrand || before.CardLast4 != after.CardLast4 ||
+		before.CardExpMonth != after.CardExpMonth || before.CardExpYear != after.CardExpYear
 }
 
 // SetDefault does the atomic swap inside one tx so RLS + partial unique

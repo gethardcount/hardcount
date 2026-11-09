@@ -60,7 +60,7 @@ func (m *memStore) Get(_ context.Context, tenantID, pmID string) (PaymentMethod,
 	return pm, nil
 }
 
-func (m *memStore) Upsert(_ context.Context, tenantID string, in PaymentMethod, makeDefault bool) (PaymentMethod, bool, error) {
+func (m *memStore) Upsert(_ context.Context, tenantID string, in PaymentMethod, makeDefault bool, _ string, _ map[string]any) (PaymentMethod, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

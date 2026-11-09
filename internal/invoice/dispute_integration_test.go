@@ -38,7 +38,7 @@ func newDisputeHarness(t *testing.T, db *postgres.DB, name string) *disputeHarne
 	invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 	pi := "pi_dsp_" + invID
 	if _, transitioned, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, pi,
-		time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), nil); err != nil || !transitioned {
+		time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), 0, nil); err != nil || !transitioned {
 		t.Fatalf("settle the invoice by card: transitioned=%v err=%v", transitioned, err)
 	}
 	return &disputeHarness{
@@ -329,7 +329,7 @@ func TestRecordStripeDispute_FindsTheInvoiceByThePayment(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("record the other attempt: %v", err)
 	}
-	if err := h.store.RecordPaymentAnomaly(h.ctx, h.tenantID, h.invID, domain.EventPaymentDuplicateCharge, anomalyPI, 1000); err != nil {
+	if _, err := h.store.RecordPaymentAnomaly(h.ctx, h.tenantID, h.invID, domain.EventPaymentDuplicateCharge, anomalyPI, 1000, nil); err != nil {
 		t.Fatalf("record the anomaly: %v", err)
 	}
 

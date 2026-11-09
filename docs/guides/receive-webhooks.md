@@ -215,10 +215,9 @@ signed with a secret you have not deployed yet arrives again later.
 ## Handle each event once
 
 Hardcount can send the same event more than once, so your receiver must be
-safe to run twice. Most events are sent at least once. A crash at the wrong
-moment can drop some of them: rule 3 of the
-[three rules for your receiver](../webhooks.md#three-rules-for-your-receiver)
-says which. Follow the three rules. In code, they come to four steps:
+safe to run twice. Hardcount sends each event at least once. Follow the
+[three rules for your receiver](../webhooks.md#three-rules-for-your-receiver).
+In code, they come to four steps:
 
 1. **Answer fast.** Hardcount waits 10 seconds for a `2xx`. Save the message
    and answer, then do slow work, such as sending an email, afterwards.

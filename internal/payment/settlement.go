@@ -36,19 +36,22 @@ const (
 // enqueue the receipt email.
 //
 // Idempotent and safe to call from any entry point (ADR-049 discover-then-
-// settle): MarkPaid is a no-op on an already-paid invoice, and the receipt,
-// the anomaly events and the card stamp are best-effort (log-only) so a
-// duplicate call — e.g. the webhook arriving after the reconciler already
-// settled — does not fail.
+// settle): MarkPaid is a no-op on an already-paid invoice, an anomaly is
+// recorded once per kind and charge, and the card stamp is best-effort
+// (log-only), so a duplicate call — e.g. the webhook arriving after the
+// reconciler already settled — does not fail and sends nothing twice. A
+// failed anomaly write does fail the call: the marker and its event are
+// saved together or not at all, and the caller's retry (Stripe's redelivery,
+// the reconciler's next run) records both.
 //
 // This is the consolidated implementation of what handlePaymentSucceeded did
 // inline (ADR-049 Phase 1); the webhook handler now resolves the invoice and
 // delegates here.
 // capturedCents is the amount Stripe actually captured (0 = unknown/legacy
-// caller): the settle compares it against the transitioned row's
-// amount_paid and escalates payment.amount_mismatch on drift — a Checkout
-// session can legally pay an amount a credit note has since changed
-// (ADR-068); silent wrong books would corrupt the refund cap.
+// caller): the settle transaction compares it against the amount due it
+// books and records payment.amount_mismatch on drift — a Checkout session
+// can legally pay an amount a credit note has since changed (ADR-068);
+// silent wrong books would corrupt the refund cap.
 //
 // The fast-path duplicate check compares against the CALLER's inv snapshot —
 // the webhook and reconciler both pass freshly-read rows (documented
@@ -71,9 +74,8 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 			// (auto-refund deferred, ADR-068). An empty recorded PI counts:
 			// the invoice settled via credits/offline and a card charge
 			// still landed.
-			s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentDuplicateCharge, paymentIntentID, capturedCents, nil,
+			return s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentDuplicateCharge, paymentIntentID, capturedCents, nil,
 				"second successful charge on an already-paid invoice")
-			return nil
 		}
 		slog.Info("payment already settled; skipping duplicate success settlement",
 			"invoice_id", inv.ID,
@@ -123,17 +125,17 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 	// across another query. A duplicate settle (transition lost) pays for one
 	// wasted read — the trade for never holding the money lock on a lookup.
 	receiptTx := s.buildReceiptHook(ctx, tenantID, inv, capturedCents)
-	fresh, transitioned, err := s.invoices.MarkPaidCardSettlementTransition(ctx, tenantID, inv.ID, paymentIntentID, now, receiptTx)
+	fresh, transitioned, err := s.invoices.MarkPaidCardSettlementTransition(ctx, tenantID, inv.ID, paymentIntentID, now, capturedCents, receiptTx)
 	if err != nil {
 		if errors.Is(err, errs.ErrInvalidState) {
 			// Non-payable target (voided; the void's session-expire leg
 			// failed and the customer paid inside the residual). Retrying the
 			// webhook forever is wrong — the transition will never succeed.
 			// Escalate the per-cause event (the money is owed BACK, distinct
-			// from duplicate_charge) and absorb.
-			s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentReceivedOnVoidedInvoice, paymentIntentID, capturedCents, nil,
+			// from duplicate_charge) and absorb: once the anomaly is
+			// recorded, the webhook is acknowledged.
+			return s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentReceivedOnVoidedInvoice, paymentIntentID, capturedCents, nil,
 				"payment succeeded against a non-payable invoice")
-			return nil
 		}
 		return fmt.Errorf("mark invoice paid: %w", err)
 	}
@@ -143,37 +145,31 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 		// invoice records its PI only at settle, so the stale comparison
 		// would false-alarm on every routine concurrent same-PI redelivery).
 		if paymentIntentID != "" && fresh.StripePaymentIntentID != paymentIntentID {
-			s.escalatePaymentAnomaly(ctx, tenantID, fresh, domain.EventPaymentDuplicateCharge, paymentIntentID, capturedCents, nil,
+			return s.escalatePaymentAnomaly(ctx, tenantID, fresh, domain.EventPaymentDuplicateCharge, paymentIntentID, capturedCents, nil,
 				"second successful charge lost the settle race to a different PaymentIntent")
-			return nil
 		}
 		slog.Info("payment already settled by a concurrent settler; skipping duplicate side-effects",
 			"invoice_id", inv.ID, "payment_intent_id", paymentIntentID, "source", source)
 		return nil
 	}
 
-	// invoice.paid, payment.succeeded and the receipt email (buildReceiptHook)
-	// are queued in MarkPaidCardSettlementTransition's transaction, so they
-	// commit with the paid-flip (ADR-040). The steps below run after that
-	// commit and are best-effort. They are ordered so the cheapest to lose
-	// runs last:
-	//   1. The amount truth-check, fast database writes. Nothing runs it
-	//      again, so a crash before it loses the payment.amount_mismatch
-	//      event and the anomaly marker.
-	//   2. The dunning resolve. The dunning sweep's paid check resolves the
+	// invoice.paid, payment.succeeded, the receipt email (buildReceiptHook)
+	// and, for a charge of another amount than the one due, the anomaly
+	// marker and payment.amount_mismatch (ADR-068) are written in
+	// MarkPaidCardSettlementTransition's transaction, so they commit with the
+	// paid-flip (ADR-040). The steps below run after that commit and are
+	// best-effort. They are ordered so the cheapest to lose runs last:
+	//   1. The dunning resolve. The dunning sweep's paid check resolves the
 	//      run when its next retry comes due.
-	//   3. The checkout-session expire and the card stamp, Stripe network
+	//   2. The checkout-session expire and the card stamp, Stripe network
 	//      calls. A session expires within an hour, and the card stamp is
 	//      only a timeline sub-line.
 	// Add a new step at the end, unless losing it costs more than step 1.
 
-	// Amount truth-check (ADR-068): the captured amount must equal what the
-	// transition booked (amount_paid = amount_due at settle). A drifted
-	// Checkout session (credit note changed the due inside the session's
-	// window) settles the invoice but books the WRONG figure — detect it,
-	// never silently absorb it.
+	// The amount truth-check ran in the settle transaction; this line is its
+	// ops log, the same loud line as the other anomalies.
 	if capturedCents > 0 && capturedCents != fresh.AmountPaidCents {
-		s.escalatePaymentAnomaly(ctx, tenantID, fresh, domain.EventPaymentAmountMismatch, paymentIntentID, capturedCents, nil,
+		logPaymentAnomaly(ctx, tenantID, fresh, domain.EventPaymentAmountMismatch, paymentIntentID, capturedCents,
 			"captured amount differs from the amount booked at settle")
 	}
 
@@ -472,15 +468,53 @@ func receiptAmountCents(capturedCents int64, fresh domain.Invoice) int64 {
 
 // escalatePaymentAnomaly is the shared loud channel for money anomalies the
 // settle path DETECTS but must not absorb silently (ADR-068): a duplicate
-// charge, a captured-amount mismatch, a payment on a voided invoice. It
-// slog.Errors (ops), dispatches the per-cause outbound event (integrators),
-// and stamps the durable anomaly marker the dashboard attention banner reads
-// (operators — the load-bearing surface: with auto-refund deferred, the
-// operator IS the refund mechanism). Best-effort by design: detection must
-// never fail the settlement that triggered it. extra holds the event's
-// other keys (domain.WebhookEventExtras), such as currency_mismatch's
-// charge_currency; nil for none.
-func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, inv domain.Invoice, eventType, incomingPI string, capturedCents int64, extra map[string]any, msg string) {
+// charge, a payment on a voided invoice, a charge in another currency (the
+// captured-amount mismatch is recorded inside the settle transaction). It
+// slog.Errors (ops), then records the anomaly: the durable marker the
+// dashboard attention banner reads (operators — the load-bearing surface:
+// with auto-refund deferred, the operator IS the refund mechanism) and the
+// per-cause webhook event (integrators), in one transaction, once per kind
+// and charge (PaymentAnomalyRecorder). extra holds the event's other keys
+// (domain.WebhookEventExtras), such as currency_mismatch's charge_currency;
+// nil for none.
+//
+// A failed write returns the error, and the caller returns it: the webhook
+// answers 5xx and Stripe delivers the charge again, or the reconciler retries
+// on its next run. The redelivery detects the anomaly again and records it
+// then; one already recorded is not sent twice. An adapter with no recorder
+// fails the same way, since the recorder is the only path the marker and the
+// event take; boot refuses one (MustHaveAnomalyRecorder).
+func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, inv domain.Invoice, eventType, incomingPI string, capturedCents int64, extra map[string]any, msg string) error {
+	logPaymentAnomaly(ctx, tenantID, inv, eventType, incomingPI, capturedCents, msg)
+	if s.anomalies == nil {
+		return fmt.Errorf("record %s for invoice %s: no payment anomaly recorder is wired (SetAnomalyRecorder)", eventType, inv.ID)
+	}
+	// The charge that raised the anomaly rides beside the invoice. The
+	// invoice is the row the caller passed: on duplicate_charge its
+	// stripe_payment_intent_id is the other charge it recorded; on
+	// currency_mismatch and received_on_voided_invoice it is whatever the
+	// invoice held when the charge arrived (docs/api/webhook-events.md).
+	data := map[string]any{
+		"incoming_payment_intent_id": incomingPI,
+		"captured_cents":             capturedCents,
+	}
+	for k, v := range extra {
+		data[k] = v
+	}
+	recorded, err := s.anomalies.RecordPaymentAnomaly(ctx, tenantID, inv.ID, eventType, incomingPI, capturedCents, domain.InvoiceWebhookData(inv, data))
+	if err != nil {
+		return fmt.Errorf("record %s for invoice %s: %w", eventType, inv.ID, err)
+	}
+	if !recorded {
+		slog.InfoContext(ctx, "payment anomaly already recorded for this charge; its event is not sent again",
+			"event", eventType, "invoice_id", inv.ID, "incoming_payment_intent_id", incomingPI)
+	}
+	return nil
+}
+
+// logPaymentAnomaly is the ops line every payment anomaly writes when it is
+// detected.
+func logPaymentAnomaly(ctx context.Context, tenantID string, inv domain.Invoice, eventType, incomingPI string, capturedCents int64, msg string) {
 	slog.ErrorContext(ctx, "payment anomaly: "+msg,
 		"event", eventType,
 		"invoice_id", inv.ID,
@@ -491,29 +525,6 @@ func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, in
 		"captured_cents", capturedCents,
 		"amount_paid_cents", inv.AmountPaidCents,
 	)
-	if s.events != nil {
-		// The charge that raised the anomaly rides beside the invoice. The
-		// invoice is the row the caller passed: on duplicate_charge its
-		// stripe_payment_intent_id is the other charge it recorded; on
-		// amount_mismatch it is this charge (the settle just recorded it);
-		// on currency_mismatch and received_on_voided_invoice it is whatever
-		// the invoice held when the charge arrived (docs/api/webhook-events.md).
-		data := map[string]any{
-			"incoming_payment_intent_id": incomingPI,
-			"captured_cents":             capturedCents,
-		}
-		for k, v := range extra {
-			data[k] = v
-		}
-		if err := s.events.Dispatch(ctx, tenantID, eventType, domain.InvoiceWebhookData(inv, data)); err != nil {
-			slog.ErrorContext(ctx, "payment anomaly: event dispatch failed", "event", eventType, "invoice_id", inv.ID, "error", err)
-		}
-	}
-	if s.anomalies != nil {
-		if err := s.anomalies.RecordPaymentAnomaly(ctx, tenantID, inv.ID, eventType, incomingPI, capturedCents); err != nil {
-			slog.ErrorContext(ctx, "payment anomaly: durable marker write failed", "event", eventType, "invoice_id", inv.ID, "error", err)
-		}
-	}
 }
 
 // StopCollection is the void path's twin of the settle path's cleanup: an

@@ -229,7 +229,7 @@ func TestChargeAttempt_SettleTransitionsResolveOutcomeAtomically(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("chokepoint insert: %v", err)
 	}
-	if _, _, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, paid.ID, "pi_atomic_ok", time.Now().UTC(), nil); err != nil {
+	if _, _, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, paid.ID, "pi_atomic_ok", time.Now().UTC(), 0, nil); err != nil {
 		t.Fatalf("mark paid: %v", err)
 	}
 	got, err = store.ListChargeAttemptsByInvoice(ctx, tenantID, paid.ID)

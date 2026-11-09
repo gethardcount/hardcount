@@ -123,7 +123,6 @@ func newSHRig(t *testing.T, name string) *shRig {
 	r.stripe = NewStripe(r.fake, r.invoices, NewPostgresWebhookStore(db), nil, r.dunning)
 	r.stripe.SetDunningResolver(r.dunning)
 	r.stripe.SetCardFetcher(shCards{})
-	r.stripe.SetEventDispatcher(webhook.NewOutboxDispatcher(outbox))
 	r.stripe.SetAnomalyRecorder(r.invoices)
 	r.stripe.SetEmailReceipt(sender, emails)
 	r.stripe.SetEmailPaymentFailed(sender, emails)
@@ -705,7 +704,7 @@ func TestStaleHold_StalledCharger_SendsNothing(t *testing.T) {
 		snapshotA := r.get(inv.ID)
 		// An older attempt's late success lands while A stalls, its hold
 		// still live.
-		if _, _, err := r.invoices.MarkPaidCardSettlementTransition(r.ctx, r.tenantID, inv.ID, "pi_older_attempt", time.Now().UTC(), nil); err != nil {
+		if _, _, err := r.invoices.MarkPaidCardSettlementTransition(r.ctx, r.tenantID, inv.ID, "pi_older_attempt", time.Now().UTC(), 0, nil); err != nil {
 			t.Fatal(err)
 		}
 		_, err = r.chargeUnder(r.ctx, autoCharge, a, snapshotA, "pm_card_1")

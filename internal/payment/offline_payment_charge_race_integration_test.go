@@ -70,7 +70,6 @@ func TestOfflinePayment_RacedWithCardChargeAtTheStripeCall(t *testing.T) {
 	client := &boundaryStripe{}
 	s := payment.NewStripe(client, invStore, payment.NewPostgresWebhookStore(db), nil)
 	s.SetCardFetcher(settleRaceCard{})
-	s.SetEventDispatcher(webhook.NewOutboxDispatcher(outbox))
 	s.SetAnomalyRecorder(invStore)
 	rig := &settleRaceRig{db: db, ctx: ctx, invStore: invStore, customers: customer.NewPostgresStore(db)}
 

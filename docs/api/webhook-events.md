@@ -17,9 +17,8 @@ an example message. How messages are delivered, signed and retried:
   `subscription.collection_resumed`. Every other key is always sent, even
   when it is empty, such as `applied` on `dunning.escalated`.
 - **"Always sent"** marks an event saved together with the change that
-  caused it, so a crash cannot drop it. Any other event can be lost in a
-  crash just after the change. *Always sent* does not mean always
-  delivered. See
+  caused it, so a crash cannot drop it. Every event is marked. *Always
+  sent* does not mean always delivered. See
   [Three rules for your receiver](../webhooks.md#three-rules-for-your-receiver).
 - **The examples are the real shape of each message.** Hardcount sends the
   body on one line, with its keys in this order; it is indented here. Tests
@@ -378,6 +377,11 @@ what it took. Match the charge by `incoming_payment_intent_id`, not by the
 invoice's `stripe_payment_intent_id`. Each event below says which charge
 the invoice's `stripe_payment_intent_id` is.
 
+Each anomaly is sent once per charge. When Stripe or Hardcount's reconciler
+reports the same charge again, no second event is sent. The invoice keeps
+only its latest anomaly, so a charge reported again after another anomaly
+on the same invoice is sent again.
+
 ### `payment.succeeded`
 
 A charge was collected. The invoice names its PaymentIntent.
@@ -511,7 +515,7 @@ Hardcount recorded on the paid invoice. It is left out when Hardcount
 recorded none, such as when credit paid the invoice or it was paid outside
 Hardcount (`paid_out_of_band` is true).
 
-**Also in `data`:** `incoming_payment_intent_id`, `captured_cents`.
+**Always sent.** **Also in `data`:** `incoming_payment_intent_id`, `captured_cents`.
 
 <details>
 <summary>Example message</summary>
@@ -574,9 +578,12 @@ Hardcount (`paid_out_of_band` is true).
 
 A charge settled for a different amount than the invoice owed. The invoice
 was just paid by this charge, so its `stripe_payment_intent_id` is this
-charge, and `amount_paid_cents` is what Hardcount recorded.
+charge, and `amount_paid_cents` is what Hardcount recorded. The event is
+saved with the payment, so this invoice, and the invoice in that payment's
+`invoice.paid` and `payment.succeeded`, show the anomaly
+(`payment_anomaly_kind`).
 
-**Also in `data`:** `incoming_payment_intent_id`, `captured_cents`.
+**Always sent.** **Also in `data`:** `incoming_payment_intent_id`, `captured_cents`.
 
 <details>
 <summary>Example message</summary>
@@ -644,7 +651,7 @@ converted. Review it in Stripe. The invoice is as it was when the charge
 arrived: its `stripe_payment_intent_id` may be this charge, an earlier one,
 or none.
 
-**Also in `data`:** `incoming_payment_intent_id`, `captured_cents`,
+**Always sent.** **Also in `data`:** `incoming_payment_intent_id`, `captured_cents`,
 `charge_currency`.
 
 <details>
@@ -711,7 +718,7 @@ Money arrived for a voided invoice. Refund it. The invoice is as it was
 when the charge arrived: its `stripe_payment_intent_id` may be this charge,
 an earlier one, or none.
 
-**Also in `data`:** `incoming_payment_intent_id`, `captured_cents`.
+**Always sent.** **Also in `data`:** `incoming_payment_intent_id`, `captured_cents`.
 
 <details>
 <summary>Example message</summary>
@@ -1049,12 +1056,20 @@ digits, expiry and whether it is the default. A Stripe event that arrives
 after the card was removed in Hardcount leaves it removed and sends neither
 event.
 
+Each event reports a change to the card: a new card, or a new default flag,
+brand, last 4 digits or expiry. A Stripe event that changes nothing
+Hardcount has recorded sends no event, so a repeated Stripe event is not
+sent twice. One Stripe Checkout setup session sends two Stripe events for
+its card, and the second one sends an event only if it changed the card,
+for example by making it the default. Subscribe to both events to see every
+saved card.
+
 ### `payment_method.attached`
 
 A customer saved a payment method. Invoices waiting for one are charged on
 the next billing run. `stripe_payment_method_id` is the card's Stripe ID.
 
-**Also in `data`:** `stripe_payment_method_id`.
+**Always sent.** **Also in `data`:** `stripe_payment_method_id`.
 
 <details>
 <summary>Example message</summary>
@@ -1088,7 +1103,7 @@ the next billing run. `stripe_payment_method_id` is the card's Stripe ID.
 A customer's payment method was set up or replaced through Stripe Checkout.
 `stripe_customer_id` is the Stripe customer it was saved to.
 
-**Also in `data`:** `stripe_customer_id`.
+**Always sent.** **Also in `data`:** `stripe_customer_id`.
 
 <details>
 <summary>Example message</summary>

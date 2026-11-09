@@ -350,11 +350,12 @@ func newCatchUpRig(t *testing.T) *catchUpRig {
 	client := payment.NewLiveStripeClient(clients)
 	refunds := &refundBook{invoices: invStore}
 	notes := creditnote.NewPostgresStore(db)
-	pms := paymentmethods.NewService(paymentmethods.NewPostgresStore(db), paymentmethods.NewStripeAdapter(clients, customers), customers)
+	pmStore := paymentmethods.NewPostgresStore(db)
+	pmStore.SetOutboxEnqueuer(outbox)
+	pms := paymentmethods.NewService(pmStore, paymentmethods.NewStripeAdapter(clients, customers), customers)
 
 	s := payment.NewStripe(client, invStore, payment.NewPostgresWebhookStore(db), catchUpPaymentSetups{customers: customers, pms: pms})
 	s.SetCardFetcher(catchUpCards{})
-	s.SetEventDispatcher(webhook.NewOutboxDispatcher(outbox))
 	s.SetAnomalyRecorder(invStore)
 	s.SetEmailReceipt(sender, settleRaceEmails{store: customers})
 	s.SetRefundStatusUpdater(refunds)

@@ -84,6 +84,11 @@ type mockInvoiceUpdater struct {
 	// store enqueuing payment.succeeded IN-TX, gated on the transition (so a
 	// concurrent redelivery increments it once, not twice).
 	cardEventEnqueues int
+	// amountMismatches records the PaymentIntent of each
+	// payment.amount_mismatch the card settle queued. It mirrors the real
+	// store, which records one in the settle transaction, on the transition,
+	// when the captured amount differs from the amount due.
+	amountMismatches []string
 	// failedEventEnqueues counts payment.failed enqueues — mirrors the real
 	// store enqueuing payment.failed IN-TX, gated on firstForThisPI (same-PI
 	// redelivery no-ops; a new retry PI fires again).
@@ -265,10 +270,14 @@ func (m *mockInvoiceUpdater) MarkPaidReportingTransition(_ context.Context, _, i
 // does inside its transaction (nil tx: these fakes have none). A fake that
 // accepted the hook and dropped it would make every settlement-email
 // assertion in this package read zero and pass forever.
-func (m *mockInvoiceUpdater) MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id string, stripePI string, paidAt time.Time, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
+func (m *mockInvoiceUpdater) MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id string, stripePI string, paidAt time.Time, capturedCents int64, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
+	due := m.invoices[id].AmountDueCents
 	inv, transitioned, err := m.MarkPaidReportingTransition(ctx, tenantID, id, stripePI, paidAt)
 	if err == nil && transitioned {
 		m.cardEventEnqueues++
+		if capturedCents > 0 && capturedCents != due {
+			m.amountMismatches = append(m.amountMismatches, stripePI)
+		}
 		if then != nil {
 			if herr := then(nil, inv); herr != nil {
 				return inv, transitioned, nil // non-vetoing, like the store's SAVEPOINT
@@ -897,7 +906,7 @@ func (t *transientMarkPaidInvoices) MarkPaidReportingTransition(_ context.Contex
 // MarkPaidCardSettlementTransition must ALSO fail transiently — SettleSucceeded
 // now calls this variant, so the override has to be here too (else the embedded
 // mock's success path would run).
-func (t *transientMarkPaidInvoices) MarkPaidCardSettlementTransition(_ context.Context, _, _ string, _ string, _ time.Time, _ func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
+func (t *transientMarkPaidInvoices) MarkPaidCardSettlementTransition(_ context.Context, _, _ string, _ string, _ time.Time, _ int64, _ func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
 	return domain.Invoice{}, false, fmt.Errorf("connection reset by peer")
 }
 
@@ -942,12 +951,17 @@ type recordingAttacher struct {
 	// makeDefault is what the caller asked of the attach: true only for a
 	// card saved through a Hardcount setup flow (ADR-021).
 	makeDefault bool
+	// eventType and eventExtra are the payment_method.* event the caller
+	// asked the attach to queue in its transaction.
+	eventType  string
+	eventExtra map[string]any
 }
 
-func (r *recordingAttacher) AttachForWebhook(ctx context.Context, tenantID, customerID, pmID string, makeDefault bool) (*domain.PaymentMethodView, error) {
+func (r *recordingAttacher) AttachForWebhook(ctx context.Context, tenantID, customerID, pmID string, makeDefault bool, eventType string, extra map[string]any) (*domain.PaymentMethodView, error) {
 	r.called++
 	r.tenantID, r.customerID, r.pmID = tenantID, customerID, pmID
 	r.makeDefault = makeDefault
+	r.eventType, r.eventExtra = eventType, extra
 	r.actorType, r.actorID = audit.ResolveActor(ctx)
 	if r.err != nil {
 		return nil, r.err
@@ -1001,6 +1015,11 @@ func TestHandleWebhook_SetupIntentSucceeded(t *testing.T) {
 	// POST /v1/checkout/setup, made before the upgrade and finished after.
 	if !attacher.makeDefault {
 		t.Error("a SetupIntent carrying hardcount_customer_id must attach its card as the default")
+	}
+	// The attach queues payment_method.attached in its own transaction.
+	if attacher.eventType != domain.EventPaymentMethodAttached || attacher.eventExtra["stripe_payment_method_id"] != "pm_stripe_42" {
+		t.Errorf("attach asked to queue %q with %v, want %s with stripe_payment_method_id pm_stripe_42",
+			attacher.eventType, attacher.eventExtra, domain.EventPaymentMethodAttached)
 	}
 }
 
@@ -1335,6 +1354,11 @@ func TestHandleWebhook_CheckoutCompleted_NeverAsksForTheDefault(t *testing.T) {
 			}
 			if attacher.makeDefault {
 				t.Error("checkout.session.completed must not attach its card as the default")
+			}
+			// The attach queues payment_method.updated in its own transaction.
+			if attacher.eventType != domain.EventPaymentMethodUpdated || attacher.eventExtra["stripe_customer_id"] != "cus_stripe_1" {
+				t.Errorf("attach asked to queue %q with %v, want %s with stripe_customer_id cus_stripe_1",
+					attacher.eventType, attacher.eventExtra, domain.EventPaymentMethodUpdated)
 			}
 		})
 	}

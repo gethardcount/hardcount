@@ -69,7 +69,7 @@ func TestSettleTransitions_EmailRidesTheTx(t *testing.T) {
 	t.Run("paid flip and receipt commit together", func(t *testing.T) {
 		tenantID, invID, store := settleFixture(t, db, ctx, "settle-paid")
 		var sawAmount int64
-		_, transitioned, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_ok", time.Now().UTC(),
+		_, transitioned, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_ok", time.Now().UTC(), 0,
 			func(tx *sql.Tx, fresh domain.Invoice) error {
 				sawAmount = fresh.AmountPaidCents // the row this tx wrote
 				_, e := outbox.Enqueue(ctx, tx, tenantID, email.TypePaymentReceipt, map[string]any{"to": "c@example.test"})
@@ -88,11 +88,11 @@ func TestSettleTransitions_EmailRidesTheTx(t *testing.T) {
 
 	t.Run("hook is skipped when the transition is lost", func(t *testing.T) {
 		tenantID, invID, store := settleFixture(t, db, ctx, "settle-dup")
-		if _, _, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_first", time.Now().UTC(), nil); err != nil {
+		if _, _, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_first", time.Now().UTC(), 0, nil); err != nil {
 			t.Fatalf("first settle: %v", err)
 		}
 		ran := false
-		_, transitioned, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_first", time.Now().UTC(),
+		_, transitioned, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_first", time.Now().UTC(), 0,
 			func(tx *sql.Tx, _ domain.Invoice) error {
 				ran = true
 				_, e := outbox.Enqueue(ctx, tx, tenantID, email.TypePaymentReceipt, map[string]any{"to": "c@example.test"})
@@ -111,7 +111,7 @@ func TestSettleTransitions_EmailRidesTheTx(t *testing.T) {
 
 	t.Run("a failing hook never vetoes the money write", func(t *testing.T) {
 		tenantID, invID, store := settleFixture(t, db, ctx, "settle-veto")
-		fresh, transitioned, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_veto", time.Now().UTC(),
+		fresh, transitioned, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_veto", time.Now().UTC(), 0,
 			func(tx *sql.Tx, _ domain.Invoice) error {
 				if _, e := outbox.Enqueue(ctx, tx, tenantID, email.TypePaymentReceipt, map[string]any{"to": "c@example.test"}); e != nil {
 					return e
