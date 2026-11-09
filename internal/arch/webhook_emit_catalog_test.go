@@ -37,11 +37,9 @@ import (
 // event commits with the change it reports (ADR-040). A method that queued
 // the event in a transaction of its own would commit it after the change: a
 // crash, a deploy or a cancelled request between the two commits would lose
-// the event for good. The webhook package had one (EnqueueStandalone, and
-// OutboxDispatcher.Dispatch on top of it) until P1-01 moved every producer
-// into its transaction and deleted it. The test fails if the webhook package
-// gains one again: an exported function or method that takes an eventType
-// but no *sql.Tx.
+// the event for good. (See ADR-040.) The test fails if the webhook package
+// gains one: an exported function or method that takes an eventType but no
+// *sql.Tx.
 //
 // It does not see a hand-rolled BeginTx + Enqueue + Commit with no state
 // write in it, which looks like an in-transaction send. The class B question

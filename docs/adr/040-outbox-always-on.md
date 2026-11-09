@@ -53,6 +53,8 @@ DLQ.
 > that queues an event after its commit. It follows the event type through
 > every wrapper that passes it on, and through the interfaces those
 > wrappers implement, such as the payment adapter's anomaly recorder.
+> (Narrowed 2026-11-09: the amendment below says what the test checks and
+> what it misses.)
 > (Corrected 2026-11-05. This paragraph first said that every webhook
 > producer enqueues inside the business transaction.)
 > The paragraph above has never been
