@@ -606,6 +606,36 @@ func TestDunningRetry_StripeSucceeded_InlineSettleError_Skipped(t *testing.T) {
 	}
 }
 
+// A run out of retries under the rig's write-off policy, through the router's
+// own write-off adapter: the invoice is written off and the run escalated,
+// with its timeline row. The dunning package's tests reach the invoice
+// service through their own bridge, so only this test sees the adapter pass
+// the escalation into the write-off's transaction (ADR-112 amendment
+// 2026-11-09).
+//
+// Mutations that turn it red: the adapter passing no escalation; the invoice
+// service's write-off dropping the one it is given.
+func TestDunningExhaust_WriteOffViaRouterAdapter_Escalates(t *testing.T) {
+	d := newDunningRetryRig(t, "Exhaust Write-off Adapter")
+	custID := d.customerWithCard("adapter", "pm_adapter")
+	inv := d.dunnedInvoice(custID, "INV-P126-ADAPTER")
+	run := d.dueRun(inv.ID, custID, d.policy.Retries())
+
+	d.tick()
+	if got := d.invoice(inv.ID); got.Status != domain.InvoiceUncollectible {
+		t.Errorf("invoice %s, want uncollectible: the policy writes it off", got.Status)
+	}
+	if got := d.run(run.ID); got.State != domain.DunningEscalated || got.Resolution != domain.ResolutionRetriesExhausted {
+		t.Errorf("run %s/%q, want escalated / retries_exhausted", got.State, got.Resolution)
+	}
+	if evs := d.events(run.ID, domain.DunningEventEscalated); len(evs) != 1 {
+		t.Errorf("escalated timeline rows %+v, want one", evs)
+	}
+	if n := len(d.charges.charged); n != 0 {
+		t.Errorf("Stripe received %d charges for a run out of retries, want none", n)
+	}
+}
+
 // R3 (ADR-129): a customer holds USD credit, has an unpaid USD invoice in
 // dunning from a canceled USD subscription, and a EUR invoice from the EUR
 // subscription that replaced it. The EUR close's credit apply draws nothing;

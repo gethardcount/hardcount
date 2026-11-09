@@ -2,10 +2,10 @@ import { test, expect, type Page, type Route } from '@playwright/test'
 import { api, uniq } from './fixtures/api'
 import { createCustomer } from './fixtures/seed'
 
-// Money writes on the dashboard wait for the account settings
-// (GET /v1/settings), and a Settings save reaches every page at once, in both
-// modes. Create plan and Grant credits use the account's default currency, so
-// until the settings load, either would have to guess it.
+// Signed-in pages wait for the account settings (GET /v1/settings), and a
+// Settings save reaches every page at once, in both modes. Create plan and
+// Grant credits use the account's default currency, so a page drawn before
+// the settings load would have to guess it.
 //
 // CI's account is in USD, the likeliest guess, so the browser answers the
 // settings read with another currency. A real Settings save would change the
@@ -113,30 +113,32 @@ function midnightIn(instant: string, timeZone: string): boolean {
   return time.format(new Date(instant)) === '00:00:00'
 }
 
-// Opens Grant credits on the customer's page.
-async function openGrantCredits(page: Page, customerId: string) {
-  await page.goto(`/customers/${customerId}`)
+// Opens Grant credits on the customer's page, which is open.
+async function openGrantCredits(page: Page) {
   const credits = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Credits', exact: true }) })
   await credits.getByRole('button', { name: 'Grant credits' }).click()
   return page.getByRole('dialog', { name: 'Grant credits' })
 }
 
-test('Create plan waits for the account currency, then creates the plan in it', async ({ page }) => {
+// The wait a signed-in page shows until the account settings load.
+function settingsWait(page: Page) {
+  return page.getByRole('status', { name: 'Loading your account settings' })
+}
+
+test('the Pricing page waits for the account settings, then Create plan uses their currency', async ({ page }) => {
   const release = await holdSettings(page, { default_currency: 'EUR' })
   await page.goto('/pricing')
+  // The settings have not answered: no currency, so no plan can be started.
+  await expect(settingsWait(page)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Add Plan' })).toHaveCount(0)
+
+  release()
   await page.getByRole('button', { name: 'Add Plan' }).click()
   const dialog = page.getByRole('dialog', { name: 'Create plan' })
   const id = uniq()
   await dialog.getByText('Plan Name', { exact: true }).locator('..').getByRole('textbox').fill(`E2E EUR plan ${id}`)
   await dialog.getByLabel('Code', { exact: true }).fill(`e2e-eur-${id}`)
   await dialog.getByText(/^Base Price/).locator('..').getByRole('textbox').fill('10.00')
-
-  // The settings have not answered: no currency, so nothing can be created.
-  await expect(dialog.getByRole('button', { name: 'Create plan' })).toBeDisabled()
-  await expect(dialog.getByText('Base Price', { exact: true })).toBeVisible()
-  await expect(dialog.getByText("Loading the account's currency…", { exact: true })).toBeVisible()
-
-  release()
   await expect(dialog.getByText('Base Price (€)', { exact: true })).toBeVisible()
   const creating = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname === '/v1/plans')
   await dialog.getByRole('button', { name: 'Create plan' }).click()
@@ -148,18 +150,19 @@ test('Create plan waits for the account currency, then creates the plan in it', 
   await expect(page).toHaveURL(new RegExp(`/plans/${plan.id}$`))
 })
 
-test('Grant credits waits for the account currency of a customer with none of their own', async ({ page }) => {
+test('the customer page waits for the account settings, then Grant credits uses their currency', async ({ page }) => {
   // No billing profile, subscription or invoice: the grant defaults to the
   // account currency.
   const customer = await createCustomer()
   const release = await holdSettings(page, { default_currency: 'EUR' })
-  const dialog = await openGrantCredits(page, customer.id)
-  await dialog.getByLabel(/^Amount/).fill('25.00')
-  await dialog.getByLabel('Description').fill('E2E account-currency credit')
-  await expect(dialog.getByRole('button', { name: 'Grant credits' })).toBeDisabled()
-  await expect(dialog.getByText("Loading this customer's currency…", { exact: true })).toBeVisible()
+  await page.goto(`/customers/${customer.id}`)
+  await expect(settingsWait(page)).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: customer.display_name, exact: true })).toHaveCount(0)
 
   release()
+  const dialog = await openGrantCredits(page)
+  await dialog.getByLabel(/^Amount/).fill('25.00')
+  await dialog.getByLabel('Description').fill('E2E account-currency credit')
   await expect(dialog.getByText('Amount (€)', { exact: true })).toBeVisible()
   await expect(dialog.getByText("Loading this customer's currency…", { exact: true })).toHaveCount(0)
   await dialog.getByRole('button', { name: 'Grant credits' }).click()
@@ -176,16 +179,20 @@ test('Grant credits waits for the account currency of a customer with none of th
 })
 
 test("Grant credits says when the customer's currency did not load, and Retry loads it", async ({ page }) => {
+  // No currency of their own, so the answer is the account's EUR once the
+  // customer's billing profile read shows they have none. That read fails
+  // until the test lets it through.
   const customer = await createCustomer()
-  // The settings read fails until the test lets it through.
+  const release = await holdSettings(page, { default_currency: 'EUR' })
+  release()
   let failing = true
-  await page.route(url => url.pathname === '/v1/settings', async route => {
+  await page.route(url => url.pathname === `/v1/customers/${customer.id}/billing-profile`, async route => {
     if (route.request().method() !== 'GET') return route.fallback()
     if (failing) return route.fulfill({ status: 500, body: '{}' })
-    const answer = await fetchFromPage(route)
-    await route.fulfill({ response: answer, json: { ...(await answer.json()), default_currency: 'EUR' } })
+    return route.fallback()
   })
-  const dialog = await openGrantCredits(page, customer.id)
+  await page.goto(`/customers/${customer.id}`)
+  const dialog = await openGrantCredits(page)
   const failed = dialog.getByRole('alert').filter({ hasText: "Couldn't load this customer's currency" })
   await expect(failed).toBeVisible()
   await expect(failed).toContainText('You can also pick a currency above.')

@@ -6,9 +6,11 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
-import { api, ApiError, formatDateTime, getTenantTimezone, type TestClock, type AdvanceSummary } from '@/lib/api'
+import { api, ApiError, formatDateTime, type TestClock, type AdvanceSummary } from '@/lib/api'
 import { showApiError } from '@/lib/formErrors'
-import { addCalendarMonthInTZ } from '@/lib/dates'
+import { addCalendarMonthInTZ, formatYMDInTZ } from '@/lib/dates'
+import { effectiveNow } from '@/lib/effectiveNow'
+import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { cn } from '@/lib/utils'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
@@ -458,7 +460,7 @@ function AdvanceClockDialog({
   // Times shown / picked in tenant TZ so the operator-picked "5pm
   // tomorrow" matches the tenant's clock and the displayed clock-time
   // stays internally consistent. ADR-010.
-  const tz = getTenantTimezone() || 'UTC'
+  const tz = useTenantTimezone()
   // Date + time edited independently — branded DatePicker for the date
   // and a small text input for HH:mm. Defaults to "current frozen + 1h"
   // in tenant TZ so the picker isn't blank and isn't accidentally past.
@@ -466,13 +468,11 @@ function AdvanceClockDialog({
     const d = new Date(clock.frozen_time)
     d.setHours(d.getHours() + 1)
     return formatInTimeZone(d, tz, 'yyyy-MM-dd')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clock.frozen_time, tz])
   const defaultTime = useMemo(() => {
     const d = new Date(clock.frozen_time)
     d.setHours(d.getHours() + 1)
     return formatInTimeZone(d, tz, 'HH:mm')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clock.frozen_time, tz])
   const [datePart, setDatePart] = useState(defaultDate)
   const [timePart, setTimePart] = useState(defaultTime)
@@ -601,10 +601,12 @@ function AdvanceClockDialog({
                 time={timePart}
                 onDateChange={setDatePart}
                 onTimeChange={setTimePart}
-                minDate={new Date(clock.frozen_time)}
+                timeZone={tz}
+                now={effectiveNow(clock.frozen_time)}
+                min={formatYMDInTZ(clock.frozen_time, tz)}
               />
             </div>
-            <p className="text-xs text-muted-foreground mt-1.5">Times are in your account's timezone ({tz}). Each advance moves the clock forward by up to 1 year — chunk longer simulations into successive advances.</p>
+            <p className="text-xs text-muted-foreground mt-1.5">Times are in your account's time zone ({tz}). Each advance moves the clock forward by up to 1 year — chunk longer simulations into successive advances.</p>
             {targetIso !== null && new Date(targetIso) <= new Date(clock.frozen_time) && (
               <p className="text-xs text-destructive mt-1">Target time must be after the current clock time.</p>
             )}

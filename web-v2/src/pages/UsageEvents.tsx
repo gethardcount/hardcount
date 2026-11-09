@@ -66,9 +66,8 @@ export default function UsageEventsPage() {
   // re-renders (data arriving) while the operator types.
   const commitDim = useCallback((v: string) => setUrlState({ dim: v, page: '1' }), [setUrlState])
 
-  // The window is memoised on the filters AND the tenant timezone. On a cold
-  // load the page renders before /v1/settings arrives, so the first bounds use
-  // the 'UTC' fallback; tz changing when settings land recomputes them.
+  // The window is memoised on the filters AND the tenant timezone, so a
+  // Settings save that changes the zone recomputes it.
   // Convert picked civil dates to UTC instants of start/end of day in tenant
   // TZ, never browser-local, so operators in different zones filtering
   // "from May 5" get the same rows. ADR-010.
@@ -324,13 +323,17 @@ export default function UsageEventsPage() {
               onChange={v => setUrlState({ from: v, page: '1' })}
               placeholder="From date"
               className="w-44"
+              timeZone={tz}
+              now={wallClockNow()}
             />
             <DatePicker
               value={filterTo}
               onChange={v => setUrlState({ to: v, page: '1' })}
               placeholder="To date"
               className="w-44"
-              minDate={filterFrom ? new Date(filterFrom + 'T00:00:00') : undefined}
+              timeZone={tz}
+              now={wallClockNow()}
+              min={filterFrom || undefined}
             />
           </>
         )}

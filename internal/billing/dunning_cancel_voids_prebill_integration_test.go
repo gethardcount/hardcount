@@ -2,6 +2,7 @@ package billing_test
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -395,9 +396,12 @@ func (m finalActionMovers) GetTerminalState(ctx context.Context, tenantID, id st
 	return st, nil
 }
 
+// finalActionWriteOff bridges invoice.Service to dunning's write-off port, the
+// same call internal/api/adapters.go makes: then runs in the write-off's
+// transaction.
 type finalActionWriteOff struct{ svc *invoice.Service }
 
-func (w finalActionWriteOff) MarkUncollectible(ctx context.Context, tenantID, id string) error {
-	_, err := w.svc.MarkUncollectible(ctx, tenantID, id)
+func (w finalActionWriteOff) MarkUncollectible(ctx context.Context, tenantID, id string, then func(*sql.Tx) error) error {
+	_, err := w.svc.MarkUncollectibleThen(ctx, tenantID, id, then)
 	return err
 }

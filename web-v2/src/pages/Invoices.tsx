@@ -19,7 +19,7 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { attentionReasonLabel } from '@/lib/attentionLabels'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { DueBadge } from '@/components/DueBadge'
-import { effectiveNow } from '@/lib/effectiveNow'
+import { effectiveNow, wallClockNow } from '@/lib/effectiveNow'
 import { useClockFrozenMap } from '@/hooks/useClockFrozenMap'
 import { SimulatedBadge } from '@/components/TestClockBadge'
 
@@ -118,8 +118,8 @@ export default function InvoicesPage() {
   // Debounce the search term so the API sees one request per typing
   // pause; the input itself stays keystroke-responsive via URL state.
   const debouncedSearch = useDebouncedValue(search.trim(), 300)
-  // The date bounds depend on the tenant zone, which can arrive after the
-  // first render; listing it in the memo's deps recomputes them when it does.
+  // The date bounds are day bounds in the tenant zone; listing it in the
+  // memo's deps recomputes them when a Settings save changes it.
   const tz = useTenantTimezone()
 
   const queryParams = useMemo(() => {
@@ -331,13 +331,17 @@ export default function InvoicesPage() {
             onChange={(v) => setUrlState({ dateFrom: v, page: '1' })}
             placeholder="From date"
             className="min-w-0 flex-1 sm:flex-none sm:w-44"
+            timeZone={tz}
+            now={wallClockNow()}
           />
           <DatePicker
             value={dateTo}
             onChange={(v) => setUrlState({ dateTo: v, page: '1' })}
             placeholder="To date"
             className="min-w-0 flex-1 sm:flex-none sm:w-44"
-            minDate={dateFrom ? new Date(dateFrom + 'T00:00:00') : undefined}
+            timeZone={tz}
+            now={wallClockNow()}
+            min={dateFrom || undefined}
           />
         </div>
       )}

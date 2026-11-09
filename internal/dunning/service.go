@@ -110,8 +110,14 @@ func (e *SubscriptionActionNotYet) Error() string {
 
 // InvoiceUncollectibleMarker writes the unpaid invoice off when dunning
 // exhausts retries with final_invoice_action='mark_uncollectible'.
+//
+// then (nil = none) runs inside the write-off's transaction, after the status
+// flip and while the invoice's row lock is held, and its error rolls the
+// write-off back and is returned. Dunning passes the run's escalation, so the
+// write-off and the escalation commit together (ADR-112 amendment
+// 2026-11-09). then reads nothing outside tx: the row lock is held.
 type InvoiceUncollectibleMarker interface {
-	MarkUncollectible(ctx context.Context, tenantID, invoiceID string) error
+	MarkUncollectible(ctx context.Context, tenantID, invoiceID string, then func(tx *sql.Tx) error) error
 }
 
 // InvoiceGetter gets invoice details for finding the subscription.
@@ -719,6 +725,8 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 			case inv.Status == domain.InvoiceVoided:
 				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceVoided, "invoice_"+string(inv.Status), nil)
 				return rerr
+			// Someone else wrote it off: dunning's own write-off commits only
+			// with the run's escalation (applyInvoiceAction).
 			case inv.Status == domain.InvoiceUncollectible:
 				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceNotCollectible, "invoice_"+string(inv.Status), nil)
 				return rerr
@@ -1296,6 +1304,9 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 			case loaded.Status == domain.InvoiceVoided:
 				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceVoided, "invoice_"+string(loaded.Status), nil)
 				return rerr
+			// Dunning's own write-off commits only with the run's escalation
+			// (applyInvoiceAction), so an active run beside a written-off
+			// invoice was written off by someone else: an operator or the API.
 			case loaded.Status == domain.InvoiceUncollectible:
 				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceNotCollectible, "invoice_"+string(loaded.Status), nil)
 				return rerr
@@ -1507,9 +1518,43 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		}
 	}
 	if !actionFailed {
-		invApplied, invFailed := s.applyInvoiceAction(
-			ctx, tenantID, run.InvoiceID, policy.FinalInvoiceAction, inv)
-		actionFailed = actionFailed || invFailed
+		// When dunning writes the invoice off itself, the escalation commits
+		// in the write-off's transaction (ADR-112 amendment 2026-11-09). Two
+		// commits could leave the invoice written off beside an active run (a
+		// crash, a deploy or a failed insert between them), and the next tick
+		// reads that as someone else's write-off and resolves the run. The
+		// escalation is built here, before that transaction opens, because
+		// its email reads the customer and the invoice.
+		written := outcome
+		written.InvoiceWrittenOff = true
+		var escalateWithWriteOff func(tx *sql.Tx) error
+		if policy.FinalInvoiceAction == domain.InvActionMarkUncollectible {
+			esc := s.newEscalation(ctx, tenantID, run, policy, written, now)
+			escalateWithWriteOff = func(tx *sql.Tx) error { return s.escalateTx(ctx, tx, tenantID, esc) }
+		}
+		invApplied, escalated, err := s.applyInvoiceAction(
+			ctx, tenantID, run.InvoiceID, policy.FinalInvoiceAction, inv, escalateWithWriteOff)
+		var escErr *escalationError
+		switch {
+		case escalated:
+			logExhausted(ctx, run, policy, written)
+			return nil
+		case errors.Is(err, errRunMoved):
+			slog.InfoContext(ctx, "dunning exhaust: run resolved or escalated by another path before the write-off — the write-off rolled back, nothing written",
+				"run_id", run.ID, "invoice_id", run.InvoiceID)
+			return nil
+		case errors.As(err, &escErr):
+			// The write-off rolled back with the failed escalation. The run
+			// keeps its exhaustion lease, and the tick after it runs the
+			// exhaustion again, as after a failed standalone escalation; the
+			// action_failed path would wait a day for a write-off that did
+			// not fail.
+			return err
+		case err != nil:
+			slog.WarnContext(ctx, "failed to mark invoice uncollectible after dunning exhausted",
+				"invoice_id", run.InvoiceID, "error", err)
+			actionFailed = true
+		}
 		outcome.InvoiceWrittenOff = invApplied
 	}
 
@@ -1545,34 +1590,16 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		return nil
 	}
 
-	run.State = domain.DunningEscalated
-	run.Resolution = domain.ResolutionRetriesExhausted
-	run.ResolvedAt = &now
-	run.NextActionAt = nil
-
-	// Guarded escalation write. If a settle resolved this run during the
-	// (successful) terminal action, don't clobber resolved→escalated or emit a
-	// contradictory dunning.escalated on top of the settle's dunning.resolved.
-	// The store queues dunning.escalated in this write's transaction, only
-	// when the write applies (ADR-040), and the timeline row below is written
-	// only then too.
-	// The escalation email rides this write's transaction (ADR-040); it
-	// renders what actually applied to this invoice, not what the policy
-	// asked for. Built before the write — plain reads — and enqueued by the
-	// store inside the same tx under a SAVEPOINT.
-	var escalateTx func(tx *sql.Tx) error
-	if s.emailNotifier != nil && s.customerEmail != nil {
-		escalateTx = s.buildDunningEscalationTx(ctx, tenantID, run, outcome)
-	}
-	if applied, err := s.store.EscalateRun(ctx, tenantID, run, run.AttemptCount, map[string]any{
-		// The policy's two configured actions, and separately what actually
-		// landed. Subscribers reconciling their own records need the second:
-		// a one-off invoice under a cancel policy escalates with nothing
-		// canceled, and an aggregate "final_action" could not say so.
-		"final_subscription_action": string(policy.FinalSubscriptionAction),
-		"final_invoice_action":      string(policy.FinalInvoiceAction),
-		"applied":                   outcome.Reason(),
-	}, escalateTx); err != nil {
+	// No write-off ran in this call (the policy asks for none, the invoice was
+	// already written off, or no marker is wired), so the escalation commits
+	// on its own. Guarded escalation write: if a settle resolved this run
+	// during the (successful) terminal action, don't clobber
+	// resolved→escalated or emit a contradictory dunning.escalated on top of
+	// the settle's dunning.resolved. The store queues dunning.escalated and
+	// the escalation email in this write's transaction, only when the write
+	// applies (ADR-040), and the timeline row below is written only then too.
+	esc := s.newEscalation(ctx, tenantID, run, policy, outcome, now)
+	if applied, err := s.store.EscalateRun(ctx, tenantID, esc.run, run.AttemptCount, esc.extra, esc.email); err != nil {
 		return err
 	} else if !applied {
 		slog.Info("dunning exhaust: run resolved or escalated by another processor during the terminal action — not escalating",
@@ -1580,29 +1607,108 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		return nil
 	}
 
-	_, _ = s.store.CreateEvent(ctx, tenantID, domain.InvoiceDunningEvent{
-		RunID:        run.ID,
-		InvoiceID:    run.InvoiceID,
-		EventType:    domain.DunningEventEscalated,
-		State:        run.State,
-		AttemptCount: run.AttemptCount,
-		// What actually happened to this invoice, not what the policy asked
-		// for — the timeline renders this row, and a one-off invoice under a
-		// cancel policy would otherwise read "cancel" beside a subscription
-		// that never existed.
-		Reason:    outcome.Reason(),
-		CreatedAt: now,
-	})
+	// The timeline row is written after the escalation commits, and a crash
+	// in between loses it (ADR-112, deferred). In the escalation's
+	// transaction it would lock the run row and then, for its foreign key,
+	// the invoice row: the reverse of the failure settle, which locks the
+	// invoice first. The write-off path has the invoice's lock already and
+	// writes the row in its transaction (EscalateRunTx).
+	_, _ = s.store.CreateEvent(ctx, tenantID, esc.event)
+	logExhausted(ctx, run, policy, outcome)
+	return nil
+}
 
-	slog.Info("dunning exhausted",
+// escalation is what an exhaustion writes when it escalates the run: the
+// escalated run, what dunning.escalated carries beside it, the escalated
+// timeline row, and the customer's escalation email (nil = none).
+type escalation struct {
+	run   domain.InvoiceDunningRun
+	extra map[string]any
+	event domain.InvoiceDunningEvent
+	email func(tx *sql.Tx) error
+}
+
+// newEscalation builds run's escalation at the instant at, from outcome:
+// what actually applied to this invoice, not what the policy asked for. The
+// email's reads (the customer's address, the invoice) run here, before any
+// transaction opens.
+func (s *Service) newEscalation(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, outcome appliedActions, at time.Time) escalation {
+	run.State = domain.DunningEscalated
+	run.Resolution = domain.ResolutionRetriesExhausted
+	run.ResolvedAt = &at
+	run.NextActionAt = nil
+	esc := escalation{
+		run: run,
+		// The policy's two configured actions, and separately what actually
+		// landed. Subscribers reconciling their own records need the second:
+		// a one-off invoice under a cancel policy escalates with nothing
+		// canceled, and an aggregate "final_action" could not say so.
+		extra: map[string]any{
+			"final_subscription_action": string(policy.FinalSubscriptionAction),
+			"final_invoice_action":      string(policy.FinalInvoiceAction),
+			"applied":                   outcome.Reason(),
+		},
+		event: domain.InvoiceDunningEvent{
+			RunID:        run.ID,
+			InvoiceID:    run.InvoiceID,
+			EventType:    domain.DunningEventEscalated,
+			State:        run.State,
+			AttemptCount: run.AttemptCount,
+			// What actually happened to this invoice — the timeline renders
+			// this row, and a one-off invoice under a cancel policy would
+			// otherwise read "cancel" beside a subscription that never existed.
+			Reason:    outcome.Reason(),
+			CreatedAt: at,
+		},
+	}
+	if s.emailNotifier != nil && s.customerEmail != nil {
+		esc.email = s.buildDunningEscalationTx(ctx, tenantID, run, outcome)
+	}
+	return esc
+}
+
+// errRunMoved is the escalation's answer inside the write-off's transaction
+// when the run is no longer active at its attempt count: a payment, a void or
+// an operator resolved it, or another processor escalated it, after this one
+// listed it. The write-off rolls back with it, so no invoice is written off
+// beside a run another path closed.
+var errRunMoved = errors.New("the dunning run was resolved or escalated by another path")
+
+// escalationError is the escalation's own failure inside the write-off's
+// transaction, such as a failed dunning.escalated insert. The write-off rolls
+// back with it.
+type escalationError struct{ err error }
+
+func (e *escalationError) Error() string {
+	return "escalate the run in the write-off's transaction: " + e.err.Error()
+}
+
+func (e *escalationError) Unwrap() error { return e.err }
+
+// escalateTx writes esc on tx, the write-off's transaction, which holds the
+// invoice's row lock (EscalateRunTx). It returns errRunMoved when the run's
+// write does not apply and an *escalationError when the write fails. Either
+// rolls the write-off back.
+func (s *Service) escalateTx(ctx context.Context, tx *sql.Tx, tenantID string, esc escalation) error {
+	applied, err := s.store.EscalateRunTx(ctx, tx, tenantID, esc.run, esc.run.AttemptCount, esc.extra, esc.event, esc.email)
+	if err != nil {
+		return &escalationError{err: err}
+	}
+	if !applied {
+		return errRunMoved
+	}
+	return nil
+}
+
+// logExhausted logs an escalation that committed, with what applied.
+func logExhausted(ctx context.Context, run domain.InvoiceDunningRun, policy domain.DunningPolicy, outcome appliedActions) {
+	slog.InfoContext(ctx, "dunning exhausted",
 		"run_id", run.ID,
 		"invoice_id", run.InvoiceID,
 		"final_subscription_action", policy.FinalSubscriptionAction,
 		"final_invoice_action", policy.FinalInvoiceAction,
 		"applied", outcome.Reason(),
 	)
-
-	return nil
 }
 
 // appliedActions is what a terminal exhaustion actually did to ONE
@@ -1769,12 +1875,16 @@ func (s *Service) waitForInvoiceGrace(ctx context.Context, tenantID string, run 
 	return nil
 }
 
-// applyInvoiceAction writes the unpaid invoice off when the policy asks,
-// reporting whether it is now written off and whether the attempt errored.
-func (s *Service) applyInvoiceAction(ctx context.Context, tenantID, invoiceID string, action domain.DunningInvoiceAction, inv domain.Invoice) (applied, failed bool) {
+// applyInvoiceAction writes the unpaid invoice off when the policy asks.
+// applied reports whether the invoice is now written off. When this call
+// writes it off, escalate (nil = none) runs inside the write-off's
+// transaction, and escalated reports that the two committed together. err is
+// the write-off's failure, escalate's error included: the write-off rolled
+// back.
+func (s *Service) applyInvoiceAction(ctx context.Context, tenantID, invoiceID string, action domain.DunningInvoiceAction, inv domain.Invoice, escalate func(tx *sql.Tx) error) (applied, escalated bool, err error) {
 	switch action {
 	case domain.InvActionNone:
-		return false, false
+		return false, false, nil
 
 	case domain.InvActionMarkUncollectible:
 		if inv.Status == domain.InvoiceUncollectible {
@@ -1784,25 +1894,23 @@ func (s *Service) applyInvoiceAction(ctx context.Context, tenantID, invoiceID st
 			// late-paid re-check normally resolves such a run before
 			// reaching here; this covers an operator write-off landing
 			// between the two reads.)
-			return true, false
+			return true, false, nil
 		}
 		if s.invoiceUncollect == nil {
 			slog.Warn("dunning write-off skipped — no invoice uncollectible marker wired",
 				"invoice_id", invoiceID)
-			return false, false
+			return false, false, nil
 		}
-		if err := s.invoiceUncollect.MarkUncollectible(ctx, tenantID, invoiceID); err != nil {
-			slog.Warn("failed to mark invoice uncollectible after dunning exhausted",
-				"invoice_id", invoiceID, "error", err)
-			return false, true
+		if err := s.invoiceUncollect.MarkUncollectible(ctx, tenantID, invoiceID, escalate); err != nil {
+			return false, false, err
 		}
 		slog.Info("invoice marked uncollectible by dunning", "invoice_id", invoiceID)
-		return true, false
+		return true, escalate != nil, nil
 
 	default:
 		slog.Error("unknown dunning final_invoice_action — no action taken",
 			"action", action, "invoice_id", invoiceID)
-		return false, false
+		return false, false, nil
 	}
 }
 
@@ -1839,7 +1947,7 @@ func (s *Service) ResolveRun(ctx context.Context, tenantID, runID string, resolu
 			return domain.InvoiceDunningRun{}, err
 		}
 		if !done {
-			if err := s.invoiceUncollect.MarkUncollectible(ctx, tenantID, run.InvoiceID); err != nil {
+			if err := s.invoiceUncollect.MarkUncollectible(ctx, tenantID, run.InvoiceID, nil); err != nil {
 				return domain.InvoiceDunningRun{}, fmt.Errorf("mark invoice uncollectible: %w", err)
 			}
 		}
