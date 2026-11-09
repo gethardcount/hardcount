@@ -443,6 +443,12 @@ invoice or a credit note. Until PR-4, D05's meter edit takes its meter and
 then plans; no writer takes a plan and then a meter before PR-4, so this
 makes no cycle.
 
+**Within step 6, credit-note invoice locks come before the number row**
+(amended 2026-11-09, ADR-118 amendment of that date). A transaction that
+holds the number row takes no new credit-note lock. A credit-note create
+takes its invoice row (`FOR KEY SHARE`) before it numbers the note, and a
+relief void takes the voided invoice's row before the number row.
+
 **A test-clock teardown is outside this order.** It deletes bottom-up for
 foreign keys: invoice rows before the subscription row, override rows
 before the clock row (`internal/testclock/postgres.go:150-221`). From PR-4,

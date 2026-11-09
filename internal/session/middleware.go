@@ -9,6 +9,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/platform/logging"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -30,7 +31,7 @@ func MiddlewareOrAPIKey(sessSvc *Service, keySvc *auth.Service) func(http.Handle
 					// A store failure is no verdict on the cookie. Do not
 					// fall back to "missing credentials": report the outage
 					// as retryable (#560).
-					slog.ErrorContext(r.Context(), "session resolve unavailable", "error", rerr)
+					slog.Log(r.Context(), logging.ErrorLevel(r.Context(), rerr), "session resolve unavailable", "error", rerr)
 					respond.Error(w, r, http.StatusServiceUnavailable, "api_error",
 						"authentication_unavailable",
 						"authentication is temporarily unavailable — retry shortly")
@@ -51,7 +52,7 @@ func MiddlewareOrAPIKey(sessSvc *Service, keySvc *auth.Service) func(http.Handle
 				if !errors.Is(err, auth.ErrInvalidKey) {
 					// An infrastructure failure, not a verdict on the
 					// credential (#560).
-					slog.ErrorContext(r.Context(), "api key validation unavailable", "error", err)
+					slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "api key validation unavailable", "error", err)
 					respond.Error(w, r, http.StatusServiceUnavailable, "api_error",
 						"authentication_unavailable",
 						"authentication is temporarily unavailable — retry shortly")

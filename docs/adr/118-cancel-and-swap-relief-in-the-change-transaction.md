@@ -11,6 +11,9 @@
 - 2026-11-05: a relief void's `invoice.voided` commits with the cancel or
   plan swap
   ([amendment](#amendment-2026-11-05-the-void-event-commits-with-the-change)).
+- 2026-11-09: in the cancel's transaction, the relief is written before the
+  final invoice is numbered
+  ([amendment](#amendment-2026-11-09-the-relief-is-written-before-the-final-invoice-is-numbered)).
 
 ## Summary
 
@@ -476,3 +479,78 @@ code before this change.
 **Tests.** `internal/invoice` `TestVoidUnchangedTx_EventCommitsWithTheCallerTx`
 (real Postgres: the caller's rollback removes the event, and its commit
 saves it).
+
+## Amendment 2026-11-09: the relief is written before the final invoice is numbered
+
+**What was wrong.** A cancel took two locks in the opposite order from every
+credit-note writer. Both are held until commit:
+
+- the tenant's number row (`tenant_settings`), which numbers every invoice
+  and every credit note;
+- an invoice's credit-note lock, a transaction advisory lock that every
+  credit-note writer takes before it numbers its note.
+
+The cancel numbered its final invoice, and so held the number row, before
+its relief asked for the credit-note lock of each invoice it credits. An
+operator's credit note, or a refund made in Stripe recorded as a credit note
+(ADR-134), takes that invoice's credit-note lock first and then the number
+row. When both ran at the same moment, Postgres aborted one of them as a
+deadlock (`40P01`). It needed a final invoice above zero (usage, or an
+in-arrears base) and a relief with a credit note (a paid funding invoice, or
+an unpaid one that was partly used). The whole transaction rolled back, so
+no amount was ever wrong.
+A scheduled cancel and a Stripe refund webhook are retried on their own. An
+operator's cancel or credit note, and dunning's cancel, returned an error.
+
+**Decision.** One engine method, `BillCancelTx`, writes both on the cancel's
+transaction, for the immediate and the scheduled cancel, in this order:
+
+1. Price the final invoice: the threshold watermark, the lines and the tax.
+   It writes nothing and takes neither lock, so the tax call (a network call
+   for a Stripe Tax tenant) still runs before any tenant-wide lock.
+2. Write the relief: the void of a wholly unused invoice, then the
+   credit-note locks of every invoice it credits, in sorted order, then each
+   note with its number.
+3. Number and insert the final invoice.
+
+So every transaction that takes both locks takes the credit-note locks
+first: the cancel, the plan swap, the item change and every credit-note
+writer (ADR-130 section 8, step 6).
+
+A credit-note create also takes its invoice's row `FOR KEY SHARE` right after
+the credit-note lock, before it numbers the note (ADR-061 amendment
+2026-11-09). A relief void holds the voided invoice's row `FOR UPDATE` and
+then waits for the number row. A create on that invoice took the row only at
+its insert's foreign-key check, after the number row, which closed the same
+kind of cycle. A same-day change of billing interval reached it, because the
+swap numbers its new invoice after the void. With step 3 after the void, a
+same-day cancel would have reached it too.
+
+**Why the new order moves no money.** The old order came from a code comment
+of 2026-05-18 ("so the credit grant doesn't pre-apply against this
+invoice"). The 2026-10-19 amendment retired that reason: neither write in
+the transaction applies credits, and after commit `finishReliefThenCollect`
+issues the relief first and collects the final invoice second. The final
+invoice's lines (usage and in-arrears base) do not depend on the relief. The
+relief's reads (the funding invoices and their credited headroom) run on
+their own connections, so they never see the uncommitted final invoice in
+either order.
+
+**What a webhook receiver sees.** Inside the transaction, the relief's rows
+are now queued before the final invoice's: a void's `invoice.voided` and the
+drafts' audit rows come before `invoice.finalized`. A receiver must already
+accept events out of order ([Webhooks](../webhooks.md)).
+
+**Tests.** `internal/billing/cancel_credit_note_lock_order_integration_test.go`,
+on real Postgres:
+
+- `TestCancel_ConcurrentCreditNoteOnFundingInvoice_BothCommit`: an immediate
+  and a scheduled cancel, each against an operator credit note and a
+  recorded Stripe refund on the paid invoice the relief credits. In the old
+  order, all four abort one side with `40P01`.
+- `TestReliefVoid_ConcurrentCreditNoteOnTheVoidedInvoice_BothCommit`: a
+  same-day cancel and a same-day interval change, each voiding the unpaid
+  invoice, against a credit note on it. Without the `FOR KEY SHARE` read,
+  both abort one side.
+- `TestCancel_TaxCallHoldsNoNumberRowOrCreditNoteLock`: neither lock is held
+  during the final invoice's tax call.
