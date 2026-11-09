@@ -124,8 +124,10 @@ type exhaustFixture struct {
 	invoices  *invoice.PostgresStore
 	invSvc    *invoice.Service
 	subs      *subscription.Service
-	runs      *dunning.PostgresStore
-	svc       *dunning.Service
+	// subStore is subs' store, so a test can wire its webhook outbox.
+	subStore *subscription.PostgresStore
+	runs     *dunning.PostgresStore
+	svc      *dunning.Service
 }
 
 // newExhaustFixture builds one tenant with a real active subscription, its
@@ -224,7 +226,7 @@ func newExhaustFixture(t *testing.T, db *postgres.DB, name string, acts finalAct
 
 	return &exhaustFixture{
 		db: db, ctx: ctx, clk: clk, tenantID: tenantID, subID: sub.ID, invoiceID: inv.ID, runID: runID,
-		invoices: invoices, invSvc: invSvc, subs: subSvc, runs: runs, svc: svc,
+		invoices: invoices, invSvc: invSvc, subs: subSvc, subStore: subStore, runs: runs, svc: svc,
 	}
 }
 

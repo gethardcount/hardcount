@@ -130,14 +130,17 @@ func countEvents(mem *memStore, typ domain.DunningEventType) int {
 }
 
 // writeOffMover marks the shared invoice uncollectible, as the real mover
-// does, so the invoice reader sees the write-off on the next read.
+// does, so the invoice reader sees the write-off on the next read. calls
+// counts the attempts and committed the write-offs that landed.
 type writeOffMover struct {
-	inv   *domain.Invoice
-	calls int
+	inv       *domain.Invoice
+	calls     int
+	committed int
 }
 
 func (m *writeOffMover) MarkUncollectible(context.Context, string, string) error {
 	m.calls++
+	m.committed++
 	m.inv.Status = domain.InvoiceUncollectible
 	return nil
 }
@@ -146,13 +149,16 @@ type ptrInvGet struct{ inv *domain.Invoice }
 
 func (g ptrInvGet) Get(context.Context, string, string) (domain.Invoice, error) { return *g.inv, nil }
 
-// TestExhaust_InterruptedAfterWriteOff_ResolvesNotCollectible pins the
-// deferred residue honestly (ADR-112 amendment 2026-10-08, deferral 1): when
-// the write-off committed and only the escalation write failed, the re-drive
-// sees an uncollectible invoice and closes the run as invoice_not_collectible
-// — no escalation, no second write-off. The run is finished, not stranded;
-// what is lost is the final notice.
-func TestExhaust_InterruptedAfterWriteOff_ResolvesNotCollectible(t *testing.T) {
+// TestExhaust_InterruptedEscalation_WriteOffRollsBackAndRedrives: the
+// escalation write fails inside the write-off's transaction, so the
+// write-off rolls back with it and the run keeps its exhaustion lease. The
+// re-drive after the lease writes the invoice off and escalates once, with
+// no resolve: one write-off landed of the two attempted.
+//
+// Mutation that turns it red: escalating after the write-off commits (the
+// write-off lands on the first attempt, and the re-drive resolves the run as
+// invoice_not_collectible with no escalation).
+func TestExhaust_InterruptedEscalation_WriteOffRollsBackAndRedrives(t *testing.T) {
 	mem := newMemStore()
 	markUncollectiblePolicy(mem)
 	store := &escalateFailsOnce{memStore: mem}
@@ -164,17 +170,29 @@ func TestExhaust_InterruptedAfterWriteOff_ResolvesNotCollectible(t *testing.T) {
 	ctx := context.Background()
 
 	run := finalAttemptRun(t, mem, svc)
-	svc.ProcessDueRuns(ctx, "t1", 20)
+	if _, errs := svc.ProcessDueRuns(ctx, "t1", 20); len(errs) != 1 {
+		t.Fatalf("the escalation's error must surface: errs=%v", errs)
+	}
+	if got := mem.runs[run.ID]; got.State != domain.DunningActive || got.Resolution == domain.ResolutionActionFailed || got.NextActionAt == nil {
+		t.Fatalf("after the failed escalation: state=%s resolution=%s next=%v, want active with its lease, not action_failed",
+			got.State, got.Resolution, got.NextActionAt)
+	}
 	lease := *mem.runs[run.ID].NextActionAt
 	if _, errs := svc.ProcessDueRuns(clock.WithEffectiveNow(ctx, lease.Add(time.Second)), "t1", 20); len(errs) != 0 {
 		t.Fatalf("re-drive: %v", errs)
 	}
 	got := mem.runs[run.ID]
-	if got.State != domain.DunningResolved || got.Resolution != domain.ResolutionInvoiceNotCollectible {
-		t.Fatalf("state=%s resolution=%s, want resolved/invoice_not_collectible", got.State, got.Resolution)
+	if got.State != domain.DunningEscalated || got.Resolution != domain.ResolutionRetriesExhausted {
+		t.Fatalf("state=%s resolution=%s, want escalated/retries_exhausted", got.State, got.Resolution)
 	}
-	if mover.calls != 1 || countEvents(mem, domain.DunningEventEscalated) != 0 {
-		t.Fatalf("write-offs=%d escalations=%d, want 1 and 0", mover.calls, countEvents(mem, domain.DunningEventEscalated))
+	if mover.calls != 2 || mover.committed != 1 {
+		t.Fatalf("write-offs attempted=%d committed=%d, want 2 and 1: the first rolled back with its escalation", mover.calls, mover.committed)
+	}
+	if n := countEvents(mem, domain.DunningEventEscalated); n != 1 {
+		t.Fatalf("escalated rows = %d, want 1", n)
+	}
+	if n := countEvents(mem, domain.DunningEventResolved); n != 0 {
+		t.Fatalf("resolved rows = %d, want 0", n)
 	}
 }
 
