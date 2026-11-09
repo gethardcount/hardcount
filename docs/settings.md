@@ -140,14 +140,15 @@ These are read by Docker Compose from [`deploy/compose/.env`](../deploy/compose/
 | `HARDCOUNT_IMAGE` | The API image to run. | `hardcount-api:local`, built from the checkout |
 | `HARDCOUNT_DASHBOARD_IMAGE` | The dashboard image to run. | `hardcount-dashboard:local`, built from the checkout |
 | `NGINX_HTTP_PORT` | The host port nginx listens on, for the dashboard and API. | `80` |
-| `HARDCOUNT_PORT` | Read by `quickstart.sh`: the port it writes into `.env` as `NGINX_HTTP_PORT`. | `8080` |
-| `COMPOSE_PROJECT_NAME` | Docker Compose's own project name. `quickstart.sh` writes `hardcount-quickstart`. | The directory name |
+| `HARDCOUNT_PORT` | Read by `quickstart.sh`: the port it writes into `.env` as `NGINX_HTTP_PORT=127.0.0.1:<port>`, so nginx listens on this machine only. | `8080` |
+| `COMPOSE_PROJECT_NAME` | Docker Compose's own project name. `quickstart.sh` writes `hardcount-quickstart`, and passes the name in its `.env` to every Compose command. Every quick start writes that name, so `quickstart.sh` refuses while a quick start in another folder has it. | The directory name |
 
 How Compose differs from running the binary:
 
 - **Compose passes only the names `docker-compose.yml` lists.** A name it does not list does nothing in `.env`. `DB_SSLMODE` and the `DB_HOST` set are not listed: the stack's own Postgres needs neither. To pass another name, use the [override file](#your-own-changes-the-override-file).
 - **Some values are fixed.** `PORT` is `8080`, `RUN_MIGRATIONS_ON_BOOT` is `true`, and `DATABASE_URL` and `APP_DATABASE_URL` point at the in-stack Postgres. A `DATABASE_URL` in `.env` is ignored.
 - **Some defaults differ.** `APP_ENV` is `production`, `REDIS_URL` is `redis://redis:6379`, `TRUST_PROXY` is `172.16.0.0/12,192.168.0.0/16`, and `SMTP_FROM` is `billing@example.com`. `quickstart.sh` sets `APP_ENV=local`.
+- **A name set in the shell wins over `.env`.** A value exported in the shell, or given on the command line as in `NGINX_HTTP_PORT=8080 docker compose up -d`, replaces the `.env` line. `quickstart.sh` runs Compose without these names and without any `COMPOSE_` setting from your shell, so it uses its `.env` only.
 
 ### Your own changes: the override file
 

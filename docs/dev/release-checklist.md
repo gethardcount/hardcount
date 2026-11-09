@@ -122,7 +122,7 @@ Run it from v0.9.1 on. It was skipped for v0.9.0, the first release named Hardco
 
 The `upgrade` CI job runs steps 1 to 5 and 7 on every pull request ([How we test](../testing.md#before-a-release)), but from source, not the published images, and without comparing the PDF's text. This drill checks the images and the PDF.
 
-1. Run `./quickstart.sh destroy` to start from an empty install. Check out the previous release tag and run `./quickstart.sh`, then `./quickstart.sh demo`.
+1. To start from an empty install, run `./quickstart.sh destroy --yes` in the fresh install's `deploy/compose`. In a folder with no `.env`, it deletes nothing, so run it where the fresh install ran. `docker compose ls -a` then lists no `hardcount-quickstart`. Check out the previous release tag and run `./quickstart.sh`, then `./quickstart.sh demo`.
    **You see:** the demo's invoice link. Open it and note the invoice number, total and line amounts. Download its PDF.
 2. Check out the new release tag. In `deploy/compose/.env`, change the tag on the `HARDCOUNT_IMAGE` and `HARDCOUNT_DASHBOARD_IMAGE` lines to the new release. Run `docker compose pull`, then `docker compose run --rm hardcount-api migrate status`.
    **You see:** the plan, with `running now:  no`. The state is `behind`, listing the release's new migrations.
@@ -136,7 +136,7 @@ The `upgrade` CI job runs steps 1 to 5 and 7 on every pull request ([How we test
    **You see:** the same policies as before the upgrade. An upgrade never adds or changes a retry policy on an existing account.
 7. Run `./quickstart.sh demo` again.
    **You see:** a second finalized invoice for a new demo customer.
-8. Run `./quickstart.sh destroy` when you are done.
+8. Run `./quickstart.sh destroy --yes` when you are done.
 
 ## First invoice tutorial
 
