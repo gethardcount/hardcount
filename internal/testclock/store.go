@@ -47,8 +47,8 @@ type Store interface {
 	// MarkFailed flips advancing → internal_failure when a catchup run
 	// errors. The reason is persisted on the clock row so the dashboard
 	// can show "Catchup failed: <reason>" without forcing the operator
-	// to dig through server logs. Truncated by the caller to ~500
-	// chars; the full payload stays in structured slog. ADR-018.
+	// to dig through server logs. The store cuts it to about 500
+	// bytes; the full payload stays in structured slog. ADR-018.
 	MarkFailed(ctx context.Context, tenantID, id, reason string) (domain.TestClock, error)
 	// RetryFromFailed transitions internal_failure → advancing on a
 	// clock the operator has chosen to retry. Frozen_time is unchanged

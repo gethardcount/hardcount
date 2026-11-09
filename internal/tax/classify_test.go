@@ -88,6 +88,16 @@ func TestCleanMessage(t *testing.T) {
 	}
 }
 
+// TestCleanMessage_CutsBetweenCharacters: a long raw error is cut to 200
+// bytes and "…". When byte 200 falls inside a character, the cut keeps the
+// text before that character, so the result stays valid UTF-8.
+func TestCleanMessage_CutsBetweenCharacters(t *testing.T) {
+	kept := strings.Repeat("a", 199)
+	if got, want := CleanMessage(kept+"é"+strings.Repeat("b", 100)), kept+"…"; got != want {
+		t.Errorf("CleanMessage = %q, want %q", got, want)
+	}
+}
+
 func TestCleanMessage_TruncatesLongRaw(t *testing.T) {
 	raw := strings.Repeat("x", 250)
 	got := CleanMessage(raw)

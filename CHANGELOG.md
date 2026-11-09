@@ -21,6 +21,7 @@ original text.
 
 **Before upgrading:**
 
+- A subscription whose cycle close kept failing on a long Stripe Tax error, until billing parked it, stays parked after the upgrade. Its log line `bill subscription failed` reads `invalid byte sequence for encoding "UTF8"` (SQLSTATE 22021). Call `POST /v1/subscriptions/{id}/retry-billing` for each one.
 - Quick-start installs: the quick start now listens only on 127.0.0.1, and `./quickstart.sh destroy` asks you to type the project name first. Scripts pass `--yes`. It takes its settings only from its `.env`, not from your shell. It refuses to run while a quick start in another folder has its Compose project: run `./quickstart.sh destroy` in that folder first. An `.env` that an earlier `quickstart.sh` wrote still listens on every network interface: put `127.0.0.1:` before the port on its `NGINX_HTTP_PORT` line, as in `NGINX_HTTP_PORT=127.0.0.1:8080`, then run `./quickstart.sh`.
 - One migration runs on start: `00223_restore_catchup` adds the `restore_catchup` table, which marks a restored database.
 - Hardcount now refuses to start on a database `scripts/restore.sh` restored, or `hardcount restore begin` marked, and the restore pauses billing and dunning. A script that does this must change:
@@ -43,6 +44,7 @@ original text.
 
 ### Fixed
 
+- **A cut to fit no longer splits a character.** A long error or webhook answer cut inside an accented letter or emoji, or an answer that is not text, made Postgres refuse the write. A cycle close then failed on every retry, a failed email or webhook was retried without end, a test clock stayed advancing, and a delivered webhook was sent again. ([#1644](https://github.com/gethardcount/hardcount/pull/1644))
 - **An item change whose invoice read fails is refused, not left uncharged.** Adding an item, or a quantity or plan increase that takes effect now, reads the current period's invoice to check it is paid. A database error there was taken as "no invoice yet": the change went through, and nothing ever charged it. Now it answers `503` `proration_unavailable` and changes nothing. Send it again. ([#1646](https://github.com/gethardcount/hardcount/pull/1646))
 - **An error toast that names the failed action, such as "Failed to void", says "Result unknown" after a bare server error.** A 502 or 504 from the proxy, or a 500 with no reason, read as a failure with "Try again", though the action may have gone through. Now the warning says to refresh and check before trying again. An error shown inside a dialog is unchanged, except in Issue credit note. ([#1640](https://github.com/gethardcount/hardcount/pull/1640))
 - **Issue credit note no longer makes a second note after a lost answer.** The dialog showed raw text such as "Failed to fetch". Closed and opened again, it still offered the old amounts and sent a new request key, so a second try made a second note, and with it a second card refund. Now it says the result is unknown, counts a note that landed, and keeps the key until an answer settles the try. ([#1640](https://github.com/gethardcount/hardcount/pull/1640))

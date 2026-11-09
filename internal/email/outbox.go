@@ -12,6 +12,7 @@ import (
 
 	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
@@ -498,6 +499,9 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 		return
 	}
 
+	// Every mark below saves the error in last_error, cut to 500 bytes.
+	errMsg := errs.Clip(hErr.Error(), 500)
+
 	// Obsolete beats every other classification: the email must not be
 	// sent, retried, or DLQ'd — the world moved on while it waited.
 	if errors.Is(hErr, ErrEmailObsolete) {
@@ -506,7 +510,7 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 			SET status = 'skipped', last_error = `+"$2"+`, skip_reason = `+"$3"+`,
 			    payload = `+scrubbedPayloadSQL+`
 			WHERE id = $1 AND status = 'pending'
-		`, truncateError(hErr.Error()), skipReasonOf(hErr))
+		`, errMsg, skipReasonOf(hErr))
 		slog.Info("email outbox: row skipped as obsolete",
 			"outbox_id", row.ID,
 			"tenant_id", row.TenantID,
@@ -515,7 +519,6 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 		return
 	}
 
-	errMsg := truncateError(hErr.Error())
 	// row.Attempts is the CLAIM-persisted count (the single increment
 	// site) — DLQ once the budget is spent, or immediately for errors
 	// that can never succeed.
@@ -830,12 +833,4 @@ func (s *OutboxStore) FailedCount(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	return n, nil
-}
-
-func truncateError(s string) string {
-	const maxLen = 500
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen]
 }
