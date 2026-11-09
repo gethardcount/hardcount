@@ -12,7 +12,9 @@ the screen, and that the main things an operator does work end to end.
   signed out, and the emailed-link pages with no code.
 - `journeys.spec.ts` signs in, creates a customer, creates a subscription,
   advances a test clock to the renewal and opens the new invoice, opens the
-  public invoice page, and grants credits. It picks a credit expiry day on a
+  public invoice page, and grants credits. In Grant credits, it picks the
+  second of two customers with the same name with the keyboard, and checks
+  that the grant goes to that customer. It picks a credit expiry day on a
   grant and on a commit line, and checks that the dashboard sends the next
   midnight in the account's zone and shows "Valid through" the picked day.
   An API grant that stops mid-day shows "Expires" with its time. Those two

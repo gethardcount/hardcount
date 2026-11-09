@@ -3,6 +3,7 @@ import { Popover as PopoverPrimitive } from '@base-ui/react/popover'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { ChevronsUpDown, Check, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { comboboxFilter, comboboxItem } from '@/lib/comboboxItem'
 
 export interface ComboboxOption {
   value: string
@@ -67,9 +68,10 @@ export function Combobox({
   // Dedupe options by value defensively. CommandItem keys on
   // opt.value; a caller that hands us duplicates (e.g. tzdb listing
   // the same canonical zone twice) blows up React with a duplicate-
-  // key warning and renders the same row twice. Map preserves the
-  // first occurrence of each value, which is the conventional pick
-  // for sorted lists.
+  // key warning and renders the same row twice. cmdk's item value is
+  // built from opt.value too, and must be unique (see comboboxItem).
+  // Map preserves the first occurrence of each value, which is the
+  // conventional pick for sorted lists.
   const dedupedOptions = React.useMemo(() => {
     const seen = new Map<string, ComboboxOption>()
     for (const o of options) {
@@ -170,10 +172,7 @@ export function Combobox({
           >
             <Command
               shouldFilter={!serverFiltered}
-              filter={(val, search, keywords) => {
-                const haystack = [val, ...(keywords ?? [])].join(' ').toLowerCase()
-                return haystack.includes(search.toLowerCase()) ? 1 : 0
-              }}
+              filter={comboboxFilter}
               className="flex flex-1 flex-col min-h-0"
             >
               <CommandInput placeholder="Search..." autoFocus onValueChange={onSearchChange} />
@@ -187,8 +186,7 @@ export function Combobox({
                   {dedupedOptions.map(opt => (
                     <CommandItem
                       key={opt.value}
-                      value={opt.label}
-                      keywords={[opt.value, ...(opt.keywords ?? [])]}
+                      {...comboboxItem(opt)}
                       onSelect={() => handleSelect(opt.value)}
                     >
                       {/* Truncation honesty (2026-07-30): the popup is trigger-
