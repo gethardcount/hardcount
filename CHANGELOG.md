@@ -21,6 +21,7 @@ original text.
 
 **Before upgrading:**
 
+- Quick-start installs: the quick start now listens only on 127.0.0.1, and `./quickstart.sh destroy` asks you to type the project name first. Scripts pass `--yes`. It takes its settings only from its `.env`, not from your shell. It refuses to run while a quick start in another folder has its Compose project: run `./quickstart.sh destroy` in that folder first. An `.env` that an earlier `quickstart.sh` wrote still listens on every network interface: put `127.0.0.1:` before the port on its `NGINX_HTTP_PORT` line, as in `NGINX_HTTP_PORT=127.0.0.1:8080`, then run `./quickstart.sh`.
 - One migration runs on start: `00223_restore_catchup` adds the `restore_catchup` table, which marks a restored database.
 - Hardcount now refuses to start on a database `scripts/restore.sh` restored, or `hardcount restore begin` marked, and the restore pauses billing and dunning. A script that does this must change:
   - **A restore that replaces your live database** runs `hardcount restore catch-up` before it starts Hardcount. After a snapshot or point-in-time restore, it runs `hardcount restore begin` first ([Restore Hardcount](docs/ops/restore.md)).
@@ -32,9 +33,15 @@ original text.
 
 ### Fixed
 
+- **`quickstart.sh` takes its settings only from its `.env`.** Compose took a setting exported in the shell over the `.env`, so after `set -a; . ./.env` for a server install, the quick start ran with that server's port, `APP_ENV` and encryption key. From a clean shell it then could not open its own data. ([#1635](https://github.com/gethardcount/hardcount/pull/1635))
+- **`quickstart.sh` refuses to act on a server install, or on a quick start in another folder.** `destroy` deleted the database and the `.env`, which holds the encryption key, of a server install set up in its folder. In a second quick-start folder, it deleted the first one's database, because every quick start uses the same Compose project. Now it refuses an `.env` it did not write, and a project whose containers another folder started. `destroy` asks first. ([#1635](https://github.com/gethardcount/hardcount/pull/1635))
 - **New invoice starts at your payment terms, and a click after a lost answer makes one invoice.** It started at Net 30 whatever Settings said. After a lost answer, a second click could make, and send, a second invoice, and Add line item a second line. Both now show what landed, and New invoice says the result is unknown. ([#1637](https://github.com/gethardcount/hardcount/pull/1637))
 - **A refund of another account's payment, on a Stripe account two Hardcount accounts share, is acknowledged.** Its webhook failed, and Stripe sent it again for three days. ([#1633](https://github.com/gethardcount/hardcount/pull/1633))
 - **Dunning and customer webhook events are no longer lost to a crash, a deploy or a dropped request.** `dunning.escalated`, `dunning.resolved`, `customer.email_bounced` and `customer.email_complained` were queued just after their change was saved, and a crash or a cancelled request in between dropped them. Each is now saved with its change. A bounce from your SMTP server that cannot be saved is logged at ERROR, because nothing sends it again. ([#1636](https://github.com/gethardcount/hardcount/pull/1636))
+
+### Security
+
+- **The quick start listens only on this computer.** It served the dashboard and API on every network interface, over plain HTTP, with a live key already made. A new quick-start `.env` sets `NGINX_HTTP_PORT=127.0.0.1:8080`. From another machine, use an SSH tunnel ([quick start](docs/quick-start.md)). ([#1635](https://github.com/gethardcount/hardcount/pull/1635))
 
 ## [0.9.3] - 2026-11-09
 
