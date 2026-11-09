@@ -40,7 +40,7 @@ You need git and Docker 24 or newer with the Compose plugin. On Windows, run it 
 **1. Start Hardcount**
 
 ```bash
-git clone --branch v0.9.2 https://github.com/gethardcount/hardcount.git
+git clone --branch v0.9.3 https://github.com/gethardcount/hardcount.git
 cd hardcount/deploy/compose
 ./quickstart.sh
 ```
