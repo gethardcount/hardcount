@@ -24,7 +24,7 @@ func TestParkEnded_ActivityShowsNoUnknownRow(t *testing.T) {
 		{
 			name: "its payment succeeded",
 			end: func(r *snapRig, inv domain.Invoice) error {
-				_, _, err := r.store.MarkPaidCardSettlementTransition(r.ctx, r.tenantID, inv.ID, "pi_park_paid", time.Now().UTC(), nil)
+				_, _, err := r.store.MarkPaidCardSettlementTransition(r.ctx, r.tenantID, inv.ID, "pi_park_paid", time.Now().UTC(), 0, nil)
 				return err
 			},
 			kinds: nil, // a success on a paid invoice is told by "Invoice paid"

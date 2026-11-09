@@ -293,7 +293,7 @@ func TestListPendingClawbackDrafts_ParkedWrittenOffSource_CardSucceeded_CreditsT
 	}
 
 	// 2. Stripe answers: the charge succeeded. The card settlement's write.
-	paid, transitioned, err := invStore.MarkPaidCardSettlementTransition(ctx, tenantID, inv.ID, "pi_found", time.Now().UTC(), nil)
+	paid, transitioned, err := invStore.MarkPaidCardSettlementTransition(ctx, tenantID, inv.ID, "pi_found", time.Now().UTC(), 0, nil)
 	if err != nil || !transitioned {
 		t.Fatalf("card settle: transitioned %v, err %v", transitioned, err)
 	}

@@ -294,8 +294,11 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	deliver(stripeEvent("evt_wp_f", "payment_intent.succeeded", piObject("pi_wp_f", idF, 4000, map[string]any{"status": "succeeded"})), "short payment_intent.succeeded")
 	got = events.next("short charge", domain.EventInvoicePaid, domain.EventPaymentSucceeded, domain.EventPaymentAmountMismatch, domain.EventDunningResolved)
 	mis := got[domain.EventPaymentAmountMismatch]
+	// The anomaly is recorded in the payment's transaction, so the event
+	// carries it; only the card stamp comes after the commit.
 	checkEventResource(t, "payment.amount_mismatch", mis, getInvoice(idF),
-		"payment_anomaly_kind", "payment_anomaly_payment_intent_id", "payment_anomaly_captured_cents",
+		"payment_card_brand", "payment_card_last4", "updated_at")
+	checkEventResource(t, "invoice.paid (short charge)", got[domain.EventInvoicePaid], getInvoice(idF),
 		"payment_card_brand", "payment_card_last4", "updated_at")
 	if mis.Data["incoming_payment_intent_id"] != "pi_wp_f" || mis.Data["captured_cents"] != float64(4000) {
 		t.Errorf("payment.amount_mismatch extras = %v / %v, want pi_wp_f / 4000", mis.Data["incoming_payment_intent_id"], mis.Data["captured_cents"])
@@ -358,8 +361,8 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 		t.Errorf("payment.dispute_closed dispute = %v, want the API's lost dispute %v", cls.Data["dispute"], disputes)
 	}
 
-	// A Checkout that saved a card, then the same card saved through a
-	// Hardcount setup session.
+	// A Checkout that saved a card, the same card saved through a Hardcount
+	// setup session, then a new card for it from another setup session.
 	deliver(stripeEvent("evt_wp_cs", "checkout.session.completed", map[string]any{
 		"id": "cs_wp", "object": "checkout.session", "mode": "setup", "status": "complete",
 		"customer": "cus_webhook_payload", "metadata": map[string]any{"hardcount_tenant_id": tenantID, "hardcount_customer_id": customerID},
@@ -375,10 +378,22 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 		t.Errorf("payment_method.updated stripe_customer_id = %v, want cus_webhook_payload", upd.Data["stripe_customer_id"])
 	}
 
+	// The Checkout saved it as the customer's first card, so the default: the
+	// setup intent for it changes nothing and sends nothing.
 	deliver(stripeEvent("evt_wp_seti", "setup_intent.succeeded", map[string]any{
 		"id": "seti_wp", "object": "setup_intent", "status": "succeeded", "payment_method": "pm_flow",
 		"customer": "cus_webhook_payload", "metadata": map[string]any{"hardcount_customer_id": customerID},
 	}), "setup_intent.succeeded")
+	if same := events.next("setup intent for the saved card"); len(same) != 0 {
+		t.Errorf("a setup intent for the card already saved as the default queued %v, want nothing", same)
+	}
+
+	// Stripe makes a new PaymentMethod each time a card is saved, even the
+	// same physical card: Hardcount replaces the old row with the new one.
+	deliver(stripeEvent("evt_wp_seti_new", "setup_intent.succeeded", map[string]any{
+		"id": "seti_wp_new", "object": "setup_intent", "status": "succeeded", "payment_method": "pm_flow_new",
+		"customer": "cus_webhook_payload", "metadata": map[string]any{"hardcount_customer_id": customerID},
+	}), "setup_intent.succeeded for a new card")
 	got = events.next("setup intent", domain.EventPaymentMethodAttached)
 	att := got[domain.EventPaymentMethodAttached]
 	pms = flowList(call("GET", "/v1/customers/"+customerID+"/payment-methods", flowReq{}).want(t, 200, "list payment methods").body, "data")
@@ -386,8 +401,8 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 		t.Fatalf("payment methods: %v, want 1", pms)
 	}
 	checkEventResource(t, "payment_method.attached", att, pms[0])
-	if att.Data["stripe_payment_method_id"] != "pm_flow" {
-		t.Errorf("payment_method.attached stripe_payment_method_id = %v, want pm_flow", att.Data["stripe_payment_method_id"])
+	if att.Data["stripe_payment_method_id"] != "pm_flow_new" {
+		t.Errorf("payment_method.attached stripe_payment_method_id = %v, want pm_flow_new", att.Data["stripe_payment_method_id"])
 	}
 
 	// The operator removes the card; then Stripe's events for it arrive late.
@@ -396,7 +411,7 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	call("DELETE", "/v1/customers/"+customerID+"/payment-methods/"+flowStr(pms[0], "id"), flowReq{}).want(t, 200, "remove card")
 	events.next("remove card")
 	deliver(stripeEvent("evt_wp_seti_late", "setup_intent.succeeded", map[string]any{
-		"id": "seti_wp_late", "object": "setup_intent", "status": "succeeded", "payment_method": "pm_flow",
+		"id": "seti_wp_late", "object": "setup_intent", "status": "succeeded", "payment_method": "pm_flow_new",
 		"customer": "cus_webhook_payload", "metadata": map[string]any{"hardcount_customer_id": customerID},
 	}), "late setup_intent.succeeded")
 	deliver(stripeEvent("evt_wp_cs_late", "checkout.session.completed", map[string]any{

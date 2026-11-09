@@ -115,12 +115,12 @@ type settleFaultInvoices struct {
 	failed bool
 }
 
-func (s *settleFaultInvoices) MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id, stripePaymentIntentID string, paidAt time.Time, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
+func (s *settleFaultInvoices) MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id, stripePaymentIntentID string, paidAt time.Time, capturedCents int64, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
 	if !s.failed {
 		s.failed = true
 		return domain.Invoice{}, false, errConnDropped
 	}
-	return s.PostgresStore.MarkPaidCardSettlementTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, then)
+	return s.PostgresStore.MarkPaidCardSettlementTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, capturedCents, then)
 }
 
 type dunningRetryRig struct {

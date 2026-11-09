@@ -364,7 +364,7 @@ func TestMarkPaidCardSettlement_EnqueuesPaymentSucceededInTx(t *testing.T) {
 		store.SetOutboxEnqueuer(rec)
 		invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 
-		_, transitioned, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_card", now, nil)
+		_, transitioned, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_card", now, 0, nil)
 		if err != nil {
 			t.Fatalf("MarkPaidCardSettlementTransition: %v", err)
 		}
@@ -377,7 +377,7 @@ func TestMarkPaidCardSettlement_EnqueuesPaymentSucceededInTx(t *testing.T) {
 		}
 
 		// Duplicate (already paid) → no new enqueues.
-		_, transitioned2, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_card2", now.Add(time.Minute), nil)
+		_, transitioned2, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_card2", now.Add(time.Minute), 0, nil)
 		if err != nil {
 			t.Fatalf("duplicate MarkPaidCardSettlementTransition: %v", err)
 		}
@@ -419,7 +419,7 @@ func TestMarkPaidCardSettlement_RollsBackPaidFlipIfEventEnqueueFails(t *testing.
 	invID := seedFinalizedInvoice(t, db, ctx, tenantID)
 	now := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	if _, _, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_card", now, nil); err == nil {
+	if _, _, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, invID, "pi_card", now, 0, nil); err == nil {
 		t.Fatal("expected an error when the in-tx payment.succeeded enqueue fails")
 	}
 

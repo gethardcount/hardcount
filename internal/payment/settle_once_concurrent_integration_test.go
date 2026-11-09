@@ -116,9 +116,9 @@ type countingStore struct {
 	reached atomic.Int64
 }
 
-func (c *countingStore) MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id, pi string, paidAt time.Time, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
+func (c *countingStore) MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id, pi string, paidAt time.Time, capturedCents int64, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
 	c.reached.Add(1)
-	return c.InvoiceUpdater.MarkPaidCardSettlementTransition(ctx, tenantID, id, pi, paidAt, then)
+	return c.InvoiceUpdater.MarkPaidCardSettlementTransition(ctx, tenantID, id, pi, paidAt, capturedCents, then)
 }
 
 type settleRaceRig struct {
@@ -148,7 +148,6 @@ func newSettleRaceRig(t *testing.T) *settleRaceRig {
 	counting := &countingStore{InvoiceUpdater: invStore}
 	s := payment.NewStripe(client, counting, payment.NewPostgresWebhookStore(db), nil)
 	s.SetCardFetcher(settleRaceCard{})
-	s.SetEventDispatcher(webhook.NewOutboxDispatcher(outbox))
 	s.SetAnomalyRecorder(invStore)
 	s.SetEmailReceipt(sender, emails)
 	s.SetEmailPaymentFailed(sender, emails)
