@@ -19,6 +19,8 @@ import type { Customer, CreditBalance } from '@/lib/api'
 import { applyApiError } from '@/lib/formErrors'
 import { downloadCSV } from '@/lib/csv'
 import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
+import { useTenantTimezone } from '@/hooks/useTenantTimezone'
+import { pickerDays } from '@/lib/datePickerDays'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { useSortable, type SortDir } from '@/hooks/useSortable'
 import { useUrlState } from '@/hooks/useUrlState'
@@ -674,6 +676,9 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
   })
   const activeCustomer = selectedInBalances ?? pickedCustomerData?.data?.[0]
   const now = useEffectiveNow(activeCustomer?.test_clock_id)
+  // "Valid through" is a day of the account's zone, and is sent as the
+  // midnight that ends it there.
+  const tz = useTenantTimezone()
 
   // One idempotency key per dialog OPEN. Retries on transient failure
   // (network, 5xx) replay through the API's Idempotency middleware and
@@ -745,7 +750,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
           currency: dialogCurrency!,
           amount_cents: amountCents,
           description,
-          ...(expiresAt ? { expires_at: startOfNextDayInTZ(expiresAt) } : {}),
+          ...(expiresAt ? { expires_at: startOfNextDayInTZ(expiresAt, tz) } : {}),
           ...(form.getValues('promotional') ? { grant_kind: 'promotional' as const } : {}),
         }, idemKey)
       }
@@ -904,11 +909,15 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Valid through</FormLabel>
+                      {/* Today is the first day: valid through today ends
+                          at tonight's midnight, still ahead. */}
                       <DatePicker
                         value={field.value}
                         onChange={field.onChange}
                         placeholder="Never expires"
-                        minDate={new Date(now)}
+                        timeZone={tz}
+                        now={now}
+                        min={pickerDays(now, tz).today}
                       />
                       <FormDescription>The credits can be used until the end of this day in your account's time zone. Leave empty for credits that never expire.</FormDescription>
                     </FormItem>

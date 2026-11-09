@@ -7,8 +7,8 @@ import { toast } from 'sonner'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { cancelImmediatelyText, changePlanNowHelper, changeQuantityText, PAUSE_DIALOG_SENTENCE, pauseCollectionToast, planChangeToast, removeItemText, scheduleCancelToast, startBillingLines } from '@/lib/subscriptionCopy'
-import { api, formatCents, formatCentsBare, prorationText, formatDate, formatDateTime, getTenantTimezone, type Subscription, type SubscriptionItem, type Plan, type ItemChangeResult } from '@/lib/api'
-import { civilDateFrom, formatCivilDate, formatCivilPeriod, startOfDayInTZ } from '@/lib/dates'
+import { api, formatCents, formatCentsBare, prorationText, formatDate, formatDateTime, type Subscription, type SubscriptionItem, type Plan, type ItemChangeResult } from '@/lib/api'
+import { civilDateFrom, formatCivilDate, formatCivilPeriod, formatYMDInTZ, startOfDayInTZ } from '@/lib/dates'
 import { showApiError } from '@/lib/formErrors'
 import { amountInputError, dollarsToWholeCents, wholeUnits } from '@/lib/priceInput'
 import { Combobox, type ComboboxOption } from '@/components/Combobox'
@@ -24,6 +24,7 @@ import { cancelAtPeriodEndText, periodLabels, trialLength } from '@/lib/subscrip
 import { previewView } from '@/lib/invoicePreview'
 import { ExpiryBadge } from '@/components/ExpiryBadge'
 import { effectiveNow } from '@/lib/effectiveNow'
+import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { cn } from '@/lib/utils'
 import { invoicePaymentChip, invoiceStatus, subscriptionStatus, trialBadgeEndsAt } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -160,13 +161,15 @@ export default function SubscriptionDetailPage() {
   // else wall time) — the single anchor for the lifecycle timeline's past/future
   // dots and the date-picker floors below. A sub frozen in the past must not
   // offer wall-clock dates its engine would treat as far-future.
-  const nowDate = new Date(effectiveNow(sub?.test_clock_id ? testClock?.frozen_time : undefined))
+  const now = effectiveNow(sub?.test_clock_id ? testClock?.frozen_time : undefined)
+  const nowDate = new Date(now)
+  // The account's zone, which the resume date and a new trial end are
+  // picked and sent in.
+  const tz = useTenantTimezone()
   // Earliest auto-resume date: tomorrow in tenant TZ. The pick is sent as
   // start of that day (startOfDayInTZ), and start of today is already past,
-  // which the server refuses ("must be in the future"). The DatePicker reads
-  // its floor with browser-local getters, so it gets local midnight of that
-  // civil date.
-  const pauseResumeMinDate = new Date(`${civilDateFrom(nowDate.getTime(), 1)}T00:00:00`)
+  // which the server refuses ("must be in the future").
+  const pauseResumeMin = civilDateFrom(now, 1, tz)
 
   // Activity timeline (T0-18) — chronological feed of lifecycle events
   // pulled from the audit log. Separate query key from the period-
@@ -265,7 +268,7 @@ export default function SubscriptionDetailPage() {
       // civil date (extend-trial, credit expiry) anchors in tenant TZ. A
       // browser-local parse shifted the resume by the operator/tenant offset.
       if (pauseResumesAt.trim() !== '') {
-        body.resumes_at = startOfDayInTZ(pauseResumesAt)
+        body.resumes_at = startOfDayInTZ(pauseResumesAt, tz)
       }
       return api.pauseSubscriptionCollection(id!, body)
     },
@@ -483,8 +486,7 @@ export default function SubscriptionDetailPage() {
           {sub.status === 'trialing' && (
             <>
               <Button variant="outline" onClick={() => {
-                const tz = getTenantTimezone() || 'UTC'
-                const seed = sub.trial_end_at ? new Date(sub.trial_end_at) : nowDate
+                const seed = sub.trial_end_at ? new Date(sub.trial_end_at) : new Date(now)
                 seed.setDate(seed.getDate() + 7)
                 setExtendTrialDate(formatInTimeZone(seed, tz, 'yyyy-MM-dd'))
                 setExtendTrialTime(formatInTimeZone(seed, tz, 'HH:mm'))
@@ -1226,7 +1228,9 @@ export default function SubscriptionDetailPage() {
               value={pauseResumesAt}
               onChange={setPauseResumesAt}
               placeholder="Pick a date"
-              minDate={pauseResumeMinDate}
+              timeZone={tz}
+              now={now}
+              min={pauseResumeMin}
             />
             <p className="text-xs text-muted-foreground">
               Leave blank to pause until you resume it. With a date, collection resumes on that day.
@@ -1348,10 +1352,12 @@ export default function SubscriptionDetailPage() {
               time={extendTrialTime}
               onDateChange={setExtendTrialDate}
               onTimeChange={setExtendTrialTime}
-              minDate={sub.trial_end_at ? new Date(sub.trial_end_at) : nowDate}
+              timeZone={tz}
+              now={now}
+              min={formatYMDInTZ(sub.trial_end_at ?? nowDate.toISOString(), tz)}
             />
             <p className="text-xs text-muted-foreground">
-              Times are in your tenant timezone ({getTenantTimezone() || 'UTC'}).
+              Times are in your tenant timezone ({tz}).
             </p>
           </div>
           <DialogFooter>
@@ -1361,7 +1367,6 @@ export default function SubscriptionDetailPage() {
             <Button
               onClick={() => {
                 if (!extendTrialDate || !/^\d{2}:\d{2}$/.test(extendTrialTime)) return
-                const tz = getTenantTimezone() || 'UTC'
                 const iso = fromZonedTime(`${extendTrialDate}T${extendTrialTime}:00`, tz).toISOString()
                 extendTrialMutation.mutate(iso)
               }}

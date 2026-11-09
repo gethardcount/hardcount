@@ -63,9 +63,8 @@ export function resolveWindow(
 // windowQueryBounds is the window the page actually sends: the range's civil
 // dates turned into UTC instants at the start and end of day in `timezone`.
 // '' means unbounded. The zone is an explicit argument so the page's memo can
-// depend on it: a cold load renders before /v1/settings arrives, and bounds
-// computed then in the 'UTC' fallback must be recomputed once the tenant zone
-// is known (a New York tenant's "last 30 days" starts at 04:00Z, not 00:00Z).
+// depend on it: a Settings save that changes the zone recomputes the bounds
+// (a New York tenant's "last 30 days" starts at 04:00Z, not 00:00Z).
 export function windowQueryBounds(
   range: RangeKey,
   custom: Window,

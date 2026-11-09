@@ -2008,28 +2008,38 @@ function rateWithSymbol(cents: string | number, symbol: string): string {
   return `${sign}${symbol}${groupedWhole}.${frac}`
 }
 
-// _tenantTimezone is module-scoped state seeded once at app boot
-// (after /v1/settings resolves) via setTenantTimezone. formatDate /
-// formatDateTime read from it as their default so every existing
-// display call site automatically renders in tenant TZ — no per-
-// callsite churn. Not reactive: tenant TZ rarely changes during a
-// session, and the Settings save flow is followed by a navigation
-// that re-bootstraps. Acceptable for v1; revisit if multi-tenant-
-// switcher UX lands. See ADR-010.
+// _tenantTimezone is the account's zone for display: formatDate and
+// formatDateTime use it when the caller passes no zone, so every date shows
+// in the account's zone without passing it at each call, and dates.ts reads
+// it as tenantTZ(). AccountSettingsGate copies it from the settings query
+// before a signed-in page draws, and clears it when the operator signs out.
+// It is null outside the signed-in pages. A value that is sent to the server
+// never comes from here: write sites take the zone from the settings query
+// (useTenantTimezone). See ADR-010.
 let _tenantTimezone: string | null = null
+const tenantTimezoneListeners = new Set<() => void>()
 
 export function setTenantTimezone(tz: string | null): void {
-  _tenantTimezone = tz || null
+  const next = tz || null
+  if (next === _tenantTimezone) return
+  _tenantTimezone = next
+  for (const listener of tenantTimezoneListeners) listener()
 }
 
 export function getTenantTimezone(): string | null {
   return _tenantTimezone
 }
 
-// formatDate / formatDateTime — default to tenant TZ when set,
-// browser-local otherwise. Pass an explicit `timezone` to override
-// (used by ApiKeys to be defensive even before the bootstrap-time
-// setTenantTimezone call resolves).
+// subscribeTenantTimezone calls `listener` whenever the display zone
+// changes, so AccountSettingsGate can read it with useSyncExternalStore.
+export function subscribeTenantTimezone(listener: () => void): () => void {
+  tenantTimezoneListeners.add(listener)
+  return () => { tenantTimezoneListeners.delete(listener) }
+}
+
+// formatDate / formatDateTime — default to the display zone above when set,
+// browser-local otherwise (the public pages pass their own zone). Pass an
+// explicit `timezone` to override.
 //
 // formatDate stays bare (no zone label) — date-only displays are
 // visually noisy with a TZ stamp and the date is unambiguous at
@@ -2038,8 +2048,7 @@ export function getTenantTimezone(): string | null {
 // formatDateTime appends a zone abbreviation when rendering in
 // tenant TZ ("May 5, 2026, 2:14 PM PDT") so operators have an
 // explicit cue about the rendering frame. Browser-local fallback
-// stays unlabelled (matches existing behaviour to avoid surprising
-// pre-bootstrap renders).
+// stays unlabelled.
 export function formatDate(iso: string, timezone?: string): string {
   const tz = timezone || _tenantTimezone || undefined
   return new Date(iso).toLocaleDateString('en-US', {

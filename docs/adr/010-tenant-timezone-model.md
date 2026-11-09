@@ -11,7 +11,7 @@ Accepted
 
 ## Summary
 
-Instants are stored as `timestamptz` and sent on the API as UTC RFC 3339 strings ([ADR-075](075-canonical-utc-api-timestamps.md) pins the process to UTC). The dashboard shows dates and times in the org timezone (`tenant_settings.timezone`, an IANA name, default `UTC`) and reads dates the operator picks in that zone. There is no per-user timezone. The sub-decision that billing math stays in UTC is superseded: billing date math now anchors in the same org timezone ([ADR-058](058-billing-date-math-tenant-timezone.md), [ADR-077](077-org-level-billing-timezone.md)). Status: active for display, superseded for billing.
+Instants are stored as `timestamptz` and sent on the API as UTC RFC 3339 strings ([ADR-075](075-canonical-utc-api-timestamps.md) pins the process to UTC). The dashboard shows dates and times in the org timezone (`tenant_settings.timezone`, an IANA name, default `UTC`) and reads dates the operator picks in that zone. There is no per-user timezone. The sub-decision that billing math stays in UTC is superseded: billing date math now anchors in the same org timezone ([ADR-058](058-billing-date-math-tenant-timezone.md), [ADR-077](077-org-level-billing-timezone.md)). Amended 2026-11-09: the dashboard never guesses the zone of a value it sends. Signed-in pages wait for the account settings, and the date picker's days are days of the account zone ([amendment](#amendment-2026-11-09-the-dashboard-never-guesses-the-zone)). Status: active for display, superseded for billing.
 
 ## Context
 
@@ -126,7 +126,8 @@ arc (b523c71 → 2e93b3f):
 - `lib/TenantTimezoneBootstrap.tsx`: render-nothing component mounted in
   `main.tsx` inside `AuthProvider`. Fetches `/v1/settings` once user is
   authenticated and seeds the module-scoped TZ. React-query caches the
-  fetch so per-page `useQuery(['settings'])` callers dedupe.
+  fetch so per-page `useQuery(['settings'])` callers dedupe. *(Removed
+  2026-11-09: see the amendment below.)*
 - Net: ~70 existing display call sites across 20+ files automatically
   inherit tenant-TZ rendering. Zero per-callsite churn.
 
@@ -181,6 +182,30 @@ to use tenant TZ is a per-feature decision:
 The pattern is the same everywhere: pickers compute UTC via tenant TZ;
 displays format UTC via tenant TZ. Scaling this beyond ApiKeys is purely
 edit-and-test work, no architectural changes.
+
+## Amendment 2026-11-09: the dashboard never guesses the zone
+
+Until the account settings loaded, or when they failed to load, the
+dashboard's date helpers used UTC as the zone. A value picked then was
+sent off by the account's offset, with no error. That covers a credit or
+commit expiry, an invoice's service period, a resume date, a trial end, a
+test-clock time and an API key expiry. The date picker also
+took its first day and its Today from the browser's zone and clock, not from
+the account zone and the customer's test clock.
+
+- **Signed-in pages wait for the settings.** `components/AccountSettingsGate.tsx`
+  shows a wait until `GET /v1/settings` answers, and an error with Retry if
+  it fails. `lib/TenantTimezoneBootstrap.tsx` is gone.
+- **The module-scoped zone is for display only.** The gate copies the zone
+  into it, and `formatDate` and `formatDateTime` read it.
+- **A value the dashboard sends takes its zone from the settings query**
+  (`useTenantTimezone`). The `lib/dates.ts` helpers that return an instant
+  to send take the zone as a required argument. A display helper given no
+  zone uses the module-scoped zone, and throws if there is none yet.
+- **The date picker works in days of the account zone.** Its first allowed
+  day is a `yyyy-mm-dd` day of that zone. Its today, which the Today button
+  picks, is the day of the customer's now there: a test clock's now when
+  the customer is on one.
 
 ## Consequences
 

@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ApiError, api, setTenantTimezone, formatTaxRate, type StripeProviderCredentials } from '@/lib/api'
+import { ApiError, api, formatTaxRate, type StripeProviderCredentials } from '@/lib/api'
 import { updateTenantSettings } from '@/lib/gen/queries.gen'
 import { tenantSettingsQuery, writeSavedSettings } from '@/hooks/useTenantSettings'
 import { useBothModeQueryClients } from '@/contexts/modeQueryClients'
@@ -305,13 +305,8 @@ export default function SettingsPage() {
       // date filters, the seller on a draft invoice. Test and live mode
       // share the settings, so the save goes into both modes' caches, and
       // a new default currency refreshes the figures scoped to it.
+      // AccountSettingsGate copies a new zone to formatDate's display zone.
       writeSavedSettings(modeClients, updated)
-      // formatDate and formatDateTime read the zone from a module value.
-      // Until the first mode switch, TenantTimezoneBootstrap reads its own
-      // copy of the settings, which this save does not reach (it mounts
-      // before sign-in, so its query lives in the signed-out query client).
-      // Set it here.
-      setTenantTimezone(updated.timezone ? normalizeTimezone(updated.timezone) : null)
       toast.success('Settings saved')
     } catch (err) {
       // The server names its fields; only the threshold is named differently

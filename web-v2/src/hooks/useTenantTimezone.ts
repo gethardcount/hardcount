@@ -1,14 +1,16 @@
-import { getTenantTimezone } from '@/lib/api'
 import { useTenantSettings } from '@/hooks/useTenantSettings'
 
-// useTenantTimezone returns the tenant timezone as React state, so a memo that
-// turns civil dates into UTC instants can list it as a dependency and recompute
-// once /v1/settings arrives. Reading the module-level getTenantTimezone() inside
-// a memo does not do that: a cold load renders before settings land, the memo
-// caches UTC day bounds, and nothing invalidates it. It reads the one settings
-// query, which a Settings save updates. Falls back to the module value, then
-// 'UTC' (the DB default), until settings load.
+// useTenantTimezone returns the account's time zone from the settings query.
+// Every day or time an operator picks is sent as an instant in this zone, so
+// a write site takes the zone from here, and a memo that turns days into
+// instants lists it as a dependency. A Settings save updates the query, so
+// the next render has the new zone.
+//
+// Signed-in pages render only once the settings have loaded
+// (AccountSettingsGate), so there is always a zone here. Called before that,
+// it throws: a guessed zone would be sent with no error.
 export function useTenantTimezone(): string {
   const { data } = useTenantSettings()
-  return data?.timezone || getTenantTimezone() || 'UTC'
+  if (!data?.timezone) throw new Error('useTenantTimezone: the account settings have not loaded. Render under AccountSettingsGate.')
+  return data.timezone
 }

@@ -6,13 +6,21 @@ import { Calendar, X, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { dayAsDate, pickerDays } from '@/lib/datePickerDays'
+import type { EffectiveNow } from '@/lib/effectiveNow'
 
+// The picker works in days (yyyy-mm-dd) of the account's zone. Its today,
+// marked in the calendar and set by the Today button, is the day of `now` in
+// `timeZone`: pass the account zone (useTenantTimezone) and the customer's
+// now (useEffectiveNow), or wallClockNow() where no clock applies.
 interface DatePickerProps {
-  value: string                    // ISO date string (yyyy-mm-dd) or ''
+  value: string                    // yyyy-mm-dd, or ''
   onChange: (value: string) => void
+  timeZone: string
+  now: EffectiveNow
+  min?: string                     // The first day that can be picked, yyyy-mm-dd
   placeholder?: string
   className?: string
-  minDate?: Date                   // Disable dates before this
 }
 
 // Display format the user sees ("May 4, 2026"). Source of truth on
@@ -37,30 +45,28 @@ const PARSE_FORMATS = [
 type ParseResult =
   | { ok: true; value: string }              // parsed + within range
   | { ok: false; reason: 'format' }          // didn't match any accepted format
-  | { ok: false; reason: 'min'; min: Date }  // parsed fine but earlier than minDate
+  | { ok: false; reason: 'min' }             // parsed fine but earlier than min
 
 // parseTypedDate accepts the strings users actually type and returns
 // a discriminated result. Whitespace runs are collapsed to single
 // spaces before matching so copy-paste with weird spacing
 // ("Jul   1,  2026") still parses.
-function parseTypedDate(input: string, minDate?: Date): ParseResult | { ok: true; value: '' } {
+function parseTypedDate(input: string, min?: string): ParseResult | { ok: true; value: '' } {
   const trimmed = input.trim().replace(/\s+/g, ' ')
   if (!trimmed) return { ok: true, value: '' }
   for (const f of PARSE_FORMATS) {
     const d = parse(trimmed, f, new Date())
     if (isValid(d)) {
-      if (minDate) {
-        const minStart = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate())
-        const dStart = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-        if (dStart < minStart) return { ok: false, reason: 'min', min: minDate }
-      }
-      return { ok: true, value: format(d, 'yyyy-MM-dd') }
+      const day = format(d, 'yyyy-MM-dd')
+      // yyyy-mm-dd days compare correctly as text.
+      if (min && day < min) return { ok: false, reason: 'min' }
+      return { ok: true, value: day }
     }
   }
   return { ok: false, reason: 'format' }
 }
 
-export function DatePicker({ value, onChange, placeholder = 'Pick a date', className, minDate }: DatePickerProps) {
+export function DatePicker({ value, onChange, timeZone, now, min, placeholder = 'Pick a date', className }: DatePickerProps) {
   const [open, setOpen] = React.useState(false)
   const [inputText, setInputText] = React.useState('')
   const [errorReason, setErrorReason] = React.useState<null | 'format' | 'min'>(null)
@@ -71,7 +77,10 @@ export function DatePicker({ value, onChange, placeholder = 'Pick a date', class
   const inputRef = React.useRef<HTMLInputElement>(null)
   const errorId = React.useId()
 
-  const selectedDate = value ? new Date(value + 'T00:00:00') : undefined
+  const selectedDate = value ? dayAsDate(value) : undefined
+  const { today, todayAllowed } = pickerDays(now, timeZone, min)
+  const todayDate = dayAsDate(today)
+  const minDate = min ? dayAsDate(min) : undefined
 
   // Sync the input text when the external value changes (e.g. caller
   // resets the field, or the calendar popover commits a date).
@@ -85,10 +94,10 @@ export function DatePicker({ value, onChange, placeholder = 'Pick a date', class
   React.useEffect(() => {
     if (inputRef.current && document.activeElement === inputRef.current) return
     if (hasError) return
-    setInputText(value ? format(new Date(value + 'T00:00:00'), DISPLAY_FORMAT) : '')
+    setInputText(value ? format(dayAsDate(value), DISPLAY_FORMAT) : '')
   }, [value, hasError])
 
-  // Clear stale 'min' errors when the minDate constraint shifts (e.g.
+  // Clear stale 'min' errors when the min constraint shifts (e.g.
   // upstream a sibling field changes "From" so "To" might now be
   // valid). Format errors are about the user's input, not the
   // constraint, so they don't clear here.
@@ -99,13 +108,12 @@ export function DatePicker({ value, onChange, placeholder = 'Pick a date', class
   // effect would re-run on the errorReason change and immediately
   // null it. Bug discovered when typing a back date made the field
   // appear to vanish instead of showing the constraint message.
-  const minDateKey = minDate ? minDate.toISOString() : null
   React.useEffect(() => {
     setErrorReason(prev => (prev === 'min' ? null : prev))
-  }, [minDateKey])
+  }, [min])
 
   const commitInput = () => {
-    const result = parseTypedDate(inputText, minDate)
+    const result = parseTypedDate(inputText, min)
     if (!result.ok) {
       // Invalid: surface a red border + inline error AND clear the
       // parent's value so any submit gating tied to a non-empty date
@@ -124,7 +132,7 @@ export function DatePicker({ value, onChange, placeholder = 'Pick a date', class
       // Reformat the input so "5/4/2026" snaps to "May 4, 2026"
       // immediately after blur, without waiting for a re-render
       // round-trip via the value sync effect.
-      setInputText(format(new Date(result.value + 'T00:00:00'), DISPLAY_FORMAT))
+      setInputText(format(dayAsDate(result.value), DISPLAY_FORMAT))
     }
   }
 
@@ -251,13 +259,15 @@ export function DatePicker({ value, onChange, placeholder = 'Pick a date', class
               mode="single"
               selected={selectedDate}
               onSelect={handleSelect}
-              // Fall back to minDate, not today: startMonth below pins the
+              // The account zone's today, not the browser's: on a test clock
+              // it is the clock's day, and an unset field opens on its month.
+              today={todayDate}
+              // Fall back to minDate, then today: startMonth below pins the
               // lower bound to JANUARY of minDate's year, and DayPicker clamps
               // its default month into [startMonth, endMonth]. So whenever
-              // minDate is in the future — always, on a test clock, where it
-              // is the clock's simulated now — an unset field opened on
-              // January with every day disabled, and the operator had to page
-              // forward to reach the first selectable date.
+              // minDate is in the future, an unset field opened on January
+              // with every day disabled, and the operator had to page forward
+              // to reach the first selectable date.
               defaultMonth={selectedDate ?? minDate}
               showOutsideDays
               className="hardcount-cal"
@@ -275,8 +285,8 @@ export function DatePicker({ value, onChange, placeholder = 'Pick a date', class
               // 5-year past + 10-year future window from today. The
               // upper bound is generous because annual-billing trial
               // extensions and credit-grant expiries reach years out.
-              startMonth={minDate ? new Date(minDate.getFullYear(), 0) : new Date(new Date().getFullYear() - 5, 0)}
-              endMonth={new Date(new Date().getFullYear() + 10, 11)}
+              startMonth={minDate ? new Date(minDate.getFullYear(), 0) : new Date(todayDate.getFullYear() - 5, 0)}
+              endMonth={new Date(todayDate.getFullYear() + 10, 11)}
             />
             <style>{`
               .hardcount-cal { --accent: var(--primary); }
@@ -317,20 +327,13 @@ export function DatePicker({ value, onChange, placeholder = 'Pick a date', class
               .hardcount-cal .rdp-weekdays { display:flex; }
               .hardcount-cal .rdp-week { display:flex; }
             `}</style>
-            {/* Quick-select Today shortcut. Honour minDate by greying
-                out the button when today < minDate — the day-grid above
-                already disables today's cell, but this footer button
-                has its own click handler and would otherwise bypass the
-                constraint. Compare at start-of-day on both sides so a
-                minDate passed with a non-zero time still gates today
-                consistently. */}
+            {/* Quick-select Today shortcut: the account zone's today
+                (pickerDays). Greyed out when today is before min — the
+                day-grid above already disables today's cell, but this
+                footer button has its own click handler and would otherwise
+                bypass the constraint. */}
             {(() => {
-              const todayStart = new Date()
-              todayStart.setHours(0, 0, 0, 0)
-              const minStart = minDate
-                ? new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate())
-                : null
-              const todayBlocked = !!minStart && todayStart < minStart
+              const todayBlocked = !todayAllowed
               const todayBtn = (
                 <Button
                   type="button"
@@ -343,7 +346,7 @@ export function DatePicker({ value, onChange, placeholder = 'Pick a date', class
                     // calendar-driven commit must reset any typed-input
                     // error so the field reflects the new value.
                     setErrorReason(null)
-                    onChange(format(new Date(), 'yyyy-MM-dd'))
+                    onChange(today)
                     setOpen(false)
                   }}
                 >
@@ -368,7 +371,7 @@ export function DatePicker({ value, onChange, placeholder = 'Pick a date', class
                         {todayBtn}
                       </TooltipTrigger>
                       <TooltipContent>
-                        Today is below the minimum allowed date ({format(minStart!, 'MMM d, yyyy')}).
+                        Today is below the minimum allowed date ({format(minDate!, DISPLAY_FORMAT)}).
                       </TooltipContent>
                     </Tooltip>
                   ) : (

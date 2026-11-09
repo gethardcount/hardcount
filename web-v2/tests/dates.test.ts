@@ -5,7 +5,8 @@
 // `npm test` (Vitest).
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { startOfDayInTZ, endOfDayInTZ, startOfNextDayInTZ, creditExpiryLabel, isBeforeCivilToday, formatInvoiceDate, usageFilterEndYMD, civilDateFrom, addCalendarMonthInTZ } from '../src/lib/dates.ts'
+import { startOfDayInTZ, endOfDayInTZ, startOfNextDayInTZ, creditExpiryLabel, isBeforeCivilToday, formatInvoiceDate, formatCivilDate, usageFilterEndYMD, civilDateFrom, addCalendarMonthInTZ } from '../src/lib/dates.ts'
+import { setTenantTimezone } from '../src/lib/api.ts'
 
 test('startOfDayInTZ = 00:00 of the civil day in the given zone, as a UTC instant', () => {
   // 2026-05-05 00:00 IST (UTC+5:30) = the previous UTC evening.
@@ -43,8 +44,7 @@ test('the from/to pair brackets a row that is "May 5" in the tenant zone but not
 
 // Backs MANUAL_TEST FLOW TZ1 (dashboard invoice dates): issued/due/paid/voided dates
 // render in the invoice's billing timezone, the zone the PDF and hosted page
-// use, not the live tenant zone. The test stub's tenant zone is unset, so the
-// fallback here is 'UTC'.
+// use, not the live tenant zone.
 test('formatInvoiceDate uses the invoice billing timezone, not the tenant zone', () => {
   // Issued under Asia/Kolkata: due 2027-07-10T18:30Z is Jul 11 there (the PDF
   // date), even if the org has since moved to America/New_York (Jul 10).
@@ -53,8 +53,23 @@ test('formatInvoiceDate uses the invoice billing timezone, not the tenant zone',
 })
 
 test('formatInvoiceDate falls back to the tenant zone when the invoice has none', () => {
-  assert.equal(formatInvoiceDate('2027-07-10T18:30:00Z', ''), 'Jul 10, 2027')
-  assert.equal(formatInvoiceDate('2027-07-10T18:30:00Z', undefined), 'Jul 10, 2027')
+  // Signed-in pages set the account zone before they draw (AccountSettingsGate).
+  setTenantTimezone('Asia/Kolkata')
+  try {
+    assert.equal(formatInvoiceDate('2027-07-10T18:30:00Z', ''), 'Jul 11, 2027')
+    assert.equal(formatInvoiceDate('2027-07-10T18:30:00Z', undefined), 'Jul 11, 2027')
+  } finally {
+    setTenantTimezone(null)
+  }
+})
+
+// Before the account settings load there is no account zone. A helper given
+// no zone used to read the day in UTC then: a guess that moved a credit's
+// expiry or an invoice's dates by the account's offset, with no error.
+test('a helper given no zone throws before the account zone is known, instead of guessing UTC', () => {
+  assert.throws(() => creditExpiryLabel('2026-12-01T00:00:00.000Z'), /account time zone/)
+  assert.throws(() => formatInvoiceDate('2027-07-10T18:30:00Z', ''), /account time zone/)
+  assert.throws(() => formatCivilDate('2026-12-01T00:00:00.000Z', undefined), /account time zone/)
 })
 
 // Locks MANUAL_TEST FLOW I1 "drill-down covers a cancel invoice's last day":
