@@ -33,6 +33,7 @@ var bypassKinds = map[string]string{
 	"stripe":     "reading an account's Stripe keys to call Stripe, and recording whether Stripe accepted them (`internal/tenantstripe`)",
 	"members":    "team members and invites (`internal/dashmembers`)",
 	"tool":       "`hardcount-bench-seed`",
+	"doctor":     "`hardcount-doctor`, which reads every account's rows",
 	"restore":    "the restore commands (`hardcount restore begin` and `catch-up`)",
 	"definer":    "", // postgres.DB.BeginTx itself
 }
@@ -40,6 +41,10 @@ var bypassKinds = map[string]string{
 // txBypassUsers: "file Func" or "file Recv.Func" -> kind.
 var txBypassUsers = map[string]string{
 	"cmd/hardcount-bench-seed/main.go bootstrapFixtures": "tool",
+
+	// hardcount-doctor: its checks read every tenant's rows on purpose, in
+	// a read-only transaction.
+	"internal/doctor/doctor.go beginRead": "doctor",
 
 	// The restore commands (ADR-135): the marker's anchor reads Stripe
 	// webhooks across tenants, and the catch-up reads every account's

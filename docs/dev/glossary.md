@@ -48,8 +48,10 @@ them to use Hardcount.
   [More](../adr/114-leader-leases-tick-scoped-fencing.md#fencing-boundary-the-five-claim-funnels)
 - **hardcount-doctor**: A read-only command that scans a Hardcount database for
   states no correct code could produce, such as invoice totals that do not
-  add up. It exits 1 when it finds a problem, or 2 if a check cannot run. It
-  runs in CI and needs a database role that can see every row.
+  add up. It exits 1 when it finds a problem, or 2 if a check cannot run or
+  it reads no customers and no invoices while accounts exist. It runs in CI.
+  It reads every account's rows under any database user that can read the
+  tables.
   [More](records/product-stability-plan.md)
 - **restore marker and restore catch-up**: After a database restore, a row
   in `restore_catchup` (the restore marker) makes `hardcount serve` refuse

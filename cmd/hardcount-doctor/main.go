@@ -1,12 +1,15 @@
 // hardcount-doctor sweeps a Hardcount database for money-invariant
 // violations: states that no legal writer can produce. It only reads. It
-// exits 1 if it finds a violation, and 2 if a check failed to run.
+// exits 1 if it finds a violation, and 2 if a check failed to run or there
+// was nothing to read.
 //
 //	DATABASE_URL="postgres://…" go run ./cmd/hardcount-doctor
 //
-// DATABASE_URL must be a role that sees every row, such as the table owner
-// or an admin. An RLS-scoped app role (hardcount_app) sees nothing, so the
-// doctor would report a clean result over rows it cannot see.
+// DATABASE_URL can be any user that can read Hardcount's tables, such as
+// the owner. The doctor turns row-level security off in its own read-only
+// transactions, so it reads every tenant's rows. When tenants exist but it
+// reads no customers and no invoices, it exits 2 instead of reporting a
+// clean result.
 //
 // See internal/doctor for the invariant catalog and the exactness rule, and
 // docs/dev/records/product-stability-plan.md for why the doctor exists.
