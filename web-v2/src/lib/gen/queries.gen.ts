@@ -9468,6 +9468,9 @@ export const getCollectInvoicePaymentUrl = (id: string,) => {
  *
  * 1. The customer's credit balance is applied first. If it covers the
  *    whole amount, the invoice is marked paid and no card is charged.
+ *    An invoice that credit applied earlier already covers, with
+ *    nothing left due, is marked paid the same way, and no credit is
+ *    applied again.
  * 2. Otherwise Hardcount charges the remaining amount to the customer's
  *    saved payment method with a Stripe PaymentIntent.
  *
