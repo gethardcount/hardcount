@@ -115,9 +115,9 @@ over when a leader dies. The five leased jobs:
 | `webhook_delivery` | Retries webhook deliveries that failed |
 
 An **outbox** is a database table of messages waiting to be sent
-(`webhook_outbox`, `email_outbox`). Many messages are written in the same
-transaction as the change that caused them, so a crash cannot lose those
-([which webhooks](webhooks.md#three-rules-for-your-receiver)).
+(`webhook_outbox`, `email_outbox`). Every webhook event, and some emails,
+are written in the same transaction as the change that caused them, so a
+crash cannot lose those ([Webhooks](webhooks.md#three-rules-for-your-receiver)).
 
 When you move a [test clock](glossary.md#testing-with-simulated-time)
 forward, a worker in the copy that took the request bills the skipped time

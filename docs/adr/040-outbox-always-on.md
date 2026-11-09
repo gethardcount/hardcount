@@ -1,6 +1,6 @@
 # ADR-040: Outbox is the only path (webhook + email)
 
-**Status:** Accepted (amended 2026-08-30)
+**Status:** Accepted (amended 2026-08-30, 2026-11-09)
 **Date:** 2026-05-30
 **Supersedes:** the boot-time fallback contract introduced when
 the webhook/email outboxes shipped (the `HARDCOUNT_WEBHOOK_OUTBOX_ENABLED`
@@ -8,7 +8,7 @@ and `HARDCOUNT_EMAIL_OUTBOX_ENABLED` env flags).
 
 ## Summary
 
-Webhooks and emails always go through their outbox tables, and a background dispatcher delivers each row with retries and a dead-letter queue. The `HARDCOUNT_WEBHOOK_OUTBOX_ENABLED` and `HARDCOUNT_EMAIL_OUTBOX_ENABLED` flags were removed, because the direct-send path they enabled lost messages on any transient failure. Amended 2026-08-30: the four money emails (payment receipt, payment failed, dunning warning, dunning escalation) are now queued inside their state change's transaction; other emails are queued after commit. To pause a dispatcher, run `SELECT leader_pause('email_outbox', who, why)` or the `webhook_outbox` equivalent ([runbook](../ops/runbook/background-job-stuck.md)); the advisory locks named below were retired by [ADR-114](114-leader-leases-tick-scoped-fencing.md). Status: active, amended.
+Webhooks and emails always go through their outbox tables, and a background dispatcher delivers each row with retries and a dead-letter queue. The `HARDCOUNT_WEBHOOK_OUTBOX_ENABLED` and `HARDCOUNT_EMAIL_OUTBOX_ENABLED` flags were removed, because the direct-send path they enabled lost messages on any transient failure. Amended 2026-08-30 and 2026-11-09: every webhook event and the four money emails (payment receipt, payment failed, dunning warning, dunning escalation) are queued in their state change's transaction. Operator, marker-re-driven and account-plane emails are queued after it. Only the drain, `Dispatcher.handle`, calls `dispatchFromOutbox`, which turns a queued webhook row into an event and its deliveries. To pause a dispatcher, run `SELECT leader_pause('email_outbox', who, why)` or the `webhook_outbox` equivalent ([runbook](../ops/runbook/background-job-stuck.md)); the advisory locks named below were retired by [ADR-114](114-leader-leases-tick-scoped-fencing.md). Status: active, amended.
 
 ## Context
 
@@ -82,6 +82,45 @@ DLQ.
 > abort a transaction that owes the customer a receipt. Account-plane and
 > operator-initiated sends stay post-commit (the operator receives the
 > enqueue error synchronously).
+
+> **Amendment (2026-11-09): every webhook event is queued in the transaction of the change it reports.**
+> An outbox row is a database write, not an external effect; only its
+> delivery is asynchronous. A producer inserts it with
+> `OutboxStore.Enqueue(ctx, tx, …)` in the transaction that writes the
+> state change, usually in the store method that owns that transition (the
+> MarkPaid pattern). It builds the payload from the row that transaction
+> wrote (ADR-131). The event commits with its change, and an enqueue
+> failure fails the change. All 41 webhook event types follow this rule
+> (P1-01), so a crash after a commit can no longer drop an event.
+> `invoice.finalized` has one writer, the invoice store, for an invoice
+> born finalized and a finalized draft alike.
+>
+> P1-01 removed the post-commit path: `domain.EventDispatcher`,
+> `webhook.OutboxDispatcher`, the webhook `OutboxStore.EnqueueStandalone`,
+> `webhook.Service.Dispatch` and every service's `SetEventDispatcher`. It
+> also removed the `hardcount_webhook_outbox_enqueue_failures_total`
+> metric, which counted the events that path lost.
+> `internal/arch/webhook_emit_catalog_test.go` fails if the webhook package
+> gains a function or method that takes an event type but no `*sql.Tx`. It
+> does not see a hand-rolled `BeginTx` + `Enqueue` + `Commit` with no state
+> write in it; the class B question of the
+> [money-path playbook](../dev/money-path-robustness-playbook.md#4-review-lens--questions-that-independently-re-derive-each-invariant)
+> covers that. `webhook.MustWiredOutbox` refuses to boot when a store that
+> queues events has no outbox, because such a store skips its events.
+>
+> `EnqueueStandalone` remains for email only, where no business
+> transaction exists:
+> - an operator's send or resend (invoice, credit note, setup link), where
+>   the request returns the enqueue error;
+> - an engine email that its own marker column sends again until the send
+>   is recorded: the collector's invoice email (`invoice_emailed_at`) and
+>   the no-payment-method notice (`no_pm_notified_at`);
+> - account-plane sends: a password reset, which the requester asks for
+>   again, and a team invite, which the Team page lists and the operator can
+>   revoke and send again.
+>
+> `internal/arch/email_outbox_standalone_test.go` lists them with their
+> reasons, and CI fails on any other call.
 
 At migration time, both outboxes shipped behind boot env flags
 (`HARDCOUNT_WEBHOOK_OUTBOX_ENABLED=true` and `HARDCOUNT_EMAIL_OUTBOX_ENABLED

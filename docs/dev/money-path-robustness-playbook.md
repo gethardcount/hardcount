@@ -94,7 +94,7 @@ Terms the tables lean on:
 
 | | Class | Tell | Fix |
 |--|-------|------|-----|
-| **C1** | Non-idempotent effect under a **new caller** *or* a **crash-retry** | an effect (`fireEvent`/`Dispatch`/email/Stripe call) fires unconditionally after a state write | fire **only on the winning CAS branch** (`RowsAffected==1`) *and/or* carry an internal dedup/source key |
+| **C1** | Non-idempotent effect under a **new caller** *or* a **crash-retry** | an effect (an outbox `Enqueue`, an email, a Stripe call) fires unconditionally after a state write | fire **only on the winning CAS branch** (`RowsAffected==1`) *and/or* carry an internal dedup/source key |
 | **C2** | Incomplete invariant rollout | a new guard/chokepoint is added, but not every writer routes through it | enumerate ALL writers, route each through the one chokepoint |
 | **C3** | Unguarded write racing a transition | `UPDATE … WHERE id=$X` with no state predicate | state-predicate `WHERE … AND status=<expected>` + `RowsAffected` gate |
 | **C4** | Irreversible action on a **stale precondition** | a tick-start / handler-start check that goes stale across a Stripe (or DB) round-trip | re-read the precondition **immediately before** the irreversible action |
@@ -148,7 +148,7 @@ Write the site-set as a checklist in the PR description. Check each box
 **against grep output**, not against memory:
 
 ```
-grep -n "TxTenant\|MarkPaid\|resolveRunNow\|transitionInTx\|\.Dispatch(\|fireEvent" internal/<domain>/
+grep -n "TxTenant\|MarkPaid\|resolveRunNow\|transitionInTx\|[Ee]nqueue\|\.Send" internal/<domain>/
 ```
 
 If a new writer can't reuse the existing chokepoint (`transitionAtomic`,
@@ -231,18 +231,18 @@ Ordered by leverage. A "no" blocks the PR.
     will catch` / `EnqueueStandalone` / `_ =` on side-effects. Prove each
     named backstop exists and sweeps this state.
     - **Tests.** Two tests fail the common shapes of a new send queued after
-      its commit. `internal/arch/webhook_emit_catalog_test.go` fails a new
-      call that queues a webhook event after its commit.
+      its commit. `internal/arch/webhook_emit_catalog_test.go` fails when
+      the webhook package gains a function or method that takes an event
+      type but no `*sql.Tx`, so `OutboxStore.Enqueue` on a caller's
+      transaction stays the only way to queue a webhook event.
       `internal/arch/email_outbox_standalone_test.go` fails a call of an
       `OutboxSender` method built on `enqueue`, unless the call is listed
       with a reason.
     - **What they miss.** Green tests do not prove that no new post-commit
       send exists. Neither test sees a hand-rolled `BeginTx` + `Enqueue` +
-      `Commit` with no state write in it, or a send made through a function
-      value. The webhook test does not flag a new caller of a function that
-      queues an event after its commit and does other work too, such as
-      `payment.Stripe.SettleSucceeded`. The email test does not see a direct
-      `EnqueueStandalone` call, or a send from inside `internal/email`.
+      `Commit` with no state write in it. The email test also does not see a
+      send made through a function value, a direct `EnqueueStandalone` call,
+      or a send from inside `internal/email`.
     - **Who catches those.** The grep above finds a direct
       `EnqueueStandalone`. For the rest, a reviewer checks each `Enqueue` the
       diff reaches, including those in the functions it calls. Each must run
