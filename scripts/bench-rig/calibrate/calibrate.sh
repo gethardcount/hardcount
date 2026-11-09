@@ -76,7 +76,8 @@ field() { python3 -c "import sys,json;print(json.load(sys.stdin)['$1'])"; }
 
 check() { # label actual expected tolerance
   local label="$1" actual="$2" expected="$3" tol="${4:-0}"
-  local lo=$(python3 -c "print($expected-$tol)") hi=$(python3 -c "print($expected+$tol)")
+  local lo hi
+  lo=$(python3 -c "print($expected-$tol)"); hi=$(python3 -c "print($expected+$tol)")
   if python3 -c "import sys;sys.exit(0 if $lo <= $actual <= $hi else 1)"; then
     printf '    %-38s %-12s OK\n' "$label" "$actual"
   else

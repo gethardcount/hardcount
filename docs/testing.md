@@ -9,7 +9,7 @@ by hand before a release.
 | Layer | Tools | What belongs here |
 |---|---|---|
 | 1. Logic and money | `go test`: unit tests (`-short`) and integration tests against a real Postgres (`internal/testutil`) | All money math, state changes, Row-Level Security (RLS), migrations, API contracts and architecture rules (the source tests in `internal/arch`) |
-| 2. Static checks | golangci-lint, eslint, `tsc -b`, codegen drift (`make gen`) | Code rules. A rule we can check by reading the code becomes a linter rule or a Go test, not a script |
+| 2. Static checks | golangci-lint, eslint, `tsc -b`, codegen drift (`make gen`), ShellCheck | Code rules. A rule we can check by reading the code becomes a linter rule or a Go test, not a script |
 | 3. Dashboard end to end | Playwright (`@playwright/test`) | A smoke test over every page, plus a few key user journeys, against a real API with seeded data |
 | 4. Live services | [Release checklist](dev/release-checklist.md), run by hand | Real Stripe test mode, real email, the LiteLLM callback and the invoice PDF. Run before each release tag |
 
@@ -125,6 +125,7 @@ go test -p 1 ./... -short=false      # unit + integration; test databases are cr
 # Layer 2: static checks
 make lint                            # golangci-lint
 make gen && git diff --exit-code     # generated code matches api/openapi.yaml
+scripts/ci/shellcheck.sh             # ShellCheck on every shell script
 cd web-v2 && npx tsc -b && npm run lint   # eslint, then knip (unused code)
 
 # Dashboard unit tests (Vitest, web-v2/tests/*.test.ts)
