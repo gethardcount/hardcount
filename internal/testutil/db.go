@@ -1,7 +1,7 @@
 // Package testutil holds helpers that tests share: the integration test
-// database (SetupTestDB, AdminPool), a wait for a backend blocked on a lock
-// (WaitForLockWaiter), and small readers for credit balances and the mode
-// on a context.
+// database (SetupTestDB, AdminPool), a database role for one test
+// (CreateRole), a wait for a backend blocked on a lock (WaitForLockWaiter),
+// and small readers for credit balances and the mode on a context.
 package testutil
 
 import (
