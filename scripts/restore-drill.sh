@@ -92,7 +92,9 @@ cleanup() {
   local rc=$?
   if [ -n "${DRILL_CONTAINER_STARTED:-}" ]; then
     log "Cleaning up ephemeral container: $DRILL_CONTAINER_NAME"
-    docker rm -f "$DRILL_CONTAINER_NAME" >/dev/null 2>&1 || true
+    # -v also removes the container's anonymous data volume, which holds a
+    # full copy of the restored database. Without it each drill leaves one.
+    docker rm -fv "$DRILL_CONTAINER_NAME" >/dev/null 2>&1 || true
   fi
   if [ -n "${BACKUP_WORKDIR:-}" ] && [ -d "$BACKUP_WORKDIR" ]; then
     log "Cleaning up backup workdir: $BACKUP_WORKDIR"
