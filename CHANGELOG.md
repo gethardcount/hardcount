@@ -31,6 +31,7 @@ original text.
 ### Added
 
 - **A restored database catches up with Stripe before Hardcount serves it.** Started on a restored database, Hardcount could charge or refund again money Stripe moved after the backup. Now the restore pauses billing and dunning, and Hardcount refuses to start until `hardcount restore catch-up` has applied Stripe's events since the backup. What it must not apply is listed for you to handle. That is a payment whose invoice the restore lost, a refund whose credit note it lost or whose tax the old server may have reversed, and an event it could not apply. [Restore Hardcount](docs/ops/restore.md) is much shorter. ([#1633](https://github.com/gethardcount/hardcount/pull/1633))
+- **CI runs ShellCheck on every shell script.** For contributors: a ShellCheck warning in any tracked script now fails the `lint` job. Run `scripts/ci/shellcheck.sh` locally. The warnings the scripts had are fixed, and `scripts/restore.sh` and `scripts/backup.sh` quote the tool name they look up. ([#1645](https://github.com/gethardcount/hardcount/pull/1645))
 
 ### Removed
 

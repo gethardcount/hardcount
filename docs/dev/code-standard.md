@@ -175,8 +175,9 @@ Each domain package in `internal/` has a **handler** (HTTP), a **service**
   `continue-on-error` only on a step that publishes a report, like the
   coverage upload, with a comment saying who reads it.
   ([SWE at Google, ch. 20](https://abseil.io/resources/swe-book/html/ch20.html))
-- **Shell scripts pass ShellCheck, and workflows pass actionlint.** A script
-  that grows past about 100 lines or holds real logic becomes Go.
+- **Shell scripts pass ShellCheck, and workflows pass actionlint.** CI fails
+  a ShellCheck warning in any tracked script (`scripts/ci/shellcheck.sh`). A
+  script that grows past about 100 lines or holds real logic becomes Go.
   ([Google shell guide](https://google.github.io/styleguide/shellguide.html))
 - **Pin third-party GitHub Actions to a full commit SHA,** with the release in
   a comment. Workflows default to `contents: read`, and every job has
