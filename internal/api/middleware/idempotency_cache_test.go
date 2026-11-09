@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -56,6 +57,53 @@ func TestIdempotency_Caches5xx(t *testing.T) {
 	}
 	if rec2.Body.String() != rec1.Body.String() {
 		t.Errorf("replay body mismatch:\n got: %s\nwant: %s", rec2.Body.String(), rec1.Body.String())
+	}
+}
+
+// TestIdempotency_5xxStoredExcept503: a 502 or 504 is stored like a 500,
+// because the request may have made its change before it failed. A 503 is
+// not stored: Hardcount answers 503 only when a second run is safe: nothing
+// the request did would be done twice. A retry with the same key runs the
+// request again.
+func TestIdempotency_5xxStoredExcept503(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	tenantID := testutil.CreateTestTenant(t, db, "Idempotency 503")
+
+	cases := []struct {
+		status     int
+		wantStored bool
+	}{
+		{http.StatusBadGateway, true},
+		{http.StatusServiceUnavailable, false},
+		{http.StatusGatewayTimeout, true},
+	}
+	for _, tc := range cases {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			var calls atomic.Int64
+			inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				http.Error(w, `{"error":"x"}`, tc.status)
+			})
+			handler := Idempotency(db, nil)(inner)
+			key := "idem-" + strconv.Itoa(tc.status)
+
+			_ = invokeWithKey(t, handler, tenantID, key, `{}`)
+			rec2 := invokeWithKey(t, handler, tenantID, key, `{}`)
+
+			wantCalls := int64(2)
+			if tc.wantStored {
+				wantCalls = 1
+			}
+			if got := calls.Load(); got != wantCalls {
+				t.Errorf("status %d: handler runs = %d, want %d", tc.status, got, wantCalls)
+			}
+			if replayed := rec2.Header().Get("Idempotent-Replayed") == "true"; replayed != tc.wantStored {
+				t.Errorf("status %d: second call replayed = %v, want %v", tc.status, replayed, tc.wantStored)
+			}
+			if rec2.Code != tc.status {
+				t.Errorf("status %d: second call answered %d", tc.status, rec2.Code)
+			}
+		})
 	}
 }
 

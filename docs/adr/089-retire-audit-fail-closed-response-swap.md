@@ -92,3 +92,17 @@ default posture (fail-open + metric); no live tenant had opted in.
 - The interim window (until in-tx emission lands) accepts silently-metered
   row loss on audit-DB failure — exactly the pre-existing default posture,
   documented here so it is a decision, not an accident.
+
+## Amendment 2026-11-09: a 503 is not stored
+
+The idempotency layer no longer stores a 503. A handler answers 503 only
+when a second run is safe: something the request needed failed, and nothing
+the request did would be done twice (`errs.Unavailable`). The first such
+answer is `503 proration_unavailable`: an item change that cannot read the
+current period's base invoice rolls back, and a retry with the same key runs
+it again.
+
+This does not reopen the alternative rejected above. That 503 came after
+the change had committed, so a second run would repeat the change. Decision
+1 still holds: no middleware replaces a committed response, so a 503 never
+stands for a change that was made.

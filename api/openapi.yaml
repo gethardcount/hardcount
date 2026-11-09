@@ -140,8 +140,8 @@ components:
         For 24 hours, a repeat with the same key, method, path and body gets
         the first response again, byte for byte, with an
         `Idempotent-Replayed: true` header, instead of running again. A
-        first answer of 409 or 422 is not kept, so a retry with the same
-        key runs again. A repeat sent while the first request is still
+        first answer of 409, 422 or 503 is not kept, so a retry with the
+        same key runs again. A repeat sent while the first request is still
         running waits up to 5 seconds for its answer; if there is none by
         then, it gets 409 with code `conflict_idempotency`. The same key
         with a different method, path or body is a 422 with code
@@ -17280,6 +17280,27 @@ paths:
                   param: plan_id
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          description: |
+            Code `proration_unavailable`: Hardcount could not check whether
+            the current period's invoice is paid, so the item was not added.
+            This answer is not stored under the `Idempotency-Key`: send the
+            same request with the same key after `Retry-After`.
+          headers:
+            Retry-After:
+              description: Seconds to wait before you send the request again.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: api_error
+                  code: proration_unavailable
+                  message: could not check whether this period's invoice is paid, so the change was not made — please retry
+                  request_id: req_dbjg652q3gpgqfoq5cd0
 
   /v1/subscriptions/{id}/items/{itemID}:
     patch:
@@ -17465,6 +17486,28 @@ paths:
                   param: quantity
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          description: |
+            Code `proration_unavailable`: an increase that takes effect now
+            could not check whether the current period's invoice is paid, so
+            the item was not changed. This answer is not stored under the
+            `Idempotency-Key`: send the same request with the same key after
+            `Retry-After`.
+          headers:
+            Retry-After:
+              description: Seconds to wait before you send the request again.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: api_error
+                  code: proration_unavailable
+                  message: could not check whether this period's invoice is paid, so the change was not made — please retry
+                  request_id: req_dbjg652q3gpgqfoq5cd0
     delete:
       tags: [Subscriptions]
       summary: Remove a subscription item
