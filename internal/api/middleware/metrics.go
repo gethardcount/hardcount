@@ -12,8 +12,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
-	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 var (
@@ -121,16 +119,6 @@ var (
 		[]string{"status"},
 	)
 
-	// Every known event type starts at 0 (init below), so increase() sees
-	// the first failure.
-	webhookOutboxEnqueueFailures = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "hardcount_webhook_outbox_enqueue_failures_total",
-			Help: "Webhook events that could not be added to the webhook outbox, by event type. The event is lost: no endpoint gets it. The ERROR log \"failed to enqueue webhook event\" names the tenant.",
-		},
-		[]string{"event_type"},
-	)
-
 	dunningRunsProcessed = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hardcount_dunning_runs_processed_total",
@@ -235,9 +223,6 @@ const (
 )
 
 func init() {
-	for eventType := range domain.KnownWebhookEventTypes {
-		webhookOutboxEnqueueFailures.WithLabelValues(eventType)
-	}
 	for _, mode := range []string{"live", "test"} {
 		emailOutboxDeadLettered.WithLabelValues(DeadLetterPermanent, mode)
 		emailOutboxDeadLettered.WithLabelValues(DeadLetterMaxAttempts, mode)
@@ -454,11 +439,6 @@ func RecordStripeKeyUnusable(reason string) {
 // RecordWebhookDelivery records a webhook delivery status ("succeeded", "failed", or "pending").
 func RecordWebhookDelivery(status string) {
 	webhookDeliveries.WithLabelValues(status).Inc()
-}
-
-// RecordWebhookOutboxEnqueueFailure records a failed attempt to enqueue an event.
-func RecordWebhookOutboxEnqueueFailure(eventType string) {
-	webhookOutboxEnqueueFailures.WithLabelValues(eventType).Inc()
 }
 
 // RecordDunningRun records the outcome of a processed dunning run

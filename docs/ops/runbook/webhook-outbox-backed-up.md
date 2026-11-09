@@ -14,11 +14,6 @@ before anything is sent. An endpoint that keeps failing does not make this table
   after 15 tries over about 52 hours. Their events were never written, so
   no endpoint gets them.
 - `hardcount_webhook_outbox_pending` is above 1000.
-- `hardcount_webhook_outbox_enqueue_failures_total` rises. An event could not
-  be queued at all, so it has no row in `webhook_outbox` and no endpoint
-  gets it. The ERROR log "failed to enqueue webhook event" names its
-  `event_type` and `tenant_id`. The cause is the same as a failed write
-  below: usually the database.
 
 ## Why
 
