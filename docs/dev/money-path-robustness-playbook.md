@@ -80,7 +80,7 @@ Terms the tables lean on:
 | # | Class | Invariant | Fix kind | Hardcount example |
 |---|-------|-----------|----------|---------------|
 | **A** | **Exactly-once / idempotency** | Every money mutation is idempotent-by-construction or dedup-key-guarded | dedup index / CAS / stable Stripe key | proration `idx_invoices_proration_dedup` → `invoice_proration_source_taken`; MarkPaid no-op re-read branch (avoids `amount_paid=amount_due` re-zero) |
-| **B** | **Dual-write atomicity** | Internal state + its coupled effect never diverge | coordinator-tx (internal, ADR-056) / outbox-in-tx (external, ADR-040); reconciler is the *fallback* | `invoice.paid`+`payment.succeeded` enqueue **in** the MarkPaid tx; cancel final-bill folded into the cancel tx (#307) |
+| **B** | **Dual-write atomicity** | Internal state + its coupled effect never diverge | coordinator-tx (internal, ADR-056) / outbox-in-tx (external, ADR-040); reconciler is the *fallback* | `invoice.paid`+`payment.succeeded` enqueue **in** the MarkPaid tx; `invoice.finalized` in the tx that inserts or finalizes the invoice; cancel final-bill folded into the cancel tx (#307) |
 | **C** | **External-truth / webhooks** | Stripe (signed webhook or server response) is the *sole* money-outcome authority; ingestion is idempotent + order-insensitive; never mark money-state from a browser redirect | write the dedup row **last** (after the effect commits); 5xx to force redelivery | dedup row after effect (`row present ⇒ effect committed`); hosted-pay `?status=success` is cosmetic only |
 | **D** | **Concurrency races (C1–C4)** | A transition is one atomic CAS; every write/effect/action around it is proven safe | see the C1–C4 sub-table | `SELECT … FOR UPDATE` gates + `ResolveRun WHERE state<>'resolved'` |
 | **E** | **Partial-failure & loud-fail** | A mid-flow crash is recoverable (record-before-effect + requeryable state, or one atomic tx); every money error is surfaced; **no comment claims a backstop that doesn't exist** | in-tx / requeryable state / ERROR+operator path | test-clock panic → `internal_failure` on a `WithoutCancel` ctx; PaymentUnknown loud-fail CRITICAL-with-PI |
@@ -187,6 +187,8 @@ Ordered by leverage. A "no" blocks the PR.
    - Internal DB write → threaded `*sql.Tx` in-tx (ADR-056).
    - External call → `OutboxStore.Enqueue(ctx, tx, …)` in the commit tx
      (ADR-040), or a self-clearing marker column + scheduler sweep.
+   - `EnqueueStandalone` only where no business transaction exists;
+     `internal/arch/email_outbox_standalone_test.go` pins the list.
 4. **The UPDATE itself is idempotent?** Keep a no-op re-read branch for when
    the transition already ran (guard the `amount_paid=amount_due` re-zeroing
    class). The CAS lists the states the row may come from
@@ -227,7 +229,12 @@ Ordered by leverage. A "no" blocks the PR.
     validated", point at the exact upstream check for each invariant.
 12. **Grep your own diff** for `catchup will retry` / `next cycle` / `reconciler
     will catch` / `EnqueueStandalone` / `_ =` on side-effects. Prove each
-    named backstop exists and sweeps this state.
+    named backstop exists and sweeps this state. Two tests fail a new send
+    queued after its commit: `internal/arch/webhook_emit_catalog_test.go`
+    for a webhook event, and `internal/arch/email_outbox_standalone_test.go`
+    for an email it does not list with a reason. Neither sees a hand-rolled
+    `BeginTx` + `Enqueue` + `Commit` with no business write in it; the
+    class B question in §4 does.
 
 ---
 
