@@ -1120,6 +1120,19 @@ func (s *Service) SettleZeroDue(ctx context.Context, tenantID, id string) (domai
 	return s.store.MarkPaid(ctx, tenantID, id, "", s.clock.Now(ctx))
 }
 
+// SettleZeroDueWithoutClaim is SettleZeroDue for a caller that holds no
+// charge claim: Collect on an invoice that an earlier credit apply left open
+// with nothing due (ADR-136). SettleZeroDue calls MarkPaid, which reads
+// neither the amount due nor the charge hold under its lock; that is safe
+// only inside the caller's own claim. This settle re-reads both under the
+// row lock and refuses while any hold is set, because that charge may have
+// taken the money. paid reports whether this call settled the invoice, so
+// the caller fires its effects once.
+func (s *Service) SettleZeroDueWithoutClaim(ctx context.Context, tenantID, id string) (domain.Invoice, bool, error) {
+	ctx = s.bindForInvoice(ctx, tenantID, id)
+	return s.store.SettleZeroDue(ctx, tenantID, id, s.clock.Now(ctx))
+}
+
 // ClaimChargeForManualCollect takes the per-invoice charge hold for the
 // operator's Collect Payment action — the same hold the auto-charge sweep
 // and dunning retry take, so no two initiators charge one invoice

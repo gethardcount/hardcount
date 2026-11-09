@@ -116,6 +116,13 @@ period's invoice is not made, and answers `503` `proration_unavailable`.
 Wait the seconds in `Retry-After` when the answer has it, then send the same
 request with the same key.
 
+**A `409` `concurrent_change` also means a second run is safe.** Like every
+`409`, it is not stored. Postgres stopped the request to break a deadlock with
+another change to the same records. It is a `409`, not a `503`, because the
+same race already answers `409` when it does not deadlock. Send the same
+request again with the same key. [Errors](errors.md#409-conflict) lists the
+routes that answer it and what stays done.
+
 **Some answers come before the key is checked and are never stored.** A
 retry with the same key runs normally after them:
 
