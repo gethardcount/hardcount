@@ -25,3 +25,21 @@ test('each target has its own key', () => {
   keys.settle('hc_inv_b')
   assert.equal(keys.keyFor('hc_inv_a'), a, "settling one target keeps the other's key")
 })
+
+// The dialog says "Result unknown" after a refusal that comes before the
+// server reads the key (a 429, say) only when an earlier try under that key
+// may have made the note. On a first try, such a refusal did nothing.
+test('a key remembers that a try under it may have taken effect, until it is settled', () => {
+  const keys = newRetryKeys()
+  keys.keyFor('hc_inv_a')
+  assert.equal(keys.unknown('hc_inv_a'), false, 'a new key has no try whose result is unknown')
+  keys.markUnknown('hc_inv_a')
+  assert.equal(keys.unknown('hc_inv_a'), true)
+  assert.equal(keys.unknown('hc_inv_b'), false, 'each target has its own')
+  keys.settle('hc_inv_a')
+  assert.equal(keys.unknown('hc_inv_a'), false, 'settled, the next try is a new action')
+  // A try that ends after another one settled the key marks nothing: it
+  // makes no key the next try would send.
+  keys.markUnknown('hc_inv_a')
+  assert.equal(keys.unknown('hc_inv_a'), false)
+})

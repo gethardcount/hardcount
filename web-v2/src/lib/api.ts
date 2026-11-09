@@ -35,7 +35,11 @@ export class ApiError extends Error {
   // retryAfterMs is the response's Retry-After, in milliseconds, when it
   // sent a readable one (a 429 does). lib/rateLimitRetry waits that long.
   retryAfterMs?: number
-  constructor(message: string, status: number, opts?: { field?: string; code?: string; requestId?: string; method?: string; retryAfterMs?: number }) {
+  // replayed is true when the server sent the stored answer of an earlier
+  // request with the same Idempotency-Key (the Idempotent-Replayed header).
+  // That request has ended, so what it did can be read back now.
+  replayed?: boolean
+  constructor(message: string, status: number, opts?: { field?: string; code?: string; requestId?: string; method?: string; retryAfterMs?: number; replayed?: boolean }) {
     super(message)
     this.name = 'ApiError'
     this.status = status
@@ -44,6 +48,7 @@ export class ApiError extends Error {
     this.requestId = opts?.requestId
     this.method = opts?.method
     this.retryAfterMs = opts?.retryAfterMs
+    this.replayed = opts?.replayed
   }
 }
 
@@ -151,6 +156,7 @@ export async function apiRequest<T>(method: string, path: string, body?: unknown
       requestId,
       method: method.toUpperCase(),
       retryAfterMs: parseRetryAfter(res.headers.get('Retry-After')),
+      replayed: res.headers.get('Idempotent-Replayed') === 'true',
     })
   }
 

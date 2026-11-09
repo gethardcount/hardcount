@@ -184,22 +184,38 @@ export function isStripeRefundUnresolved(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === STRIPE_REFUND_UNRESOLVED
 }
 
-// What Issue credit note says when its request fails. A note can start a card
-// refund, so the dialog must tell a try that may have made the note from one
-// the server refused.
+// What Issue credit note says when its request fails, and whether the
+// invoice's Idempotency-Key (lib/retryKeys) is kept for the next try. A note
+// can start a card refund. So the dialog must tell a try that may have made
+// the note from one the server refused, and must keep the key while a try
+// under it may have made one. The next try then sends the key again, and the
+// server returns that note instead of making a second one.
 //
-// The try may have made the note when:
-//   - no answer says whether it did (lib/errorCopy outcomeUnknown): no
-//     answer at all, or a bare 5xx;
-//   - the server is still running a request with the same key
-//     (conflict_idempotency), or one never finished
-//     (conflict_idempotency_unresolved);
-//   - the error is not the API's, so the request may have been sent.
-// Such a try keeps its Idempotency-Key (lib/retryKeys). The next try sends it
-// again, and the server returns the note instead of making a second one.
-// Any other answer refused the note, so the next try is a new note.
+// The answers, in the order they are read:
+//   - No answer from the API: status 0, or an error that is not the API's.
+//     The request may have been sent. Unknown; keep the key.
+//   - An answer the server stored under the key and sent again
+//     (Idempotent-Replayed). The try that got it first has ended, so settle.
+//     A bare 5xx (lib/errorCopy outcomeUnknown) did not say whether it made
+//     the note: the amounts read again now count it if it did
+//     (ISSUE_CREDIT_ENDED). Any other stored answer says what happened.
+//   - conflict_idempotency_unresolved: the try under the key died without an
+//     answer. It has ended too (ISSUE_CREDIT_ENDED).
+//   - A bare 5xx, or conflict_idempotency (a try under the key is still
+//     running). Unknown; keep the key.
+//   - idempotency_error: other values under a key the server has seen.
+//     Nothing was made; settle.
+//   - A refusal from the handler (HANDLER_REFUSALS), or a 5xx with its own
+//     code such as provider_error: settle. The handler runs only for a key
+//     with no stored answer, so no earlier try under the key made a note.
+//   - Anything else: an answer given before the server reads the key. That
+//     is the session check (401), the cross-site check (403), the rate limit
+//     (429), or a service that is unavailable (503, such as
+//     idempotency_unavailable when the key could not be reserved). It says
+//     nothing about an earlier try under the key, so the key is kept. After
+//     an earlier try whose result is unknown, it still reads as unknown.
 export const ISSUE_CREDIT_UNKNOWN =
-  "The credit note may have been made. The amounts above are read again, so they count it if it was. Issuing again from this page with the same values can't make a second note."
+  "The credit note may have been made. The amounts above are read again, so they count it if it was. Issuing again with the same values can't make a second note, and says what became of the first try once it has ended."
 
 // The server refuses other values under a key it has seen (422
 // idempotency_error). After a try whose result is unknown, that means the
@@ -207,20 +223,39 @@ export const ISSUE_CREDIT_UNKNOWN =
 export const ISSUE_CREDIT_VALUES_DIFFER =
   'Nothing was issued. These values differ from the try whose result is unknown. Check the amounts above: issuing again makes a new note.'
 
+export const ISSUE_CREDIT_ENDED =
+  "The earlier try with these values ended without saying whether it made the note. The amounts above are read again, so they count the note if it was made. If they don't count it, issuing again makes a new note."
+
 export interface IssueCreditFailure {
-  // true: the try may have made the note, so its key is kept.
+  // true: the note may have been made, by this try or an earlier one under
+  // the same key. Drawn as uncertain, not as an error.
   unknown: boolean
+  // true: the answer says what became of the tries under the key. The key
+  // is dropped, and the next try is a new note.
+  settles: boolean
   message: string
 }
 
-export function issueCreditFailure(err: unknown): IssueCreditFailure {
-  const { status, code } = typeof err === 'object' && err !== null ? (err as { status?: unknown; code?: unknown }) : {}
-  if (
-    typeof status !== 'number' || status === 0 || outcomeUnknown(err) ||
-    code === 'conflict_idempotency' || code === 'conflict_idempotency_unresolved'
-  ) {
-    return { unknown: true, message: ISSUE_CREDIT_UNKNOWN }
+// The statuses the credit-note handler refuses a request with. A 409 or 422
+// from the idempotency layer has its own code, read before these.
+const HANDLER_REFUSALS = new Set([400, 404, 409, 412, 422])
+
+// earlierUnknown: an earlier try under the key may have made the note
+// (RetryKeys.unknown).
+export function issueCreditFailure(err: unknown, earlierUnknown: boolean): IssueCreditFailure {
+  const { status, code, replayed } = typeof err === 'object' && err !== null
+    ? (err as { status?: unknown; code?: unknown; replayed?: unknown })
+    : {}
+  const mayHaveMadeIt = { unknown: true, settles: false, message: ISSUE_CREDIT_UNKNOWN }
+  if (typeof status !== 'number' || status === 0) return mayHaveMadeIt
+  if (code === 'conflict_idempotency_unresolved' || (replayed === true && outcomeUnknown(err))) {
+    return { unknown: true, settles: true, message: ISSUE_CREDIT_ENDED }
   }
-  if (code === 'idempotency_error') return { unknown: false, message: ISSUE_CREDIT_VALUES_DIFFER }
-  return { unknown: false, message: errorSentence(err) }
+  if (replayed === true) return { unknown: false, settles: true, message: errorSentence(err) }
+  if (outcomeUnknown(err) || code === 'conflict_idempotency') return mayHaveMadeIt
+  if (code === 'idempotency_error') return { unknown: false, settles: true, message: ISSUE_CREDIT_VALUES_DIFFER }
+  if (HANDLER_REFUSALS.has(status) || (status >= 500 && status !== 503)) {
+    return { unknown: false, settles: true, message: errorSentence(err) }
+  }
+  return earlierUnknown ? mayHaveMadeIt : { unknown: false, settles: false, message: errorSentence(err) }
 }

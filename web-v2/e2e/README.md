@@ -64,7 +64,12 @@ the screen, and that the main things an operator does work end to end.
   say the result is unknown and count the note that landed. A try after
   closing and reopening it, on the invoice page and the credit notes page,
   must send the same Idempotency-Key and make no second note. Other values
-  under that key are refused, and the next try must make a new note.
+  under that key are refused, and the next try must make a new note. After
+  a lost answer, a 503 that the server gives before it reads the key must
+  not drop the key, and the dialog must still say the result is unknown. A
+  server error that the server sends again for the key (Idempotent-Replayed)
+  means the try has ended: the dialog must say to check the amounts, and the
+  next try must make a new note. The browser gives these two answers.
 - `activity.spec.ts` takes screenshots of the activity cards for people to
   compare: the invoice and subscription Activity cards, a Dunning run and the
   customer's Sent emails, at 1440px and 390px wide. It runs each story for a

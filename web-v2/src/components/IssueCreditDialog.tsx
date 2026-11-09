@@ -176,8 +176,9 @@ export function IssueCreditDialog({ invoice, existingCreditNotes, retryKeys, onC
       // again, so the amounts above count one that landed. Neither page
       // polls them on its own.
       invalidateMoneySurfaces(queryClient, { invoiceId: invoice.id })
-      const f = issueCreditFailure(err)
-      if (!f.unknown) retryKeys.settle(invoice.id)
+      const f = issueCreditFailure(err, retryKeys.unknown(invoice.id))
+      if (f.settles) retryKeys.settle(invoice.id)
+      else if (f.unknown) retryKeys.markUnknown(invoice.id)
       setFailure(f)
     } finally {
       setSubmitting(false)

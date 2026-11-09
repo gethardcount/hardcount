@@ -63,4 +63,21 @@ test('a bare 502 from the proxy on Issue credit note reads as a result unknown',
   assert.equal((err as Error & { status?: number }).status, 502)
   assert.equal((err as Error & { method?: string }).method, 'POST')
   assert.equal(outcomeUnknown(err), true)
+  assert.equal((err as Error & { replayed?: boolean }).replayed, false, 'the proxy sent no Idempotent-Replayed')
+})
+
+// The server stores a 5xx under the key and answers each later try with it,
+// marked Idempotent-Replayed. The error must say so: the try that got it
+// first has ended, so the dialog can stop sending its key.
+test('a 5xx the server stored under the key and sent again says it is replayed', async () => {
+  vi.stubGlobal('fetch', async () => new Response(
+    JSON.stringify({ error: { type: 'api_error', code: 'internal_error', message: 'an internal error occurred' } }),
+    { status: 500, headers: { 'Content-Type': 'application/json', 'Idempotent-Replayed': 'true' } },
+  ))
+
+  const err: unknown = await issueCreditNote(body, 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d').then(() => null, (e: unknown) => e)
+
+  assert.ok(err instanceof Error)
+  assert.equal((err as Error & { status?: number }).status, 500)
+  assert.equal((err as Error & { replayed?: boolean }).replayed, true)
 })

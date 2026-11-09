@@ -10,6 +10,7 @@ import {
   collectOutcome,
   emailStepAfterFinalize,
   isEmailNotConfigured,
+  ISSUE_CREDIT_ENDED,
   ISSUE_CREDIT_UNKNOWN,
   ISSUE_CREDIT_VALUES_DIFFER,
   issueCreditFailure,
@@ -19,6 +20,7 @@ import {
   recordStripeRefundOutcome,
   writeOffOutcome,
 } from '../src/lib/actionOutcomes.ts'
+import { errorSentence } from '../src/lib/errorCopy.ts'
 
 const inv = (status: string, payment_status: string, amount_paid_cents = 0, stripe_payment_intent_id?: string) => ({
   invoice_number: 'INV-1', status, payment_status, amount_paid_cents, stripe_payment_intent_id,
@@ -178,8 +180,10 @@ test('Retry refund refused over an unrecorded refund made in Stripe is told apar
 })
 
 // An API error as lib/api throws it, for the request Issue credit note sends.
-function apiError(message: string, status: number, code?: string): Error {
-  return Object.assign(new Error(message), { status, code, method: 'POST' })
+// replayed: the answer is the stored answer of an earlier try under the same
+// key (the server's Idempotent-Replayed header).
+function apiError(message: string, status: number, code?: string, replayed?: boolean): Error {
+  return Object.assign(new Error(message), { status, code, method: 'POST', replayed })
 }
 
 // Issue credit note can start a card refund. A try whose answer does not
@@ -193,29 +197,77 @@ test('Issue credit note: a try that may have made the note reads as unknown, so 
     ['a proxy 502 with no body', apiError('Bad Gateway', 502)],
     ['a server fault', apiError('an internal error occurred', 500, 'internal_error')],
     ['the same key still running', apiError('A request with this idempotency key is still being processed. Please retry.', 409, 'conflict_idempotency')],
-    ['the same key never finished', apiError('A request with this idempotency key started 6m ago and never recorded an outcome', 409, 'conflict_idempotency_unresolved')],
     ['an error from the page, not the API', new TypeError('network error')],
   ]
   for (const [name, err] of unknown) {
-    assert.deepEqual(issueCreditFailure(err), { unknown: true, message: ISSUE_CREDIT_UNKNOWN }, name)
+    for (const earlierUnknown of [false, true]) {
+      assert.deepEqual(issueCreditFailure(err, earlierUnknown), { unknown: true, settles: false, message: ISSUE_CREDIT_UNKNOWN }, name)
+    }
   }
   // It names the note, never the raw transport text.
   assert.doesNotMatch(ISSUE_CREDIT_UNKNOWN, /fetch|40 seconds|idempotency/i)
 })
 
+// The server gives these answers before it reads the key: the session check
+// (401), the cross-site check (403), the rate limit (429), and a service
+// that is unavailable (503), such as a failed reservation of the key. They
+// say nothing about an earlier try under the key, so the key is kept.
+// Dropping it would let the next try make a second note.
+test('Issue credit note: a refusal before the server reads the key keeps the key, and says unknown only after an unknown try', () => {
+  const beforeTheKey: [string, Error][] = [
+    ['the session check', apiError('missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...', 401, 'unauthorized')],
+    ['the cross-site check', apiError('cross-site request blocked', 403, 'forbidden')],
+    ['the rate limit', apiError('too many requests — please retry after the rate limit resets', 429, 'rate_limited')],
+    ['a failed reservation of the key', apiError('could not record the idempotency key — retry the request with the same key', 503, 'idempotency_unavailable')],
+    ['the sign-in store', apiError('authentication is temporarily unavailable — retry shortly', 503, 'authentication_unavailable')],
+  ]
+  for (const [name, err] of beforeTheKey) {
+    assert.deepEqual(issueCreditFailure(err, true), { unknown: true, settles: false, message: ISSUE_CREDIT_UNKNOWN }, `${name}, after an unknown try`)
+    assert.deepEqual(issueCreditFailure(err, false), { unknown: false, settles: false, message: errorSentence(err) }, `${name}, on a first try`)
+  }
+})
+
 test('Issue credit note: a refusal is a known failure in the server sentence, and the next try is a new note', () => {
-  assert.deepEqual(
-    issueCreditFailure(apiError('credit note total exceeds what is still creditable on this invoice', 409, 'invalid_state')),
-    { unknown: false, message: 'Credit note total exceeds what is still creditable on this invoice.' },
-  )
-  assert.deepEqual(
-    issueCreditFailure(apiError('Stripe refused the refund: charge already refunded', 502, 'provider_error')),
-    { unknown: false, message: 'Stripe refused the refund: charge already refunded.' },
-  )
+  const refusals: [Error, string][] = [
+    [apiError('credit note total exceeds what is still creditable on this invoice', 409, 'invalid_state'), 'Credit note total exceeds what is still creditable on this invoice.'],
+    [apiError('reason is required', 422, 'validation_error'), 'Reason is required.'],
+    [apiError('unknown field "refund"', 400, 'invalid_request'), 'Unknown field "refund".'],
+    [apiError('invoice was changed', 412, 'precondition_failed'), 'Invoice was changed.'],
+    [apiError('invoice could not be found', 404, 'invoice_not_found'), 'Invoice could not be found.'],
+    [apiError('Stripe refused the refund: charge already refunded', 502, 'provider_error'), 'Stripe refused the refund: charge already refunded.'],
+  ]
+  for (const [err, message] of refusals) {
+    for (const earlierUnknown of [false, true]) {
+      assert.deepEqual(issueCreditFailure(err, earlierUnknown), { unknown: false, settles: true, message }, message)
+    }
+  }
 })
 
 test('Issue credit note: other values under a kept key are refused, and the sentence says why in plain words', () => {
   const err = apiError('Keys for idempotent requests can only be used with the same parameters they were first used with.', 422, 'idempotency_error')
-  assert.deepEqual(issueCreditFailure(err), { unknown: false, message: ISSUE_CREDIT_VALUES_DIFFER })
+  assert.deepEqual(issueCreditFailure(err, true), { unknown: false, settles: true, message: ISSUE_CREDIT_VALUES_DIFFER })
   assert.doesNotMatch(ISSUE_CREDIT_VALUES_DIFFER, /idempotent|parameters/i)
+})
+
+// The server stores a 5xx under the key, and answers every later try with
+// that key with it, marked Idempotent-Replayed. The try that got it first
+// has ended, so the amounts read again are final: they count its note if it
+// made one. Keeping the key would only replay the 5xx for 24 hours. A try
+// the server never recorded an answer for (it died during the try) has
+// ended too.
+test('Issue credit note: a try that ended without saying whether it made the note settles the key, and says to check the amounts', () => {
+  const ended: [string, Error][] = [
+    ['a stored server fault', apiError('an internal error occurred', 500, 'internal_error', true)],
+    ['a stored timeout', apiError('the request ran past its time limit', 504, 'timeout', true)],
+    ['a try the server never finished', apiError('A request with this idempotency key started 6m ago and never recorded an outcome', 409, 'conflict_idempotency_unresolved')],
+  ]
+  for (const [name, err] of ended) {
+    assert.deepEqual(issueCreditFailure(err, true), { unknown: true, settles: true, message: ISSUE_CREDIT_ENDED }, name)
+  }
+  // A stored refusal says what happened, in the server's sentence.
+  assert.deepEqual(
+    issueCreditFailure(apiError('Stripe refused the refund: charge already refunded', 502, 'provider_error', true), true),
+    { unknown: false, settles: true, message: 'Stripe refused the refund: charge already refunded.' },
+  )
+  assert.doesNotMatch(ISSUE_CREDIT_ENDED, /idempotency|replay|5\d\d/i)
 })
