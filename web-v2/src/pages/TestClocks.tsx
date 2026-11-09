@@ -7,7 +7,9 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
 
-import { api, formatDate, formatDateTime, getTenantTimezone, type TestClock } from '@/lib/api'
+import { api, formatDate, formatDateTime, type TestClock } from '@/lib/api'
+import { useTenantTimezone } from '@/hooks/useTenantTimezone'
+import { wallClockNow } from '@/lib/effectiveNow'
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { cn } from '@/lib/utils'
@@ -171,13 +173,12 @@ function CreateClockDialog({ onClose }: { onClose: () => void }) {
   // tenant TZ. Date + time edited independently so the branded
   // DatePicker (consistent with API Keys / Credits) handles
   // the date and a small text input handles HH:mm.
-  const tz = getTenantTimezone() || 'UTC'
+  const tz = useTenantTimezone()
   // A brand-new clock's start defaults to the real present — genuinely wall-clock
   // (there is no simulated "now" yet; this is the moment the operator creates it).
-  // eslint-disable-next-line no-restricted-syntax -- new-clock start defaults to real now
-  const [datePart, setDatePart] = useState(() => formatInTimeZone(new Date(), tz, 'yyyy-MM-dd'))
-  // eslint-disable-next-line no-restricted-syntax -- new-clock start defaults to real now
-  const [timePart, setTimePart] = useState(() => formatInTimeZone(new Date(), tz, 'HH:mm'))
+  const [now] = useState(wallClockNow)
+  const [datePart, setDatePart] = useState(() => formatInTimeZone(new Date(now), tz, 'yyyy-MM-dd'))
+  const [timePart, setTimePart] = useState(() => formatInTimeZone(new Date(now), tz, 'HH:mm'))
   const [pickerError, setPickerError] = useState('')
 
   const form = useForm<CreateData>({
@@ -240,9 +241,11 @@ function CreateClockDialog({ onClose }: { onClose: () => void }) {
                 time={timePart}
                 onDateChange={(d) => { setDatePart(d); setPickerError('') }}
                 onTimeChange={(t) => { setTimePart(t); setPickerError('') }}
+                timeZone={tz}
+                now={now}
               />
               <p className="text-xs text-muted-foreground">
-                Times are in your account's timezone ({tz}). The clock starts here; use Advance from the detail page to move it forward.
+                Times are in your account's time zone ({tz}). The clock starts here; use Advance from the detail page to move it forward.
               </p>
               {pickerError && <p className="text-xs text-destructive">{pickerError}</p>}
             </div>

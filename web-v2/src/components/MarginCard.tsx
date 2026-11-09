@@ -19,6 +19,7 @@ import {
 } from '@/lib/usageWindow'
 import { useGetCustomerMargin } from '@/lib/gen/queries.gen'
 import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
+import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { useCurrentCycleUsage, useLastInvoicedPeriod, useLatestUsageAt } from '@/hooks/useCustomerUsageWindows'
 
 // Margin (ADR-079): rated usage revenue vs stamped provider COGS over an
@@ -44,6 +45,7 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
   // before them. The billing periods come from the server, already on the
   // customer's clock. Custom absolute dates are left untouched.
   const now = useEffectiveNow(customerTestClockId)
+  const tz = useTenantTimezone()
 
   const cycleQuery = useCurrentCycleUsage(customerId, customerTestClockId, preset === 'cycle')
   const invoicedQuery = useLastInvoicedPeriod(customerId, preset === 'last_invoiced')
@@ -54,7 +56,8 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
     now,
     customFrom,
     customTo,
-  }), [preset, cycleQuery.data, invoicedQuery.data, now, customFrom, customTo])
+    timezone: tz,
+  }), [preset, cycleQuery.data, invoicedQuery.data, now, customFrom, customTo, tz])
   const params = marginWindow.kind === 'ready' ? { from: marginWindow.from, to: marginWindow.to } : undefined
   const windowError = (preset === 'cycle' && cycleQuery.isError) || (preset === 'last_invoiced' && invoicedQuery.isError)
 
@@ -73,7 +76,7 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
     : null
   const showLatest = () => {
     if (!latestAt) return
-    const r = rangeIncluding(latestAt, now)
+    const r = rangeIncluding(latestAt, now, tz)
     setCustomFrom(r.from)
     setCustomTo(r.to)
     setPreset('custom')
@@ -120,7 +123,7 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
             </CardDescription>
             {marginWindow.kind === 'ready' && marginWindow.period && (
               <p className="text-xs text-muted-foreground mt-1 tabular-nums">
-                {formatCivilPeriod(marginWindow.from, marginWindow.to, undefined)}
+                {formatCivilPeriod(marginWindow.from, marginWindow.to, tz)}
               </p>
             )}
             {/* The report always prices a window the card sends, so its
@@ -143,9 +146,10 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
               <>
                 {/* w-48: the field also holds a calendar icon, a clear button and
                     a chevron, so w-40 cut the year off "Sep 30, 2026". */}
-                <DatePicker value={customFrom} onChange={setCustomFrom} placeholder="From" className="w-48" />
+                <DatePicker value={customFrom} onChange={setCustomFrom} placeholder="From" className="w-48"
+                  timeZone={tz} now={now} />
                 <DatePicker value={customTo} onChange={setCustomTo} placeholder="To" className="w-48"
-                  minDate={customFrom ? new Date(customFrom + 'T00:00:00') : undefined} />
+                  timeZone={tz} now={now} min={customFrom || undefined} />
               </>
             )}
           </div>

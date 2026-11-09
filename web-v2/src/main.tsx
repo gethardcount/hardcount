@@ -7,7 +7,6 @@ import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { ModeAwareQueryProvider } from '@/contexts/QueryProvider'
-import { TenantTimezoneBootstrap } from '@/lib/TenantTimezoneBootstrap'
 import '@fontsource-variable/geist/index.css'
 import '@fontsource-variable/geist-mono/index.css'
 import './index.css'
@@ -231,7 +230,6 @@ const App = () => (
   <ErrorBoundary>
     <AuthProvider>
       <ModeAwareQueryProvider>
-      <TenantTimezoneBootstrap />
       <TooltipProvider>
         <RouterProvider router={router} />
       </TooltipProvider>

@@ -642,13 +642,11 @@ test('issuing a credit note again after its answer was lost makes one note, from
 
 // New invoice starts at the account's payment terms (Settings, Payment terms)
 // and offers them, also when no preset has them. Until the settings read
-// answers, it sends nothing, because it would have to guess the terms. CI's
-// account is on Net 30, so the browser holds the settings read, then answers
-// it with Net 15. The billing profile sets the customer's currency, so New
-// invoice opens before the settings load.
-test('New invoice waits for the account payment terms, then uses them: on Net 15, the invoice is due 15 days after it is issued', async ({ page }) => {
+// answers, the customer's page waits, so no invoice can be sent with guessed
+// terms. CI's account is on Net 30, so the browser holds the settings read,
+// then answers it with Net 15.
+test('the customer page waits for the account settings, then New invoice uses their payment terms: on Net 15, the invoice is due 15 days after it is issued', async ({ page }) => {
   const customer = await createCustomer()
-  await api('PUT', `/customers/${customer.id}/billing-profile`, { currency: 'USD' })
   let release!: () => void
   const released = new Promise<void>(resolve => { release = resolve })
   await page.route(url => url.pathname === '/v1/settings', async route => {
@@ -658,15 +656,14 @@ test('New invoice waits for the account payment terms, then uses them: on Net 15
     await route.fulfill({ response: answer, json: { ...(await answer.json()), net_payment_terms: 15 } })
   })
   await page.goto(`/customers/${customer.id}`)
+  await expect(page.getByRole('status', { name: 'Loading your account settings' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'New invoice' })).toHaveCount(0)
+
+  release()
   await page.getByRole('button', { name: 'New invoice' }).click()
   const composer = page.getByRole('dialog', { name: 'New invoice' })
   await composer.getByPlaceholder('Implementation services').fill(`E2E net 15 ${uniq()}`)
   await composer.getByLabel('Line 1 unit price in USD').fill('80')
-  await expect(composer.getByText("Loading the account's payment terms…", { exact: true })).toBeVisible()
-  await expect(composer.getByRole('button', { name: 'Save draft' })).toBeDisabled()
-  await expect(composer.getByRole('button', { name: 'Save & send' })).toBeDisabled()
-
-  release()
   await expect(composer.getByLabel('Payment terms')).toContainText('Net 15')
   await expect(composer.getByText('Due 15 days after the invoice is issued.')).toBeVisible()
   await composer.getByRole('button', { name: 'Save draft' }).click()

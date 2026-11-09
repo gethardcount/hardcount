@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { CommandPalette } from '@/components/CommandPalette'
+import { AccountSettingsGate } from '@/components/AccountSettingsGate'
 import { isNavActive, isTestMode, SETTINGS_NAV, visibleNav } from '@/lib/navigation'
 import { HardcountLogo } from '@/components/HardcountLogo'
 import { OnboardingLauncher, SetupChecklistPanel } from '@/components/OnboardingLauncher'
@@ -594,16 +595,19 @@ export function Layout() {
         </div>
         <div className={cn(CONTENT_BAND, 'p-4 md:p-8')}>
           {/* A page whose code is still downloading shows a spinner here,
-              inside the shell. */}
-          <Suspense
-            fallback={
-              <div role="status" aria-label="Loading page" className="flex justify-center py-16">
-                <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
-              </div>
-            }
-          >
-            <Outlet />
-          </Suspense>
+              inside the shell. So does a page waiting for the account
+              settings, whose time zone and currency it may send. */}
+          <AccountSettingsGate>
+            <Suspense
+              fallback={
+                <div role="status" aria-label="Loading page" className="flex justify-center py-16">
+                  <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
+          </AccountSettingsGate>
         </div>
       </ScrollPane>
 

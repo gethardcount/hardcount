@@ -2,6 +2,7 @@ import * as React from 'react'
 import { Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { DatePicker } from '@/components/ui/date-picker'
+import type { EffectiveNow } from '@/lib/effectiveNow'
 
 // DateTimePicker — branded date+time picker.
 //
@@ -13,9 +14,9 @@ import { DatePicker } from '@/components/ui/date-picker'
 //
 // Time is held as the operator-typed string in tenant TZ ("HH:mm").
 // Caller is responsible for combining `date` + `time` into a UTC
-// timestamp via fromZonedTime — same contract as DatePicker. Keeping
-// the picker timezone-agnostic means it stays a pure UI primitive and
-// doesn't need to read the tenant TZ itself.
+// timestamp via fromZonedTime — same contract as DatePicker. The
+// picker reads no zone itself: `timeZone` and `now` go to DatePicker,
+// for its today and the first day it allows.
 //
 // Hour granularity is 1h, minute granularity is 1min. Test-clock and
 // billing-period flows need minute precision so the input doesn't
@@ -26,8 +27,10 @@ interface DateTimePickerProps {
   time: string                       // HH:mm (24h, zero-padded)
   onDateChange: (date: string) => void
   onTimeChange: (time: string) => void
+  timeZone: string
+  now: EffectiveNow
+  min?: string                       // first day allowed, yyyy-MM-dd
   className?: string
-  minDate?: Date
   // datePlaceholder is forwarded to DatePicker for the empty-date state.
   datePlaceholder?: string
 }
@@ -79,8 +82,10 @@ export function DateTimePicker({
   time,
   onDateChange,
   onTimeChange,
+  timeZone,
+  now,
+  min,
   className,
-  minDate,
   datePlaceholder,
 }: DateTimePickerProps) {
   const [inputText, setInputText] = React.useState(time || '')
@@ -135,7 +140,9 @@ export function DateTimePicker({
           value={date}
           onChange={onDateChange}
           placeholder={datePlaceholder}
-          minDate={minDate}
+          timeZone={timeZone}
+          now={now}
+          min={min}
           className="flex-1 min-w-0"
         />
         <div

@@ -4,8 +4,10 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { formatInTimeZone } from 'date-fns-tz'
 import { toast } from 'sonner'
-import { api, formatDateTime, getTenantTimezone } from '@/lib/api'
+import { api, formatDateTime } from '@/lib/api'
 import { startOfDayInTZ, endOfDayInTZ } from '@/lib/dates'
+import { wallClockNow } from '@/lib/effectiveNow'
+import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import type { AuditEntry } from '@/lib/api'
 import { downloadServerCSV } from '@/lib/csv'
 import {
@@ -179,16 +181,12 @@ function formatMetadata(meta: Record<string, unknown> | undefined): { label: str
   return items
 }
 
-function groupByDate(entries: AuditEntry[]): { date: string; entries: AuditEntry[] }[] {
+function groupByDate(entries: AuditEntry[], tz: string): { date: string; entries: AuditEntry[] }[] {
   // Group by tenant-TZ date so the section headers match the
   // dashboard's tenant-TZ display elsewhere. Around UTC-day
   // boundaries the prior browser-local grouping disagreed with the
   // entries' rendered timestamps. ADR-010.
-  const tz = getTenantTimezone() || undefined
-  const fmtDate = (iso: string) =>
-    tz
-      ? formatInTimeZone(new Date(iso), tz, 'MMMM d, yyyy')
-      : new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+  const fmtDate = (iso: string) => formatInTimeZone(new Date(iso), tz, 'MMMM d, yyyy')
 
   const groups: { date: string; entries: AuditEntry[] }[] = []
   let currentDate = ''
@@ -215,6 +213,9 @@ function actionVariant(action: string): 'default' | 'secondary' | 'destructive' 
 
 export default function AuditLogPage() {
   usePageTitle('Audit log')
+  // The account's zone: the date filters send its day bounds, and the
+  // entries are grouped and timed in it.
+  const tz = useTenantTimezone()
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [urlState, setUrlState] = useUrlState({
@@ -262,8 +263,8 @@ export default function AuditLogPage() {
     if (action) params.set('action', action)
     if (resourceIdFilter) params.set('resource_id', resourceIdFilter)
     if (actorFilter) params.set('actor_id', actorFilter)
-    if (dateFrom) params.set('date_from', startOfDayInTZ(dateFrom))
-    if (dateTo) params.set('date_to', endOfDayInTZ(dateTo))
+    if (dateFrom) params.set('date_from', startOfDayInTZ(dateFrom, tz))
+    if (dateTo) params.set('date_to', endOfDayInTZ(dateTo, tz))
     if (testClockFilter) params.set('test_clock_id', testClockFilter)
     return params.toString()
   })()
@@ -298,7 +299,7 @@ export default function AuditLogPage() {
   const hasNext = total > AUDIT_COUNT_CAP
     ? entries.length === PAGE_SIZE
     : page * PAGE_SIZE < total
-  const groups = groupByDate(entries)
+  const groups = groupByDate(entries, tz)
 
   // Export streams from the SERVER (GET /v1/exports/audit-log.csv), applying the
   // filters currently on screen.
@@ -325,8 +326,8 @@ export default function AuditLogPage() {
       // above — otherwise the export anchors bare YYYY-MM-DD at UTC and a
       // non-UTC tenant's CSV silently drops (or adds) rows near day edges vs.
       // what's on screen.
-      if (dateFrom) params.set('date_from', startOfDayInTZ(dateFrom))
-      if (dateTo) params.set('date_to', endOfDayInTZ(dateTo))
+      if (dateFrom) params.set('date_from', startOfDayInTZ(dateFrom, tz))
+      if (dateTo) params.set('date_to', endOfDayInTZ(dateTo, tz))
 
       const qs = params.toString()
       await downloadServerCSV(`/v1/exports/audit-log.csv${qs ? `?${qs}` : ''}`, 'audit-log.csv')
@@ -397,13 +398,17 @@ export default function AuditLogPage() {
           onChange={v => setUrlState({ date_from: v })}
           placeholder="From date"
           className="w-44"
+          timeZone={tz}
+          now={wallClockNow()}
         />
         <DatePicker
           value={dateTo}
           onChange={v => setUrlState({ date_to: v })}
           placeholder="To date"
           className="w-44"
-          minDate={dateFrom ? new Date(dateFrom + 'T00:00:00') : undefined}
+          timeZone={tz}
+          now={wallClockNow()}
+          min={dateFrom || undefined}
         />
         {/* Test-clock scope. Only rendered once the log has actually recorded a
             simulation — for the many tenants that never touch test clocks this
@@ -465,10 +470,7 @@ export default function AuditLogPage() {
                     </div>
                     <div className="divide-y divide-border">
                       {group.entries.map(entry => {
-                        const tz = getTenantTimezone() || undefined
-                        const time = tz
-                          ? formatInTimeZone(new Date(entry.created_at), tz, 'h:mm a')
-                          : new Date(entry.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+                        const time = formatInTimeZone(new Date(entry.created_at), tz, 'h:mm a')
                         const isHigh = HIGH_SEVERITY.has(entry.action)
                         const isMedium = MEDIUM_SEVERITY.has(entry.action)
                         const isExpanded = expandedId === entry.id

@@ -10,6 +10,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { test, beforeEach } from 'vitest'
 import assert from 'node:assert/strict'
 import type { ActivityLine } from '../src/lib/gen/schemas/activityLine.ts'
+import { getGetTenantSettingsQueryKey } from '../src/lib/gen/queries.gen.ts'
+import { setTenantTimezone } from '../src/lib/api.ts'
+
+// The account's zone, as the settings query and the display zone hold it
+// under AccountSettingsGate.
+let zone = 'Asia/Kolkata'
+function setZone(tz: string) {
+  zone = tz
+  setTenantTimezone(tz)
+}
 
 const finalized: ActivityLine = {
   id: 'lifecycle:finalized:hc_inv_1',
@@ -38,8 +48,9 @@ const failed: ActivityLine = {
 async function render(lines: ActivityLine[]): Promise<string> {
   const { ActivityList, ActivityZone } = await import('../src/components/ActivityList.tsx')
   // The list reads the zone through useTenantTimezone, a settings query.
-  // Server rendering runs no fetch, so it falls back to the zone set below.
-  return renderToStaticMarkup(createElement(QueryClientProvider, { client: new QueryClient() },
+  const client = new QueryClient()
+  client.setQueryData(getGetTenantSettingsQueryKey(), { default_currency: 'USD', timezone: zone })
+  return renderToStaticMarkup(createElement(QueryClientProvider, { client },
     createElement(MemoryRouter, null,
       createElement(ActivityZone, { lines }),
       createElement(ActivityList, { lines }),
@@ -50,10 +61,7 @@ function text(html: string): string {
   return html.replace(/<[^>]+>/g, '').replace(/&#x27;/g, "'")
 }
 
-beforeEach(async () => {
-  const { setTenantTimezone } = await import('../src/lib/api.ts')
-  setTenantTimezone('Asia/Kolkata')
-})
+beforeEach(() => setZone('Asia/Kolkata'))
 
 test('a row reads title · amount, time, then meta parts, actor and Recorded, in that order', async () => {
   const html = await render([finalized])
@@ -99,8 +107,7 @@ test('a day header carries the account-calendar day even when the UTC day is the
 })
 
 test('the zone header names the zone of the Recorded times too', async () => {
-  const { setTenantTimezone } = await import('../src/lib/api.ts')
-  setTenantTimezone('America/New_York')
+  setZone('America/New_York')
   // Rows in Feb 2027 (EST), recorded in Oct 2026 (EDT).
   const t = text(await render([{ ...finalized, occurred_at: '2027-02-01T15:00:00Z' }]))
   assert.match(t, /Times in EST \/ EDT/)
