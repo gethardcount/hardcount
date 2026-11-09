@@ -34,7 +34,7 @@ original text.
 
 ### Changed
 
-- **CI keeps the tools it downloads in the Actions cache.** For contributors: golangci-lint, lychee, Vale, reviewdog, Syft, Grype and Cosign came from GitHub releases on every run, so a failed download failed the run. A run that finds them in the cache downloads nothing. Each download is checked against its release's checksum.
+- **CI keeps the tools it downloads in the Actions cache.** For contributors: golangci-lint, lychee, Vale, reviewdog, Syft, Grype and Cosign came from GitHub releases on every run, so a failed download failed the run. A run that finds them in the cache downloads nothing. Each download is checked against its release's checksum. ([#1643](https://github.com/gethardcount/hardcount/pull/1643))
 
 ### Removed
 
