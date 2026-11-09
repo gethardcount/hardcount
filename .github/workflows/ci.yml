@@ -985,3 +985,82 @@ jobs:
           REPO: ghcr.io/${{ github.repository }}
           API_DIGEST: ${{ steps.build.outputs.digest }}
           DASH_DIGEST: ${{ steps.dashbuild.outputs.digest }}
+
+  # TEMPORARY, removed before merge: runs the docker job's Syft, Grype and
+  # Cosign cache steps on this pull request (the docker job runs only on
+  # main and tags), and actionlint on this file.
+  tool-cache-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SYFT_VERSION: 1.54.0
+      GRYPE_VERSION: 0.118.0
+      COSIGN_VERSION: 3.0.6
+      ACTIONLINT_VERSION: 1.7.12
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: actionlint
+        run: |
+          set -euo pipefail
+          name="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$name" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$name"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$name" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$name" -C "$RUNNER_TEMP" actionlint
+          echo "shellcheck: $(command -v shellcheck) $(shellcheck --version | sed -n 2p)"
+          "$RUNNER_TEMP/actionlint" -version
+          "$RUNNER_TEMP/actionlint" -verbose .github/workflows/ci.yml
+
+      - name: Restore Syft from the cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.tool_cache }}/syft/${{ env.SYFT_VERSION }}
+          key: syft-binary-${{ env.SYFT_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Generate SBOM (Syft)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          syft-version: v${{ env.SYFT_VERSION }}
+          path: .
+          format: spdx-json
+          output-file: check-sbom.spdx.json
+          upload-artifact: false
+
+      - name: Restore Grype from the cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.tool_cache }}/grype/${{ env.GRYPE_VERSION }}
+          key: grype-binary-${{ env.GRYPE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Scan SBOM (Grype)
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          grype-version: v${{ env.GRYPE_VERSION }}
+          sbom: check-sbom.spdx.json
+          fail-build: false
+          output-format: table
+
+      - name: Restore Cosign from the cache
+        id: cosign-bin
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cosign
+          key: cosign-binary-${{ env.COSIGN_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install Cosign
+        if: steps.cosign-bin.outputs.cache-hit != 'true'
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v${{ env.COSIGN_VERSION }}
+
+      - name: Put the cached Cosign on PATH
+        if: steps.cosign-bin.outputs.cache-hit == 'true'
+        run: echo "$HOME/.cosign" >> "$GITHUB_PATH"
+
+      - name: Cosign on PATH
+        run: |
+          command -v cosign
+          cosign version
