@@ -178,13 +178,18 @@ func (s *PostgresStore) DeletePolicy(ctx context.Context, tenantID, id string) e
 // SetDefaultPolicy promotes the given policy to default and demotes the
 // previous default in a single tx. The partial UNIQUE index would
 // otherwise reject "set new default first" (two is_default=true rows
-// simultaneously), so we flip both atomically.
+// simultaneously), so we flip both atomically. It runs under the default
+// policy lock (lockDefaultPolicy), so it is safe to call concurrently.
 func (s *PostgresStore) SetDefaultPolicy(ctx context.Context, tenantID, id string) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
 	}
 	defer postgres.Rollback(tx)
+
+	if err := lockDefaultPolicy(ctx, tx, tenantID); err != nil {
+		return err
+	}
 
 	// Demote first; the partial UNIQUE index permits zero defaults
 	// transiently, then we promote the target.
@@ -202,6 +207,30 @@ func (s *PostgresStore) SetDefaultPolicy(ctx context.Context, tenantID, id strin
 		return errs.ErrNotFound
 	}
 	return tx.Commit()
+}
+
+// lockDefaultPolicy takes the lock on the account's default policy in the
+// mode of ctx (test or live), held until the transaction ends. Every write
+// that can change which policy is the default takes it first:
+// SetDefaultPolicy and a policy create. Without it, two such writes at once
+// each read the policies before the other commits, and the second misses
+// the first's new default and fails on the one-default unique index. An
+// edit keeps is_default, a delete refuses the default, and the seed writes
+// a new account no other transaction can see, so none of them takes it.
+func lockDefaultPolicy(ctx context.Context, tx *sql.Tx, tenantID string) error {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return err
+	}
+	mode := "test"
+	if live {
+		mode = "live"
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		"dunning_policies:"+tenantID+":"+mode); err != nil {
+		return fmt.Errorf("acquire default dunning policy lock: %w", err)
+	}
+	return nil
 }
 
 // CountCustomersOnPolicy returns the number of customers explicitly
@@ -261,6 +290,14 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 		return domain.DunningPolicy{}, fmt.Errorf("encode retry_days: %w", err)
 	}
 	if p.ID == "" {
+		// A create can take the default, so it runs under the default policy
+		// lock. The demote and the NOT EXISTS below then see a create or a
+		// SetDefaultPolicy that committed first, and two creates, or a
+		// create and a flip, at once never both take the default.
+		if err := lockDefaultPolicy(ctx, tx, tenantID); err != nil {
+			return domain.DunningPolicy{}, err
+		}
+
 		// INSERT new policy. The FIRST policy in a (tenant, livemode) scope is
 		// born is_default=true (ADR-036 amendment): NOT EXISTS(... WHERE is_default)
 		// is evaluated against the pre-insert table state, RLS-scoped to the
@@ -269,11 +306,6 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 		// closing the "policies exist but GetDefaultPolicy
 		// → not found" trap. Subsequent policies are is_default=false; the operator
 		// re-points via SetDefaultPolicy (the atomic demote-all/promote-one path).
-		// The partial unique index idx_dunning_policies_one_default_per_tenant is
-		// the LOUD backstop for a concurrent-first-insert race (a losing INSERT
-		// gets a clean 23505, never two defaults) — no savepoint-retry belt is
-		// built (creates are serial pre-launch; add the retry when a named
-		// concurrency need appears).
 		//
 		// The policy an account was created with (seeded = true, ADR-123)
 		// only holds the default until someone creates a policy of their
