@@ -67,6 +67,7 @@ original text.
 
 - **The Compose stack's nginx logs `[redacted]` in place of a link's token, and the dashboard's pages refuse to be framed.** A hosted invoice, card update, invite or password-reset link holds a token that works like a password. Both nginx access logs wrote it, in the URL and in the Referer. The dashboard's pages now also send `X-Frame-Options`, a `frame-ancestors` policy, `nosniff` and `Referrer-Policy`. ([#1651](https://github.com/gethardcount/hardcount/pull/1651))
 - **The quick start listens only on this computer.** It served the dashboard and API on every network interface, over plain HTTP, with a live key already made. A new quick-start `.env` sets `NGINX_HTTP_PORT=127.0.0.1:8080`. From another machine, use an SSH tunnel ([quick start](docs/quick-start.md)). ([#1635](https://github.com/gethardcount/hardcount/pull/1635))
+- **Postgres now also keeps each account's Stripe keys apart when they are saved, listed or removed.** Settings → Payments and `/v1/settings/stripe` run these under row-level security, as the caller's account and mode. Hardcount's code already refused another account's or mode's keys. Now the database refuses them too. Nothing changes for a caller managing its own keys. ([#1655](https://github.com/gethardcount/hardcount/pull/1655))
 
 ## [0.9.3] - 2026-11-09
 

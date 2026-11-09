@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"net/http/httptest"
 	"net/url"
@@ -59,7 +58,7 @@ func newRefundFlow(t *testing.T, db *postgres.DB, ts *httptest.Server, name stri
 	f := &refundFlow{t: t, db: db, ts: ts, stripeRefunds: map[string]string{}}
 	f.tenantID = testutil.CreateTestTenant(t, db, name)
 	f.key = createAPIKeyWithMode(t, db, f.tenantID, false)
-	if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{
+	if _, err := tenantstripe.NewStore(db).Upsert(callerCtx(f.tenantID, false), tenantstripe.UpsertInput{
 		TenantID: f.tenantID, Livemode: false, SecretKey: "sk_test_refund_flow", PublishableKey: "pk_test_refund_flow",
 	}); err != nil {
 		t.Fatalf("connect stripe: %v", err)

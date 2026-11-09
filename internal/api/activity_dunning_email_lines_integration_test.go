@@ -223,7 +223,7 @@ func TestActivityLines_SkippedEmailSaysWhy(t *testing.T) {
 	key := createAPIKeyWithMode(t, db, tenantID, false)
 	// The setup-link email goes out only with Stripe connected (ADR-060
 	// amendment 2026-10-30); without it the customer gets the invoice.
-	if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{
+	if _, err := tenantstripe.NewStore(db).Upsert(callerCtx(tenantID, false), tenantstripe.UpsertInput{
 		TenantID: tenantID, Livemode: false, SecretKey: "sk_test_skipped_email", PublishableKey: "pk_test_skipped_email",
 	}); err != nil {
 		t.Fatalf("connect stripe: %v", err)

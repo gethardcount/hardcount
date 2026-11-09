@@ -14,7 +14,7 @@ Hardcount is pre-1.0 and has no production users yet. The other four are in prod
 
 - One MIT licence, and every feature is in it.
 - A test clock for each test customer, on your normal deployment.
-- On most API requests, Postgres row-level security keeps accounts apart, on top of application code. The rest, such as background jobs, sign-in and Stripe credential settings, filter by account in application code ([full list](architecture.md#design-rules)).
+- On most API requests, Postgres row-level security keeps accounts apart, on top of application code. The rest, such as background jobs, sign-in and reading an account's Stripe keys, filter by account in application code ([full list](architecture.md#design-rules)).
 - Failed-payment retries are included. Kill Bill includes them too.
 - Webhooks are signed, with a timestamp, without running another service.
 - The throughput figure comes with its hardware and method.

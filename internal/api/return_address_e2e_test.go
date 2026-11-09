@@ -31,7 +31,7 @@ func TestE2E_ReturnAddressesUnset(t *testing.T) {
 
 	tenantID := testutil.CreateTestTenant(t, db, "Return Address Co")
 	key := createAPIKeyWithMode(t, db, tenantID, false)
-	if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{
+	if _, err := tenantstripe.NewStore(db).Upsert(callerCtx(tenantID, false), tenantstripe.UpsertInput{
 		TenantID: tenantID, Livemode: false, SecretKey: "sk_test_return_address", PublishableKey: "pk_test_return_address",
 	}); err != nil {
 		t.Fatalf("connect stripe: %v", err)
