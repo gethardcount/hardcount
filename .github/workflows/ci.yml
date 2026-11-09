@@ -859,7 +859,7 @@ jobs:
           mkdir -p "$dl"
           syft="syft_${SYFT_VERSION}_linux_amd64.tar.gz"
           grype="grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
-          cosign=cosign-linux-amd64
+          cosign="cosign-linux-amd64"
           get() { curl -fsSL --retry 5 --retry-delay 10 -o "$dl/$2" "$1/$2"; }
           get "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}" "$syft"
           get "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}" "$grype"
@@ -1042,7 +1042,7 @@ jobs:
           mkdir -p "$dl"
           syft="syft_${SYFT_VERSION}_linux_amd64.tar.gz"
           grype="grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
-          cosign=cosign-linux-amd64
+          cosign="cosign-linux-amd64"
           get() { curl -fsSL --retry 5 --retry-delay 10 -o "$dl/$2" "$1/$2"; }
           get "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}" "$syft"
           get "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}" "$grype"
