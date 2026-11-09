@@ -1681,17 +1681,6 @@ type TaxApplication struct {
 	DiscountCents int64
 }
 
-// truncateReason clips a provider error string to a sensible length before
-// stuffing it into invoices.tax_pending_reason. Full provider payloads are
-// persisted to tax_calculations for audit — this column is a human-readable
-// hint for the dashboard banner.
-func truncateReason(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max]
-}
-
 // displayTaxRate picks the rate to persist as invoice-level invoices.tax_rate.
 // When every taxed line shares one rate (the common single-jurisdiction case)
 // that statutory rate is authoritative — it is the real rate the customer was
@@ -1960,7 +1949,7 @@ func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, tenantI
 		// envelope unwrapped) — preserved verbatim in tax_calculations
 		// for diagnostic depth.
 		app.TaxErrorCode = string(tax.Classify(err))
-		app.TaxPendingReason = truncateReason(tax.CleanMessage(err.Error()), 500)
+		app.TaxPendingReason = errs.Clip(tax.CleanMessage(err.Error()), 500)
 		// tax_deferred_at lands in simulated time on clock-pinned
 		// invoices via ctx-bound effective-now. The clock-nil branch
 		// covers narrow unit tests that construct an Engine without

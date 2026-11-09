@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -547,6 +548,60 @@ func TestUpdateItem_ProrationTaxErrorDefersToDraft(t *testing.T) {
 	}
 	if inv.TaxPendingReason == "" {
 		t.Error("invoice TaxPendingReason must carry the provider error")
+	}
+}
+
+// TestUpdateItem_ProrationTaxErrorReasonCutBetweenCharacters: the tax error
+// is long and not plain ASCII. The proration invoice's tax_pending_reason
+// keeps the error up to the last whole character before each cut: 200 bytes
+// plus "…" for a plain error (tax.CleanMessage), 500 bytes for the message in
+// a Stripe JSON envelope. Postgres refuses text that is not valid UTF-8
+// (SQLSTATE 22021), so a reason cut inside a character failed the invoice
+// write, and with it the item change.
+func TestUpdateItem_ProrationTaxErrorReasonCutBetweenCharacters(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "plain error, 200-byte cut",
+			err:  errors.New(strings.Repeat("a", 199) + "é and more" + strings.Repeat("b", 100)),
+			want: strings.Repeat("a", 199) + "…",
+		},
+		{
+			name: "JSON envelope, 500-byte cut",
+			err:  errors.New(`stripe tax: {"message":"` + strings.Repeat("a", 499) + `é and more"}`),
+			want: strings.Repeat("a", 499),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := newMemStore()
+			subID, itemID := seedSubWithItem(t, store, "t1", "cus_1", "plan_old")
+			plans := &plansMock{plans: map[string]domain.Plan{
+				"plan_old": {ID: "plan_old", Name: "Basic", BaseAmountCents: 1000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
+				"plan_new": {ID: "plan_new", Name: "Pro", BaseAmountCents: 3000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
+			}}
+			invoices := &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}
+			h := NewHandler(NewService(store, nil))
+			h.SetProrationDeps(plans, invoices)
+			h.SetProrationTaxApplier(&prorationTaxApplierMock{err: tc.err})
+
+			body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
+			rr := httptest.NewRecorder()
+			h.updateItem(rr, updateItemURL(auth.WithTenantID(ctx, "t1"), subID, itemID, body))
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
+			}
+			if len(invoices.createdInvoices) != 1 {
+				t.Fatalf("got %d invoices, want 1", len(invoices.createdInvoices))
+			}
+			if got := invoices.createdInvoices[0].TaxPendingReason; got != tc.want {
+				t.Errorf("TaxPendingReason = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

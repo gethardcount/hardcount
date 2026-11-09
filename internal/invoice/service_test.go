@@ -1290,6 +1290,25 @@ func TestRecordOfflinePayment(t *testing.T) {
 		}
 	})
 
+	// The audit row keeps 500 bytes of the note. When that cut lands inside
+	// a character, the row keeps the note up to the character before it,
+	// never half of it.
+	t.Run("a long note is cut between two characters", func(t *testing.T) {
+		svc, audit := mkSvc()
+		inv := mkFinalized(svc)
+		kept := strings.Repeat("a", 499)
+		if _, err := svc.RecordOfflinePayment(ctx, "t1", inv.ID, kept+"é and more"); err != nil {
+			t.Fatalf("RecordOfflinePayment: %v", err)
+		}
+		meta := audit.entries[len(audit.entries)-1].metadata
+		if meta["note"] != kept {
+			t.Errorf("audit note = %q, want the first 499 bytes, which end before the split character", meta["note"])
+		}
+		if meta["note_truncated"] != true {
+			t.Errorf("audit note_truncated = %v, want true", meta["note_truncated"])
+		}
+	})
+
 	// amount_cents must be the BOOKED amount, not the post-transition
 	// amount_due. MarkPaid flips amount_paid=amount_due and amount_due=0
 	// in one statement, so AmountDueCents on the updated row is 0. The

@@ -41,7 +41,7 @@ export interface WebhookEndpointDelivery {
   status_code: number;
   /** Attempts made so far, at most 6. */
   attempt_count: number;
-  /** Up to the first 1 KB of the receiver's latest answer. */
+  /** Up to the first 1 KB of the receiver's latest answer, as text. Invalid UTF-8 and NUL bytes show as U+FFFD. */
   response_body: string;
   /**
      * Why an attempt failed, such as `HTTP 500`, a connection error,

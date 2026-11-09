@@ -36,7 +36,7 @@ export interface WebhookEventDeliveryAttempt {
   status: WebhookEventDeliveryAttemptStatus;
   /** HTTP status from the receiver's latest answer. 0 when no attempt got an answer. */
   status_code: number;
-  /** Up to the first 1 KB of the receiver's latest answer. */
+  /** Up to the first 1 KB of the receiver's latest answer, as text. Invalid UTF-8 and NUL bytes show as U+FFFD. */
   response_body: string;
   /** Why an attempt failed, such as `HTTP 500` or a connection error. Empty when no attempt failed. */
   error: string;

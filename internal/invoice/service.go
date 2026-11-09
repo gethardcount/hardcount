@@ -2407,11 +2407,9 @@ func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note s
 		// was truncated rather than silently keeping half a sentence.
 		if note != "" {
 			const maxNote = 500
+			meta["note"] = errs.Clip(note, maxNote)
 			if len(note) > maxNote {
-				meta["note"] = note[:maxNote]
 				meta["note_truncated"] = true
-			} else {
-				meta["note"] = note
 			}
 		}
 		_ = s.audit.Log(ctx, tenantID, domain.AuditActionUpdate, "invoice", updated.ID, updated.InvoiceNumber, meta)
