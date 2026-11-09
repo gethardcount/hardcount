@@ -1,6 +1,6 @@
 # ADR-112: Dunning exhaustion settles two questions, not one
 
-**Status:** Accepted (2026-08-05; amended 2026-10-08, 2026-10-19, 2026-10-22 and 2026-10-30)
+**Status:** Accepted (2026-08-05; amended 2026-10-08, 2026-10-19, 2026-10-22, 2026-10-30 and 2026-11-09)
 **Amends:** [ADR-036](036-dunning-campaigns-model.md) (dunning campaigns —
 `final_action` and its 2026-05-16 four-value enum)
 **Relates to:** [ADR-110](110-written-off-invoices-close-self-service-payment.md)
@@ -25,6 +25,9 @@ payment is `processing` or `unknown`, or a charge hold is set (a charge running,
 or one whose result was lost, [ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
 The final action takes the hold itself, so no charge starts while it cancels.
 The run waits and is checked again ([amendments of 2026-10-19](#amendment-2026-10-19--no-final-action-while-a-payment-may-be-in-flight)).
+When dunning writes the invoice off, the write-off and the run's escalation
+commit in one transaction, so a crash between them cannot close the run
+without its escalation ([amendment of 2026-11-09](#amendment-2026-11-09--the-write-off-and-the-escalation-commit-together-p1-26)).
 
 ## Context
 
@@ -483,3 +486,79 @@ it leaves behind is paid.
   signed webhooks and a test clock), `internal/dunning/retry_in_flight_integration_test.go`
   and `internal/invoice/retry_hold_release_integration_test.go` on real
   Postgres, and `internal/dunning/retry_in_flight_test.go`.
+
+## Amendment 2026-11-09 — the write-off and the escalation commit together (P1-26)
+
+**Gap.** Under a policy that writes the invoice off, exhaustion committed the
+write-off in its own transaction and the escalation after it. Between the two
+commits, any of these left the invoice written off and the run active with
+its exhaustion lease: a crash, a deploy, a lost leader lease, or a failed
+insert of `dunning.escalated`. After the lease, the next tick read the
+written-off invoice as an operator's write-off and resolved the run as
+`invoice_not_collectible`. So:
+
+- the integrator got `dunning.resolved` instead of `dunning.escalated`;
+- the customer got no escalation email;
+- the invoice timeline never said the payment retries ran out.
+
+A resolver that committed between the late re-check and the write-off, such as
+Stripe refusing the amount as below its minimum, also left a write-off beside
+a resolved run.
+
+**Decision.** When dunning writes the invoice off itself, the escalation runs
+inside the write-off's transaction, as a callback
+(`invoice.Service.MarkUncollectibleThen`). That transaction does these steps,
+in order:
+
+1. It locks the invoice row (`FOR UPDATE`).
+2. It flips the invoice to `uncollectible` and closes its open Checkout
+   claims.
+3. It checks the charge hold, then runs the escalation (`EscalateRunTx`): the
+   run's guarded write, the `dunning.escalated` event, the escalated timeline
+   row, and the escalation email under its savepoint.
+4. It queues `invoice.marked_uncollectible`.
+
+- **Lock order.** The invoice is locked before the run, the order the failure
+  settle and `RecordRetryInFlight` follow. The timeline row's foreign key
+  locks the invoice, which the transaction already holds. No subscription row
+  is locked.
+- **A run that has moved rolls the write-off back.** A payment, a void or an
+  operator may have resolved the run, or another processor escalated it.
+  Then the run's write does not apply, the write-off rolls back with it, and
+  the invoice stays open.
+- **A failed escalation rolls the write-off back too.** The run keeps its
+  exhaustion lease and is not marked `action_failed`, so the tick after the
+  lease runs the whole exhaustion again.
+- **The escalated timeline row.** On the write-off path it is written in
+  that transaction. An escalation with no write-off still writes its row
+  after its own commit. Writing it in that escalation's transaction would lock
+  the run row and then the invoice row, for the foreign key: the reverse of
+  the failure settle's order.
+- **Event order.** `dunning.escalated` and `invoice.marked_uncollectible` now
+  share one transaction and one `next_attempt_at`, so their delivery order is
+  not fixed. Receivers must not rely on it
+  ([webhooks](../webhooks.md#three-rules-for-your-receiver), rule 2).
+
+**Accepted residue.**
+
+- The subscription action still commits alone, before the write-off. An
+  exhaustion interrupted after it converges at the exhaustion lease, or after
+  the stale-hold sweep when the charge hold was left set. Folding the
+  subscription action in would bring the billing run, with its tax calls,
+  and the subscription-then-invoice lock pair into this transaction.
+- Runs already closed as `invoice_not_collectible` this way are not
+  backfilled: nothing tells them apart from an operator's write-off without a
+  guess.
+
+**What this closes.** It closes the first item deferred by the
+[amendment of 2026-10-08](#amendment-2026-10-08--an-interrupted-exhaustion-is-finished-and-escalates-once),
+a crash after the write-off resolving the run without its escalation, ahead
+of that item's trigger. Plan item P1-26 scheduled the fix; no tenant reported
+a missing notice. The third deferred item, the escalated timeline row written
+after the commit, is closed for policies that write the invoice off. It stays
+open, with its trigger, for policies that do not.
+
+Pinned by `internal/dunning/outbox_in_tx_integration_test.go`,
+`internal/dunning/exhaust_writeoff_race_integration_test.go` and
+`internal/api/dunning_retry_definite_decline_integration_test.go` on real
+Postgres, and `internal/dunning/exhaust_strand_test.go`.
