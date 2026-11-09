@@ -69,6 +69,12 @@ The rest of the code rules are in the [code standard](dev/code-standard.md).
   ([Fowler: test pyramid](https://martinfowler.com/articles/practical-test-pyramid.html))
 - **Use the helpers in `internal/testutil` instead of copying them.** Copies
   drift. ([SWE at Google, ch. 12](https://abseil.io/resources/swe-book/html/ch12.html))
+- **Make a test's own database role with `testutil.CreateRole`.** A role
+  belongs to the whole Postgres server, not to one database. With a fixed
+  name, the same test running on another test database at the same time
+  drops or changes your role. `CreateRole` names the role after the test
+  database, and drops it and its grants when the test ends.
+  ([Postgres: database roles](https://www.postgresql.org/docs/current/user-manag.html))
 - **Build test data through production code** (constructors, services, the
   API). Use raw SQL only for a state production can't reach, and say why.
   ([Google: test helpers](https://google.github.io/styleguide/go/best-practices#creating-test-helper-packages))
