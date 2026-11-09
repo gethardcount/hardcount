@@ -2,6 +2,7 @@ package dunning_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -65,11 +66,12 @@ func (m dunningMovers) GetTerminalState(ctx context.Context, tenantID, id string
 	return st, nil
 }
 
-// writeOff bridges invoice.Service to dunning's write-off port.
+// writeOff bridges invoice.Service to dunning's write-off port, the same call
+// internal/api/adapters.go makes: then runs in the write-off's transaction.
 type writeOff struct{ svc *invoice.Service }
 
-func (w writeOff) MarkUncollectible(ctx context.Context, tenantID, id string) error {
-	_, err := w.svc.MarkUncollectible(ctx, tenantID, id)
+func (w writeOff) MarkUncollectible(ctx context.Context, tenantID, id string, then func(*sql.Tx) error) error {
+	_, err := w.svc.MarkUncollectibleThen(ctx, tenantID, id, then)
 	return err
 }
 
@@ -124,8 +126,10 @@ type exhaustFixture struct {
 	invoices  *invoice.PostgresStore
 	invSvc    *invoice.Service
 	subs      *subscription.Service
-	runs      *dunning.PostgresStore
-	svc       *dunning.Service
+	// subStore is subs' store, so a test can wire its webhook outbox.
+	subStore *subscription.PostgresStore
+	runs     *dunning.PostgresStore
+	svc      *dunning.Service
 }
 
 // newExhaustFixture builds one tenant with a real active subscription, its
@@ -224,7 +228,7 @@ func newExhaustFixture(t *testing.T, db *postgres.DB, name string, acts finalAct
 
 	return &exhaustFixture{
 		db: db, ctx: ctx, clk: clk, tenantID: tenantID, subID: sub.ID, invoiceID: inv.ID, runID: runID,
-		invoices: invoices, invSvc: invSvc, subs: subSvc, runs: runs, svc: svc,
+		invoices: invoices, invSvc: invSvc, subs: subSvc, subStore: subStore, runs: runs, svc: svc,
 	}
 }
 

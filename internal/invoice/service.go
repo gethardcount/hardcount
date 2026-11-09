@@ -2172,6 +2172,18 @@ func (s *Service) AfterVoid(ctx context.Context, tenantID string, voided domain.
 // uncollectible (idempotent) states. Voided is allowed to transition
 // only one direction (voided is terminal), so this errors on it too.
 func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
+	return s.MarkUncollectibleThen(ctx, tenantID, id, nil)
+}
+
+// MarkUncollectibleThen is MarkUncollectible with then (nil = none) run in
+// the write-off's transaction: after the status flip and the charge-hold
+// check, while the invoice's row lock is held, before
+// invoice.marked_uncollectible is queued. An error from then rolls the
+// write-off back and is returned unwrapped. Dunning passes the run's
+// escalation, so a write-off it makes commits only with that escalation
+// (ADR-112 amendment 2026-11-09). then reads nothing outside tx: the row
+// lock is held while it runs.
+func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string, then func(tx *sql.Tx) error) (domain.Invoice, error) {
 	ctx = s.bindForInvoice(ctx, tenantID, id)
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
@@ -2215,7 +2227,13 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 	// whose hold is stale (ADR-127): writing off moves no money, and a payment
 	// the stale-hold sweep finds later still settles it.
 	updated, err := s.store.UpdateStatusWithReversalPrior(ctx, tenantID, id, domain.InvoiceUncollectible, func(tx *sql.Tx, locked domain.Invoice) error {
-		return s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionMarkUncollectible)
+		if err := s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionMarkUncollectible); err != nil {
+			return err
+		}
+		if then != nil {
+			return then(tx)
+		}
+		return nil
 	})
 	if err != nil {
 		return domain.Invoice{}, err

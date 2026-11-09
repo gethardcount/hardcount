@@ -791,7 +791,8 @@ func (s *PostgresStore) UpdateRunIfActive(ctx context.Context, tenantID string, 
 // dunning.escalated, carrying the run as the write left it with extra
 // beside it (ADR-040, ADR-131). A failed insert fails the escalation, so the
 // two commit together or not at all. The event is queued before then's
-// SAVEPOINT: an email failure skips only the email.
+// SAVEPOINT: an email failure skips only the email. The caller writes the
+// escalated timeline row after the commit (see EscalateRunTx for why).
 func (s *PostgresStore) EscalateRun(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, extra map[string]any, then func(tx *sql.Tx) error) (bool, error) {
 	if run.State != domain.DunningEscalated {
 		return false, fmt.Errorf("dunning run %s: EscalateRun writes an escalated run, not one in state %q", run.ID, run.State)
@@ -801,20 +802,64 @@ func (s *PostgresStore) EscalateRun(ctx context.Context, tenantID string, run do
 	}, then)
 }
 
-// writeRunIfActive is the guarded write of UpdateRunIfActive and EscalateRun.
-// onWrite (nil = none) runs on the transaction right after the write applies,
-// with the row it wrote, and its error fails the whole write. then runs after
-// it, under the email SAVEPOINT.
-func (s *PostgresStore) writeRunIfActive(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, onWrite func(tx *sql.Tx, written domain.InvoiceDunningRun) error, then func(tx *sql.Tx) error) (bool, error) {
-	if err := refuseStrandingWrite(run); err != nil {
-		return false, err
+// EscalateRunTx is EscalateRun on the caller's transaction tx, which commits
+// it: the write-off's (invoice.Service.MarkUncollectibleThen), so the
+// write-off and the escalation commit together. When the write applies, tx
+// also queues dunning.escalated with extra beside the run and inserts event,
+// the escalated timeline row, then runs then under the email SAVEPOINT. A
+// failed insert fails the escalation, and the write-off with it.
+//
+// Lock order: tx must already hold the invoice's row lock (FOR UPDATE)
+// before this writes the run, the order the failure settle and
+// RecordRetryInFlight follow. The timeline row's foreign key takes a
+// key-share lock on that invoice, which tx then already holds. A caller
+// without the invoice's lock uses EscalateRun and writes the row after its
+// commit: writing the run and then waiting on the invoice would deadlock
+// against a settle that holds the invoice and waits on the run.
+func (s *PostgresStore) EscalateRunTx(ctx context.Context, tx *sql.Tx, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, extra map[string]any, event domain.InvoiceDunningEvent, then func(tx *sql.Tx) error) (bool, error) {
+	if run.State != domain.DunningEscalated {
+		return false, fmt.Errorf("dunning run %s: EscalateRunTx writes an escalated run, not one in state %q", run.ID, run.State)
 	}
+	return s.writeRunIfActiveTx(ctx, tx, run, expectedAttempts, func(tx *sql.Tx, written domain.InvoiceDunningRun) error {
+		if err := s.enqueueRunEvent(ctx, tx, tenantID, domain.EventDunningEscalated, written, extra); err != nil {
+			return err
+		}
+		if _, err := s.createEventTx(ctx, tx, tenantID, event); err != nil {
+			return fmt.Errorf("escalated timeline row: %w", err)
+		}
+		return nil
+	}, then)
+}
+
+// writeRunIfActive is writeRunIfActiveTx in its own transaction, which it
+// commits when the write applies: the guarded write of UpdateRunIfActive and
+// EscalateRun.
+func (s *PostgresStore) writeRunIfActive(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, onWrite func(tx *sql.Tx, written domain.InvoiceDunningRun) error, then func(tx *sql.Tx) error) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return false, err
 	}
 	defer postgres.Rollback(tx)
 
+	applied, err := s.writeRunIfActiveTx(ctx, tx, run, expectedAttempts, onWrite, then)
+	if err != nil || !applied {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// writeRunIfActiveTx writes run on tx only while the row is still active at
+// expectedAttempts (UpdateRunIfActive's guards), and reports whether it
+// applied. onWrite (nil = none) runs on tx right after the write applies,
+// with the row it wrote, and its error fails the whole write. then runs after
+// it, under the email SAVEPOINT. The caller commits.
+func (s *PostgresStore) writeRunIfActiveTx(ctx context.Context, tx *sql.Tx, run domain.InvoiceDunningRun, expectedAttempts int, onWrite func(tx *sql.Tx, written domain.InvoiceDunningRun) error, then func(tx *sql.Tx) error) (bool, error) {
+	if err := refuseStrandingWrite(run); err != nil {
+		return false, err
+	}
 	now := clock.Now(ctx)
 	written, err := scanRun(tx.QueryRowContext(ctx, `
 		UPDATE invoice_dunning_runs SET state=$1, reason=$2, attempt_count=$3,
@@ -845,14 +890,11 @@ func (s *PostgresStore) writeRunIfActive(ctx context.Context, tenantID string, r
 			if _, rerr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT dunning_email"); rerr != nil {
 				return false, rerr
 			}
-			slog.Error("dunning email enqueue failed inside the state transaction — transition committed, email skipped",
+			slog.Error("dunning email enqueue failed inside the state transaction — the email is skipped, the state change goes ahead",
 				"run_id", run.ID, "invoice_id", run.InvoiceID, "error", herr)
 		} else if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT dunning_email"); err != nil {
 			return false, err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
 	}
 	return true, nil
 }
