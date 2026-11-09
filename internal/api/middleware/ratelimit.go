@@ -15,6 +15,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/platform/logging"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -200,7 +201,7 @@ func (rl *RateLimiter) allow(ctx context.Context, key string) (int, time.Time, t
 			)
 			return rl.local.allow(key, now)
 		case rl.failClosed:
-			slog.Error("rate_limiter: redis error, failing closed",
+			slog.Log(ctx, logging.ErrorLevel(ctx, err), "rate_limiter: redis error, failing closed",
 				"error", err,
 				"key", key,
 			)
