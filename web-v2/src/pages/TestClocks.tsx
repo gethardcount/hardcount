@@ -245,7 +245,7 @@ function CreateClockDialog({ onClose }: { onClose: () => void }) {
                 now={now}
               />
               <p className="text-xs text-muted-foreground">
-                Times are in your account's timezone ({tz}). The clock starts here; use Advance from the detail page to move it forward.
+                Times are in your account's time zone ({tz}). The clock starts here; use Advance from the detail page to move it forward.
               </p>
               {pickerError && <p className="text-xs text-destructive">{pickerError}</p>}
             </div>

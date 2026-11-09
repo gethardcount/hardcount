@@ -606,7 +606,7 @@ function AdvanceClockDialog({
                 min={formatYMDInTZ(clock.frozen_time, tz)}
               />
             </div>
-            <p className="text-xs text-muted-foreground mt-1.5">Times are in your account's timezone ({tz}). Each advance moves the clock forward by up to 1 year — chunk longer simulations into successive advances.</p>
+            <p className="text-xs text-muted-foreground mt-1.5">Times are in your account's time zone ({tz}). Each advance moves the clock forward by up to 1 year — chunk longer simulations into successive advances.</p>
             {targetIso !== null && new Date(targetIso) <= new Date(clock.frozen_time) && (
               <p className="text-xs text-destructive mt-1">Target time must be after the current clock time.</p>
             )}

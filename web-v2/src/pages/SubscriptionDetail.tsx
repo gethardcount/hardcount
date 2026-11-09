@@ -1357,7 +1357,7 @@ export default function SubscriptionDetailPage() {
               min={formatYMDInTZ(sub.trial_end_at ?? nowDate.toISOString(), tz)}
             />
             <p className="text-xs text-muted-foreground">
-              Times are in your tenant timezone ({tz}).
+              Times are in your account's time zone ({tz}).
             </p>
           </div>
           <DialogFooter>
