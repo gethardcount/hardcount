@@ -271,23 +271,31 @@ no claim. A second processor could escalate a run twice or reopen it.
   stranded before this fix. No backfill: the check names the one-line repair.
 
 **Deferred, with triggers.**
-- A crash after the write-off committed but before the escalation landed
-  recovers as `invoice_not_collectible` (the late-paid re-check sees the
-  uncollectible invoice), so the run closes without the escalation email. Every
-  terminal action did apply. Trigger: the first tenant on `mark_uncollectible`
-  who reports a missing final notice. Since 2026-11-09 a failed insert of the
-  `dunning.escalated` event fails the escalation write too, and recovers the
-  same way, with one `dunning.resolved` (P1-01).
+- *Closed 2026-11-09 by the
+  [amendment of 2026-11-09](#amendment-2026-11-09--the-write-off-and-the-escalation-commit-together-p1-26):
+  the write-off and the escalation commit together. A failed
+  `dunning.escalated` insert rolls the write-off back with it. The run keeps
+  its exhaustion lease, and the tick after the lease runs the exhaustion
+  again, so the run escalates.* Original note: A crash after the write-off
+  committed but before the escalation landed recovers as
+  `invoice_not_collectible` (the late-paid re-check sees the uncollectible
+  invoice), so the run closes without the escalation email. Every terminal
+  action did apply. Trigger: the first tenant on `mark_uncollectible` who
+  reports a missing final notice.
 - A holder frozen longer than the 15-minute lease can repeat terminal actions
   alongside the claim winner (the escalation itself stays exactly-once on
   `state`). Trigger: two or more dunning replicas in production. Since
   2026-10-22 the pause is skip-if-done: a pause already in force writes
   nothing ([ADR-036](036-dunning-campaigns-model.md) amendment 2026-10-22).
-- The escalated timeline row is written after the escalation commits (a crash
-  between loses it). Trigger: the one-attempt-path outbox work. The
-  `dunning.escalated` webhook no longer is: since 2026-11-09 it is queued in
-  the escalation's transaction (P1-01,
-  [ADR-040](040-outbox-always-on.md) amendment).
+- An escalation with no write-off writes its escalated timeline row after
+  the escalation commits (a crash between loses it). *Closed 2026-11-09 for
+  policies that write the invoice off: that row is written in the
+  write-off's transaction
+  ([amendment of 2026-11-09](#amendment-2026-11-09--the-write-off-and-the-escalation-commit-together-p1-26)).
+  Still open for an escalation with no write-off.* Trigger: the
+  one-attempt-path outbox work. The `dunning.escalated` webhook is not lost
+  this way: since 2026-11-09 it is queued in the escalation's transaction
+  (P1-01, [ADR-040](040-outbox-always-on.md) amendment).
 - InvoiceDetail ("Next retry") and the `/dunning` list's "Next Retry" column
   render any `next_action_at` as a retry, including the lease and the
   action_failed re-attempt. Copy fix; UI needs a show-before-PR walk.
