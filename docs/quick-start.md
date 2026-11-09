@@ -32,7 +32,8 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
    five containers: the Hardcount server, its dashboard, Postgres, Redis and
    nginx (a web server that puts the server and the dashboard on one
    address). The first start
-   downloads the images, which can take a few minutes.
+   downloads the images, which can take a few minutes. Hardcount listens
+   only on this computer (`127.0.0.1`), not on your network.
 
    **You see:**
 
@@ -54,7 +55,13 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
    cards once Stripe is connected.
 
 2. Open `http://localhost:8080` in your browser and sign in with that email
-   and password.
+   and password. If Hardcount runs on another machine, such as a cloud
+   server, first open an SSH tunnel to it from your computer, then open the
+   same address:
+
+   ```bash
+   ssh -L 8080:localhost:8080 you@server
+   ```
 
    **You see:** Home, with a strip at the top: "Test mode. You're viewing test
    data. No real money moves." Its four cards show zero, because Hardcount has
@@ -234,12 +241,15 @@ expected. Use the two links instead.
 | Run the demo again | `./quickstart.sh demo` | The same nine steps, for a new customer and a new invoice number. |
 | Stop Hardcount and keep its data | `./quickstart.sh stop` | "Stopped. Your data is kept. Run ./quickstart.sh to start again." |
 | Start it again | `./quickstart.sh` | The same "Hardcount is running." box. |
-| Stop Hardcount and delete its data (cannot be undone) | `./quickstart.sh destroy` | "Stopped, and the data of this quickstart install is deleted." |
+| Stop Hardcount and delete its data (cannot be undone) | `./quickstart.sh destroy`, then type `hardcount-quickstart` when it asks. `./quickstart.sh destroy --yes` skips the question. | "Stopped, and the data of this quickstart install is deleted." |
 
 ## If something goes wrong
 
 | What you see | What to do |
 |---|---|
+| "deploy/compose/.env was not written by quickstart.sh" | This folder holds a Hardcount install made by hand, such as one from [Production on one VM](production-one-vm.md). The quick start leaves it alone. Clone Hardcount into another folder and run `./quickstart.sh` there. If port 8080 is taken, start it with `HARDCOUNT_PORT=9000`. |
+| "the quick start in … already uses Docker Compose project hardcount-quickstart" | Every quick start uses that project, so two folders cannot share it. Use Hardcount from the folder the message names, or run `./quickstart.sh destroy` there first. If that folder no longer exists, the message gives the command that deletes its data. |
+| "Docker still holds the data of a quick start" | An earlier quick start's database is still in Docker, and this folder has no `.env` that can open it. Run `./quickstart.sh` in the folder that holds its `.env`. If you do not need that data, run the command the message gives, then `./quickstart.sh` again. |
 | A message that a port is already in use | Run `./quickstart.sh destroy`, then `HARDCOUNT_PORT=9000 ./quickstart.sh`. The dashboard is then at `http://localhost:9000`. |
 | "Hardcount did not become healthy in three minutes." | Read the log lines it prints above that message. |
 | "The first login was created earlier, and its password is shown only once." | The file that kept the password, `quickstart-credentials.json`, was removed. If you still have the password, sign in with it. If not, run `./quickstart.sh destroy` and start again. |
