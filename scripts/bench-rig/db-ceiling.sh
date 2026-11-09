@@ -82,7 +82,6 @@ if [ "$fixmode" != "$LIVEMODE" ]; then
   echo "       pass LIVEMODE=$fixmode (or re-seed with BENCH_LIVEMODE)." >&2
   exit 1
 fi
-maxc=$((ncust - 1))
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 
