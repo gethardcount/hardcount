@@ -49,21 +49,19 @@ type Biller interface {
 	// canceled_at is at/after current_period_end: that period ended
 	// unbilled, and no billing run bills a canceled subscription.
 	BillFinalOnImmediateCancel(ctx context.Context, sub domain.Subscription) (domain.Invoice, error)
-	// BillFinalOnImmediateCancelTx is the in-tx variant: inserts the
-	// final-on-cancel invoice on the caller's coordinator tx (ADR-056); the
-	// external finalize runs post-commit via FinalizeOnCreateInvoice. Empty
-	// invoice (nil error) for the no-op cases. afterCommit is never nil; the
-	// caller runs it only once the tx commits (it counts usage the invoice
-	// left unpriced, which a rolled-back, retried cancel must not count
-	// twice).
-	BillFinalOnImmediateCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (inv domain.Invoice, afterCommit func(), err error)
-	// BillOnCancelDraftsTx writes the cancel-proration relief on the caller's
-	// cancel tx (ADR-057, ADR-118): credit-note drafts (issue_pending) for
-	// paid and partly-used unpaid funding invoices, and an in-place void of a
-	// fully-unused unpaid one. Any error rolls the cancel back — never a
-	// canceled subscription whose relief was lost. The caller runs
-	// FinishRelief after commit.
-	BillOnCancelDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (domain.Relief, error)
+	// BillCancelTx writes a cancel's final invoice and its relief on the
+	// caller's cancel tx (ADR-056, ADR-118). It prices the final invoice,
+	// then writes the relief: credit-note drafts (issue_pending) for paid and
+	// partly-used unpaid funding invoices, and an in-place void of a
+	// fully-unused unpaid one. Then it numbers and inserts the final invoice,
+	// so the relief's credit-note locks come before the tenant's number row,
+	// the order every credit-note writer keeps. inv is empty when there is
+	// nothing to bill. An error names the step that failed (the final
+	// invoice or the relief) and rolls the cancel back. After commit the
+	// caller runs afterCommit (never nil: it counts usage the invoice left
+	// unpriced, which a rolled-back, retried cancel must not count twice),
+	// then FinishRelief, then FinalizeOnCreateInvoice.
+	BillCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (inv domain.Invoice, r domain.Relief, afterCommit func(), err error)
 	// FinishRelief runs a committed relief's post-commit legs (issue the
 	// drafts; the voids' tax reversal). Best-effort: each leg is durable and
 	// recovered by its own sweep. Each void's invoice.voided committed with
@@ -78,10 +76,10 @@ type Biller interface {
 	// period below that window would re-bill it at the next close, so the
 	// swap refuses instead.
 	ThresholdBilledThroughTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (*time.Time, error)
-	// BillOnPlanSwapDraftsTx is the plan-swap twin of BillOnCancelDraftsTx:
-	// the refund for the OLD period's unused prepayment, written on the swap
-	// tx; any error rolls the swap back. sub is the PRE-swap snapshot. The
-	// caller runs FinishRelief after commit.
+	// BillOnPlanSwapDraftsTx is the plan-swap twin of the relief inside
+	// BillCancelTx: the refund for the OLD period's unused prepayment,
+	// written on the swap tx; any error rolls the swap back. sub is the
+	// PRE-swap snapshot. The caller runs FinishRelief after commit.
 	BillOnPlanSwapDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, at time.Time) (domain.Relief, error)
 	// BillOnCreateTx is the in-tx variant of BillOnCreate: it inserts the day-1
 	// in_advance invoice on the caller's tx (no finalize). ok=false means there
@@ -2153,17 +2151,11 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 		if s.biller == nil {
 			return emitAudit(domain.Relief{}, "")
 		}
-		inv, afterCommit, billErr := s.biller.BillFinalOnImmediateCancelTx(ctx, tx, c)
+		inv, r, afterCommit, billErr := s.biller.BillCancelTx(ctx, tx, c)
 		if billErr != nil {
-			return fmt.Errorf("final-on-scheduled-cancel invoice: %w", billErr)
+			return fmt.Errorf("scheduled cancel: %w", billErr)
 		}
-		finalInv = inv
-		afterBillCommit = afterCommit
-		r, reliefErr := s.biller.BillOnCancelDraftsTx(ctx, tx, c)
-		if reliefErr != nil {
-			return fmt.Errorf("scheduled-cancel proration relief: %w", reliefErr)
-		}
-		relief = r
+		finalInv, relief, afterBillCommit = inv, r, afterCommit
 		return emitAudit(r, inv.Currency)
 	})
 	if err != nil {
@@ -2349,17 +2341,17 @@ func (s *Service) cancel(ctx context.Context, tenantID, id string, grace time.Du
 		return sub, 0, nil
 	}
 
-	// PR-10 / ADR-056: emit the final partial-period invoice (in_arrears
-	// prorated base + usage from current_period_start → canceled_at) IN THE SAME
-	// tx as the cancel flip, so a billing failure rolls the cancel back rather
-	// than leaving a canceled sub with an uninvoiced partial period — a permanent
-	// revenue leak (there is no final-on-cancel reconciler; the prior "G3
-	// deferred reconciler" referenced here never existed). That includes a
-	// period that ended unbilled (canceled_at at/after current_period_end):
-	// the biller refuses it. The relief is written after it on the same tx.
-	// Neither write applies credits; after commit the relief is issued first
-	// and the final invoice collected second, so the relief's balance credit
-	// reduces this invoice (finishReliefThenCollect).
+	// The final partial-period invoice (in_arrears prorated base and usage
+	// from current_period_start to canceled_at) and the relief are written in
+	// the cancel's tx (ADR-056, ADR-118). A billing failure then rolls the
+	// cancel back: a canceled subscription with an uninvoiced partial period
+	// is revenue that no reconciler recovers. That includes a period that
+	// ended unbilled (canceled_at at or after current_period_end): the biller
+	// refuses it. BillCancelTx writes the relief before it numbers the final
+	// invoice, the lock order every credit-note writer keeps. Neither write
+	// applies credits. After commit the relief is issued first and the final
+	// invoice collected second, so the relief's balance credit reduces this
+	// invoice (finishReliefThenCollect).
 	var finalInv domain.Invoice
 	afterBillCommit := func() {}
 	var relief domain.Relief
@@ -2399,20 +2391,13 @@ func (s *Service) cancel(ctx context.Context, tenantID, id string, grace time.Du
 		if s.biller == nil {
 			return emitCancelAudit(domain.Relief{}, "")
 		}
-		inv, afterCommit, billErr := s.biller.BillFinalOnImmediateCancelTx(ctx, tx, c)
+		// The biller's error names the step that failed: the final invoice or
+		// the relief. Any failure rolls the whole cancel back.
+		inv, r, afterCommit, billErr := s.biller.BillCancelTx(ctx, tx, c)
 		if billErr != nil {
-			return fmt.Errorf("final-on-cancel invoice: %w", billErr)
+			return billErr
 		}
-		finalInv = inv
-		afterBillCommit = afterCommit
-		// Cancel-proration relief (ADR-057, ADR-118): written IN this tx after
-		// the final invoice, for every funding invoice, paid or unpaid. Any
-		// failure rolls the whole cancel back.
-		r, reliefErr := s.biller.BillOnCancelDraftsTx(ctx, tx, c)
-		if reliefErr != nil {
-			return fmt.Errorf("cancel proration relief: %w", reliefErr)
-		}
-		relief = r
+		finalInv, relief, afterBillCommit = inv, r, afterCommit
 
 		return emitCancelAudit(r, inv.Currency)
 	})

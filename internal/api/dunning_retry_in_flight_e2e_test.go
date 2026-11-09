@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -159,7 +158,7 @@ func newInFlightRig(t *testing.T, name string, retryDays []int, script map[strin
 		"name": name + " policy", "enabled": true, "retry_days": retryDays,
 		"final_subscription_action": "none", "final_invoice_action": "none",
 	}).want(t, 201, "create dunning policy")
-	if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{
+	if _, err := tenantstripe.NewStore(db).Upsert(callerCtx(r.tenantID, false), tenantstripe.UpsertInput{
 		TenantID: r.tenantID, Livemode: false, SecretKey: "sk_test_retry_in_flight", PublishableKey: "pk_test_retry_in_flight",
 	}); err != nil {
 		t.Fatalf("connect stripe: %v", err)

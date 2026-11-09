@@ -459,7 +459,10 @@ export default function InvoiceDetailPage() {
     // A refusal means nothing was charged; "Couldn't charge" says that and
     // no more. No answer, a bare 5xx, or Stripe never answering gets "result
     // unknown" from errorToast, since the card may have been charged.
-    onError: (err) => { setShowCollectConfirm(false); showApiError(err, "Couldn't charge") },
+    // The page reloads either way: a failed request can still leave a change,
+    // such as the credit applied before a settle that answered 409
+    // concurrent_change, so the amount due shown may be stale.
+    onError: (err) => { invalidateAll(); setShowCollectConfirm(false); showApiError(err, "Couldn't charge") },
   })
 
   // No-payment-method nudge: re-send the SAME setup-link email the engine sent

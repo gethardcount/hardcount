@@ -90,12 +90,17 @@ type reliefCancelRig struct {
 	day1ID     string
 	invStore   *invoice.PostgresStore
 	credit     *credit.Service
+	cn         *creditnote.Service
+	engine     *billing.Engine
 	subSvc     *subscription.Service
 	charger    *invoiceCharger
 	noPM       *testNoPMNotifier
+	// cancelAt is when the cancel lands: reliefCancelAt, or an hour into the
+	// period with sameDay.
+	cancelAt time.Time
 	// wantCredited is the balance credit Cancel reports: a paid day-1
-	// invoice's share. An unpaid share's note reduces its own invoice, so it
-	// reports none.
+	// invoice's share. An unpaid share's note reduces its own invoice, and a
+	// voided invoice has no note, so neither reports any.
 	wantCredited int64
 }
 
@@ -105,16 +110,28 @@ type reliefRigOpts struct {
 	usageUnits int64 // usage on 2026-06-03, at 1c a unit
 	// day1Credit, when set, is granted before the day-1 invoice, which then
 	// stays unpaid with that much applied. It needs card=false. When zero the
-	// day-1 invoice is paid.
+	// day-1 invoice is paid, unless sameDay is set.
 	day1Credit int64
+	// sameDay cancels at 01:00 on the period's first day, with the usage at
+	// 00:30 and the day-1 invoice unpaid with nothing applied. The relief
+	// then voids the day-1 invoice. It needs card=false and no day1Credit.
+	sameDay bool
 }
 
 // newReliefCancelRig seeds one tenant: the plan, an active subscription in
-// its 2026-06 period with its day-1 invoice, and the usage on 2026-06-03.
+// its 2026-06 period with its day-1 invoice, and the usage on 2026-06-03
+// (00:30 on 2026-06-01 with sameDay).
 func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigOpts) *reliefCancelRig {
 	t.Helper()
 	if o.day1Credit > 0 && o.card {
 		t.Fatal("rig: a day-1 credit leaves the day-1 invoice unpaid, which needs card=false")
+	}
+	if o.sameDay && (o.card || o.day1Credit > 0) {
+		t.Fatal("rig: sameDay leaves the day-1 invoice unpaid with nothing applied, which needs card=false and no day1Credit")
+	}
+	cancelAt, usageAt := reliefCancelAt, reliefPeriodStart.AddDate(0, 0, 2)
+	if o.sameDay {
+		cancelAt, usageAt = reliefPeriodStart.Add(time.Hour), reliefPeriodStart.Add(30*time.Minute)
 	}
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, name)
@@ -196,36 +213,43 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 		}
 		wantCredited = 0
 	}
+	if o.sameDay {
+		wantCredited = 0
+	}
 	day1, err := e.BillOnCreate(ctx, sub)
 	if err != nil || day1.SubtotalCents != reliefBaseCents {
 		t.Fatalf("day-1 invoice: %v subtotal=%dc, want %dc", err, day1.SubtotalCents, reliefBaseCents)
 	}
-	if o.day1Credit == 0 {
+	if o.day1Credit == 0 && !o.sameDay {
 		if _, err := invStore.MarkPaid(ctx, tenantID, day1.ID, "pi_day1", periodStart); err != nil {
 			t.Fatalf("pay day-1 invoice: %v", err)
 		}
 	}
 
-	ts := periodStart.AddDate(0, 0, 2)
 	if _, err := usage.NewService(usageStore).Ingest(ctx, tenantID, usage.IngestInput{
-		CustomerID: cust.ID, MeterID: meter.ID, Quantity: decimal.NewFromInt(o.usageUnits), Timestamp: &ts,
+		CustomerID: cust.ID, MeterID: meter.ID, Quantity: decimal.NewFromInt(o.usageUnits), Timestamp: &usageAt,
 	}); err != nil {
 		t.Fatalf("ingest usage: %v", err)
 	}
 
-	subSvc := subscription.NewService(subStore, clock.NewFake(reliefCancelAt))
+	subSvc := subscription.NewService(subStore, clock.NewFake(cancelAt))
 	subSvc.SetBiller(e)
 	return &reliefCancelRig{
 		ctx: ctx, db: db, tenantID: tenantID, customerID: cust.ID, subID: sub.ID, day1ID: day1.ID,
-		invStore: invStore, credit: creditSvc, subSvc: subSvc, charger: charger, noPM: noPM,
-		wantCredited: wantCredited,
+		invStore: invStore, credit: creditSvc, cn: cnSvc, engine: e, subSvc: subSvc, charger: charger, noPM: noPM,
+		cancelAt: cancelAt, wantCredited: wantCredited,
 	}
 }
 
-// cancelImmediately is the operator's or API's immediate cancel at 2026-06-16.
+// cancel is the operator's or API's immediate cancel at cancelAt, unchecked.
+func (r *reliefCancelRig) cancel() (domain.Subscription, int64, error) {
+	return r.subSvc.Cancel(clock.WithEffectiveNow(r.ctx, r.cancelAt), r.tenantID, r.subID)
+}
+
+// cancelImmediately is cancel, checked.
 func (r *reliefCancelRig) cancelImmediately(t *testing.T) {
 	t.Helper()
-	canceled, credited, err := r.subSvc.Cancel(clock.WithEffectiveNow(r.ctx, reliefCancelAt), r.tenantID, r.subID)
+	canceled, credited, err := r.cancel()
 	if err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
@@ -234,22 +258,32 @@ func (r *reliefCancelRig) cancelImmediately(t *testing.T) {
 	}
 }
 
-// fireScheduledCancel is a cancel scheduled for 2026-06-16, fired by the
-// billing run an hour later.
-func (r *reliefCancelRig) fireScheduledCancel(t *testing.T) {
+// scheduleCancel schedules the cancel for cancelAt.
+func (r *reliefCancelRig) scheduleCancel(t *testing.T) {
 	t.Helper()
 	tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
 	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(r.ctx, `UPDATE subscriptions SET cancel_at = $1 WHERE id = $2`, reliefCancelAt, r.subID); err != nil {
+	if _, err := tx.ExecContext(r.ctx, `UPDATE subscriptions SET cancel_at = $1 WHERE id = $2`, r.cancelAt, r.subID); err != nil {
 		t.Fatalf("schedule cancel: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
-	if err := r.subSvc.FireDueScheduledCancel(clock.WithEffectiveNow(r.ctx, reliefCancelAt.Add(time.Hour)), r.tenantID, r.subID, reliefCancelAt); err != nil {
+}
+
+// fire is the billing run firing the scheduled cancel an hour after cancelAt.
+func (r *reliefCancelRig) fire() error {
+	return r.subSvc.FireDueScheduledCancel(clock.WithEffectiveNow(r.ctx, r.cancelAt.Add(time.Hour)), r.tenantID, r.subID, r.cancelAt)
+}
+
+// fireScheduledCancel is scheduleCancel then fire, checked.
+func (r *reliefCancelRig) fireScheduledCancel(t *testing.T) {
+	t.Helper()
+	r.scheduleCancel(t)
+	if err := r.fire(); err != nil {
 		t.Fatalf("fire scheduled cancel: %v", err)
 	}
 	sub, err := subscription.NewPostgresStore(r.db).Get(r.ctx, r.tenantID, r.subID)

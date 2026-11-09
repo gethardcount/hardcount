@@ -97,7 +97,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [054](054-effective-unit-price-decimal-display.md) | 2026-06-17 | Accepted | Invoices | Show per-unit prices at full precision; one backend function picks the billed or effective rate |
 | [055](055-anniversary-month-end-anchor.md) | 2026-06-18 | Accepted | Billing | Anniversary billing keeps the original day of month, clamped to each month's last day |
 | [056](056-atomic-cross-interval-plan-swap.md) | 2026-06-19 | Accepted | Subscriptions | A plan swap across billing intervals restructures the cycle in one transaction |
-| [057](057-atomic-recoverable-downgrade-clawback.md) | 2026-06-20 | Accepted | Credits | A downgrade's clawback credit note is created in the change transaction and issued with retry |
+| [057](057-atomic-recoverable-downgrade-clawback.md) | 2026-06-20 | Accepted (amended) | Credits | A downgrade's clawback credit note is created in the change transaction and issued with retry |
 | [058](058-billing-date-math-tenant-timezone.md) | 2026-06-09 | Accepted | Timezones | All month and year billing date math is anchored in the tenant timezone |
 | [059](059-guard-invoice-mutations-while-payment-in-flight.md) | 2026-06-22 | Accepted | Payments | In-flight payments block void, offline payment and write-off (parked excepted); clawbacks wait |
 | [060](060-no-payment-method-dunning-enrollment.md) | 2026-06-23 | Accepted (amended) | Dunning | Invoices with no payment method enter dunning, like declined charges |
@@ -175,6 +175,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [133](133-api-key-types-secret-and-ingest.md) | 2026-10-30 | Accepted | Platform & ops | API keys are secret or ingest (usage only); platform keys and /v1/tenants are removed |
 | [134](134-refunds-made-in-stripe-are-recorded.md) | 2026-10-30 | Accepted | Payments | A refund made in Stripe outside Hardcount is recorded as an issued credit note when it plainly fits the invoice, and flagged otherwise; `payment.refunded_in_stripe` |
 | [135](135-restore-refuses-to-serve-until-caught-up.md) | 2026-11-09 | Accepted | Platform & ops | A restored database is marked, and serve refuses to start until `hardcount restore catch-up` has applied Stripe's events since the backup; a payment whose invoice was lost is listed for the operator |
+| [136](136-deadlock-loser-answers-409-at-its-handler.md) | 2026-11-09 | Accepted | Platform & ops | A request that loses a database deadlock answers `409` `concurrent_change` at six handlers, so the same idempotency key runs again; Hardcount does not retry it itself |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified
 > across every ref). It is a skipped number, not a lost decision.
@@ -210,6 +211,8 @@ lines that ADR-128 left out.)
 | **A customer-level activity timeline** — customer events (profile, cards, setup links, credit grants) show only in the audit log. | [128](128-activity-line-standard.md) §Consequences | — | an operator asks "what happened to this customer" and the audit log filter is not enough |
 | **An activity line when the final dunning action fails** — the run retries it every 24 hours while the invoice timeline stays quiet; the Dunning badge says "Final action failed". | [128](128-activity-line-standard.md) §Consequences | `internal/dunning/service.go` | an operator misses a stuck final action, or asks why an invoice shows no change |
 | **An activity line when a subscription's billing run fails** — the page banner shows the current failure, but past failures have no line. | [128](128-activity-line-standard.md) §Consequences | `internal/subscription/handler.go` · `describeSubscriptionAction` | an operator needs the history of the failures, not just the current state |
+| **Lock-order fixes for the deadlocks that now answer `409`** — a cancel or plan swap against a payment, a test-clock teardown against a period close, a held-usage release against LiteLLM ingest. Each loser runs again today, except collect's card branch and an `auto_issue` whose void failed, which keep the stored `500` on purpose. | [136](136-deadlock-loser-answers-409-at-its-handler.md) §Risks | `internal/api/respond/deadlock.go` · `DeadlockAsConflict` | the WARN line "request lost a database deadlock" names the same pair again |
+| **Collect on the dashboard for an invoice with nothing due** — after collect's `409`, the invoice page shows the invoice open with $0 due and no Collect button. The API resend settles it, and so do a dunning retry and the auto-charge sweep. | [136](136-deadlock-loser-answers-409-at-its-handler.md) §Risks | `web-v2/src/lib/invoiceTerminal.ts` · `invoiceShowsCollect` | an operator reports an unpaid invoice at $0 that the dashboard cannot settle |
 
 ### Resolved follow-ups
 

@@ -30,7 +30,7 @@ var bypassKinds = map[string]string{
 	"signin":     "sign-in, sessions, API key lookup and creating an account",
 	"public":     "public links",
 	"webhook":    "incoming webhooks",
-	"stripe":     "Stripe credential settings (`internal/tenantstripe`)",
+	"stripe":     "reading an account's Stripe keys to call Stripe, and recording whether Stripe accepted them (`internal/tenantstripe`)",
 	"members":    "team members and invites (`internal/dashmembers`)",
 	"tool":       "`hardcount-bench-seed`",
 	"restore":    "the restore commands (`hardcount restore begin` and `catch-up`)",
@@ -116,20 +116,20 @@ var txBypassUsers = map[string]string{
 	"internal/invoice/postgres.go PostgresStore.GetByPublicToken":         "public",
 	"internal/payment/token.go TokenService.Validate":                     "public",
 
-	// Incoming webhooks: Stripe, Postmark.
+	// Incoming webhooks: Stripe, Postmark. A Stripe webhook finds its
+	// endpoint's tenant and mode by the endpoint id in its URL.
 	"internal/email/outbox.go OutboxStore.GetByID":                                   "webhook",
 	"internal/payment/checkout_sessions_store.go CheckoutSessionStore.MarkCompleted": "webhook",
+	"internal/tenantstripe/postgres.go Store.GetByID":                                "webhook",
 
-	// Signed-in, one tenant: Stripe credential settings.
+	// Stripe keys: GetPlaintext reads a tenant's key for a call to Stripe.
+	// MarkVerifyFailed and ClearKeyRejected record whether Stripe accepted a
+	// key, after the Connect check and after charges. The other Settings →
+	// Payments writes (connect, set the webhook secret, disconnect, list) run
+	// under TxTenant as the caller.
 	"internal/tenantstripe/postgres.go Store.ClearKeyRejected": "stripe",
-	"internal/tenantstripe/postgres.go Store.Delete":           "stripe",
-	"internal/tenantstripe/postgres.go Store.GetByID":          "stripe",
 	"internal/tenantstripe/postgres.go Store.GetPlaintext":     "stripe",
-	"internal/tenantstripe/postgres.go Store.ListByTenant":     "stripe",
-	"internal/tenantstripe/postgres.go Store.MarkVerified":     "stripe",
 	"internal/tenantstripe/postgres.go Store.MarkVerifyFailed": "stripe",
-	"internal/tenantstripe/postgres.go Store.SetWebhookSecret": "stripe",
-	"internal/tenantstripe/postgres.go Store.Upsert":           "stripe",
 
 	// Signed-in, one tenant: team members and invites (accepting an invite
 	// runs from its emailed link).

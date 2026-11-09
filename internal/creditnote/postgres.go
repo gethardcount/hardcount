@@ -198,6 +198,19 @@ func (s *PostgresStore) createUnderInvoiceLockInTx(ctx context.Context, tx *sql.
 	if err := lockInvoiceTx(ctx, tx, tenantID, invoiceID); err != nil {
 		return domain.CreditNote{}, err
 	}
+	// Lock the invoice's row FOR KEY SHARE before build numbers the note. The
+	// insert's foreign-key check takes this lock anyway, but only after the
+	// tenant's number row. A cancel or plan swap that voids this invoice holds
+	// its row FOR UPDATE and then waits for the number row, so taking the row
+	// after the number row deadlocks with it. FOR KEY SHARE does not conflict
+	// with the FOR NO KEY UPDATE that Issue and the refund paths take
+	// (ADR-061 amendment 2026-11-09). A missing row is left to the insert's
+	// foreign-key check.
+	if _, err := tx.ExecContext(ctx,
+		`SELECT 1 FROM invoices WHERE id = $1 AND tenant_id = $2 FOR KEY SHARE`, invoiceID, tenantID,
+	); err != nil {
+		return domain.CreditNote{}, fmt.Errorf("lock invoice %s for its credit note: %w", invoiceID, err)
+	}
 
 	existing, err := s.listByInvoiceTx(ctx, tx, invoiceID)
 	if err != nil {

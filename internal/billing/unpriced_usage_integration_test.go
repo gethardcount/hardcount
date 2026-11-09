@@ -402,7 +402,7 @@ func TestUnpricedUsage_ImmediateCancelTx_WithInvoice_Counted(t *testing.T) {
 		if _, err := tx.ExecContext(ctx, `UPDATE subscriptions SET status = 'canceled', canceled_at = $1 WHERE id = $2`, canceledAt, subID); err != nil {
 			t.Fatalf("cancel: %v", err)
 		}
-		inv, afterCommit, err := f.engine.BillFinalOnImmediateCancelTx(ctx, tx, sub)
+		inv, _, afterCommit, err := f.engine.BillCancelTx(ctx, tx, sub)
 		if err != nil {
 			t.Fatalf("bill final (tx): %v", err)
 		}

@@ -205,6 +205,8 @@ services:
       - "${NGINX_HTTP_PORT:-80}:80"
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Included by nginx.conf: keeps link tokens out of the access log.
+      - ./nginx-log-redact.conf:/etc/nginx/hardcount/nginx-log-redact.conf:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
       interval: 10s

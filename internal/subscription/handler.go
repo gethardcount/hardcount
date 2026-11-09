@@ -566,7 +566,10 @@ func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
 
 	sub, prorationCreditCents, err := h.svc.Cancel(r.Context(), tenantID, id)
 	if err != nil {
-		respond.FromError(w, r, err, "subscription")
+		// A cancel that lost a deadlock may be sent again: the only thing it
+		// commits first is an ended period's invoice, which the period CAS
+		// never bills twice (ADR-136).
+		respond.FromError(w, r, respond.DeadlockAsConflict(r, err), "subscription")
 		return
 	}
 
@@ -1147,7 +1150,11 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		result, err = h.svc.UpdateItem(ctx, tenantID, subID, itemID, input)
 	}
 	if err != nil {
-		respond.FromError(w, r, err, "subscription item")
+		// A change that lost a deadlock may be sent again: the only thing it
+		// commits first is CloseEndedPeriodFirst's invoice, which the period
+		// CAS never bills twice, and both paths return no error once their
+		// transaction has committed (ADR-136).
+		respond.FromError(w, r, respond.DeadlockAsConflict(r, err), "subscription item")
 		return
 	}
 

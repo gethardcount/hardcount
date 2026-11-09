@@ -196,8 +196,9 @@ internal/{domain}/
   `db.BeginTx(ctx, postgres.TxTenant, tenantID)`. A tenant is one account's
   data in a shared database; RLS hides every other tenant's rows.
 - Some store methods run under `postgres.TxBypass`, where RLS does not
-  apply: work across tenants, work before the tenant is known, and two
-  signed-in areas. Such a query must filter by `tenant_id` itself.
+  apply: work across tenants, work before the tenant is known, reading a
+  tenant's Stripe keys, and one signed-in area. Such a query must filter by
+  `tenant_id` itself.
   [Architecture](docs/architecture.md#design-rules) lists them. A new use
   fails `internal/arch/txbypass_allowlist_test.go` until it is listed there.
 - Integration tests use `testutil.SetupTestDB()`.

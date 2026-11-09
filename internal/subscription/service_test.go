@@ -1300,7 +1300,7 @@ type fakeBiller struct {
 	swapBillAt           time.Time
 	swapAfterCommitCalls int
 	finalizeCalls        int
-	// Cancel relief (BillOnCancelDraftsTx): what it returns, and how often it
+	// Cancel relief (inside BillCancelTx): what it returns, and how often it
 	// ran in the cancel tx.
 	draftTxCalls int
 	draftIDs     []string
@@ -1315,13 +1315,13 @@ type fakeBiller struct {
 	// and swap share it).
 	finishCalls    int
 	finishedDrafts []string
-	// afterCommitCalls counts runs of BillFinalOnImmediateCancelTx's
+	// afterCommitCalls counts runs of BillCancelTx's
 	// afterCommit (the unpriced-usage count, #981): post-commit only.
 	afterCommitCalls int
 	// postCommit is the order of the post-commit legs: "relief" per
 	// FinishRelief, "finalize:<invoice id>" per FinalizeOnCreateInvoice.
 	postCommit []string
-	// onAfterCommit runs inside BillFinalOnImmediateCancelTx's afterCommit,
+	// onAfterCommit runs inside BillCancelTx's afterCommit,
 	// right after the cancel commits; a test ends the caller's context here.
 	onAfterCommit func()
 	// postCommitCtxErr is ctx.Err() as each post-commit leg saw it, in
@@ -1339,22 +1339,25 @@ func (f *fakeBiller) BillFinalOnImmediateCancel(_ context.Context, _ domain.Subs
 	return domain.Invoice{}, f.finalCancelErr
 }
 
-func (f *fakeBiller) BillFinalOnImmediateCancelTx(_ context.Context, _ *sql.Tx, _ domain.Subscription) (domain.Invoice, func(), error) {
-	f.finalCalls++
-	return f.finalCancelInv, func() {
+// BillCancelTx counts the final invoice in finalCalls and the relief in
+// draftTxCalls. It fails with finalCancelErr before the relief runs, then
+// with draftTxErr.
+func (f *fakeBiller) BillCancelTx(_ context.Context, _ *sql.Tx, _ domain.Subscription) (domain.Invoice, domain.Relief, func(), error) {
+	afterCommit := func() {
 		f.afterCommitCalls++
 		if f.onAfterCommit != nil {
 			f.onAfterCommit()
 		}
-	}, f.finalCancelErr
-}
-
-func (f *fakeBiller) BillOnCancelDraftsTx(_ context.Context, _ *sql.Tx, _ domain.Subscription) (domain.Relief, error) {
+	}
+	f.finalCalls++
+	if f.finalCancelErr != nil {
+		return domain.Invoice{}, domain.Relief{}, afterCommit, f.finalCancelErr
+	}
 	f.draftTxCalls++
 	if f.draftTxErr != nil {
-		return domain.Relief{}, f.draftTxErr
+		return domain.Invoice{}, domain.Relief{}, afterCommit, f.draftTxErr
 	}
-	return domain.Relief{DraftIDs: f.draftIDs, CreditedCents: f.draftCredit}, nil
+	return f.finalCancelInv, domain.Relief{DraftIDs: f.draftIDs, CreditedCents: f.draftCredit}, afterCommit, nil
 }
 
 func (f *fakeBiller) BillOnPlanSwapDraftsTx(_ context.Context, _ *sql.Tx, _ domain.Subscription, at time.Time) (domain.Relief, error) {
