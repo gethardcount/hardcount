@@ -25,6 +25,7 @@ original text.
 - Hardcount now refuses to start on a database `scripts/restore.sh` restored, or `hardcount restore begin` marked, and the restore pauses billing and dunning. A script that does this must change:
   - **A restore that replaces your live database** runs `hardcount restore catch-up` before it starts Hardcount. After a snapshot or point-in-time restore, it runs `hardcount restore begin` first ([Restore Hardcount](docs/ops/restore.md)).
   - **A copy,** such as a staging database refreshed from a live dump, must never run the catch-up: it writes to your live Stripe account. Remove the mark with `DELETE FROM restore_catchup;` instead, and follow the rules for starting a copy ([Back up Hardcount](docs/ops/backup-considerations.md#4-run-the-restore-drill)).
+- Quick-start installs: the quick start now listens only on 127.0.0.1, and `./quickstart.sh destroy` asks you to type the project name first. Scripts pass `--yes`. An `.env` that an earlier `quickstart.sh` wrote still listens on every network interface: put `127.0.0.1:` before the port on its `NGINX_HTTP_PORT` line, as in `NGINX_HTTP_PORT=127.0.0.1:8080`, then run `./quickstart.sh`.
 
 ### Added
 
@@ -33,6 +34,11 @@ original text.
 ### Fixed
 
 - **A refund of another account's payment, on a Stripe account two Hardcount accounts share, is acknowledged.** Its webhook failed, and Stripe sent it again for three days. ([#1633](https://github.com/gethardcount/hardcount/pull/1633))
+- **`quickstart.sh` acts only on the install it made.** In a folder whose `.env` was made by hand, such as a server install, `destroy` deleted that install's database and its `.env`, which holds the encryption key. Now every command refuses that `.env`, names its own Compose project, and `destroy` asks first. ([#PR])
+
+### Security
+
+- **The quick start listens only on this computer.** It served the dashboard and API on every network interface, over plain HTTP, with a live key already made. A new quick-start `.env` sets `NGINX_HTTP_PORT=127.0.0.1:8080`. From another machine, use an SSH tunnel ([quick start](docs/quick-start.md)). ([#PR])
 
 ## [0.9.3] - 2026-11-09
 

@@ -140,8 +140,8 @@ These are read by Docker Compose from [`deploy/compose/.env`](../deploy/compose/
 | `HARDCOUNT_IMAGE` | The API image to run. | `hardcount-api:local`, built from the checkout |
 | `HARDCOUNT_DASHBOARD_IMAGE` | The dashboard image to run. | `hardcount-dashboard:local`, built from the checkout |
 | `NGINX_HTTP_PORT` | The host port nginx listens on, for the dashboard and API. | `80` |
-| `HARDCOUNT_PORT` | Read by `quickstart.sh`: the port it writes into `.env` as `NGINX_HTTP_PORT`. | `8080` |
-| `COMPOSE_PROJECT_NAME` | Docker Compose's own project name. `quickstart.sh` writes `hardcount-quickstart`. | The directory name |
+| `HARDCOUNT_PORT` | Read by `quickstart.sh`: the port it writes into `.env` as `NGINX_HTTP_PORT=127.0.0.1:<port>`, so nginx listens on this machine only. | `8080` |
+| `COMPOSE_PROJECT_NAME` | Docker Compose's own project name. `quickstart.sh` writes `hardcount-quickstart`, and passes the name in its `.env` to every Compose command. | The directory name |
 
 How Compose differs from running the binary:
 

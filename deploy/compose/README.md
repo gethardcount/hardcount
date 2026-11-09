@@ -2,7 +2,7 @@
 
 This folder runs Hardcount on one machine: Postgres, Redis, the Hardcount API, the dashboard, and nginx in front of them.
 
-- **Try it on your own computer:** run `./quickstart.sh` here. It uses the published images and local mode (`APP_ENV=local`), so sign-in works at `http://localhost:8080` in every browser. Walkthrough: [quick start](../../docs/quick-start.md).
+- **Try it on your own computer:** run `./quickstart.sh` here. It uses the published images and local mode (`APP_ENV=local`), so sign-in works at `http://localhost:8080` in every browser. It listens only on this machine (`127.0.0.1`). It acts only on the `.env` it writes and on its own Compose project, `hardcount-quickstart`, so it refuses to run here once you have made an `.env` by hand for a server. Walkthrough: [quick start](../../docs/quick-start.md).
 - **Install it on a server:** follow [Production on one VM](../../docs/production-one-vm.md). It installs a pinned release, then adds HTTPS, email, Stripe, nightly backups and a go-live checklist.
 
 ## Build from source instead

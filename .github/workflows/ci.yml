@@ -599,6 +599,13 @@ jobs:
           echo "quickstart.sh: $QS   .env.example: $ENV"
           [ -n "$QS" ] && [ "$QS" = "$ENV" ] || { echo "::error::deploy/compose/quickstart.sh HARDCOUNT_VERSION ($QS) must equal the image tag in deploy/compose/.env.example ($ENV)"; exit 1; }
 
+      # quickstart.sh shares its folder with installs made by hand, and its
+      # destroy deletes data. It must refuse an .env it did not write (a copy
+      # of .env.example), touch nothing without an .env, and name its own
+      # Compose project on every call. A fake docker records the calls.
+      - name: quickstart.sh acts only on its own install
+        run: scripts/ci/quickstart-own-install.sh
+
       # Last, so a newly published advisory (the usual reason this fails, with
       # no change in this repo) does not hide the results of the steps above.
       # The matcher is removed so govulncheck's call traces stay plain text

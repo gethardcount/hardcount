@@ -2,17 +2,23 @@
 #
 # quickstart.sh — start Hardcount on this machine with only Docker installed.
 #
-#   ./quickstart.sh            start Hardcount and create the first login
-#   ./quickstart.sh demo       run the demo: token usage to a finalized invoice
-#   ./quickstart.sh stop       stop Hardcount, keeping its data
-#   ./quickstart.sh destroy    stop Hardcount and DELETE its data
+#   ./quickstart.sh                start Hardcount and create the first login
+#   ./quickstart.sh demo           run the demo: token usage to a finalized invoice
+#   ./quickstart.sh stop           stop Hardcount, keeping its data
+#   ./quickstart.sh destroy        stop Hardcount and DELETE its data (asks first)
+#   ./quickstart.sh destroy --yes  the same, without asking
 #
-# The dashboard is served on port 8080. To use another port:
+# The dashboard is served on port 8080 of this machine only (127.0.0.1).
+# To use another port:
 #   HARDCOUNT_PORT=9000 ./quickstart.sh
 #
 # It pulls the published release images, so nothing is built from source and
 # Go, Node and jq are not needed. To build from this checkout instead, run
 # `./quickstart.sh --build`.
+#
+# It acts only on the .env it writes in this folder, and only on the Docker
+# Compose project that .env names (hardcount-quickstart). It refuses an .env
+# made by hand, such as one for a server install.
 #
 # This is for trying Hardcount on your own machine. It runs with APP_ENV=local, so
 # the dashboard works over plain HTTP at http://localhost in every browser.
@@ -27,6 +33,9 @@ HARDCOUNT_VERSION="v0.9.3"
 # The dashboard and API are served on this port. Override: HARDCOUNT_PORT=9000 ./quickstart.sh
 PORT_DEFAULT="${HARDCOUNT_PORT:-8080}"
 CREDS=quickstart-credentials.json
+# The start of the first line of every .env this script writes, in this
+# release and every earlier one. An .env without it was made by hand.
+MARKER="# Written by quickstart.sh"
 
 say()  { printf '%s\n' "$*"; }
 fail() { printf 'quickstart: %s\n' "$*" >&2; exit 1; }
@@ -38,17 +47,44 @@ docker info >/dev/null 2>&1 || fail "Docker is not running, or this user cannot 
 # 32 random bytes as 64 hex characters, without needing openssl.
 rand_hex() { head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 
-# Run a request from inside the stack, so the host needs no curl.
-in_stack() { docker compose exec -T nginx "$@"; }
+# use_own_env returns 1 when this folder has no .env. It stops the script
+# when the .env was not written by quickstart.sh: that .env belongs to another
+# install, such as one made by hand from README.md, and destroy would delete
+# its database and its encryption key. Otherwise it sets PROJECT to the
+# Compose project the .env names.
+use_own_env() {
+  [ -f .env ] || return 1
+  case "$(head -n 1 .env)" in
+    "$MARKER"*) ;;
+    *)
+      printf '%s\n' \
+        "quickstart: deploy/compose/.env was not written by quickstart.sh, so it belongs to" \
+        "another Hardcount install, such as one set up for a server. quickstart.sh does" \
+        "not touch that install. To try Hardcount on this machine as well, clone it into" \
+        "another folder and run ./quickstart.sh there." >&2
+      exit 1 ;;
+  esac
+  PROJECT=$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' .env | tail -1)
+  PROJECT=${PROJECT:-hardcount-quickstart}
+}
 
-port() { sed -n 's/^NGINX_HTTP_PORT=//p' .env 2>/dev/null | tail -1; }
+# Every Compose call names the project, so Compose never falls back to this
+# folder's name ("compose"), which an install made by hand here uses, and
+# never follows a COMPOSE_PROJECT_NAME exported in the shell.
+dc() { docker compose -p "$PROJECT" "$@"; }
+
+# Run a request from inside the stack, so the host needs no curl.
+in_stack() { dc exec -T nginx "$@"; }
+
+# The host port. NGINX_HTTP_PORT is 127.0.0.1:8080, or 8080 in an .env that
+# an earlier quickstart.sh wrote.
+port() { sed -n 's/^NGINX_HTTP_PORT=//p' .env 2>/dev/null | tail -1 | sed 's/.*://'; }
 
 write_env() {
   local build="$1"
-  [ -f .env ] && return 0
   umask 077
   {
-    echo "# Written by quickstart.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ). Keep this file private."
+    echo "${MARKER} on $(date -u +%Y-%m-%dT%H:%M:%SZ). Keep this file private."
     echo "POSTGRES_PASSWORD=$(rand_hex 24)"
     echo "HARDCOUNT_APP_DB_PASSWORD=$(rand_hex 24)"
     echo "HARDCOUNT_ENCRYPTION_KEY=$(rand_hex 32)"
@@ -61,7 +97,9 @@ write_env() {
     # mode always marks the sign-in cookie Secure, and Safari does not keep a
     # Secure cookie at http://localhost, so sign-in would fail there.
     echo "APP_ENV=local"
-    echo "NGINX_HTTP_PORT=${PORT_DEFAULT}"
+    # This machine only: local mode serves the dashboard, and a live key, over
+    # plain HTTP. From another machine, use an SSH tunnel (docs/quick-start.md).
+    echo "NGINX_HTTP_PORT=127.0.0.1:${PORT_DEFAULT}"
     # Where Stripe returns a customer: after they save a card from a setup
     # link, after they pay on the hosted invoice page, and after they add a
     # card from the "add a payment method" email. None has a default, so
@@ -78,12 +116,11 @@ write_env() {
 }
 
 wait_healthy() {
-  local i
-  for i in $(seq 1 90); do
+  for _ in $(seq 1 90); do
     if in_stack wget -qO- http://hardcount-api:8080/health >/dev/null 2>&1; then return 0; fi
     sleep 2
   done
-  docker compose logs --tail 30 hardcount-api >&2 || true
+  dc logs --tail 30 hardcount-api >&2 || true
   fail "Hardcount did not become healthy in three minutes. The last log lines are above."
 }
 
@@ -152,14 +189,14 @@ show_login() {
 
 cmd_up() {
   local build="$1"
-  write_env "$build"
+  use_own_env || { write_env "$build"; use_own_env; }
   if [ "$build" = yes ]; then
     say "Building Hardcount from this checkout. This takes a few minutes the first time."
-    docker compose up -d --build
+    dc up -d --build
   else
     say "Starting Hardcount ${HARDCOUNT_VERSION} from the published images."
     say "The first start downloads them, which can take a few minutes."
-    docker compose up -d --no-build
+    dc up -d --no-build
   fi || fail "Docker could not start the stack. If the message above says a port is already in use, run './quickstart.sh destroy', then 'HARDCOUNT_PORT=9000 ./quickstart.sh'."
   say "Waiting for Hardcount to be ready..."
   wait_healthy
@@ -167,11 +204,12 @@ cmd_up() {
 }
 
 cmd_demo() {
+  use_own_env || fail "run ./quickstart.sh first."
   [ -s "$CREDS" ] || fail "run ./quickstart.sh first."
-  docker compose ps --status running --quiet nginx | grep -q . || fail "Hardcount is not running. Run ./quickstart.sh first."
+  dc ps --status running --quiet nginx | grep -q . || fail "Hardcount is not running. Run ./quickstart.sh first."
   local key net p
   key=$(json_field secret_key_test)
-  net=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$(docker compose ps -q nginx)")
+  net=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$(dc ps -q nginx)")
   p=$(port); p=${p:-$PORT_DEFAULT}
   # The demo script needs bash, curl and jq. Run it in a small container on
   # the stack's network so the host needs none of them.
@@ -183,15 +221,44 @@ cmd_demo() {
     alpine:3.22 sh -c 'apk add --no-cache -q bash curl jq coreutils >/dev/null && bash /scripts/demo.sh "$0"' "$key"
 }
 
+cmd_stop() {
+  if ! use_own_env; then
+    say "This folder has no quickstart install (no .env), so nothing was stopped."
+    return 0
+  fi
+  dc stop
+  say "Stopped. Your data is kept. Run ./quickstart.sh to start again."
+}
+
+cmd_destroy() {
+  local answer=""
+  case "${1:-}" in
+    "" | --yes) ;;
+    *) fail "unknown option '$1'. Try: ./quickstart.sh destroy --yes" ;;
+  esac
+  if ! use_own_env; then
+    say "This folder has no quickstart install (no .env), so nothing was deleted."
+    return 0
+  fi
+  if [ "${1:-}" != --yes ]; then
+    say "This deletes the quickstart install in Docker Compose project ${PROJECT}:"
+    say "its database, .env and ${CREDS}. It cannot be undone."
+    printf 'Type %s to delete it: ' "$PROJECT"
+    # A typed answer ends the prompt line itself; piped input does not.
+    if ! read -r answer || [ ! -t 0 ]; then say ""; fi
+    [ "$answer" = "$PROJECT" ] || fail "nothing was deleted. To delete it, type ${PROJECT}, or run './quickstart.sh destroy --yes'."
+  fi
+  dc down -v
+  rm -f "$CREDS" .env
+  say "Stopped, and the data of this quickstart install is deleted. Other Hardcount installs on this machine are not touched."
+}
+
 case "${1:-up}" in
   up)        cmd_up no ;;
   --build)   cmd_up yes ;;
   demo)      cmd_demo ;;
-  stop)      docker compose stop; say "Stopped. Your data is kept. Run ./quickstart.sh to start again." ;;
-  destroy)
-    docker compose down -v
-    rm -f "$CREDS" .env
-    say "Stopped, and the data of this quickstart install is deleted. Other Hardcount installs on this machine are not touched." ;;
-  -h|--help|help) sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//' ;;
+  stop)      cmd_stop ;;
+  destroy)   cmd_destroy "${2:-}" ;;
+  -h|--help|help) sed -n '3,21p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) fail "unknown command '$1'. Try: ./quickstart.sh --help" ;;
 esac
