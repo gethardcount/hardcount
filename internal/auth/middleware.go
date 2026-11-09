@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/platform/logging"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -41,7 +42,7 @@ func Middleware(svc *Service) func(http.Handler) http.Handler {
 					// 503 for every caller reveals nothing about any one
 					// key, so the ADR-026 rule against key enumeration
 					// holds (#560).
-					slog.ErrorContext(r.Context(), "api key validation unavailable",
+					slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "api key validation unavailable",
 						"error", err)
 					respond.Error(w, r, http.StatusServiceUnavailable, "api_error",
 						"authentication_unavailable",

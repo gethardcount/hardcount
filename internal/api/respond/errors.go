@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/logging"
 )
 
 // SafeMessageError is an alias for errs.SafeMessageError, the opt-in marker
@@ -119,7 +120,7 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 		// and the provider refused it.
 		var sme SafeMessageError
 		if errors.As(err, &sme) {
-			slog.ErrorContext(r.Context(), "safe-message error returned",
+			slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "safe-message error returned",
 				"error", err,
 				"resource", resource,
 			)
@@ -163,7 +164,7 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 		// body. This is the sanitizing boundary: raw database, Stripe and Go
 		// errors never reach operators. Support finds the full error in the
 		// logs by the request ID in the response header.
-		slog.ErrorContext(r.Context(), "unhandled error",
+		slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "unhandled error",
 			"error", err,
 			"resource", resource,
 		)
@@ -175,7 +176,7 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 // The body carries the DomainError's own message, because its cause is a raw
 // server error that is logged here and never shown.
 func unavailable(w http.ResponseWriter, r *http.Request, err error, code, resource string) {
-	slog.ErrorContext(r.Context(), "request refused as unavailable; the client may send it again",
+	slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "request refused as unavailable; the client may send it again",
 		"error", err,
 		"resource", resource,
 	)
