@@ -1,3 +1,6 @@
+# Services for local development. Every port is published on 127.0.0.1
+# only: Postgres has a well-known password and Redis and Mailpit have none,
+# so another machine on your network must not reach them.
 services:
   postgres:
     image: postgres:16-alpine
@@ -6,7 +9,7 @@ services:
       POSTGRES_USER: hardcount
       POSTGRES_PASSWORD: hardcount
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -19,7 +22,7 @@ services:
   redis:
     image: redis:8.10.2-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -32,8 +35,8 @@ services:
   mailpit:
     image: axllent/mailpit:latest
     ports:
-      - "1025:1025"   # SMTP
-      - "8025:8025"   # Web UI
+      - "127.0.0.1:1025:1025"   # SMTP
+      - "127.0.0.1:8025:8025"   # Web UI
     environment:
       MP_MAX_MESSAGES: 500
       MP_SMTP_AUTH_ACCEPT_ANY: 1

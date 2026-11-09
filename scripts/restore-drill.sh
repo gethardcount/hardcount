@@ -11,7 +11,8 @@
 #   1. Captures source row counts for a list of critical tables.
 #   2. Invokes scripts/backup.sh with a temporary BACKUP_DIR (no S3, no
 #      rotation — the drill must not affect production backup infra).
-#   3. Starts a one-shot Postgres container on a non-standard port.
+#   3. Starts a one-shot Postgres container on a non-standard port of
+#      127.0.0.1, with passwords made for this run.
 #   4. Invokes scripts/restore.sh against the ephemeral container with
 #      HARDCOUNT_RESTORE_CONFIRM=yes.
 #   5. Re-reads the same critical-table counts and fails if any diverge.
@@ -28,8 +29,8 @@
 #                          back to DATABASE_URL for convenience.
 #   DRILL_PG_IMAGE         Postgres image for the ephemeral target
 #                          (default: postgres:16-alpine).
-#   DRILL_PG_PORT          Host port exposed by the ephemeral container
-#                          (default: 15432 — picked to avoid the usual 5432).
+#   DRILL_PG_PORT          Port on 127.0.0.1 the ephemeral container listens
+#                          on (default: 15432 — picked to avoid the usual 5432).
 #   DRILL_LOG              Path to the drill history file (default:
 #                          ~/.hardcount/drill.log). Auto-created.
 #   CRITICAL_TABLES        Space-separated list of tables to count-match
@@ -84,11 +85,16 @@ die() {
   exit "${2:-1}"
 }
 
+# N random bytes as hex, without needing openssl.
+rand_hex() { head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'; }
+
 cleanup() {
   local rc=$?
   if [ -n "${DRILL_CONTAINER_STARTED:-}" ]; then
     log "Cleaning up ephemeral container: $DRILL_CONTAINER_NAME"
-    docker rm -f "$DRILL_CONTAINER_NAME" >/dev/null 2>&1 || true
+    # -v also removes the container's anonymous data volume, which holds a
+    # full copy of the restored database. Without it each drill leaves one.
+    docker rm -fv "$DRILL_CONTAINER_NAME" >/dev/null 2>&1 || true
   fi
   if [ -n "${BACKUP_WORKDIR:-}" ] && [ -d "$BACKUP_WORKDIR" ]; then
     log "Cleaning up backup workdir: $BACKUP_WORKDIR"
@@ -167,13 +173,18 @@ log "Step 1/3 complete in ${BACKUP_DURATION}s."
 # Step 2 — Ephemeral Postgres
 # ---------------------------------------------------------------------------
 
-log "Step 2/3: launching ephemeral Postgres ($DRILL_PG_IMAGE) on port $DRILL_PG_PORT"
+# The ephemeral server listens on 127.0.0.1 only, and its passwords are made
+# for this run. It holds a copy of every account's data while the drill runs,
+# so another machine on the network must not reach it with a known password.
+DRILL_PG_PASSWORD=$(rand_hex 24)
+DRILL_APP_PASSWORD=$(rand_hex 24)
+log "Step 2/3: launching ephemeral Postgres ($DRILL_PG_IMAGE) on 127.0.0.1:$DRILL_PG_PORT"
 docker run -d \
   --name "$DRILL_CONTAINER_NAME" \
   -e POSTGRES_DB=hardcount_drill \
   -e POSTGRES_USER=hardcount \
-  -e POSTGRES_PASSWORD=hardcount \
-  -p "${DRILL_PG_PORT}:5432" \
+  -e POSTGRES_PASSWORD="$DRILL_PG_PASSWORD" \
+  -p "127.0.0.1:${DRILL_PG_PORT}:5432" \
   "$DRILL_PG_IMAGE" >/dev/null || die "docker run failed." 5
 DRILL_CONTAINER_STARTED=yes
 
@@ -194,9 +205,9 @@ log "Ephemeral Postgres is ready."
 # step the DR runbook prescribes on a fresh cluster (restore.sh refuses to
 # run without it, so the drill rehearses the full documented procedure).
 docker exec "$DRILL_CONTAINER_NAME" psql -U hardcount -d hardcount_drill -q -c \
-  "CREATE ROLE hardcount_app LOGIN PASSWORD 'hardcount_app'" || die "Could not provision hardcount_app role in ephemeral cluster." 5
+  "CREATE ROLE hardcount_app LOGIN PASSWORD '$DRILL_APP_PASSWORD'" || die "Could not provision hardcount_app role in ephemeral cluster." 5
 
-TARGET_URL="postgres://hardcount:hardcount@localhost:${DRILL_PG_PORT}/hardcount_drill?sslmode=disable"
+TARGET_URL="postgres://hardcount:${DRILL_PG_PASSWORD}@127.0.0.1:${DRILL_PG_PORT}/hardcount_drill?sslmode=disable"
 
 # ---------------------------------------------------------------------------
 # Step 3 — Restore

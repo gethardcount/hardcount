@@ -14,8 +14,9 @@
 #   citest   superuser hardcount; the hardcount_test database of docker/init.sql
 #
 # Then two more checks:
-#   restore drill  back up a HEAD database with scripts/backup.sh and restore
-#                  it into an empty database with scripts/restore.sh: it must
+#   restore drill  back up a HEAD database with scripts/backup.sh, into a
+#                  file only its owner can read, and restore it into an
+#                  empty database with scripts/restore.sh: it must
 #                  succeed, mark the database as restored so serve refuses
 #                  to start, equal the database backed up, and be up to date.
 #                  Then restore it over a newer database, one where a later
@@ -23,7 +24,9 @@
 #                  the restore must stop and change nothing
 #                  (docs/ops/restore.md, "Before you restore"). Then the
 #                  restore marker with a backup that lacks its table, and
-#                  with a marker that fails after pg_restore.
+#                  with a marker that fails after pg_restore. Then a backup
+#                  of a database without default privileges, whose SQL
+#                  ends with the privileges on a table.
 #   Postgres 15    HEAD applies on postgres:15 and reports up to date. 15 is
 #                  the oldest major the docs expect to work.
 #   Postgres 18    The same on postgres:18, the newest Postgres major. The
@@ -270,6 +273,9 @@ restore_drill() {
     "$ROOT/scripts/backup.sh"
   backup=$(find "$WORK/backups" -type f -name 'hardcount_*.dump' | head -1) # not the latest.dump link
   [ -n "$backup" ] || fail "restore drill: scripts/backup.sh wrote no backup"
+  # A dump holds every account's data, so only its owner may read it.
+  [ -n "$(find "$backup" -perm 600)" ] \
+    || fail "restore drill: other users can read the backup: $(ls -l "$backup")"
   for kind in schema data; do
     dump "$c" compose "$kind" > "$OUT/restore-source-$kind.sql"
   done
@@ -402,6 +408,50 @@ restore_marker_drill() {
   echo "restore marker drill: the marker held in both cases"
 }
 
+# restore_acl_last_drill: a backup whose SQL ends with the privileges on a
+# table restores, with each object's privileges as the backup holds them.
+# Such a backup comes from a database without default privileges (ALTER
+# DEFAULT PRIVILEGES), whose entries otherwise come last. Its last privilege
+# statement comes just before pg_restore's closing "\unrestrict KEY" line. A
+# restore.sh that copies that line with the statements stops at
+# "\unrestrict: not currently in restricted mode".
+restore_acl_last_drill() {
+  say "restore drill: a backup that ends with privileges on a table"
+  local c=mig-acl-last e=mig-acl-last-empty url eurl backup last side
+  CONTAINERS+=("$c" "$e")
+  start_pg "$c" "$POSTGRES16_IMAGE" compose
+  url=$(dsn compose "$PG_PORT")
+  head_hardcount "$url" migrate
+  q "$c" compose "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM hardcount_app;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM hardcount_app"
+  DATABASE_URL="$url" BACKUP_DIR="$WORK/acl-last-backups" \
+    PG_DUMP="docker run --rm -i --network host $POSTGRES16_IMAGE pg_dump" \
+    "$ROOT/scripts/backup.sh"
+  backup=$(find "$WORK/acl-last-backups" -type f -name 'hardcount_*.dump' | head -1)
+  [ -n "$backup" ] || fail "restore acl-last drill: scripts/backup.sh wrote no backup"
+  last=$(docker run --rm -i "$POSTGRES16_IMAGE" pg_restore --schema-only -f - < "$backup" | grep '^-- Name: ' | tail -1)
+  case "$last" in
+    "-- Name: TABLE "*"; Type: ACL; "*) ;;
+    *) fail "restore acl-last drill: the backup does not end with privileges on a table: $last" ;;
+  esac
+
+  start_pg "$e" "$POSTGRES16_IMAGE" compose
+  eurl=$(dsn compose "$PG_PORT")
+  DATABASE_URL="$eurl" HARDCOUNT_RESTORE_CONFIRM=yes \
+    PG_RESTORE="docker run --rm -i --network host $POSTGRES16_IMAGE pg_restore" \
+    "$ROOT/scripts/restore.sh" "$backup" > "$OUT/restore-acl-last.txt" 2>&1 \
+    || { cat "$OUT/restore-acl-last.txt"; fail "restore acl-last drill: the backup did not restore"; }
+  check_marker "$e" "restore acl-last drill"
+  for side in "$c" "$e"; do
+    dump "$side" compose schema | grep -E '^(GRANT|REVOKE) ' > "$OUT/$side-privileges.sql"
+  done
+  if ! diff -u "$OUT/$c-privileges.sql" "$OUT/$e-privileges.sql" > "$OUT/acl-last-privileges.diff"; then
+    head -50 "$OUT/acl-last-privileges.diff"
+    fail "restore acl-last drill: the restored privileges differ from the database backed up"
+  fi
+  echo "restore acl-last drill: the backup restored, with its privileges"
+}
+
 # other_major MAJOR IMAGE: HEAD applies on another Postgres major, under the
 # compose setup, and reports up to date.
 other_major() {
@@ -421,6 +471,7 @@ fresh_install managed
 fresh_install citest
 restore_drill
 restore_marker_drill
+restore_acl_last_drill
 other_major 15 "$POSTGRES15_IMAGE"
 other_major 18 "$POSTGRES18_IMAGE"
 say "migrations: all checks passed"
