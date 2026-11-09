@@ -127,9 +127,7 @@ func TestAcceptInvite_FailedJoinKeepsTheInvite(t *testing.T) {
 			const invitee = "joiner@example.com"
 			if tc.existing {
 				other := testutil.CreateTestTenant(t, h.db, "Joiner Home")
-				if _, err := h.users.CreateUser(ctx, invitee, testPassword, other, "owner"); err != nil {
-					t.Fatalf("create existing account: %v", err)
-				}
+				createUser(t, h.db, invitee, other, "owner")
 			}
 			if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, invitee); err != nil {
 				t.Fatalf("invite: %v", err)

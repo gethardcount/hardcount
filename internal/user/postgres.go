@@ -34,34 +34,9 @@ func scanUser(row *sql.Row) (domain.User, error) {
 	return u, err
 }
 
-// ErrEmailTaken is returned when Create hits the email unique
+// ErrEmailTaken is returned when CreateInTx hits the email unique
 // violation. Surfaced to the API as 409.
 var ErrEmailTaken = errs.AlreadyExists("email", "an account with this email already exists")
-
-func (s *PostgresStore) Create(ctx context.Context, email, passwordHash string) (domain.User, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		return domain.User{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	row := tx.QueryRowContext(ctx, `
-		INSERT INTO users (email, password_hash)
-		VALUES ($1, $2)
-		RETURNING `+userCols, strings.TrimSpace(email), passwordHash)
-
-	u, err := scanUser(row)
-	if err != nil {
-		if postgres.IsUniqueViolation(err) {
-			return domain.User{}, ErrEmailTaken
-		}
-		return domain.User{}, fmt.Errorf("create user: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.User{}, err
-	}
-	return u, nil
-}
 
 func (s *PostgresStore) GetByEmail(ctx context.Context, email string) (domain.User, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
@@ -122,29 +97,13 @@ func (s *PostgresStore) SetPassword(ctx context.Context, id, passwordHash string
 	return tx.Commit()
 }
 
-func (s *PostgresStore) AttachTenant(ctx context.Context, userID, tenantID, role string) error {
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		return err
-	}
-	defer postgres.Rollback(tx)
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO user_tenants (user_id, tenant_id, role)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (user_id, tenant_id) DO NOTHING
-	`, userID, tenantID, role)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // CreateInTx inserts a user and their tenant attachment inside the
 // CALLER's transaction — the seam tenant.RunBootstrap needs so the
 // owner user commits (or rolls back) atomically with the tenant, keys,
-// and settings it belongs to (ADR-073). passwordHash must already be a
-// bcrypt hash (user.HashPassword validates + hashes). No commit here;
-// the caller owns the tx.
+// and settings it belongs to (ADR-073). The invite accept uses it too,
+// so a new account commits with the invitation's claim. passwordHash must
+// already be a bcrypt hash (user.HashPassword validates + hashes). No
+// commit here; the caller owns the tx.
 func (s *PostgresStore) CreateInTx(ctx context.Context, tx *sql.Tx, email, passwordHash, tenantID, role string) (domain.User, error) {
 	row := tx.QueryRowContext(ctx, `
 		INSERT INTO users (email, password_hash)
@@ -166,11 +125,10 @@ func (s *PostgresStore) CreateInTx(ctx context.Context, tx *sql.Tx, email, passw
 	return u, nil
 }
 
-// AttachTenantInTx is AttachTenant on the caller's transaction: it adds
-// (user_id, tenant_id, role) to user_tenants, and does nothing when the
-// membership already exists. The invite accept uses it so the membership
-// commits with the invitation's claim. No commit here; the caller owns the
-// tx.
+// AttachTenantInTx adds (user_id, tenant_id, role) to user_tenants on the
+// caller's transaction, and does nothing when the membership already
+// exists. The invite accept uses it so the membership commits with the
+// invitation's claim. No commit here; the caller owns the tx.
 func (s *PostgresStore) AttachTenantInTx(ctx context.Context, tx *sql.Tx, userID, tenantID, role string) error {
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO user_tenants (user_id, tenant_id, role)

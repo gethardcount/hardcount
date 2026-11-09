@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/dashmembers"
+	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/email"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
@@ -93,6 +94,30 @@ func (userDirAdapter) HashPassword(plaintext string) (string, error) {
 	return user.HashPassword(plaintext)
 }
 
+// createUser adds an account with testPassword that belongs to tenantID
+// with role, the way bootstrap does: user.HashPassword, then CreateInTx on
+// one transaction.
+func createUser(t *testing.T, db *postgres.DB, address, tenantID, role string) domain.User {
+	t.Helper()
+	hash, err := user.HashPassword(testPassword)
+	if err != nil {
+		t.Fatalf("hash the password for %s: %v", address, err)
+	}
+	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin tx for %s: %v", address, err)
+	}
+	defer postgres.Rollback(tx)
+	u, err := user.NewPostgresStore(db).CreateInTx(t.Context(), tx, address, hash, tenantID, role)
+	if err != nil {
+		t.Fatalf("create user %s: %v", address, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit user %s: %v", address, err)
+	}
+	return u
+}
+
 // --- harness --------------------------------------------------------------
 
 type harness struct {
@@ -132,12 +157,9 @@ func newHarness(t *testing.T, tenantName string) *harness {
 
 	// Every workspace starts with a bootstrap owner (mirrors production:
 	// tenants are created via the bootstrap flow which mints the first user).
-	owner, err := userSvc.CreateUser(context.Background(),
+	owner := createUser(t, db,
 		fmt.Sprintf("owner-%s@%s.test", tenantID[len(tenantID)-6:], strings.ToLower(strings.ReplaceAll(tenantName, " ", "-"))),
-		testPassword, tenantID, "owner")
-	if err != nil {
-		t.Fatalf("create bootstrap owner: %v", err)
-	}
+		tenantID, "owner")
 
 	return &harness{
 		db: db, tenantID: tenantID, svc: svc, email: emails, clk: clk,
@@ -237,10 +259,7 @@ func TestInviteAcceptExistingUser(t *testing.T) {
 
 	// The invitee already has an account on ANOTHER workspace.
 	otherTenant := testutil.CreateTestTenant(t, h.db, "Other Workspace")
-	existing, err := h.users.CreateUser(ctx, "veteran@example.com", testPassword, otherTenant, "owner")
-	if err != nil {
-		t.Fatalf("create existing user: %v", err)
-	}
+	existing := createUser(t, h.db, "veteran@example.com", otherTenant, "owner")
 
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "veteran@example.com"); err != nil {
 		t.Fatalf("invite: %v", err)
@@ -531,7 +550,7 @@ func TestConcurrentAccept(t *testing.T) {
 
 // TestAcceptInvite_RejectedPasswordKeepsTheInvite: a new account's password
 // is checked before the invitation is used up. Before, the token was claimed
-// first and the password checked in CreateUser, so a password that is too
+// first and the password checked after it, so a password that is too
 // short, too long or on the breached list burned the invitation: the invitee
 // saw "too short", fixed it, and got "this invitation is no longer valid".
 //
