@@ -81,8 +81,19 @@ die() {
 # It reads only the backup's privilege entries, each headed by a
 # "-- Name: ...; Type: ACL; ..." comment, from a --schema-only script, which
 # holds no table rows. A GRANT it cannot read stops it.
+#
+# pg_restore from the August 2025 releases on (16.10, 17.6, 18) starts the
+# script with "\restrict KEY" and ends it with "\unrestrict KEY", with a new
+# random KEY on each run. Between the two, psql refuses every other
+# backslash command, so a backup cannot run commands on this machine
+# (CVE-2025-8714). The output keeps the two lines first and last, so the
+# statements it takes from the backup run under the same guard. A closing
+# line kept among the statements would run after the restore's own
+# "\unrestrict", where psql stops at "not currently in restricted mode".
 privilege_sql() {
   awk '
+    /^\\restrict / { restrict = $0; next }
+    /^\\unrestrict / { unrestrict = $0; next }
     /^-- (Data for )?Name: / { acl = ($0 ~ /; Type: ACL; /); next }
     !acl || /^--/ || $0 == "" { next }
     /^GRANT / {
@@ -102,8 +113,10 @@ privilege_sql() {
     { stmts[++ns] = $0 }
     END {
       if (bad) exit 1
+      if (restrict != "") print restrict
       for (i = 1; i <= nr; i++) print revokes[i]
       for (i = 1; i <= ns; i++) print stmts[i]
+      if (unrestrict != "") print unrestrict
     }'
 }
 
