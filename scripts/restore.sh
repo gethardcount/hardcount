@@ -82,7 +82,7 @@ die() {
 # "-- Name: ...; Type: ACL; ..." comment, from a --schema-only script, which
 # holds no table rows. A GRANT it cannot read stops it.
 #
-# pg_restore from the August 2025 releases on (16.10, 17.6, 18) starts the
+# pg_restore from the August 2025 releases on (13.22, 14.19, 15.14, 16.10, 17.6, and 18) starts the
 # script with "\restrict KEY" and ends it with "\unrestrict KEY", with a new
 # random KEY on each run. Between the two, psql refuses every other
 # backslash command, so a backup cannot run commands on this machine
