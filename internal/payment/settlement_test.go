@@ -4,10 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenantstripe"
 )
 
 // recordingDunningResolver records ResolveByInvoice calls (and can inject an error)
@@ -536,6 +541,82 @@ func TestStopCollection_ExpiresSessionsBeforeCancelingPI(t *testing.T) {
 	noPI := finalizedPendingInvoice()
 	noPI.StripePaymentIntentID = ""
 	s.StopCollection(context.Background(), "t1", noPI)
+}
+
+// StopCollection cancels the PaymentIntent with the Stripe key of the tenant
+// it is given, whatever tenant ctx carries. The billing run, dunning and a
+// test-clock advance void on a ctx that holds livemode and no tenant, and
+// LiveStripeClient finds the key by the tenant on ctx.
+//
+// The credentials fake holds one key per (tenant, mode). A lookup with the
+// wrong tenant or the wrong mode finds no key, so nothing is sent.
+//
+// Mutations: delete the auth.WithTenantID line in StopCollection (rows 1 and
+// 2 fail); set the tenant only when ctx has none (row 2 fails); log
+// ErrStripeCredentialsUnavailable at INFO (row 3 fails).
+func TestStopCollection_CancelsWithTheNamedTenantsCredentials(t *testing.T) {
+	const cancel = "POST /v1/payment_intents/pi_declined/cancel"
+	keys := map[string]tenantstripe.PlaintextSecrets{
+		"t_a|test": {SecretKey: "sk_test_a"},
+		"t_b|test": {SecretKey: "sk_test_b"},
+	}
+	inv := finalizedPendingInvoice()
+	inv.TenantID = "t_a"
+	inv.PaymentStatus = domain.PaymentFailed
+	inv.StripePaymentIntentID = "pi_declined"
+	// The ctx of the billing run, dunning and a test-clock catch-up.
+	background := postgres.WithLivemode(context.Background(), false)
+
+	stopper := func(creds *stubCredentials) (*Stripe, *routedStripe) {
+		api := &routedStripe{routes: map[string]func(*http.Request) (int, string){
+			cancel: func(*http.Request) (int, string) {
+				return http.StatusOK, `{"id":"pi_declined","object":"payment_intent","status":"canceled"}`
+			},
+		}}
+		client := NewLiveStripeClient(NewStripeClientsWithHTTPClient(creds, &http.Client{Transport: api}))
+		return NewStripe(client, newMockInvoiceUpdater(), newMockWebhookStore(), nil), api
+	}
+
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{"ctx with livemode only", background},
+		{"ctx names another tenant", auth.WithTenantID(background, "t_b")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, api := stopper(&stubCredentials{rows: keys})
+			s.StopCollection(tc.ctx, "t_a", inv)
+
+			var got []string
+			for _, req := range api.requests {
+				got = append(got, req.Method+" "+req.URL.Path+" "+req.Header.Get("Authorization"))
+			}
+			want := cancel + " Bearer sk_test_a"
+			if len(got) != 1 || got[0] != want {
+				t.Fatalf("Stripe requests = %q, want one %q: the cancel must use the voided invoice's tenant's key", got, want)
+			}
+		})
+	}
+
+	t.Run("credentials unreadable", func(t *testing.T) {
+		logs := captureLogs(t)
+		s, api := stopper(&stubCredentials{err: map[string]error{"t_a|test": errBlip}})
+		s.StopCollection(background, "t_a", inv)
+
+		if n := len(api.requests); n != 0 {
+			t.Fatalf("Stripe received %d requests without credentials", n)
+		}
+		var records []string
+		for _, line := range strings.Split(logs.String(), "\n") {
+			if strings.Contains(line, "payment_intent_id=pi_declined") {
+				records = append(records, line)
+			}
+		}
+		if len(records) != 1 || !strings.Contains(records[0], "level=WARN") {
+			t.Fatalf("log records naming the PaymentIntent = %q, want one at WARN: nothing was sent, and the PaymentIntent stays open at Stripe", records)
+		}
+	})
 }
 
 func (r *recordingReceiptEmail) SendPaymentReceiptTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, name, num string, amt int64, cur, tok string) error {
