@@ -109,7 +109,6 @@ type Service struct {
 	stripeSyncer  StripeSyncer
 	clocks        TestClockChecker
 	taxFlusher    TaxFlusher
-	events        domain.EventDispatcher
 	resolver      clock.Resolver
 	subChecker    SubscriptionChecker
 	auditLogger   AuditEmitter
@@ -214,61 +213,24 @@ func (s *Service) SetTaxFlusher(flusher TaxFlusher) {
 	s.taxFlusher = flusher
 }
 
-// SetEventDispatcher wires the outbound webhook dispatcher so the service
-// can emit customer.email_bounced (and future customer.* events). Nil is
-// acceptable — events become a no-op, which is the right behaviour in
-// narrow unit tests.
-func (s *Service) SetEventDispatcher(d domain.EventDispatcher) {
-	s.events = d
-}
-
 // MarkEmailBounced records a permanent-delivery-failure signal for the
 // given customer (resolved from email by the caller via the blind-index
-// lookup). Fires customer.email_bounced after a successful write so
-// partners can wire their own dead-address handling. Missing customer
-// IDs are treated as soft failures — log and return — because the
-// sender path must never panic an outbox worker.
+// lookup). The store queues customer.email_bounced in the write's
+// transaction, so partners can wire their own dead-address handling and a
+// crash after the commit cannot drop the event. A missing customer returns
+// errs.ErrNotFound.
 func (s *Service) MarkEmailBounced(ctx context.Context, tenantID, customerID, reason string) error {
-	if err := s.store.MarkEmailBounced(ctx, tenantID, customerID, reason); err != nil {
-		return err
-	}
-	s.dispatchSuppression(ctx, tenantID, domain.EventCustomerEmailBounced, customerID, reason)
-	return nil
-}
-
-// dispatchSuppression sends customer.email_bounced or .email_complained
-// with the customer as the API now returns it, and the provider's reason
-// beside it (ADR-131): a complaint on a customer that already complained
-// leaves the row's reason as it was. Non-fatal: the state transition
-// already landed, and losing a webhook event isn't worth reversing it.
-func (s *Service) dispatchSuppression(ctx context.Context, tenantID, eventType, customerID, reason string) {
-	if s.events == nil {
-		return
-	}
-	c, err := s.store.Get(ctx, tenantID, customerID)
-	if err != nil {
-		slog.ErrorContext(ctx, "webhook event not sent: the customer could not be read after the suppression",
-			"event_type", eventType, "tenant_id", tenantID, "customer_id", customerID, "error", err)
-		return
-	}
-	if err := s.events.Dispatch(ctx, tenantID, eventType, domain.CustomerWebhookData(c, map[string]any{"reason": reason})); err != nil {
-		slog.WarnContext(ctx, "dispatch "+eventType,
-			"tenant_id", tenantID, "customer_id", customerID, "error", err)
-	}
+	return s.store.MarkEmailBounced(ctx, tenantID, customerID, reason)
 }
 
 // MarkEmailComplained records a spam complaint against the customer's
 // email (resolved from the webhook's address by the caller via the
-// blind-index lookup). Fires customer.email_complained after a
-// successful write — per-cause, never folded into email_bounced: a
+// blind-index lookup). The store queues customer.email_complained in the
+// write's transaction — per-cause, never folded into email_bounced: a
 // complaint is a person saying "stop", which partners handle differently
 // from a dead mailbox (and provider-side it is effectively irreversible).
 func (s *Service) MarkEmailComplained(ctx context.Context, tenantID, customerID, reason string) error {
-	if err := s.store.MarkEmailComplained(ctx, tenantID, customerID, reason); err != nil {
-		return err
-	}
-	s.dispatchSuppression(ctx, tenantID, domain.EventCustomerEmailComplained, customerID, reason)
-	return nil
+	return s.store.MarkEmailComplained(ctx, tenantID, customerID, reason)
 }
 
 type CreateInput struct {

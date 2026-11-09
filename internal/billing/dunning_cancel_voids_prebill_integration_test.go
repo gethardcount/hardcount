@@ -23,6 +23,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/usage"
+	"github.com/gethardcount/hardcount/internal/webhook"
 )
 
 // prebillVoidRig is a flat in_advance subscription whose period began an hour
@@ -45,7 +46,6 @@ type prebillVoidRig struct {
 	dstore   *dunning.PostgresStore
 	dsvc     *dunning.Service
 	stopper  *recordingCollectionStopper
-	events   *recordingDunningEvents
 }
 
 // recordingCollectionStopper is the Stripe leg of a void (expire the Checkout
@@ -58,24 +58,6 @@ func (r *recordingCollectionStopper) StopCollection(_ context.Context, _ string,
 
 // ExpireCheckoutSessions is a write-off's leg; these tests void.
 func (*recordingCollectionStopper) ExpireCheckoutSessions(context.Context, string, domain.Invoice) {}
-
-// recordingDunningEvents records the webhook events dunning sends.
-type recordingDunningEvents struct{ types []string }
-
-func (r *recordingDunningEvents) Dispatch(_ context.Context, _, eventType string, _ map[string]any) error {
-	r.types = append(r.types, eventType)
-	return nil
-}
-
-func (r *recordingDunningEvents) count(eventType string) int {
-	n := 0
-	for _, t := range r.types {
-		if t == eventType {
-			n++
-		}
-	}
-	return n
-}
 
 func newPrebillVoidRig(t *testing.T, name string, policy domain.DunningPolicy) *prebillVoidRig {
 	t.Helper()
@@ -120,9 +102,8 @@ func newPrebillVoidRig(t *testing.T, name string, policy domain.DunningPolicy) *
 
 	// Dunning first: the invoice service's void resolves its runs.
 	r.dstore = dunning.NewPostgresStore(db)
+	r.dstore.SetOutboxEnqueuer(webhook.NewOutboxStore(db))
 	r.dsvc = dunning.NewService(r.dstore, nil, clock.Real())
-	r.events = &recordingDunningEvents{}
-	r.dsvc.SetEventDispatcher(r.events)
 
 	// One invoice service, as router.go has: the engine's relief void, the
 	// write-off, and every void's post-commit legs.
@@ -217,6 +198,24 @@ func (r *prebillVoidRig) insertRun(policyID string, attempts int) {
 
 func (r *prebillVoidRig) runID() string { return "run_" + r.day1.ID }
 
+// dunningEvents counts the queued webhook events of eventType about the run,
+// read under the tenant's row-level security.
+func (r *prebillVoidRig) dunningEvents(eventType string) int {
+	r.t.Helper()
+	tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		r.t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	var n int
+	if err := tx.QueryRowContext(r.ctx,
+		`SELECT count(*) FROM webhook_outbox WHERE event_type = $1 AND payload->'dunning_run'->>'id' = $2`,
+		eventType, r.runID()).Scan(&n); err != nil {
+		r.t.Fatalf("count %s outbox rows: %v", eventType, err)
+	}
+	return n
+}
+
 // requireVoidedAndRunClosed: the prebill is voided, its run is resolved as
 // invoice_voided with one resolved timeline row and one dunning.resolved, it
 // never escalated, and collection was stopped at Stripe once for it.
@@ -252,10 +251,10 @@ func (r *prebillVoidRig) requireVoidedAndRunClosed() {
 	if resolved != 1 || escalated != 0 {
 		r.t.Errorf("run events: %d resolved, %d escalated; want 1 resolved and no escalation", resolved, escalated)
 	}
-	if n := r.events.count(domain.EventDunningResolved); n != 1 {
+	if n := r.dunningEvents(domain.EventDunningResolved); n != 1 {
 		r.t.Errorf("dunning.resolved sent %d times, want 1", n)
 	}
-	if n := r.events.count(domain.EventDunningEscalated); n != 0 {
+	if n := r.dunningEvents(domain.EventDunningEscalated); n != 0 {
 		r.t.Errorf("dunning.escalated sent %d times, want 0", n)
 	}
 	if len(r.stopper.stopped) != 1 || r.stopper.stopped[0] != r.day1.ID {

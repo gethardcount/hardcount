@@ -1241,11 +1241,18 @@ func (a *bounceReporterAdapter) ReportBounce(ctx context.Context, tenantID, emai
 		if m.TenantID != tenantID {
 			continue
 		}
-		if err := a.svc.MarkEmailBounced(ctx, tenantID, m.CustomerID, reason); err != nil {
-			// Ignore the error: the sender has already logged the bounce.
-			// A failure here only means the badge does not update. It is
-			// not a correctness issue.
-			_ = err
+		err := a.svc.MarkEmailBounced(ctx, tenantID, m.CustomerID, reason)
+		// ErrNotFound is a customer deleted after the lookup: there is
+		// nothing left to mark.
+		if err != nil && !errors.Is(err, errs.ErrNotFound) {
+			// Log every other failure at ERROR, because this line is the
+			// only record of the bounce. The bounced status and its
+			// customer.email_bounced event commit together, so a failure
+			// loses both, and nothing sends an SMTP bounce again. Without
+			// the status, IsSuppressed keeps mailing the dead address.
+			slog.ErrorContext(ctx, "email bounce not recorded: the customer's bounced status and its webhook event are both lost",
+				"tenant_id", tenantID, "customer_id", m.CustomerID,
+				"event_type", domain.EventCustomerEmailBounced, "error", err)
 		}
 	}
 }
