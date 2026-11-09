@@ -14,8 +14,9 @@
 #   citest   superuser hardcount; the hardcount_test database of docker/init.sql
 #
 # Then two more checks:
-#   restore drill  back up a HEAD database with scripts/backup.sh and restore
-#                  it into an empty database with scripts/restore.sh: it must
+#   restore drill  back up a HEAD database with scripts/backup.sh, into a
+#                  file only its owner can read, and restore it into an
+#                  empty database with scripts/restore.sh: it must
 #                  succeed, mark the database as restored so serve refuses
 #                  to start, equal the database backed up, and be up to date.
 #                  Then restore it over a newer database, one where a later
@@ -270,6 +271,9 @@ restore_drill() {
     "$ROOT/scripts/backup.sh"
   backup=$(find "$WORK/backups" -type f -name 'hardcount_*.dump' | head -1) # not the latest.dump link
   [ -n "$backup" ] || fail "restore drill: scripts/backup.sh wrote no backup"
+  # A dump holds every account's data, so only its owner may read it.
+  [ -n "$(find "$backup" -perm 600)" ] \
+    || fail "restore drill: other users can read the backup: $(ls -l "$backup")"
   for kind in schema data; do
     dump "$c" compose "$kind" > "$OUT/restore-source-$kind.sql"
   done
