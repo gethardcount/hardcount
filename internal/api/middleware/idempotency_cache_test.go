@@ -62,8 +62,9 @@ func TestIdempotency_Caches5xx(t *testing.T) {
 
 // TestIdempotency_5xxStoredExcept503: a 502 or 504 is stored like a 500,
 // because the request may have made its change before it failed. A 503 is
-// not stored: Hardcount answers 503 only when the request changed nothing, so
-// a retry with the same key runs the request again.
+// not stored: Hardcount answers 503 only when a second run is safe: nothing
+// the request did would be done twice. A retry with the same key runs the
+// request again.
 func TestIdempotency_5xxStoredExcept503(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	tenantID := testutil.CreateTestTenant(t, db, "Idempotency 503")

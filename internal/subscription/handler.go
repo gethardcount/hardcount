@@ -1941,7 +1941,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		// the period close the handlers run first does nothing a second time.
 		if lookupErr != nil {
 			return nil, errs.Unavailable("proration_unavailable",
-				"could not read this period's invoice to price the change, so the change was not made — please retry",
+				"could not check whether this period's invoice is paid, so the change was not made — please retry",
 				fmt.Errorf("read the current period's base invoice: %w", lookupErr))
 		}
 		owesNothing := resolved.AmountDueCents == 0 && resolved.TaxStatus == domain.InvoiceTaxOK

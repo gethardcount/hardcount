@@ -151,6 +151,20 @@ func (r *baseReadRig) invoiceCount(t *testing.T) int {
 	return n
 }
 
+// baseReadUnavailableMessage is the message a client gets when the
+// base-invoice read fails.
+const baseReadUnavailableMessage = "could not check whether this period's invoice is paid, so the change was not made — please retry"
+
+func errorMessage(rr *httptest.ResponseRecorder) string {
+	var body struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	return body.Error.Message
+}
+
 // TestItemChange_BaseInvoiceRead: a change that charges (an added item, a
 // quantity increase, a plan upgrade) reads the current period's base invoice
 // first. Only "not found" means there is no base invoice yet: the change
@@ -221,6 +235,12 @@ func TestItemChange_BaseInvoiceRead(t *testing.T) {
 			}
 			if got := errorCode(rr); got != "proration_unavailable" {
 				t.Errorf("error code = %q, want proration_unavailable", got)
+			}
+			// The read checks whether the period's invoice is paid. It
+			// prices nothing: the amount comes from the plans and the days
+			// left. The message says what failed.
+			if got := errorMessage(rr); got != baseReadUnavailableMessage {
+				t.Errorf("error message = %q, want %q", got, baseReadUnavailableMessage)
 			}
 			if got := rr.Header().Get("Retry-After"); got != "1" {
 				t.Errorf("Retry-After = %q, want 1", got)

@@ -17282,11 +17282,10 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "503":
           description: |
-            Code `proration_unavailable`: Hardcount could not read the
-            current period's invoice to price the charge, so the item was
-            not added. This answer is not stored under the
-            `Idempotency-Key`: send the same request with the same key
-            after `Retry-After`.
+            Code `proration_unavailable`: Hardcount could not check whether
+            the current period's invoice is paid, so the item was not added.
+            This answer is not stored under the `Idempotency-Key`: send the
+            same request with the same key after `Retry-After`.
           headers:
             Retry-After:
               description: Seconds to wait before you send the request again.
@@ -17300,7 +17299,7 @@ paths:
                 error:
                   type: api_error
                   code: proration_unavailable
-                  message: could not read this period's invoice to price the change, so the change was not made — please retry
+                  message: could not check whether this period's invoice is paid, so the change was not made — please retry
                   request_id: req_dbjg652q3gpgqfoq5cd0
 
   /v1/subscriptions/{id}/items/{itemID}:
@@ -17490,8 +17489,8 @@ paths:
         "503":
           description: |
             Code `proration_unavailable`: an increase that takes effect now
-            could not read the current period's invoice to price its charge,
-            so the item was not changed. This answer is not stored under the
+            could not check whether the current period's invoice is paid, so
+            the item was not changed. This answer is not stored under the
             `Idempotency-Key`: send the same request with the same key after
             `Retry-After`.
           headers:
@@ -17507,7 +17506,7 @@ paths:
                 error:
                   type: api_error
                   code: proration_unavailable
-                  message: could not read this period's invoice to price the change, so the change was not made — please retry
+                  message: could not check whether this period's invoice is paid, so the change was not made — please retry
                   request_id: req_dbjg652q3gpgqfoq5cd0
     delete:
       tags: [Subscriptions]

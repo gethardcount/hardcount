@@ -427,7 +427,7 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 			return
 		}
 		// Not found means the owner released the key after its handler
-		// answered 409 or 422. The key is free again, but this request
+		// answered 409, 422 or 503. The key is free again, but this request
 		// already lost the race. Treat it as a conflict, so the client
 		// retries into a clean slot instead of running concurrently.
 		if !found {
