@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -146,6 +147,43 @@ func TestPostgresStore_AdvanceSummary_RoundTrips(t *testing.T) {
 	}
 	if reloaded.LastAdvanceSummary == nil || reloaded.LastAdvanceSummary.InvoicesGenerated != 2 {
 		t.Errorf("Get did not decode the summary: %+v", reloaded.LastAdvanceSummary)
+	}
+}
+
+// TestPostgresStore_MarkFailed_ReasonCutInsideACharacter: a catch-up fails
+// with a reason over 500 bytes whose cut lands inside a character. The store
+// keeps the bytes before that character and adds "…". Postgres refuses text
+// that is not valid UTF-8 (SQLSTATE 22021). A cut that split the character
+// would fail the write and leave the clock advancing, where neither Advance
+// (it needs ready) nor Retry advance (it needs internal_failure) applies.
+func TestPostgresStore_MarkFailed_ReasonCutInsideACharacter(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	store := testclock.NewPostgresStore(db)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Tenant")
+
+	clk, err := store.Create(ctx, tenantID, domain.TestClock{
+		Name:       "long reason",
+		FrozenTime: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("create clock: %v", err)
+	}
+	if _, err := store.MarkAdvancing(ctx, tenantID, clk.ID, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("mark advancing: %v", err)
+	}
+
+	// "é" takes bytes 498 and 499, so the 499-byte cut lands inside it.
+	kept := strings.Repeat("a", 498)
+	got, err := store.MarkFailed(ctx, tenantID, clk.ID, kept+"é"+strings.Repeat("b", 100))
+	if err != nil {
+		t.Fatalf("mark failed: %v", err)
+	}
+	if got.Status != domain.TestClockStatusInternalFailed {
+		t.Errorf("status = %q, want %q", got.Status, domain.TestClockStatusInternalFailed)
+	}
+	if want := kept + "…"; got.LastFailureReason != want {
+		t.Errorf("last_failure_reason = %q, want the first 498 bytes, which end before the split character, and …", got.LastFailureReason)
 	}
 }
 

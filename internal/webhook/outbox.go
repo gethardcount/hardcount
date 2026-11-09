@@ -10,6 +10,7 @@ import (
 	"time"
 
 	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -274,7 +275,7 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 		return
 	}
 
-	errMsg := truncateError(hErr.Error())
+	errMsg := errs.Clip(hErr.Error(), 500)
 	if row.Attempts >= MaxOutboxAttempts {
 		res, err := mtx.ExecContext(markCtx, `
 			UPDATE webhook_outbox
@@ -355,12 +356,4 @@ func (s *OutboxStore) FailedCount(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	return n, nil
-}
-
-func truncateError(s string) string {
-	const max = 500
-	if len(s) <= max {
-		return s
-	}
-	return s[:max]
 }
