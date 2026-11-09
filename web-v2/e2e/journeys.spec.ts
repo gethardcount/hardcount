@@ -609,6 +609,44 @@ test('grant credits and see the balance', async ({ page }) => {
   await expect(page.getByText('Credit balance', { exact: true }).locator('..')).toContainText(usd(balance.balance_cents))
 })
 
+// Two customers can have the same name. A keyboard pick of the second one
+// must grant the credit to the second, not to the first.
+test('a keyboard pick of the second of two same-named customers grants the credit to that customer', async ({ page }) => {
+  const name = `E2E Twin ${uniq()}`
+  for (let i = 0; i < 2; i++) {
+    await api('POST', '/customers', { external_id: `e2e_twin_${uniq()}`, display_name: name })
+  }
+  // The picker lists the customers in the order this search returns them.
+  const listed = await api<{ data: Customer[] }>('GET', `/customers?search=${encodeURIComponent(name)}&limit=20`)
+  expect(listed.data.map(c => c.display_name)).toEqual([name, name])
+
+  await page.goto('/credits')
+  await page.getByRole('button', { name: 'Grant credits' }).first().click()
+  const dialog = page.getByRole('dialog', { name: 'Grant credits' })
+  await dialog.getByRole('button', { name: 'Search customers...' }).click()
+  await page.getByPlaceholder('Search...', { exact: true }).fill(name)
+  // Wait until the list holds only the search's results. After a server
+  // search, cmdk can keep the highlight on a row that is no longer listed, so
+  // no row is highlighted. Home puts it on the first row.
+  await expect(page.getByRole('option')).toHaveCount(2)
+  const twins = page.getByRole('option', { name, exact: true })
+  await expect(twins).toHaveCount(2)
+  await page.keyboard.press('Home')
+  await expect(twins.first()).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('ArrowDown')
+  await expect(twins.nth(1)).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('Enter')
+  await expect(twins).toHaveCount(0)
+
+  await dialog.getByLabel(/^Amount/).fill('12.00')
+  await dialog.getByLabel('Description').fill('E2E credit for the second twin')
+  await dialog.getByRole('button', { name: 'Grant credits' }).click()
+  const granting = page.waitForRequest(r => r.method() === 'POST' && new URL(r.url()).pathname === '/v1/credits/grant')
+  await page.getByRole('alertdialog', { name: 'Confirm credit grant' }).getByRole('button', { name: 'Grant credits' }).click()
+  const sent = (await granting).postDataJSON() as { customer_id: string }
+  expect(sent.customer_id, 'the grant goes to the second customer in the list').toBe(listed.data[1].id)
+})
+
 // A credit expiry picked as a day is valid through that day: the dashboard
 // sends the midnight that starts the next day in the workspace zone (the
 // instant a period ending that night issues its invoice, so the credit pays
