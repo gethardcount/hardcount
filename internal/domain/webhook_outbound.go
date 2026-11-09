@@ -1,9 +1,6 @@
 package domain
 
-import (
-	"context"
-	"time"
-)
+import "time"
 
 // WebhookEndpoint is a tenant's URL that receives the outbound webhook
 // events it subscribes to, signed with its secret.
@@ -95,11 +92,6 @@ type WebhookDelivery struct {
 	EventReplayOfID string `json:"event_replay_of_id,omitempty"`
 }
 
-// EventDispatcher fires outbound webhook events.
-type EventDispatcher interface {
-	Dispatch(ctx context.Context, tenantID, eventType string, payload map[string]any) error
-}
-
 // Well-known event types emitted by Hardcount.
 const (
 	EventInvoiceFinalized = "invoice.finalized"
@@ -123,14 +115,15 @@ const (
 	EventPaymentSucceeded       = "payment.succeeded"
 	EventPaymentFailed          = "payment.failed"
 	// EventPaymentMethodAttached fires when a payment method lands on a
-	// customer through a completed Checkout setup (setup_intent.succeeded).
-	// It is the webhook-side signal that charge-on-attach now proceeds for
-	// any queued invoices. Payload: customer_id, stripe_payment_method_id.
+	// customer through a completed Checkout setup (setup_intent.succeeded)
+	// and that saves or changes the card. It is the webhook-side signal that
+	// charge-on-attach now proceeds for any queued invoices. Data: the card
+	// (PaymentMethodView) and stripe_payment_method_id.
 	EventPaymentMethodAttached = "payment_method.attached"
-	// EventPaymentMethodUpdated fires when a customer's payment-method setup
-	// completes or refreshes with card metadata (the hosted update-payment
-	// or portal flow). Payload: customer_id, stripe_customer_id, card_brand,
-	// card_last4.
+	// EventPaymentMethodUpdated fires when a finished Checkout session saves
+	// or changes the customer's card (checkout.session.completed, or the
+	// hosted sweep for a session whose webhook was lost). Data: the card
+	// (PaymentMethodView) and stripe_customer_id.
 	EventPaymentMethodUpdated = "payment_method.updated"
 	// EventPaymentDuplicateCharge fires when a second, different
 	// PaymentIntent succeeds against an already-paid invoice (two devices,

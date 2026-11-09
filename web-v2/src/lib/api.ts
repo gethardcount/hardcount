@@ -282,7 +282,9 @@ export const api = {
   // Creates a draft invoice. Cycle invoices originate from the billing engine
   // and pass subscription_id; one-off invoices issued from the customer-page
   // composer omit it (backend allows null after migration 0060). Default
-  // billing window is "now" when omitted, default net term is 30 days.
+  // billing window is "now" when omitted; omitted terms are the account's.
+  // The key is required, as for createCreditNote: a retry sent with the same
+  // key gets the first invoice back instead of a second one.
   createInvoice: (data: {
     customer_id: string
     subscription_id?: string
@@ -294,7 +296,7 @@ export const api = {
     // line_items, when present, are created atomically with the invoice
     // header in a single request (no follow-up addInvoiceLineItem calls).
     line_items?: { description: string; line_type: string; quantity: number; unit_amount_cents: number }[]
-  }) => apiRequest<Invoice>('POST', '/invoices', data),
+  }, idempotencyKey: string) => apiRequest<Invoice>('POST', '/invoices', data, { idempotencyKey }),
   finalizeInvoice: (id: string) =>
     apiRequest<Invoice>('POST', `/invoices/${id}/finalize`),
   voidInvoice: (id: string) =>
@@ -595,10 +597,12 @@ export const api = {
       `/webhook_events/${id}/deliveries`,
     ),
 
-  // Analytics
-  addInvoiceLineItem: (invoiceId: string, data: { description: string; line_type: string; quantity: number; unit_amount_cents: number }) =>
-    apiRequest<LineItem>('POST', `/invoices/${invoiceId}/line-items`, data),
+  // The key is required, as for createCreditNote: a draft's lines cannot be
+  // removed, so a retry without it would leave a second line on the invoice.
+  addInvoiceLineItem: (invoiceId: string, data: { description: string; line_type: string; quantity: number; unit_amount_cents: number }, idempotencyKey: string) =>
+    apiRequest<LineItem>('POST', `/invoices/${invoiceId}/line-items`, data, { idempotencyKey }),
 
+  // Analytics
   getAnalyticsOverview: (period?: string) =>
     apiRequest<AnalyticsOverview>('GET', `/analytics/overview${period ? `?period=${period}` : ''}`),
   getRevenueChart: (period: string) =>

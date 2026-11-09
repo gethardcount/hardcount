@@ -1,7 +1,7 @@
 # ADR-131: Webhook events carry the resource they are about
 
 **Date:** 2026-10-24
-**Status:** Accepted
+**Status:** Accepted (amended 2026-11-09)
 
 ## Summary
 
@@ -70,6 +70,16 @@ How the peers shape a payload (verified 2026-10-24):
    `recovery_warning`, `billing_period_display` and `test_clock_id`; a
    subscription's `current_billing_period_display`; a run's list-only
    joined figures. Invoice line items are not included.
+
+   *Amended 2026-11-09 (P1-01):* every event is now queued in the
+   transaction of its change ([ADR-040](040-outbox-always-on.md)), so no
+   event reads its resource after the commit. An event reads the row in
+   that transaction, or uses the row the write returned. One exception:
+   `payment.duplicate_charge`, `.currency_mismatch` and
+   `.received_on_voided_invoice` carry the invoice as the payment path read
+   it before recording the anomaly.
+   [webhook-events.md](../api/webhook-events.md) says what the invoice
+   holds in each.
 3. `WebhookEventExtras` lists the keys each event may carry beside the
    resource. A key the resource already holds is not repeated. A fact it
    does not hold is kept, so no amount is lost: for example the anomaly
@@ -82,6 +92,11 @@ How the peers shape a payload (verified 2026-10-24):
 5. When a post-commit event cannot read its resource, it is not sent, and
    an error is logged. An event with a made-up resource would tell the
    receiver something the API does not show.
+
+   *Amended 2026-11-09 (P1-01):* no event is queued after its commit any
+   more, so this rule has no case left. An event whose resource cannot be
+   read fails its transaction, so neither the change nor the event is
+   saved.
 
 ## Why this design
 
@@ -123,7 +138,8 @@ How the peers shape a payload (verified 2026-10-24):
   keep them bounded.
 - **A post-commit event can show a later state** than the change that sent
   it, when another write lands between the commit and the read. It never
-  shows a state the row did not have.
+  shows a state the row did not have. *Amended 2026-11-09:* no event is
+  queued after its commit now (decision 2), so this no longer happens.
 - **The resource follows the API.** Hiding a field from the API (the
   rename pass plans to hide some invoice internals) also removes it from
   the events.

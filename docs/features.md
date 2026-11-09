@@ -67,7 +67,7 @@ bills those charges too ([Spend thresholds](concepts/invoices.md#spend-threshold
 |---|---|---|
 | Safe retries | Send an `Idempotency-Key` header on a POST, PUT or PATCH, and a retry within 24 hours gets the first answer instead of running again. A server error is saved too, so a retry cannot repeat a charge that may have gone through. The usage routes ignore the header: each event's own key stops double counting. | [Idempotency](api/idempotency.md) |
 | Careful card charges | When Hardcount cannot tell whether a charge went through, it asks Stripe instead of charging again. Only one charge runs on an invoice at a time, and a second payment that gets through is flagged for you to refund. | [Card payment failure handling](payments.md) |
-| Webhooks kept in the database | Every webhook is queued in the database and retried. The events marked *always sent* are saved with the change, so a crash cannot drop them. A crash just after a change can drop one of the others. | [Webhooks](webhooks.md#three-rules-for-your-receiver) |
+| Webhooks kept in the database | Every webhook is saved in the same transaction as the change that caused it, then delivered and retried from the database. | [Webhooks](webhooks.md#three-rules-for-your-receiver) |
 | Signed webhooks | Every webhook is signed. When you rotate the secret, both the old and the new secret sign each message for 72 hours. | [Webhooks](webhooks.md#verifying-signatures) |
 | Live webhook log | Watch webhooks as they go out, with every delivery attempt. | [Webhooks](webhooks.md#retries) |
 | [Test clocks](glossary.md#testing-with-simulated-time) | Move a test customer's clock forward, and months of billing happen in seconds. | [First invoice](first-invoice.md) |

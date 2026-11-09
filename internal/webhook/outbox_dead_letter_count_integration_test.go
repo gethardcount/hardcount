@@ -59,7 +59,7 @@ func TestWebhookOutboxDeadLetter_CountedOnlyWhenTheMarkApplied(t *testing.T) {
 	// One row on its last attempt (the claim adds the last one).
 	lastAttempt := func() string {
 		t.Helper()
-		id, err := store.EnqueueStandalone(ctx, tenantID, "invoice.paid", map[string]any{"invoice_id": "inv_1"})
+		id, err := store.EnqueueCommitted(ctx, tenantID, "invoice.paid", map[string]any{"invoice_id": "inv_1"})
 		if err != nil {
 			t.Fatalf("enqueue: %v", err)
 		}

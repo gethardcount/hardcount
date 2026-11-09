@@ -86,25 +86,6 @@ func TestSettleSucceeded_ResolverErrorDoesNotFailSettle(t *testing.T) {
 // recovered settlement must fire the SAME consequences (dunning, mark) as the
 // webhook, and inherit the out-of-order guard.
 
-// recordingEventDispatcher counts outbound events by type and keeps the
-// last payload of each type.
-type recordingEventDispatcher struct {
-	byType map[string]int
-	last   map[string]map[string]any
-}
-
-func (r *recordingEventDispatcher) Dispatch(_ context.Context, _, eventType string, payload map[string]any) error {
-	if r.byType == nil {
-		r.byType = map[string]int{}
-	}
-	if r.last == nil {
-		r.last = map[string]map[string]any{}
-	}
-	r.byType[eventType]++
-	r.last[eventType] = payload
-	return nil
-}
-
 // recordingReceiptEmail counts payment-receipt enqueues.
 type recordingReceiptEmail struct{ sends int }
 
@@ -152,10 +133,8 @@ func TestSettleSucceeded_ConcurrentRedeliveryFiresSideEffectsOnce(t *testing.T) 
 	}
 	invoices.byPI["pi_abc"] = "inv_1"
 
-	events := &recordingEventDispatcher{}
 	email := &recordingReceiptEmail{}
 	s := NewStripe(&mockStripeClient{}, invoices, newMockWebhookStore(), nil)
-	s.SetEventDispatcher(events)
 	s.SetEmailReceipt(email, staticCustomerEmail{})
 
 	// The stale snapshot both racing deliveries hold: invoice still
@@ -173,13 +152,9 @@ func TestSettleSucceeded_ConcurrentRedeliveryFiresSideEffectsOnce(t *testing.T) 
 		t.Fatalf("invoice not settled: payment_status=%q", got)
 	}
 	// payment.succeeded is now enqueued IN-TX by the card-settlement transition
-	// (gated on transitioned), not via the post-commit dispatcher — so the in-tx
-	// path fires it exactly once and the dispatcher sees it zero times.
+	// (gated on transitioned), so it fires exactly once.
 	if got := invoices.cardEventEnqueues; got != 1 {
 		t.Errorf("payment.succeeded enqueued in-tx %d times, want exactly 1 (concurrent redelivery must not double-fire)", got)
-	}
-	if got := events.byType[domain.EventPaymentSucceeded]; got != 0 {
-		t.Errorf("payment.succeeded fired via the post-commit dispatcher %d times, want 0 (it moved in-tx)", got)
 	}
 	if email.sends != 1 {
 		t.Errorf("receipt email enqueued %d times, want exactly 1 (no double-notify)", email.sends)
@@ -227,11 +202,9 @@ func TestSettleFailed_ConcurrentRedeliveryFiresSideEffectsOnce(t *testing.T) {
 	}
 	invoices.byPI["pi_x"] = "inv_1"
 
-	events := &recordingEventDispatcher{}
 	failedEmail := &recordingFailedEmail{}
 	dunning := &recordingDunningStarter{}
 	s := NewStripe(&mockStripeClient{}, invoices, newMockWebhookStore(), nil, dunning)
-	s.SetEventDispatcher(events)
 	s.SetEmailPaymentFailed(failedEmail, staticCustomerEmail{})
 
 	// Both racers hold the same stale `processing` snapshot.
@@ -247,9 +220,6 @@ func TestSettleFailed_ConcurrentRedeliveryFiresSideEffectsOnce(t *testing.T) {
 	}
 	if got := invoices.failedEventEnqueues; got != 1 {
 		t.Errorf("payment.failed enqueued %d times, want exactly 1 (concurrent redelivery must not double-fire the webhook)", got)
-	}
-	if got := events.byType[domain.EventPaymentFailed]; got != 0 {
-		t.Errorf("payment.failed dispatched post-commit %d times, want 0 (it is enqueued IN-TX by the store; a post-commit fire would double-emit)", got)
 	}
 	if failedEmail.sends != 1 {
 		t.Errorf("payment-failed email enqueued %d times, want exactly 1 (no double-notify)", failedEmail.sends)
@@ -280,11 +250,9 @@ func TestSettleFailed_InlinePresetThenWebhookStillNotifiesOnce(t *testing.T) {
 	}
 	invoices.byPI["pi_y"] = "inv_1"
 
-	events := &recordingEventDispatcher{}
 	failedEmail := &recordingFailedEmail{}
 	dunning := &recordingDunningStarter{}
 	s := NewStripe(&mockStripeClient{}, invoices, newMockWebhookStore(), nil, dunning)
-	s.SetEventDispatcher(events)
 	s.SetEmailPaymentFailed(failedEmail, staticCustomerEmail{})
 
 	if err := s.SettleFailed(context.Background(), "t1", invoices.invoices["inv_1"], PaymentFailure{PaymentIntentID: "pi_y", Message: "Your card was declined."}, SourceWebhook); err != nil {
@@ -310,10 +278,8 @@ func TestSettleFailed_NewRetryPIFiresAgain(t *testing.T) {
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentProcessing,
 		StripePaymentIntentID: "pi_a",
 	}
-	events := &recordingEventDispatcher{}
 	dunning := &recordingDunningStarter{}
 	s := NewStripe(&mockStripeClient{}, invoices, newMockWebhookStore(), nil, dunning)
-	s.SetEventDispatcher(events)
 
 	// First failure (pi_a, the PI the invoice holds), then a dunning retry's
 	// decline on a fresh PI (pi_b) reported by its charge call. Dunning-retry

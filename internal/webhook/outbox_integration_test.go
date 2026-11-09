@@ -18,10 +18,10 @@ import (
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
 
-// TestOutbox_EnqueueStandalone_Persists verifies the base durability
-// guarantee: after EnqueueStandalone returns without error, a pending row
-// exists in webhook_outbox. No dispatcher involvement.
-func TestOutbox_EnqueueStandalone_Persists(t *testing.T) {
+// TestOutbox_Enqueue_Persists verifies the base durability guarantee: once
+// Enqueue's transaction commits, webhook_outbox holds a pending row with no
+// attempts and the payload. No dispatcher involvement.
+func TestOutbox_Enqueue_Persists(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 15*time.Second)
 	defer cancel()
@@ -29,7 +29,7 @@ func TestOutbox_EnqueueStandalone_Persists(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Outbox Enqueue")
 	store := webhook.NewOutboxStore(db)
 
-	id, err := store.EnqueueStandalone(ctx, tenantID, "invoice.finalized", map[string]any{
+	id, err := store.EnqueueCommitted(ctx, tenantID, "invoice.finalized", map[string]any{
 		"invoice_id": "inv_1",
 		"amount":     1234,
 	})
@@ -109,7 +109,7 @@ func TestOutbox_ProcessBatch_Success(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Outbox Success")
 	store := webhook.NewOutboxStore(db)
 
-	id, err := store.EnqueueStandalone(ctx, tenantID, "evt.ok", map[string]any{"n": 1})
+	id, err := store.EnqueueCommitted(ctx, tenantID, "evt.ok", map[string]any{"n": 1})
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestOutbox_ProcessBatch_RetryBackoff(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Outbox Retry")
 	store := webhook.NewOutboxStore(db)
 
-	id, err := store.EnqueueStandalone(ctx, tenantID, "evt.flaky", map[string]any{})
+	id, err := store.EnqueueCommitted(ctx, tenantID, "evt.flaky", map[string]any{})
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestOutbox_ProcessBatch_DLQ(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Outbox DLQ")
 	store := webhook.NewOutboxStore(db)
 
-	id, err := store.EnqueueStandalone(ctx, tenantID, "evt.broken", map[string]any{})
+	id, err := store.EnqueueCommitted(ctx, tenantID, "evt.broken", map[string]any{})
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestOutbox_Counts(t *testing.T) {
 	store := webhook.NewOutboxStore(db)
 
 	for range 3 {
-		if _, err := store.EnqueueStandalone(ctx, tenantID, "evt.x", map[string]any{}); err != nil {
+		if _, err := store.EnqueueCommitted(ctx, tenantID, "evt.x", map[string]any{}); err != nil {
 			t.Fatalf("enqueue: %v", err)
 		}
 	}
@@ -317,7 +317,7 @@ func TestOutbox_ProcessBatch_ConcurrentClaimersDisjoint(t *testing.T) {
 
 	const n = 10
 	for range n {
-		if _, err := store.EnqueueStandalone(ctx, tenantID, "invoice.finalized", map[string]any{"id": "inv_disjoint"}); err != nil {
+		if _, err := store.EnqueueCommitted(ctx, tenantID, "invoice.finalized", map[string]any{"id": "inv_disjoint"}); err != nil {
 			t.Fatalf("enqueue: %v", err)
 		}
 	}
@@ -374,12 +374,12 @@ func TestOutbox_ProcessBatch_SkipsRowsLockedBySibling(t *testing.T) {
 	const half = 5
 	held, free := map[string]bool{}, map[string]bool{}
 	for range half {
-		id, err := store.EnqueueStandalone(ctx, tenantID, "sibling.holds", map[string]any{})
+		id, err := store.EnqueueCommitted(ctx, tenantID, "sibling.holds", map[string]any{})
 		if err != nil {
 			t.Fatalf("enqueue held: %v", err)
 		}
 		held[id] = true
-		id, err = store.EnqueueStandalone(ctx, tenantID, "sibling.free", map[string]any{})
+		id, err = store.EnqueueCommitted(ctx, tenantID, "sibling.free", map[string]any{})
 		if err != nil {
 			t.Fatalf("enqueue free: %v", err)
 		}

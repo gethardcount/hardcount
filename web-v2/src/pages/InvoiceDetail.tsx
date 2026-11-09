@@ -1856,6 +1856,7 @@ export default function InvoiceDetailPage() {
           currency={invoice.currency}
           onClose={() => setShowAddLineItem(false)}
           onAdded={() => { setShowAddLineItem(false); toast.success('Line item added'); invalidateAll() }}
+          onFailed={invalidateAll}
         />
       )}
 
@@ -2004,9 +2005,18 @@ function OperatorContextCard({
   )
 }
 
-function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
+function AddLineItemDialog({ invoiceId, currency, onClose, onAdded, onFailed }: {
   invoiceId: string; currency: string; onClose: () => void; onAdded: () => void
+  // Reads the invoice again: a try that failed may still have added the line.
+  onFailed: () => void
 }) {
+  // One Idempotency-Key per dialog open, sent with every submit from it. A
+  // draft's lines cannot be removed, so a click after a lost answer must get
+  // the first line back, not add a second one. The dialog unmounts on close,
+  // so the next open makes a new key. That is why it cannot close while a
+  // try is out: the line may land after the page reloads, and a new opening
+  // would add it again.
+  const [idemKey] = useState(() => crypto.randomUUID())
   const [description, setDescription] = useState('')
   const [lineType, setLineType] = useState('add_on')
   const [quantity, setQuantity] = useState('1')
@@ -2038,9 +2048,10 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
         line_type: lineType,
         quantity: qty,
         unit_amount_cents: unitCents,
-      })
+      }, idemKey)
       onAdded()
     } catch (err) {
+      onFailed()
       showApiError(err, 'Failed to add line item')
     } finally {
       setSaving(false)
@@ -2048,7 +2059,7 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+    <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add line item</DialogTitle>
@@ -2099,7 +2110,7 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
             </p>
           )}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
             <Button type="submit" disabled={saving}>
               {saving ? <><Loader2 size={14} className="animate-spin mr-2" />Adding...</> : 'Add line item'}
             </Button>
