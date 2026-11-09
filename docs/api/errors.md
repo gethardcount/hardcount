@@ -227,7 +227,8 @@ Each sends a `Retry-After` header with the seconds to wait.
 | `authentication_unavailable` | Hardcount could not check the key or session | Retry the same request |
 | `idempotency_unavailable` | Hardcount could not record the `Idempotency-Key`, so it ran nothing | Retry with the same key after `Retry-After` (1 second) |
 | `ingest_unavailable` | The usage store did not answer. Nothing was recorded. | Send the same events again |
-| `currency_unavailable` | `POST /v1/invoices` could not read the customer's currency. No invoice was made. | Retry, with a new `Idempotency-Key` if you sent one |
+| `currency_unavailable` | `POST /v1/invoices` could not read the customer's currency. No invoice was made. | Retry the same request, with the same `Idempotency-Key` if you sent one |
+| `proration_unavailable` | Adding an item, or an immediate quantity or plan change that costs more, could not read the current period's invoice to price the charge. The change was not made. | Retry the same request after `Retry-After` (1 second), with the same `Idempotency-Key` if you sent one |
 | `catchup_queue_full` | A test-clock advance or retry-advance found too many catch-ups waiting. A catch-up is the billing Hardcount runs for the time a test clock skipped. This clock's catch-up did not start, and the clock is set to `internal_failure`. | Once the running catch-ups finish, send `POST /v1/test-clocks/{id}/retry-advance`. The same advance again answers `409`. |
 
 ### 504 Gateway Timeout
@@ -250,8 +251,9 @@ Each sends a `Retry-After` header with the seconds to wait.
   the same request with the same key. Nothing ran.
 - **`503` `ingest_unavailable`:** send the same events with the same keys.
   Nothing was recorded.
-- **`503` `currency_unavailable`:** no invoice was made, but with an
-  `Idempotency-Key` the answer is stored. Retry with a new key.
+- **`503` `currency_unavailable` and `proration_unavailable`:** the change
+  was not made, and a `503` is never stored. Send the same request with the
+  same key.
 - **`500`, `502` and `504` on a usage route:** send the same events with
   the same keys. A key is never counted twice.
 - **`500`, `502` and `504` on another write sent with an `Idempotency-Key`:**

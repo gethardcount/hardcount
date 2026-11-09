@@ -177,10 +177,10 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 			// response must still be stored, or the retry runs it again.
 			bgCtx := postgres.WithLivemode(context.Background(), livemode)
 
-			// Cache every status except 409 and 422. Above all, a retry
-			// after a transient 500 must not run the side effects again.
-			// The first call may have committed writes the client cannot
-			// see, such as a Stripe charge that succeeded while the
+			// Cache every status except 409, 422 and 503. Above all, a
+			// retry after a transient 500 must not run the side effects
+			// again. The first call may have committed writes the client
+			// cannot see, such as a Stripe charge that succeeded while the
 			// response timed out. If the 500 were not cached, a retry under
 			// the same key would charge twice.
 			//
@@ -192,8 +192,16 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 			// flag the fixed body as a reused key. Storing either would
 			// trap the caller, so the pending reservation is deleted
 			// instead, which frees the key for a clean retry.
+			//
+			// 503 Service Unavailable is not cached either. A handler
+			// answers 503 only when a second run is safe: something the
+			// request needed failed, and nothing it committed would be done
+			// twice (errs.Unavailable). Storing it would replay a failure
+			// that a retry may get past. A handler that may have made its
+			// change must not answer 503.
 			if recorder.statusCode == http.StatusConflict ||
-				recorder.statusCode == http.StatusUnprocessableEntity {
+				recorder.statusCode == http.StatusUnprocessableEntity ||
+				recorder.statusCode == http.StatusServiceUnavailable {
 				releaseKey(bgCtx, db, tenantID, key, recorder.statusCode)
 				return
 			}
@@ -307,12 +315,11 @@ func finalizeKey(ctx context.Context, db *postgres.DB, tenantID, key string, sta
 }
 
 // releaseKey deletes the pending reservation, so a key whose handler returned
-// a status that is not cached (409 or 422, or a 5xx on a release-on-error
-// route) can be retried cleanly. When the delete fails, the pending row
-// stays. Every retry with the key then gets 409 instead of running again
-// (conflict_idempotency_unresolved once the reservation is older than
-// idempotencyOrphanAfter). So each failure is counted and logged, like a
-// finalize failure.
+// a status that is not cached (409, 422 or 503) can be retried cleanly. When
+// the delete fails, the pending row stays. Every retry with the key then gets
+// 409 instead of running again (conflict_idempotency_unresolved once the
+// reservation is older than idempotencyOrphanAfter). So each failure is
+// counted and logged, like a finalize failure.
 func releaseKey(ctx context.Context, db *postgres.DB, tenantID, key string, statusCode int) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()

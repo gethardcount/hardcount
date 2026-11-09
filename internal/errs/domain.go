@@ -169,6 +169,23 @@ func NotFound(resource string) *DomainError {
 	}
 }
 
+// Unavailable refuses a request because something it needed failed, such as
+// a database read. It maps to HTTP 503 with Retry-After, and the idempotency
+// layer does not store a 503, so the client sends the same request again
+// with the same key. Return it only when a second run is safe: nothing the
+// request committed would be done twice. code names what was unavailable.
+// cause goes to the server log, never to the client.
+//
+//	return errs.Unavailable("proration_unavailable", "could not read this period's invoice — please retry", err)
+func Unavailable(code, message string, cause error) *DomainError {
+	return &DomainError{
+		Kind:    ErrUnavailable,
+		Code:    code,
+		Message: message,
+		Cause:   cause,
+	}
+}
+
 // CodeEmailNotConfigured is the stable code an operator-initiated email
 // action answers with when this server has no SMTP_HOST. Sends are queued
 // and delivered later. Without this refusal, the action would report "sent"
@@ -251,6 +268,10 @@ var (
 	//
 	// But it leaves the frontend with only a toast, and no field highlight.
 	ErrValidation = errors.New("validation error")
+	// ErrUnavailable marks a request refused because something it needed
+	// failed, when a second run of it is safe. respond.FromError maps it to
+	// HTTP 503. Use errs.Unavailable, which carries the code and the cause.
+	ErrUnavailable = errors.New("unavailable")
 )
 
 // Error code constants.
