@@ -1171,6 +1171,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// boot and send nothing. Every component that holds an outbox joins this
 	// list; TestMustWiredOutbox_CoversEveryOutboxHolder pins it.
 	webhook.MustWiredOutbox(invoiceStore, creditStore, subStore, dunningStore, customerStore, paymentMethodsStore, creditNoteSvc)
+	// The payment adapter queues no event itself: each payment anomaly's
+	// marker and webhook event go through its anomaly recorder, the invoice
+	// store. Refuse to boot without one, for the same reason.
+	stripeAdapter.MustHaveAnomalyRecorder()
 
 	// Invoice finalize commits the Stripe Tax calculation into a
 	// tax_transaction, so the tenant's Stripe Tax reports show the final

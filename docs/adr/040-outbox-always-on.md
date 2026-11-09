@@ -50,7 +50,9 @@ DLQ.
 > 30-second route timeout or a lost leader lease between the two commits
 > lost the event, and nothing sent it again. No producer uses that path
 > now, and `internal/arch/webhook_emit_catalog_test.go` fails a new site
-> that queues an event after its commit.
+> that queues an event after its commit. It follows the event type through
+> every wrapper that passes it on, and through the interfaces those
+> wrappers implement, such as the payment adapter's anomaly recorder.
 > (Corrected 2026-11-05. This paragraph first said that every webhook
 > producer enqueues inside the business transaction.)
 > The paragraph above has never been

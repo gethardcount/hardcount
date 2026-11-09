@@ -81,7 +81,7 @@ func TestWebhookHandler_SuccessfulPayment(t *testing.T) {
 	invoices := newMockInvoiceUpdaterH()
 	invoices.invoices["inv_1"] = mockInvoice{
 		id: "inv_1", tenantID: "t1", status: "finalized",
-		paymentStatus: "processing", stripePI: "pi_test_abc",
+		paymentStatus: "processing", stripePI: "pi_test_abc", currency: "USD",
 	}
 	invoices.byPI["pi_test_abc"] = "inv_1"
 
@@ -354,7 +354,7 @@ func TestWebhookHandler_TransientFailureRedelivers(t *testing.T) {
 	invoices := newMockInvoiceUpdaterH()
 	invoices.invoices["inv_1"] = mockInvoice{
 		id: "inv_1", tenantID: "t1", status: "finalized",
-		paymentStatus: "processing", stripePI: "pi_test_abc",
+		paymentStatus: "processing", stripePI: "pi_test_abc", currency: "USD",
 	}
 	invoices.byPI["pi_test_abc"] = "inv_1"
 	// First delivery hits a transient DB blip on MarkPaid.
@@ -445,7 +445,11 @@ func signStripePayloadAt(payload []byte, secret string, at time.Time) string {
 
 type mockInvoice struct {
 	id, tenantID, status, paymentStatus, stripePI, lastError string
-	paidAt                                                   *time.Time
+	// currency is the invoice's. A payment_intent.succeeded whose charge
+	// currency differs records payment.currency_mismatch, which these tests
+	// do not wire a recorder for, so a success test sets it to match.
+	currency string
+	paidAt   *time.Time
 }
 
 type mockInvoiceUpdaterHandler struct {
@@ -503,7 +507,7 @@ func (m *mockInvoiceUpdaterHandler) GetByStripePaymentIntentID(_ context.Context
 		return domain.Invoice{}, fmt.Errorf("not found")
 	}
 	inv := m.invoices[id]
-	return domain.Invoice{ID: id, TenantID: inv.tenantID}, nil
+	return domain.Invoice{ID: id, TenantID: inv.tenantID, Currency: inv.currency}, nil
 }
 
 func (m *mockInvoiceUpdaterHandler) Get(_ context.Context, _, id string) (domain.Invoice, error) {
@@ -511,7 +515,7 @@ func (m *mockInvoiceUpdaterHandler) Get(_ context.Context, _, id string) (domain
 	if !ok {
 		return domain.Invoice{}, fmt.Errorf("not found")
 	}
-	return domain.Invoice{ID: id, TenantID: inv.tenantID}, nil
+	return domain.Invoice{ID: id, TenantID: inv.tenantID, Currency: inv.currency}, nil
 }
 
 func (m *mockInvoiceUpdaterHandler) MarkPaid(ctx context.Context, tenantID, id string, piID string, paidAt time.Time) (domain.Invoice, error) {

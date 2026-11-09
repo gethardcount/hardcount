@@ -125,7 +125,7 @@ type Stripe struct {
 	disputes           DisputeRecorder            // optional; records charge.dispute.* against the invoice (#979)
 	externalRefunds    ExternalRefundRecorder     // optional; records refunds made in Stripe outside Hardcount (ADR-134)
 	resolver           clock.Resolver             // optional; binds effective-now from invoice
-	anomalies          PaymentAnomalyRecorder     // optional; durable marker for the attention banner (ADR-068)
+	anomalies          PaymentAnomalyRecorder     // required; writes the anomaly marker (ADR-068) and queues its webhook event (MustHaveAnomalyRecorder)
 	checkoutSessions   *CheckoutSessionStore      // optional; claim-ledger truth-sync + settle-time expire (ADR-068)
 	sessionClients     *StripeClients             // optional; raw mode-keyed clients for session expire calls
 	audit              AuditEmitter               // optional; ADR-090 in-tx emission for the checkout-completed PM flip
@@ -166,9 +166,25 @@ type PaymentAnomalyRecorder interface {
 	RecordPaymentAnomaly(ctx context.Context, tenantID, invoiceID, kind, paymentIntentID string, capturedCents int64, data map[string]any) (bool, error)
 }
 
-// SetAnomalyRecorder wires the durable anomaly marker store.
+// SetAnomalyRecorder wires the store that writes each payment anomaly's
+// marker and queues its webhook event. Required: without it, every anomaly
+// fails its webhook (escalatePaymentAnomaly), and MustHaveAnomalyRecorder
+// refuses to boot.
 func (s *Stripe) SetAnomalyRecorder(r PaymentAnomalyRecorder) {
 	s.anomalies = r
+}
+
+// MustHaveAnomalyRecorder panics unless SetAnomalyRecorder was called. The
+// recorder is the only path a duplicate charge, a charge in another
+// currency or a payment on a voided invoice takes to its marker and its
+// webhook event, and anomalies are rare: a dropped wiring line would
+// otherwise boot and go unnoticed until the first one failed its webhook.
+// The composition root calls it after the wiring, as it does
+// webhook.MustWiredOutbox.
+func (s *Stripe) MustHaveAnomalyRecorder() {
+	if s.anomalies == nil {
+		panic("payment.Stripe: no payment anomaly recorder is wired (SetAnomalyRecorder), so no payment anomaly would record its marker or send its webhook event")
+	}
 }
 
 // SetCheckoutSessionStore wires the claim ledger for webhook truth-sync and

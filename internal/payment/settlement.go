@@ -481,11 +481,13 @@ func receiptAmountCents(capturedCents int64, fresh domain.Invoice) int64 {
 // A failed write returns the error, and the caller returns it: the webhook
 // answers 5xx and Stripe delivers the charge again, or the reconciler retries
 // on its next run. The redelivery detects the anomaly again and records it
-// then; one already recorded is not sent twice.
+// then; one already recorded is not sent twice. An adapter with no recorder
+// fails the same way, since the recorder is the only path the marker and the
+// event take; boot refuses one (MustHaveAnomalyRecorder).
 func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, inv domain.Invoice, eventType, incomingPI string, capturedCents int64, extra map[string]any, msg string) error {
 	logPaymentAnomaly(ctx, tenantID, inv, eventType, incomingPI, capturedCents, msg)
 	if s.anomalies == nil {
-		return nil
+		return fmt.Errorf("record %s for invoice %s: no payment anomaly recorder is wired (SetAnomalyRecorder)", eventType, inv.ID)
 	}
 	// The charge that raised the anomaly rides beside the invoice. The
 	// invoice is the row the caller passed: on duplicate_charge its

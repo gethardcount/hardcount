@@ -3,6 +3,7 @@ package payment
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -258,4 +259,57 @@ func TestSettleSucceeded_AmountMismatch(t *testing.T) {
 	if len(anomalies2.kinds) != 0 {
 		t.Fatalf("anomalies recorded after the settle = %v, want none", anomalies2.kinds)
 	}
+}
+
+// TestSettleSucceeded_NoAnomalyRecorder_FailsTheCall: the recorder is the
+// only path a payment anomaly's marker and webhook event take, so an adapter
+// without one fails the call instead of dropping both. The webhook then
+// answers 5xx, Stripe delivers the charge again, and the error names the
+// missing wiring. Each of the three anomalies SettleSucceeded records after
+// its transition.
+func TestSettleSucceeded_NoAnomalyRecorder_FailsTheCall(t *testing.T) {
+	paid := domain.Invoice{
+		ID: "inv_1", TenantID: "t1", Status: domain.InvoicePaid,
+		PaymentStatus: domain.PaymentSucceeded, StripePaymentIntentID: "pi_A", AmountPaidCents: 1000,
+	}
+	unpaid := domain.Invoice{
+		ID: "inv_1", TenantID: "t1", Status: domain.InvoiceFinalized,
+		PaymentStatus: domain.PaymentProcessing, AmountDueCents: 1000,
+	}
+	for _, c := range []struct {
+		name             string
+		stored, snapshot domain.Invoice
+		markPaidErr      error
+	}{
+		{"duplicate on a paid invoice", paid, paid, nil},
+		{"duplicate that lost the settle race", paid, unpaid, nil},
+		{"payment on a voided invoice", unpaid, unpaid, errs.InvalidState("voided")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			invoices := newMockInvoiceUpdater()
+			invoices.invoices[c.stored.ID] = c.stored
+			invoices.markPaidErr = c.markPaidErr
+			s := NewStripe(&mockStripeClient{}, invoices, newMockWebhookStore(), nil)
+			err := s.SettleSucceeded(context.Background(), "t1", c.snapshot, "pi_B", 1000, SourceWebhook)
+			if err == nil || !strings.Contains(err.Error(), "no payment anomaly recorder") {
+				t.Fatalf("settle without an anomaly recorder: err %v, want one naming the missing recorder", err)
+			}
+		})
+	}
+}
+
+// TestMustHaveAnomalyRecorder: the boot check in internal/api/router.go
+// refuses an adapter with no anomaly recorder and passes one that has it.
+func TestMustHaveAnomalyRecorder(t *testing.T) {
+	s := NewStripe(&mockStripeClient{}, newMockInvoiceUpdater(), newMockWebhookStore(), nil)
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("MustHaveAnomalyRecorder passed an adapter with no recorder; want a panic")
+			}
+		}()
+		s.MustHaveAnomalyRecorder()
+	}()
+	s.SetAnomalyRecorder(&recordingAnomalies{})
+	s.MustHaveAnomalyRecorder()
 }
