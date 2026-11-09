@@ -58,7 +58,9 @@ A few features still assume one copy. None of them touch money:
 
 6. Set the load balancer's request body limit. Allow bodies above 32 MB on `POST /v1/integrations/litellm/spend`, where LiteLLM sends its batches; 1 MB is enough on every other route. The Compose stack's nginx uses `client_max_body_size 33m` for that route. A lower limit turns full batches away with `413`, and LiteLLM does not send them again, so that usage is never billed ([LiteLLM size limit](../integrations/litellm.md#keep-each-send-under-the-size-limit)).
 
-7. Check the database connections. Each copy opens up to `DB_MAX_OPEN_CONNS` connections (default 20), plus a few while it starts. Copies × `DB_MAX_OPEN_CONNS` must stay below your Postgres `max_connections`.
+7. Keep the tokens in links out of the load balancer's access log. Some links carry a token that works like a password: whoever has a hosted invoice link can pay the invoice, and whoever has an invite link can join the team. If the load balancer logs URLs, redact the paths and the `token=` value that the Compose stack's [`nginx-log-redact.conf`](../../deploy/compose/nginx-log-redact.conf) lists, in the URL and in the Referer. The dashboard image sends its own security headers, so the load balancer adds none.
+
+8. Check the database connections. Each copy opens up to `DB_MAX_OPEN_CONNS` connections (default 20), plus a few while it starts. Copies × `DB_MAX_OPEN_CONNS` must stay below your Postgres `max_connections`.
 
 ## Health checks
 

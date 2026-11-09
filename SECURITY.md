@@ -55,7 +55,8 @@ In place:
   - about 30,000 common leaked passwords are refused when a password is set;
   - repeated wrong passwords slow down instead of locking the account;
   - the sign-in cookie travels only over HTTPS in production.
-- **Requests:** CSRF checks on the dashboard, security headers and HSTS, rate limiting. TLS itself is ended by a proxy run by the person who runs the server.
+- **Requests:** CSRF checks on the dashboard, security headers and HSTS, rate limiting. TLS itself is ended by a proxy run by the person who runs the server. The dashboard's pages, the hosted invoice page among them, refuse to be shown in a frame on another site.
+- **Logs:** the token in a link, such as a hosted invoice or invite link, is redacted from the API's access log and traces, and from the Compose stack's nginx access logs.
 - **Webhooks:** outbound events signed with HMAC-SHA256; inbound Stripe events verified.
 - **Audit log:** append-only; a database trigger refuses any update or delete.
 - **Supply chain:** CI runs `govulncheck` and scans the images with Trivy; release images carry an SBOM and are signed. GitHub secret scanning and push protection are on, so a commit that holds a known secret format is refused before it is public.
