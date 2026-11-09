@@ -181,7 +181,7 @@ DB_NAME=$(echo "$DATABASE_URL" | sed -E 's|.*://[^/]*/([^?]*).*|\1|')
 # e.g. PG_RESTORE="docker run --rm -i --network host postgres:16-alpine pg_restore"
 # (the archive is fed via stdin, so a wrapped binary needs no mounts).
 PG_RESTORE="${PG_RESTORE:-pg_restore}"
-command -v ${PG_RESTORE%% *} >/dev/null 2>&1 || die "pg_restore not found in PATH." 1
+command -v "${PG_RESTORE%% *}" >/dev/null 2>&1 || die "pg_restore not found in PATH." 1
 command -v psql >/dev/null 2>&1 || die "psql not found in PATH." 1
 
 # pg_restore emits client-version SET commands (SET transaction_timeout is

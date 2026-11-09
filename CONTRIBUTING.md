@@ -248,7 +248,7 @@ secrets.
 | `test` | Module checksums, and the integration tests against a real Postgres | `go test -p 1 ./... -count=1 -short=false` (needs `docker compose up -d postgres`; test databases are created for you) |
 | `test-pgbouncer` | The same suite through PgBouncer, a connection pooler, in transaction mode | `scripts/pgbouncer-test.sh` (needs Docker) |
 | `golden-path` | Boots a real server, runs `scripts/demo.sh` from prices to a finished invoice, then runs hardcount-doctor over the rows it wrote | Steps 2 to 5 of [Development setup](#development-setup), then `go run ./cmd/hardcount-doctor` |
-| `lint` | golangci-lint (`.golangci.yml`), the Go version in `go.mod` against the `Dockerfile`, the quickstart release against the Compose template, and `govulncheck` | `make lint`, then `govulncheck ./...` |
+| `lint` | golangci-lint (`.golangci.yml`), the Go version in `go.mod` against the `Dockerfile`, the quickstart release against the Compose template, ShellCheck on every shell script, and `govulncheck` | `make lint`, `scripts/ci/shellcheck.sh` (needs ShellCheck), then `govulncheck ./...` |
 | `codegen-drift` | Generated TypeScript matches `api/openapi.yaml` | `make gen && git diff --exit-code` |
 | `frontend` | Dashboard build (`tsc -b` and Vite), unit tests, eslint, and knip (unused files, exports and dependencies) | `cd web-v2 && npm run build && npm test && npm run lint` |
 | `e2e` | Playwright tests against a real API and dashboard. Setup: [`web-v2/e2e/README.md`](web-v2/e2e/README.md) | `cd web-v2 && npm run test:e2e` |
