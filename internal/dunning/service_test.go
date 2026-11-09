@@ -310,6 +310,19 @@ func (m *memStore) EscalateRun(_ context.Context, _ string, run domain.InvoiceDu
 	}, then)
 }
 
+// EscalateRunTx mirrors the real store: EscalateRun's guarded write, with the
+// escalated timeline row written with it, as the real store inserts it on the
+// write-off's transaction.
+func (m *memStore) EscalateRunTx(_ context.Context, _ *sql.Tx, _ string, run domain.InvoiceDunningRun, expectedAttempts int, extra map[string]any, event domain.InvoiceDunningEvent, then func(tx *sql.Tx) error) (bool, error) {
+	if run.State != domain.DunningEscalated {
+		return false, fmt.Errorf("EscalateRunTx with a run in state %q", run.State)
+	}
+	return m.writeIfActive(run, expectedAttempts, func() {
+		m.webhooks.record(domain.EventDunningEscalated, domain.DunningRunWebhookData(run, extra))
+		_, _ = m.CreateEvent(context.Background(), "", event) // the in-memory insert cannot fail
+	}, then)
+}
+
 func (m *memStore) writeIfActive(run domain.InvoiceDunningRun, expectedAttempts int, onWrite func(), then func(tx *sql.Tx) error) (bool, error) {
 	if err := refuseStrandingWrite(run); err != nil {
 		return false, err
@@ -888,15 +901,24 @@ func TestResolveRun(t *testing.T) {
 
 // capturingUncollect records calls to MarkUncollectible so the
 // cross-flow test below can assert the dunning resolve path actually
-// reaches the invoice service.
+// reaches the invoice service. With err set the write-off is refused before
+// it reaches then, as the real one is. Otherwise then runs, as inside the
+// write-off's transaction, and its error is the write-off's: without that, a
+// run would escalate beside a write-off that failed.
 type capturingUncollect struct {
 	calls []string // invoice IDs
 	err   error
 }
 
-func (c *capturingUncollect) MarkUncollectible(_ context.Context, _, invoiceID string) error {
+func (c *capturingUncollect) MarkUncollectible(_ context.Context, _, invoiceID string, then func(*sql.Tx) error) error {
 	c.calls = append(c.calls, invoiceID)
-	return c.err
+	if c.err != nil {
+		return c.err
+	}
+	if then != nil {
+		return then(nil)
+	}
+	return nil
 }
 
 // TestResolveRun_InvoiceNotCollectible_CascadesToInvoice locks in the

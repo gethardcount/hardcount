@@ -307,8 +307,8 @@ type stopAfterWriteOff struct {
 	stop context.CancelFunc
 }
 
-func (s *stopAfterWriteOff) MarkUncollectible(ctx context.Context, tenantID, id string) error {
-	err := s.writeOff.MarkUncollectible(ctx, tenantID, id)
+func (s *stopAfterWriteOff) MarkUncollectible(ctx context.Context, tenantID, id string, then func(*sql.Tx) error) error {
+	err := s.writeOff.MarkUncollectible(ctx, tenantID, id, then)
 	if s.stop != nil {
 		s.stop()
 		s.stop = nil

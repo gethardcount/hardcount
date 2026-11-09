@@ -2,6 +2,7 @@ package dunning_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -65,11 +66,12 @@ func (m dunningMovers) GetTerminalState(ctx context.Context, tenantID, id string
 	return st, nil
 }
 
-// writeOff bridges invoice.Service to dunning's write-off port.
+// writeOff bridges invoice.Service to dunning's write-off port, the same call
+// internal/api/adapters.go makes: then runs in the write-off's transaction.
 type writeOff struct{ svc *invoice.Service }
 
-func (w writeOff) MarkUncollectible(ctx context.Context, tenantID, id string) error {
-	_, err := w.svc.MarkUncollectible(ctx, tenantID, id)
+func (w writeOff) MarkUncollectible(ctx context.Context, tenantID, id string, then func(*sql.Tx) error) error {
+	_, err := w.svc.MarkUncollectibleThen(ctx, tenantID, id, then)
 	return err
 }
 

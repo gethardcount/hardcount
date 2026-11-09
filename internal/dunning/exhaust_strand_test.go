@@ -18,7 +18,8 @@ import (
 // the NULL, the exhaust-on-entry claim, and the state='active' write guard.
 
 // escalateFailsOnce fails the first write that would escalate a run — a DB
-// error landing after the final retry committed, the SB-1 cut point.
+// error landing after the final retry committed, the SB-1 cut point. On the
+// write-off path that write runs inside the write-off (EscalateRunTx).
 type escalateFailsOnce struct {
 	*memStore
 	failed bool
@@ -30,6 +31,14 @@ func (s *escalateFailsOnce) EscalateRun(ctx context.Context, tenantID string, ru
 		return false, errors.New("connection reset during the escalation write")
 	}
 	return s.memStore.EscalateRun(ctx, tenantID, run, expected, extra, then)
+}
+
+func (s *escalateFailsOnce) EscalateRunTx(ctx context.Context, tx *sql.Tx, tenantID string, run domain.InvoiceDunningRun, expected int, extra map[string]any, event domain.InvoiceDunningEvent, then func(*sql.Tx) error) (bool, error) {
+	if !s.failed {
+		s.failed = true
+		return false, errors.New("connection reset during the escalation write")
+	}
+	return s.memStore.EscalateRunTx(ctx, tx, tenantID, run, expected, extra, event, then)
 }
 
 // finalAttemptRun puts a run one retry short of exhaustion, due now.
@@ -130,16 +139,23 @@ func countEvents(mem *memStore, typ domain.DunningEventType) int {
 }
 
 // writeOffMover marks the shared invoice uncollectible, as the real mover
-// does, so the invoice reader sees the write-off on the next read. calls
-// counts the attempts and committed the write-offs that landed.
+// does, so the invoice reader sees the write-off on the next read. then runs
+// first, as inside the write-off's transaction, and an error from it rolls
+// the write-off back. calls counts the attempts and committed the write-offs
+// that landed.
 type writeOffMover struct {
 	inv       *domain.Invoice
 	calls     int
 	committed int
 }
 
-func (m *writeOffMover) MarkUncollectible(context.Context, string, string) error {
+func (m *writeOffMover) MarkUncollectible(_ context.Context, _, _ string, then func(*sql.Tx) error) error {
 	m.calls++
+	if then != nil {
+		if err := then(nil); err != nil {
+			return err
+		}
+	}
 	m.committed++
 	m.inv.Status = domain.InvoiceUncollectible
 	return nil
@@ -340,10 +356,15 @@ func TestFinalAttempt_LeaseHidesRunDuringCharge(t *testing.T) {
 	}
 }
 
-// escalateAlwaysFails models an escalation write that can never land.
+// escalateAlwaysFails models an escalation write that can never land, alone
+// or inside the write-off.
 type escalateAlwaysFails struct{ *memStore }
 
 func (s escalateAlwaysFails) EscalateRun(context.Context, string, domain.InvoiceDunningRun, int, map[string]any, func(*sql.Tx) error) (bool, error) {
+	return false, errors.New("escalation write keeps failing")
+}
+
+func (s escalateAlwaysFails) EscalateRunTx(context.Context, *sql.Tx, string, domain.InvoiceDunningRun, int, map[string]any, domain.InvoiceDunningEvent, func(*sql.Tx) error) (bool, error) {
 	return false, errors.New("escalation write keeps failing")
 }
 
@@ -375,7 +396,8 @@ func TestProcessDueRunsForClock_PersistentExhaustFailure_Terminates(t *testing.T
 }
 
 // reentrantMover re-enters a second processor's processRun while the first
-// is inside its terminal action — the in-flight SB-2 race.
+// is inside its terminal action — the in-flight SB-2 race. Then then runs, as
+// inside the write-off's transaction, and its error is the write-off's.
 type reentrantMover struct {
 	other    *Service
 	snapshot domain.InvoiceDunningRun
@@ -383,10 +405,13 @@ type reentrantMover struct {
 	errOther error
 }
 
-func (m *reentrantMover) MarkUncollectible(ctx context.Context, tenantID, _ string) error {
+func (m *reentrantMover) MarkUncollectible(ctx context.Context, tenantID, _ string, then func(*sql.Tx) error) error {
 	m.calls++
 	if m.calls == 1 {
 		m.errOther = m.other.processRun(ctx, tenantID, m.snapshot, false)
+	}
+	if then != nil {
+		return then(nil)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package dunning_test
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -28,9 +29,9 @@ type resolveBeforeWriteOff struct {
 	err error
 }
 
-func (m *resolveBeforeWriteOff) MarkUncollectible(ctx context.Context, tenantID, id string) error {
+func (m *resolveBeforeWriteOff) MarkUncollectible(ctx context.Context, tenantID, id string, then func(*sql.Tx) error) error {
 	m.err = m.svc.ResolveByInvoice(ctx, tenantID, id, domain.ResolutionAmountBelowMinimum)
-	return m.writeOff.MarkUncollectible(ctx, tenantID, id)
+	return m.writeOff.MarkUncollectible(ctx, tenantID, id, then)
 }
 
 // resolveWhileWriteOffWaits is the real write-off, except that it runs while a
@@ -45,7 +46,7 @@ type resolveWhileWriteOffWaits struct {
 	err error
 }
 
-func (m *resolveWhileWriteOffWaits) MarkUncollectible(ctx context.Context, tenantID, id string) error {
+func (m *resolveWhileWriteOffWaits) MarkUncollectible(ctx context.Context, tenantID, id string, then func(*sql.Tx) error) error {
 	t := m.t
 	admin := testutil.AdminPool(t)
 	tx, err := m.f.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -58,7 +59,7 @@ func (m *resolveWhileWriteOffWaits) MarkUncollectible(ctx context.Context, tenan
 	}
 
 	wrote := make(chan error, 1)
-	go func() { wrote <- m.writeOff.MarkUncollectible(ctx, tenantID, id) }()
+	go func() { wrote <- m.writeOff.MarkUncollectible(ctx, tenantID, id, then) }()
 	// The write-off's row lock selects the invoice's full column list, and
 	// pg_stat_activity keeps only the first 1 kB of a statement, which ends
 	// before its FOR UPDATE. So match the list's start: the hold claim's lock
@@ -183,13 +184,13 @@ type secondTickInside struct {
 	errs  []error
 }
 
-func (m *secondTickInside) MarkUncollectible(ctx context.Context, tenantID, id string) error {
+func (m *secondTickInside) MarkUncollectible(ctx context.Context, tenantID, id string, then func(*sql.Tx) error) error {
 	m.calls++
 	if m.calls == 1 {
 		m.f.clk.Advance(16 * time.Minute)
 		m.errs = m.f.tickAt(m.f.ctx)
 	}
-	return m.writeOff.MarkUncollectible(ctx, tenantID, id)
+	return m.writeOff.MarkUncollectible(ctx, tenantID, id, then)
 }
 
 // TestExhaust_WriteOff_SecondProcessorAfterLease_OneEscalation: processor A
