@@ -16,10 +16,6 @@ an example message. How messages are delivered, signed and retried:
   `reason` on `subscription.canceled` and `resumed_at` on
   `subscription.collection_resumed`. Every other key is always sent, even
   when it is empty, such as `applied` on `dunning.escalated`.
-- **"Always sent"** marks an event saved together with the change that
-  caused it, so a crash cannot drop it. Every event is marked. *Always
-  sent* does not mean always delivered. See
-  [Three rules for your receiver](../webhooks.md#three-rules-for-your-receiver).
 - **The examples are the real shape of each message.** Hardcount sends the
   body on one line, with its keys in this order; it is indented here. Tests
   check every example against the code that builds the message
@@ -53,7 +49,7 @@ invoice, just after this event
 Under Stripe Tax, `tax_transaction_id` can be recorded after this event;
 `GET /v1/invoices/{id}` shows it.
 
-**Always sent.** **Also in `data`:** nothing.
+**Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -116,7 +112,7 @@ An invoice is fully paid, by card, credit or an offline payment, or a credit
 note left nothing due. Its `amount_paid_cents` is what was paid at that
 moment: 0 when credit or a credit note covered the rest.
 
-**Always sent.** **Also in `data`:** nothing.
+**Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -179,7 +175,7 @@ Someone recorded a payment made outside Hardcount, such as a bank transfer
 or a cheque. `recovered_from` is the status the invoice was paid from:
 `finalized` or `uncollectible`.
 
-**Always sent.** **Also in `data`:** `recovered_from`.
+**Also in `data`:** `recovered_from`.
 
 <details>
 <summary>Example message</summary>
@@ -241,7 +237,7 @@ or a cheque. `recovered_from` is the status the invoice was paid from:
 
 An invoice was written off as bad debt.
 
-**Always sent.** **Also in `data`:** nothing.
+**Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -304,7 +300,7 @@ An invoice was voided. Under Stripe Tax, Hardcount reverses the invoice's
 tax just after the void is saved, so the invoice in this event has no
 `tax_reversed_at`; `GET /v1/invoices/{id}` shows it once that is done.
 
-**Always sent.** **Also in `data`:** nothing.
+**Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -386,7 +382,7 @@ on the same invoice is sent again.
 
 A charge was collected. The invoice names its PaymentIntent.
 
-**Always sent.** **Also in `data`:** nothing.
+**Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -449,7 +445,7 @@ A charge the invoice was waiting on failed. It is sent once per charge
 attempt (PaymentIntent). A decline on the hosted payment page does not send
 it, because the customer saw it there and can try again.
 
-**Always sent.** **Also in `data`:** nothing.
+**Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -515,7 +511,7 @@ Hardcount recorded on the paid invoice. It is left out when Hardcount
 recorded none, such as when credit paid the invoice or it was paid outside
 Hardcount (`paid_out_of_band` is true).
 
-**Always sent.** **Also in `data`:** `incoming_payment_intent_id`, `captured_cents`.
+**Also in `data`:** `incoming_payment_intent_id`, `captured_cents`.
 
 <details>
 <summary>Example message</summary>
@@ -583,7 +579,7 @@ saved with the payment, so this invoice, and the invoice in that payment's
 `invoice.paid` and `payment.succeeded`, show the anomaly
 (`payment_anomaly_kind`).
 
-**Always sent.** **Also in `data`:** `incoming_payment_intent_id`, `captured_cents`.
+**Also in `data`:** `incoming_payment_intent_id`, `captured_cents`.
 
 <details>
 <summary>Example message</summary>
@@ -651,7 +647,7 @@ converted. Review it in Stripe. The invoice is as it was when the charge
 arrived: its `stripe_payment_intent_id` may be this charge, an earlier one,
 or none.
 
-**Always sent.** **Also in `data`:** `incoming_payment_intent_id`, `captured_cents`,
+**Also in `data`:** `incoming_payment_intent_id`, `captured_cents`,
 `charge_currency`.
 
 <details>
@@ -718,7 +714,7 @@ Money arrived for a voided invoice. Refund it. The invoice is as it was
 when the charge arrived: its `stripe_payment_intent_id` may be this charge,
 an earlier one, or none.
 
-**Always sent.** **Also in `data`:** `incoming_payment_intent_id`, `captured_cents`.
+**Also in `data`:** `incoming_payment_intent_id`, `captured_cents`.
 
 <details>
 <summary>Example message</summary>
@@ -789,7 +785,7 @@ Stripe), `opened_at`, and `closed_at` once it is closed. What a dispute does
 and how to turn on Stripe's dispute events:
 [Card disputes](../ops/runbook/card-disputes.md).
 
-**Always sent.** **Also in `data`:** `dispute`.
+**Also in `data`:** `dispute`.
 
 <details>
 <summary>Example message</summary>
@@ -870,7 +866,7 @@ that never became a chargeback) or `prevented`. When the first Stripe event
 Hardcount receives is already the close, both dispute events are sent with
 the closed status, in either order.
 
-**Always sent.** **Also in `data`:** `dispute`.
+**Also in `data`:** `dispute`.
 
 <details>
 <summary>Example message</summary>
@@ -974,7 +970,7 @@ send no event. Hardcount hears of a refund made in Stripe only with
 `refund.created` on the Stripe webhook endpoint:
 [A refund made in Stripe](../ops/runbook/refund-made-in-stripe.md).
 
-**Always sent.** **Also in `data`:** `refund`.
+**Also in `data`:** `refund`.
 
 <details>
 <summary>Example message</summary>
@@ -1069,7 +1065,7 @@ saved card.
 A customer saved a payment method. Invoices waiting for one are charged on
 the next billing run. `stripe_payment_method_id` is the card's Stripe ID.
 
-**Always sent.** **Also in `data`:** `stripe_payment_method_id`.
+**Also in `data`:** `stripe_payment_method_id`.
 
 <details>
 <summary>Example message</summary>
@@ -1103,7 +1099,7 @@ the next billing run. `stripe_payment_method_id` is the card's Stripe ID.
 A customer's payment method was set up or replaced through Stripe Checkout.
 `stripe_customer_id` is the Stripe customer it was saved to.
 
-**Always sent.** **Also in `data`:** `stripe_customer_id`.
+**Also in `data`:** `stripe_customer_id`.
 
 <details>
 <summary>Example message</summary>
@@ -1147,7 +1143,7 @@ not show them.
 
 A subscription was created.
 
-**Always sent.** **Also in `data`:** nothing.
+**Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -1202,7 +1198,7 @@ A subscription was created.
 
 A draft subscription was activated.
 
-**Always sent.** **Also in `data`:** nothing.
+**Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -1262,7 +1258,7 @@ automatic payment retries ran out) or `system` (Hardcount itself). A cancel
 by dunning says `dunning`, also when a test-clock advance ran it. A cancel at trial end carries
 `reason: trial_end_cancel`; other cancels have no `reason`.
 
-**Always sent.** **Also in `data`:** `canceled_by`, `reason`.
+**Also in `data`:** `canceled_by`, `reason`.
 
 <details>
 <summary>Example message</summary>
@@ -1320,7 +1316,7 @@ by dunning says `dunning`, also when a test-clock advance ran it. A cancel at tr
 A trial ended. `triggered_by` is `operator` or `schedule`, and `ended_at`
 is when it ended.
 
-**Always sent.** **Also in `data`:** `ended_at`, `triggered_by`.
+**Also in `data`:** `ended_at`, `triggered_by`.
 
 <details>
 <summary>Example message</summary>
@@ -1378,7 +1374,7 @@ is when it ended.
 A trial's end date moved later. The new end is the subscription's
 `trial_end_at`. `triggered_by` is `operator`.
 
-**Always sent.** **Also in `data`:** `triggered_by`.
+**Also in `data`:** `triggered_by`.
 
 <details>
 <summary>Example message</summary>
@@ -1434,7 +1430,7 @@ A trial's end date moved later. The new end is the subscription's
 
 A cancel at period end was scheduled.
 
-**Always sent.** **Also in `data`:** nothing.
+**Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -1490,7 +1486,7 @@ A cancel at period end was scheduled.
 A scheduled cancel was removed. Clearing when no cancel is scheduled sends
 nothing.
 
-**Always sent.** **Also in `data`:** nothing.
+**Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -1552,7 +1548,7 @@ is paid (`subscription.collection_resumed` with `triggered_by: payment`) or
 you resume it. On a canceled subscription, paying the invoice does not lift
 the pause; resume it yourself.
 
-**Always sent.** **Also in `data`:** `triggered_by`.
+**Also in `data`:** `triggered_by`.
 
 <details>
 <summary>Example message</summary>
@@ -1621,7 +1617,7 @@ nothing. `triggered_by` is `operator`, `schedule` (its resume date came) or
   own trigger (`schedule` or `payment`). The resume call then sends no
   event with `triggered_by: operator`.
 
-**Always sent.** **Also in `data`:** `triggered_by`, `resumed_at`.
+**Also in `data`:** `triggered_by`, `resumed_at`.
 
 <details>
 <summary>Example message</summary>
@@ -1678,7 +1674,7 @@ nothing. `triggered_by` is `operator`, `schedule` (its resume date came) or
 
 A plan was added to the subscription. `item_id` names the new item.
 
-**Always sent.** **Also in `data`:** `item_id`.
+**Also in `data`:** `item_id`.
 
 <details>
 <summary>Example message</summary>
@@ -1734,7 +1730,7 @@ A plan was added to the subscription. `item_id` names the new item.
 
 An item's plan or quantity changed. `item_id` names the item.
 
-**Always sent.** **Also in `data`:** `item_id`.
+**Also in `data`:** `item_id`.
 
 <details>
 <summary>Example message</summary>
@@ -1790,7 +1786,7 @@ An item's plan or quantity changed. `item_id` names the item.
 
 An item was removed. `item_id` names it; it is no longer in `items`.
 
-**Always sent.** **Also in `data`:** `item_id`.
+**Also in `data`:** `item_id`.
 
 <details>
 <summary>Example message</summary>
@@ -1847,7 +1843,7 @@ An item was removed. `item_id` names it; it is no longer in `items`.
 A plan change for the next billing period was scheduled. The item's
 `pending_plan_id` and `pending_plan_effective_at` show it.
 
-**Always sent.** **Also in `data`:** `item_id`.
+**Also in `data`:** `item_id`.
 
 <details>
 <summary>Example message</summary>
@@ -1906,7 +1902,7 @@ change scheduled sends nothing. If the change took effect at the period end
 before the cancel reached it, the call answers 409 and sends nothing:
 `subscription.pending_change.applied` says what happened.
 
-**Always sent.** **Also in `data`:** `item_id`.
+**Also in `data`:** `item_id`.
 
 <details>
 <summary>Example message</summary>
@@ -1965,7 +1961,7 @@ is the new plan, `old_plan_id` the one it left, and `applied_at` when. The
 subscription is as it was just before the period closed. Closing a period
 means Hardcount builds its invoice and starts the next period.
 
-**Always sent.** **Also in `data`:** `item_id`, `old_plan_id`, `applied_at`.
+**Also in `data`:** `item_id`, `old_plan_id`, `applied_at`.
 
 <details>
 <summary>Example message</summary>
@@ -2031,7 +2027,7 @@ the period's usage so far, or a usage count on one item.
 - `crossed_item_id`: the item whose usage-count threshold was crossed,
   empty if none.
 
-**Always sent.** **Also in `data`:** `invoice_id`, `running_subtotal`, `crossed_amount`,
+**Also in `data`:** `invoice_id`, `running_subtotal`, `crossed_amount`,
 `crossed_item_id`.
 
 <details>
@@ -2096,7 +2092,7 @@ the period's usage so far, or a usage count on one item.
 An email to a customer bounced, and Hardcount stopped emailing that address.
 `reason` is the email provider's.
 
-**Always sent.** **Also in `data`:** `reason`.
+**Also in `data`:** `reason`.
 
 <details>
 <summary>Example message</summary>
@@ -2133,7 +2129,7 @@ An email to a customer bounced, and Hardcount stopped emailing that address.
 A customer marked an email from Hardcount as spam, and Hardcount stopped
 emailing that address. `reason` is the email provider's.
 
-**Always sent.** **Also in `data`:** `reason`.
+**Also in `data`:** `reason`.
 
 <details>
 <summary>Example message</summary>
@@ -2178,7 +2174,7 @@ fields the API adds when you read a run are left out: `invoice_number`,
 
 Payment retries started for an invoice.
 
-**Always sent.** **Also in `data`:** nothing.
+**Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -2219,7 +2215,7 @@ Payment retries ran out, and the final action from your policy was taken.
 `subscription_canceled+invoice_marked_uncollectible`, and empty when nothing
 applied.
 
-**Always sent.** **Also in `data`:** `final_subscription_action`, `final_invoice_action`,
+**Also in `data`:** `final_subscription_action`, `final_invoice_action`,
 `applied`.
 
 <details>
@@ -2261,7 +2257,7 @@ applied.
 Payment retries ended early, for example because the invoice was paid or
 someone resolved it by hand. The run's `resolution` says why.
 
-**Always sent.** **Also in `data`:** nothing.
+**Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -2307,7 +2303,7 @@ not use them to decide whether to keep serving a customer:
 The settled credit balance in one currency fell below your account's
 threshold, `threshold_cents`.
 
-**Always sent.** **Also in `data`:** `threshold_cents`.
+**Also in `data`:** `threshold_cents`.
 
 <details>
 <summary>Example message</summary>
@@ -2339,7 +2335,7 @@ threshold, `threshold_cents`.
 
 The settled credit balance in one currency reached zero or less.
 
-**Always sent.** **Also in `data`:** nothing.
+**Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -2370,7 +2366,7 @@ The settled credit balance in one currency reached zero or less.
 
 The settled credit balance in one currency went above zero again.
 
-**Always sent.** **Also in `data`:** nothing.
+**Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>
@@ -2409,7 +2405,7 @@ customer paid for up front.
 - `refunded_gross_cents`: the money the credit note returns.
 - `remaining_after_cents`: what is left on the grant.
 
-**Always sent.** **Also in `data`:** `grant_id`, `funding_invoice_id`,
+**Also in `data`:** `grant_id`, `funding_invoice_id`,
 `credit_note_id`, `retired_cents`, `refunded_gross_cents`,
 `remaining_after_cents`.
 

@@ -1,9 +1,6 @@
 package domain
 
-import (
-	"context"
-	"time"
-)
+import "time"
 
 // WebhookEndpoint is a tenant's URL that receives the outbound webhook
 // events it subscribes to, signed with its secret.
@@ -93,11 +90,6 @@ type WebhookDelivery struct {
 	// carried without fetching the event per row. Writers never set these.
 	EventType       string `json:"event_type,omitempty"`
 	EventReplayOfID string `json:"event_replay_of_id,omitempty"`
-}
-
-// EventDispatcher fires outbound webhook events.
-type EventDispatcher interface {
-	Dispatch(ctx context.Context, tenantID, eventType string, payload map[string]any) error
 }
 
 // Well-known event types emitted by Hardcount.

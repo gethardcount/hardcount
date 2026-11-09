@@ -30,11 +30,11 @@ them to use Hardcount.
 ### Running Hardcount
 
 - **outbox**: A database table of messages waiting to be sent
-  (`webhook_outbox`, `email_outbox`). Most webhook events, and the four
+  (`webhook_outbox`, `email_outbox`). Every webhook event, and the four
   money emails (payment receipt, payment failed, dunning warning, dunning
-  escalation), are queued inside the transaction that caused them. The rest
-  are queued right after it commits. A background dispatcher then delivers
-  each row, with retries. [More](../adr/040-outbox-always-on.md)
+  escalation), are queued inside the transaction that caused them. Other
+  emails are queued right after it commits. A background dispatcher then
+  delivers each row, with retries. [More](../adr/040-outbox-always-on.md)
 - **leader lease**: A row in the `leader_leases` table that lets exactly
   one copy of Hardcount run one tick of a job that must run once across all
   copies (billing, dunning, both outbox dispatchers, webhook delivery). It

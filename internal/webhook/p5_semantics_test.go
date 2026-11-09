@@ -157,7 +157,7 @@ func TestP5_HandlerOwnsOutboxMark(t *testing.T) {
 	svc := NewTestService(store, nil) // sync deliveries; nil client = no real POSTs
 	_ = seedEndpoint(t, db, ctx, tenantID)
 
-	rowID, err := outbox.EnqueueStandalone(ctx, tenantID, "invoice.paid", map[string]any{"invoice_id": "inv_1"})
+	rowID, err := outbox.EnqueueCommitted(ctx, tenantID, "invoice.paid", map[string]any{"invoice_id": "inv_1"})
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
