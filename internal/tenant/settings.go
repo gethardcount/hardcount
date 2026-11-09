@@ -413,14 +413,14 @@ func (h *SettingsHandler) get(w http.ResponseWriter, r *http.Request) {
 	// Any error coming back from Get is a real DB or scan failure.
 	ts, err := h.store.Get(r.Context(), tenantID)
 	if err != nil {
-		slog.Error("get settings", "error", err)
+		slog.Log(r.Context(), respond.ErrorLevel(r.Context(), err), "get settings", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
 
 	seq, err := h.store.NextInvoiceSequence(r.Context(), tenantID)
 	if err != nil {
-		slog.Error("read next invoice sequence", "error", err)
+		slog.Log(r.Context(), respond.ErrorLevel(r.Context(), err), "read next invoice sequence", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
@@ -452,7 +452,7 @@ func (h *SettingsHandler) upsert(w http.ResponseWriter, r *http.Request) {
 	// unknown base would resurrect replace semantics.
 	ts, err := h.store.Get(r.Context(), tenantID)
 	if err != nil {
-		slog.Error("get settings for merge", "error", err)
+		slog.Log(r.Context(), respond.ErrorLevel(r.Context(), err), "get settings for merge", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
@@ -460,7 +460,7 @@ func (h *SettingsHandler) upsert(w http.ResponseWriter, r *http.Request) {
 	// into an error response. The save does not change the sequence.
 	seq, err := h.store.NextInvoiceSequence(r.Context(), tenantID)
 	if err != nil {
-		slog.Error("read next invoice sequence", "error", err)
+		slog.Log(r.Context(), respond.ErrorLevel(r.Context(), err), "read next invoice sequence", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
@@ -481,7 +481,7 @@ func (h *SettingsHandler) upsert(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.store.Upsert(r.Context(), ts)
 	if err != nil {
-		slog.Error("upsert settings", "error", err)
+		slog.Log(r.Context(), respond.ErrorLevel(r.Context(), err), "upsert settings", "error", err)
 		respond.InternalError(w, r)
 		return
 	}

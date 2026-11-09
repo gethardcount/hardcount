@@ -1,6 +1,7 @@
 package respond
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -119,7 +120,7 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 		// and the provider refused it.
 		var sme SafeMessageError
 		if errors.As(err, &sme) {
-			slog.ErrorContext(r.Context(), "safe-message error returned",
+			slog.Log(r.Context(), ErrorLevel(r.Context(), err), "safe-message error returned",
 				"error", err,
 				"resource", resource,
 			)
@@ -163,7 +164,7 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 		// body. This is the sanitizing boundary: raw database, Stripe and Go
 		// errors never reach operators. Support finds the full error in the
 		// logs by the request ID in the response header.
-		slog.ErrorContext(r.Context(), "unhandled error",
+		slog.Log(r.Context(), ErrorLevel(r.Context(), err), "unhandled error",
 			"error", err,
 			"resource", resource,
 		)
@@ -175,7 +176,7 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 // The body carries the DomainError's own message, because its cause is a raw
 // server error that is logged here and never shown.
 func unavailable(w http.ResponseWriter, r *http.Request, err error, code, resource string) {
-	slog.ErrorContext(r.Context(), "request refused as unavailable; the client may send it again",
+	slog.Log(r.Context(), ErrorLevel(r.Context(), err), "request refused as unavailable; the client may send it again",
 		"error", err,
 		"resource", resource,
 	)
@@ -189,6 +190,27 @@ func unavailable(w http.ResponseWriter, r *http.Request, err error, code, resour
 	}
 	w.Header().Set("Retry-After", "1")
 	Error(w, r, http.StatusServiceUnavailable, "api_error", code, message)
+}
+
+// ErrorLevel returns the level for logging err, an error from work done for
+// a request. ctx is the request's context, or one derived from it.
+//
+// It is WARN when the request's client went away, for example by closing a
+// browser tab: ctx ended with context.Canceled and err wraps
+// context.Canceled. This relies on net/http being the only code that cancels
+// a request's context, which it does when the client disconnects. Every
+// other failure is ERROR, the level operators alert on. That includes the
+// 30s route timeout, which ends ctx with context.DeadlineExceeded, because a
+// slow request is a server problem.
+//
+// Use it only where the harm ends with the request, such as a failed read
+// for its answer. A line about work lost or left half done, such as an audit
+// row or a session revocation, stays at ERROR even when the client went away.
+func ErrorLevel(ctx context.Context, err error) slog.Level {
+	if errors.Is(err, context.Canceled) && errors.Is(ctx.Err(), context.Canceled) {
+		return slog.LevelWarn
+	}
+	return slog.LevelError
 }
 
 // routePattern returns the matched chi route pattern (for example

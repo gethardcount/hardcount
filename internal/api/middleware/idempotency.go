@@ -149,7 +149,7 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 				// or charge. A refused request is safe to retry, and Stripe
 				// answers a failed idempotency check the same way.
 				idempotencyCacheErrors.WithLabelValues("reserve").Inc()
-				slog.ErrorContext(r.Context(), "idempotency reserve failed; refusing the request (503) rather than running it unprotected",
+				slog.Log(r.Context(), respond.ErrorLevel(r.Context(), err), "idempotency reserve failed; refusing the request (503) rather than running it unprotected",
 					"tenant_id", tenantID, "path", r.URL.Path, "error", err)
 				w.Header().Set("Retry-After", "1")
 				respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "idempotency_unavailable", "could not record the idempotency key — retry the request with the same key")
