@@ -96,8 +96,6 @@ print(' '.join(sorted({d.datetime.utcfromtimestamp(t).strftime('%Y-%m-%d-%H') fo
       if [ -s "$dest/$tag.window" ]; then
         read -r w_start w_end < "$dest/$tag.window"; : "${w_end:=$(date -u +%s)}"
         RID=$(aws_ rds describe-db-instances --db-instance-identifier hardcount-bench-db --query 'DBInstances[0].DbiResourceId' --output text)
-        s_iso=$(python3 -c "import datetime as d,sys; print(d.datetime.utcfromtimestamp(int(sys.argv[1])).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$w_start")
-        e_iso=$(python3 -c "import datetime as d,sys; print(d.datetime.utcfromtimestamp(int(sys.argv[1])).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$w_end")
         # PI returns at most 600 data points per call, i.e. 10 minutes at 1 s
         # (a 1 h request silently comes back as its first 10 minutes — the
         # first control-series pull lost 90 % of the window that way). Page in

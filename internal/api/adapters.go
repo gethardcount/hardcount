@@ -797,13 +797,14 @@ func (a *subscriptionStateAdapter) GetTerminalState(ctx context.Context, tenantI
 
 // invoiceUncollectibleAdapter implements dunning.InvoiceUncollectibleMarker
 // over invoice.Service. Marking the invoice uncollectible is Stripe's
-// standard final action for dunning (ADR-036 amendment).
+// standard final action for dunning (ADR-036 amendment). then is dunning's
+// escalation, run in the write-off's transaction.
 type invoiceUncollectibleAdapter struct {
 	svc *invoice.Service
 }
 
-func (a *invoiceUncollectibleAdapter) MarkUncollectible(ctx context.Context, tenantID, id string) error {
-	_, err := a.svc.MarkUncollectible(ctx, tenantID, id)
+func (a *invoiceUncollectibleAdapter) MarkUncollectible(ctx context.Context, tenantID, id string, then func(tx *sql.Tx) error) error {
+	_, err := a.svc.MarkUncollectibleThen(ctx, tenantID, id, then)
 	return err
 }
 

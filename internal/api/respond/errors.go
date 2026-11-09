@@ -54,6 +54,11 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 	code := errs.Code(err)
 
 	switch {
+	case errors.Is(err, errs.ErrUnavailable):
+		// Checked first, so a not-found deeper in its cause cannot turn a
+		// refusal the client should retry into a 404.
+		unavailable(w, r, err, code, resource)
+
 	case errors.Is(err, errs.ErrNotFound):
 		if code != "" {
 			NotFoundCoded(w, r, code, err.Error())
@@ -164,6 +169,26 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 		)
 		InternalError(w, r)
 	}
+}
+
+// unavailable answers an errs.Unavailable refusal: 503 with Retry-After: 1.
+// The body carries the DomainError's own message, because its cause is a raw
+// server error that is logged here and never shown.
+func unavailable(w http.ResponseWriter, r *http.Request, err error, code, resource string) {
+	slog.ErrorContext(r.Context(), "request refused as unavailable; the client may send it again",
+		"error", err,
+		"resource", resource,
+	)
+	if code == "" {
+		code = "unavailable"
+	}
+	message := "the request could not be completed — please retry"
+	var de *errs.DomainError
+	if errors.As(err, &de) && de.Message != "" {
+		message = de.Message
+	}
+	w.Header().Set("Retry-After", "1")
+	Error(w, r, http.StatusServiceUnavailable, "api_error", code, message)
 }
 
 // routePattern returns the matched chi route pattern (for example

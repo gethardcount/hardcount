@@ -57,7 +57,14 @@ type Store interface {
 	// applies, its transaction also queues the dunning.escalated webhook with
 	// extra beside the run, before then's SAVEPOINT. A failed insert fails the
 	// escalation, so the escalation and its event commit together or not at all.
+	// The caller writes the escalated timeline row after the commit.
 	EscalateRun(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, extra map[string]any, then func(tx *sql.Tx) error) (bool, error)
+	// EscalateRunTx is EscalateRun on the caller's transaction tx, which
+	// already holds the invoice's row lock (the write-off's) and commits. It
+	// also inserts event, the escalated timeline row, before then's
+	// SAVEPOINT. A failed insert fails the escalation, and the caller's
+	// transaction with it.
+	EscalateRunTx(ctx context.Context, tx *sql.Tx, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, extra map[string]any, event domain.InvoiceDunningEvent, then func(tx *sql.Tx) error) (bool, error)
 	// ClaimExhaustion moves an exhausted run's next_action_at from the value the
 	// caller listed (expectedNext) to lease, only while the row is still active
 	// at expectedAttempts with that next_action_at. Exactly one processor wins;
