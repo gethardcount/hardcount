@@ -60,7 +60,7 @@ original text.
 
 ### Security
 
-- **The dev services and the restore drill listen only on 127.0.0.1, and only a backup's owner can read it.** The root `docker-compose.yml` published Postgres, Redis and Mailpit on every network interface, and `scripts/restore-drill.sh` its copy of your data with the password `hardcount`. The drill now makes its passwords per run, and `scripts/backup.sh` writes dumps as mode 0600. With Docker Engine on Linux, run `scripts/pgbouncer-test.sh` with `PGB_MODE=ci`. ([#1653](https://github.com/gethardcount/hardcount/pull/1653))
+- **The dev Postgres, Redis and Mailpit, and the restore drill, listen only on 127.0.0.1.** Another machine on your network could reach them with a known password or none. Dumps from `scripts/backup.sh` are now readable only by their owner. With Docker Engine on Linux, a container can no longer reach the dev Mailpit ([Mailpit](docs/ops/email-setup.md#mailpit-local-development)). ([#1653](https://github.com/gethardcount/hardcount/pull/1653))
 - **The quick start listens only on this computer.** It served the dashboard and API on every network interface, over plain HTTP, with a live key already made. A new quick-start `.env` sets `NGINX_HTTP_PORT=127.0.0.1:8080`. From another machine, use an SSH tunnel ([quick start](docs/quick-start.md)). ([#1635](https://github.com/gethardcount/hardcount/pull/1635))
 
 ## [0.9.3] - 2026-11-09
