@@ -965,7 +965,11 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if inv.AmountDueCents <= 0 {
-		respond.Validation(w, r, "invoice has no amount due")
+		// Unpaid with nothing due: an earlier credit apply covered the
+		// invoice and the settle after it failed, a lost deadlock included
+		// (ADR-136). Settle it now, so Collect sent again finishes. No card
+		// is needed, so this comes before the provider check.
+		h.collectNothingDue(w, r, tenantID, id)
 		return
 	}
 
@@ -1030,9 +1034,11 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		h.releaseCollectHold(r.Context(), tenantID, id, hold)
 		if serr != nil {
 			// A settle that lost a deadlock may be sent again: no charge was
-			// sent, and the credit applied above stays applied, so a resend
-			// finds nothing due and draws no credit twice (ADR-136). Only this
-			// branch: a deadlock after a card charge keeps its stored 500.
+			// sent, and the credit applied above stays applied. The resend
+			// finds nothing due, so it applies no credit and settles the
+			// invoice from the credit already applied (collectNothingDue,
+			// ADR-136). Only this branch: a deadlock after a card charge
+			// keeps its stored 500.
 			respond.FromError(w, r, respond.DeadlockAsConflict(r, serr), "invoice")
 			return
 		}
@@ -1044,16 +1050,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		// unpaid invoice stays open.
 		if settled.Status == domain.InvoicePaid {
 			h.resolveDunningRecovered(r.Context(), tenantID, id)
-		}
-		// The same collect row the card path writes below: the credit paid
-		// the invoice, and that is the money movement an auditor looks for.
-		if settled.Status == domain.InvoicePaid && h.auditLogger != nil {
-			_ = h.auditLogger.Log(h.svc.AuditCtx(r.Context(), settled), tenantID, domain.AuditActionCollect, "invoice", settled.ID, settled.InvoiceNumber, map[string]any{
-				"invoice_number":        settled.InvoiceNumber,
-				"credits_applied_cents": settled.CreditsAppliedCents,
-				"currency":              settled.Currency,
-				"paid_with":             "credit",
-			})
+			h.auditNoChargeCollect(r.Context(), tenantID, settled, "credit")
 		}
 		respond.JSON(w, r, http.StatusOK, settled)
 		return
@@ -1120,6 +1117,55 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, r, http.StatusOK, charged)
+}
+
+// collectNothingDue is Collect on a finalized, unpaid invoice with nothing
+// due. A credit-covered settle that failed after its credit was applied
+// leaves one. No charge is sent, so it takes no charge claim: the settle
+// re-reads the invoice under its row lock and refuses while a charge hold is
+// set. The dunning resolve and the audit row fire only when this call
+// settled the invoice; a writer that settled it first owns them.
+func (h *Handler) collectNothingDue(w http.ResponseWriter, r *http.Request, tenantID, id string) {
+	settled, paid, err := h.svc.SettleZeroDueWithoutClaim(r.Context(), tenantID, id)
+	if err != nil {
+		// Nothing commits before this settle, so one that lost a deadlock
+		// may be sent again (ADR-136).
+		respond.FromError(w, r, respond.DeadlockAsConflict(r, err), "invoice")
+		return
+	}
+	if !paid {
+		if settled.Status == domain.InvoicePaid {
+			respond.Validation(w, r, "invoice is already paid")
+			return
+		}
+		// The read only picks the words; the settle above was the gate.
+		if state, serr := h.svc.ChargeHoldState(r.Context(), tenantID, id); serr == nil && state != domain.ChargeHoldNone {
+			respond.ConflictCoded(w, r, "", "payment_in_flight", domain.ChargeHoldRefusalMessage)
+			return
+		}
+		respond.Validation(w, r, "invoice has no amount due")
+		return
+	}
+	h.resolveDunningRecovered(r.Context(), tenantID, id)
+	// "nothing_due": nothing was left to pay when Collect ran, so Collect
+	// applied no credit itself. credits_applied_cents shows what covered it.
+	h.auditNoChargeCollect(r.Context(), tenantID, settled, "nothing_due")
+	respond.JSON(w, r, http.StatusOK, settled)
+}
+
+// auditNoChargeCollect writes the collect row for an invoice Collect settled
+// with no card charge. It is the row the card path writes too: the one an
+// auditor looks for to see how an invoice was paid outside a billing run.
+func (h *Handler) auditNoChargeCollect(ctx context.Context, tenantID string, settled domain.Invoice, paidWith string) {
+	if h.auditLogger == nil {
+		return
+	}
+	_ = h.auditLogger.Log(h.svc.AuditCtx(ctx, settled), tenantID, domain.AuditActionCollect, "invoice", settled.ID, settled.InvoiceNumber, map[string]any{
+		"invoice_number":        settled.InvoiceNumber,
+		"credits_applied_cents": settled.CreditsAppliedCents,
+		"currency":              settled.Currency,
+		"paid_with":             paidWith,
+	})
 }
 
 // releaseCollectHold frees Collect's charge hold on a path that sent no

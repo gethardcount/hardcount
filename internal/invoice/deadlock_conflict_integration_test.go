@@ -24,10 +24,10 @@ import (
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
 
-// Record payment and Collect's credit-covered branch, when the paid flip loses
-// a database deadlock, answer 409 concurrent_change, and the idempotency layer
-// does not store it. The same request with the same Idempotency-Key then runs
-// again (ADR-136).
+// Record payment and Collect, when the paid flip loses a database deadlock,
+// answer 409 concurrent_change, and the idempotency layer does not store it.
+// The same request with the same Idempotency-Key then runs again and finishes
+// (ADR-136).
 //
 // The invoice store, the credit ledger, the idempotency middleware and the
 // webhook outbox are real Postgres. deadlockOnceInvoices makes the first paid
@@ -37,8 +37,11 @@ import (
 // invoice).
 //
 // Mutation-verify: drop respond.DeadlockAsConflict from recordOfflinePayment
-// (record_payment) or from collectPayment's credit-covered branch
-// (collect_zero_due): the first answer is a 500, and the same key replays it.
+// (record_payment), from collectPayment's credit-covered branch
+// (collect_zero_due) or from its settle of an invoice open with nothing due
+// (collect_open_at_zero): the first answer is a 500, and the same key replays
+// it. Send collectPayment's nothing-due branch back to the 422: the resend in
+// collect_zero_due answers 422 and the invoice stays open.
 
 // errPaidFlipDeadlock is the error Postgres gives the paid flip it stops to
 // break a deadlock, wrapped as the store wraps it.
@@ -47,10 +50,11 @@ func errPaidFlipDeadlock() error {
 }
 
 // deadlockOnceInvoices is the real store, except that the first offline paid
-// flip or the first MarkPaid, whichever is armed, loses a deadlock.
+// flip, the first MarkPaid or the first SettleZeroDue, whichever is armed,
+// loses a deadlock.
 type deadlockOnceInvoices struct {
 	*invoice.PostgresStore
-	offline, markPaid atomic.Bool
+	offline, markPaid, settleZeroDue atomic.Bool
 }
 
 // MarkPaidOffline runs the real transaction. When armed, it fails under the
@@ -67,6 +71,13 @@ func (s *deadlockOnceInvoices) MarkPaid(ctx context.Context, tenantID, id, payme
 		return domain.Invoice{}, errPaidFlipDeadlock()
 	}
 	return s.PostgresStore.MarkPaid(ctx, tenantID, id, paymentIntentID, paidAt)
+}
+
+func (s *deadlockOnceInvoices) SettleZeroDue(ctx context.Context, tenantID, id string, paidAt time.Time) (domain.Invoice, bool, error) {
+	if s.settleZeroDue.CompareAndSwap(true, false) {
+		return domain.Invoice{}, false, errPaidFlipDeadlock()
+	}
+	return s.PostgresStore.SettleZeroDue(ctx, tenantID, id, paidAt)
 }
 
 type deadlockInvoiceRig struct {
@@ -215,21 +226,49 @@ func TestDeadlockLoss_AnswersConflict_NotStored(t *testing.T) {
 			t.Fatal("the charge hold is still set after a settle that sent no charge")
 		}
 
-		// The same key runs the request again; it is not a replay. Collect
-		// refuses an invoice with nothing due before it applies credit, so
-		// the credit is never drawn twice. That same refusal leaves this
-		// invoice open with nothing due: Collect does not mark it paid.
+		// The same key runs the request again; it is not a replay. The
+		// invoice has nothing due, so Collect settles it from the credit the
+		// first attempt applied, and applies none again.
 		rr := r.post("collect", "idem-deadlock-collect", "")
-		if rr.Code != http.StatusUnprocessableEntity || rr.Header().Get("Idempotent-Replayed") != "" ||
-			!strings.Contains(rr.Body.String(), "invoice has no amount due") {
-			t.Fatalf("resend with the same key: %d (replayed=%q) %s, want 422 'invoice has no amount due' from the handler",
+		if rr.Code != http.StatusOK || rr.Header().Get("Idempotent-Replayed") != "" {
+			t.Fatalf("resend with the same key: %d (replayed=%q) %s, want 200 from the handler",
 				rr.Code, rr.Header().Get("Idempotent-Replayed"), rr.Body.String())
+		}
+		got = r.invoice()
+		if got.Status != domain.InvoicePaid || got.CreditsAppliedCents != 5000 {
+			t.Fatalf("after the resend: %s with %dc credit applied, want paid with 5000c", got.Status, got.CreditsAppliedCents)
 		}
 		if n := r.usageEntries(); n != 1 {
 			t.Fatalf("%d credit usage entries after the resend, want 1", n)
 		}
-		if got := r.invoice(); got.CreditsAppliedCents != 5000 {
-			t.Fatalf("%dc credit applied after the resend, want 5000c", got.CreditsAppliedCents)
+		if n := r.events(domain.EventInvoicePaid); n != 1 {
+			t.Fatalf("%d invoice.paid rows after the resend, want 1", n)
+		}
+	})
+
+	t.Run("collect_open_at_zero", func(t *testing.T) {
+		// An earlier attempt applied credit that covers the invoice, and its
+		// settle failed. Collect settles it now, and that settle loses the
+		// deadlock. Nothing was written before it.
+		r := newDeadlockInvoiceRig(t, db, "Deadlock Collect Open At Zero")
+		leaveOpenAtZero(t, db, r.inv.ID)
+		r.store.settleZeroDue.Store(true)
+
+		wantInvoiceConcurrentChange(t, r.post("collect", "idem-deadlock-open-at-zero", ""))
+		if got := r.invoice(); got.Status != domain.InvoiceFinalized || got.AmountDueCents != 0 {
+			t.Fatalf("after the lost settle: %s with %dc due, want finalized with 0c due", got.Status, got.AmountDueCents)
+		}
+
+		rr := r.post("collect", "idem-deadlock-open-at-zero", "")
+		if rr.Code != http.StatusOK || rr.Header().Get("Idempotent-Replayed") != "" {
+			t.Fatalf("resend with the same key: %d (replayed=%q) %s, want 200 from the handler",
+				rr.Code, rr.Header().Get("Idempotent-Replayed"), rr.Body.String())
+		}
+		if got := r.invoice(); got.Status != domain.InvoicePaid {
+			t.Fatalf("after the resend: %s, want paid", got.Status)
+		}
+		if n := r.events(domain.EventInvoicePaid); n != 1 {
+			t.Fatalf("%d invoice.paid rows, want 1", n)
 		}
 	})
 }

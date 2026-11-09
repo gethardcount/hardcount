@@ -109,10 +109,9 @@ Postgres stopped it stays done:
 - **Cancel and item changes:** the invoice for a billing period that had
   already ended. It may already be charged. The request sent again does not
   bill that period twice.
-- **Collect:** the customer's credit applied to the invoice. Collect answers
-  `concurrent_change` only when that credit covers the whole invoice. Sent
-  again, it answers `422`, because nothing is left due, and it does not mark
-  the invoice paid.
+- **Collect:** the customer's credit that the request applied to the invoice
+  before the settle that Postgres stopped. Sent again, Collect finds nothing
+  left due, so it applies no credit and marks the invoice paid.
 - **Create with `auto_issue`:** the note it made, which is voided. The
   request sent again makes and issues a new note.
 

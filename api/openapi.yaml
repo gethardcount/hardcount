@@ -20346,6 +20346,9 @@ paths:
 
         1. The customer's credit balance is applied first. If it covers the
            whole amount, the invoice is marked paid and no card is charged.
+           An invoice that credit applied earlier already covers, with
+           nothing left due, is marked paid the same way, and no credit is
+           applied again.
         2. Otherwise Hardcount charges the remaining amount to the customer's
            saved payment method with a Stripe PaymentIntent.
 
@@ -20466,9 +20469,10 @@ paths:
             a different card, or can pay on the hosted invoice page. Code
             `concurrent_change`: the customer's credit covered the invoice,
             and Postgres stopped the settle to break a deadlock with another
-            change to the same records. Nothing was charged, and the credit
-            stays applied, so the invoice is open with nothing due. Collect
-            sent again answers `422`.
+            change to the same records. Nothing was charged, and any credit
+            the request applied stays applied, so the invoice is open with
+            nothing due. Collect sent again, with the same `Idempotency-Key`,
+            marks it paid and applies no credit twice.
           content:
             application/json:
               schema:
@@ -20481,11 +20485,12 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "422":
           description: |
-            Code `validation_error`. The invoice is not finalized, is already
-            paid, or has no amount due; the customer is paying on the hosted
-            page; payments are not configured; the customer has no payment
-            method set up; or the request has a body with a field (this
-            route takes no body, and `param` names the field).
+            Code `validation_error`. The invoice is not finalized or is
+            already paid; it has nothing due but cannot be marked paid yet;
+            the customer is paying on the hosted page; payments are not
+            configured; the customer has no payment method set up; or the
+            request has a body with a field (this route takes no body, and
+            `param` names the field).
           content:
             application/json:
               schema:

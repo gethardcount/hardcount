@@ -59,6 +59,12 @@ type Store interface {
 	// paid_out_of_band and writes no PaymentIntent, and check runs on the
 	// row under the lock and can refuse. Never for a card settlement.
 	MarkPaidOffline(ctx context.Context, tenantID, id string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error)
+	// SettleZeroDue marks paid, under the invoice's row lock, a finalized
+	// invoice whose payment is pending or failed, with nothing due, tax ok
+	// and no charge hold. Anything else is returned unsettled, not as an
+	// error. paid reports whether this call settled it. Service uses it for
+	// a settle that holds no charge claim (SettleZeroDueWithoutClaim).
+	SettleZeroDue(ctx context.Context, tenantID, id string, paidAt time.Time) (domain.Invoice, bool, error)
 	// ChargeHeldTx: the charge hold — none, live or stale (ADR-127) — and
 	// its value. Caller holds the row lock on tx.
 	ChargeHeldTx(ctx context.Context, tx *sql.Tx, id string) (domain.ChargeHoldState, domain.ChargeHold, error)

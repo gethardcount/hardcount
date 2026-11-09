@@ -11,7 +11,7 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
 
 - **The bug.** `respond.FromError` maps no SQLSTATE, so a 40P01 answered `500` `internal_error`. The idempotency middleware stores every status except `409`, `422` and `503` for 24 hours ([Idempotency](../api/idempotency.md)). A request sent with a key that lost a deadlock replayed its `500` to every retry with that key.
 - **The documented deadlocks that reach a request:**
-  - **D1: cancel or cross-interval plan swap against a paid flip**, while dunning's pause on the subscription is being written. A paid flip locks the invoice, then waits for the subscription to lift the pause (the comment on `subscription.PostgresStore.LockDunningPauseTx`). The cancel or swap holds the subscription, then waits for the invoice to void it. The paid flips are record payment, collect's credit-covered settle, credit-note issue and the issue step of create with `auto_issue`.
+  - **D1: cancel or cross-interval plan swap against a paid flip**, while dunning's pause on the subscription is being written. A paid flip locks the invoice, then waits for the subscription to lift the pause (the comment on `subscription.PostgresStore.LockDunningPauseTx`). The cancel or swap holds the subscription, then waits for the invoice to void it. The request-path paid flips that answer `409` are record payment, collect's settles with no card (credit-covered, or nothing left due), credit-note issue and the issue step of create with `auto_issue`. The card settle reaches D1 too: the Stripe webhooks and collect's card branch. Neither answers `409` (table 3).
   - **D2: test-clock teardown against a period closer** ([ADR-066](066-threshold-money-semantics.md)). The teardown deletes the clock's invoices, then its subscriptions. A cancel, a swap or a period close holds the subscription, then reads the threshold invoice.
   - **D3: held usage release or discard against LiteLLM ingest.** They lock the same held rows in different orders.
   - **D4: cancel against a credit-note create, now removed.** The cancel took the invoice-number lock, then the credit-note invoice lock. Credit-note create (with or without `auto_issue`), the refund route, commit-relief create and recording a refund made in Stripe took them the other way. P1-08 ([#1649](https://github.com/gethardcount/hardcount/pull/1649)) removed it: the cancel writes its relief before it numbers its final invoice. It also has a credit-note create lock its invoice row before it numbers the note, so a relief that voids an unused invoice no longer deadlocks with a credit note on that invoice.
@@ -27,7 +27,7 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
    | `POST /v1/subscriptions/{id}/cancel` | The invoice of a period that had already ended, which may already be charged | The period's compare-and-set does not bill it twice |
    | `PATCH /v1/subscriptions/{id}/items/{itemID}` | The same, through `CloseEndedPeriodFirst` | The same. Neither path returns an error once its transaction has committed |
    | `POST /v1/invoices/{id}/record-payment` | Nothing | — |
-   | `POST /v1/invoices/{id}/collect`, credit-covered branch only | The credit applied to the invoice | Collect refuses an invoice with nothing due before it applies credit, so no credit is drawn twice |
+   | `POST /v1/invoices/{id}/collect`, its settles with no card only | In the credit-covered branch, the credit applied to the invoice | Sent again, Collect finds nothing due, so it applies no credit and marks the invoice paid (decision 4) |
    | `POST /v1/credit-notes/{id}/issue` | Nothing | Once its transaction commits, the draft→issued compare-and-set refuses a second issue |
    | `POST /v1/credit-notes` with `auto_issue`, issue step | The draft note, which the handler voids | Only when the void succeeded. When it failed, the draft stays, and the answer stays the stored `500` |
 
@@ -46,6 +46,11 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
    | Collect's card branch | Not converted. Stripe may have taken the money, so the stored `500` is the answer the idempotency layer chose, and the webhook settles the invoice |
    | The D4 writers: credit-note create, the refund route, commit-relief create and a refund made in Stripe | Not converted. Their only documented deadlock was D4, which P1-08 removed |
    | Any other request | Not converted. A 40P01 there is still a stored `500` |
+
+4. **Collect settles a finalized, unpaid invoice with nothing due.** A credit-covered settle that fails after its credit was applied leaves one, a `409` included. Before, Collect answered `422` "invoice has no amount due" there, so its resend could not finish. Now `collectNothingDue` marks the invoice paid with no card and no charge claim, through `Service.SettleZeroDueWithoutClaim`:
+   - It calls the store's `SettleZeroDue`, the dunning retry's settle. It re-reads the invoice under its row lock and settles only a finalized one with nothing due, tax ok and payment pending or failed. It refuses while a charge hold is set, because that charge may have taken the money. Collect then answers `409` `payment_in_flight`.
+   - It does not call `Service.SettleZeroDue`. That one calls `MarkPaid`, which reads neither the amount due nor the hold under its lock, and is safe only inside the caller's own claim.
+   - The dunning resolve and the collect audit row fire only when this call settled the invoice. A writer that settled it first owns them, and Collect answers `422` "invoice is already paid".
 
 ## Why this design
 
@@ -69,6 +74,7 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
   - D2: the teardown could lock the clock's subscriptions right after the clock row. After this ADR, neither side leaves a stored `500`.
   - D3: release and discard could lock in key order. Neither side is stored.
   - D4: P1-08 fixed it this way.
+- **E. Answer `503` through `errs.Unavailable`.** That is the codebase's shape for "the request failed, a second run is safe, do not store the answer". It answers `503` with `Retry-After`, keeps the cause on the error, and logs once in `FromError`. [Idempotency](../api/idempotency.md) defines a `503` this way. Rejected: the same race already answers `409` `invoice_changed` when it does not deadlock, so clients of cancel and plan change already read a `409` and send again. A `503` would give one race two answers, and it says the server is unavailable when it is not. The cost is a second shape for the same meaning. The helper logs its own WARN line and drops the cause from the error it returns, because `FromError` renders an `ErrInvalidState` message as it is. Idempotency names `409` `concurrent_change` beside the `503`, so a client finds both.
 
 ## Consequences
 
@@ -81,12 +87,13 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
 
 - **Revisit trigger.** The WARN line "request lost a database deadlock" names a pair. A pair that recurs gets a lock-order fix and its pair test, under the money-path playbook (section 5, item 6).
 - **A resend repeats the work the lost attempt did before Postgres stopped it.** For a cancel or a prorated item change that includes the tax calculation, whose row stays with no invoice. The `invoice_changed` `409` already has the same cost.
-- **Collect does not finish after its `409`.** The credit stays applied, so the invoice is open with nothing due. Collect sent again answers `422` "invoice has no amount due": its pre-check, and the charge claim behind it, admit only an invoice with an amount due. The same state follows any failure of that settle today, not only a deadlock. A dunning retry settles such an invoice (it marks an invoice with nothing due paid), and so does the auto-charge sweep while the invoice still waits for its automatic charge. Collect itself does not.
+- **The dashboard does not offer Collect on an invoice with nothing due.** After collect's `409`, the invoice page reloads and shows the invoice open with $0 due and no Collect button, so an operator there cannot send it again. The API resend settles it (decision 4). So does a dunning retry, and the auto-charge sweep while the invoice still waits for its automatic charge.
 - **Other transactions.** A 40P01 in any other request, the D4 writers included, stays a stored `500`. None has a documented deadlock now.
 
 ## References
 
-- `internal/api/respond/deadlock.go`, and the six call sites in `internal/subscription/handler.go`, `internal/invoice/handler.go` and `internal/creditnote/handler.go`.
+- `internal/api/respond/deadlock.go`, and the seven call sites in `internal/subscription/handler.go`, `internal/invoice/handler.go` (two in collect) and `internal/creditnote/handler.go`.
+- `internal/invoice/collect_open_at_zero_integration_test.go`: Collect on an invoice with nothing due, with and without a charge hold.
 - `internal/api/deadlock_conflict_e2e_test.go`: a real deadlock between a cancel and a payment.
 - [ADR-066](066-threshold-money-semantics.md): the D2 deadlock.
 - [Idempotency](../api/idempotency.md) and [Errors](../api/errors.md#409-conflict).
