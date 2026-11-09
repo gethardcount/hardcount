@@ -19,6 +19,21 @@ original text.
 
 ## [Unreleased]
 
+**Before upgrading:**
+
+- One migration runs on start: `00223_restore_catchup` adds the `restore_catchup` table, which marks a restored database.
+- Hardcount now refuses to start on a database `scripts/restore.sh` restored, or `hardcount restore begin` marked, and the restore pauses billing and dunning. A script that does this must change:
+  - **A restore that replaces your live database** runs `hardcount restore catch-up` before it starts Hardcount. After a snapshot or point-in-time restore, it runs `hardcount restore begin` first ([Restore Hardcount](docs/ops/restore.md)).
+  - **A copy,** such as a staging database refreshed from a live dump, must never run the catch-up: it writes to your live Stripe account. Remove the mark with `DELETE FROM restore_catchup;` instead, and follow the rules for starting a copy ([Back up Hardcount](docs/ops/backup-considerations.md#4-run-the-restore-drill)).
+
+### Added
+
+- **A restored database catches up with Stripe before Hardcount serves it.** Started on a restored database, Hardcount could charge or refund again money Stripe moved after the backup. Now the restore pauses billing and dunning, and Hardcount refuses to start until `hardcount restore catch-up` has applied Stripe's events since the backup. What it must not apply is listed for you to handle. That is a payment whose invoice the restore lost, a refund whose credit note it lost or whose tax the old server may have reversed, and an event it could not apply. [Restore Hardcount](docs/ops/restore.md) is much shorter. ([#1633](https://github.com/gethardcount/hardcount/pull/1633))
+
+### Fixed
+
+- **A refund of another account's payment, on a Stripe account two Hardcount accounts share, is acknowledged.** Its webhook failed, and Stripe sent it again for three days. ([#1633](https://github.com/gethardcount/hardcount/pull/1633))
+
 ## [0.9.3] - 2026-11-09
 
 Two under-billing fixes: a refreshed tax-inclusive Stripe Tax draft keeps its total, and a scheduled plan change no longer drops the other items' base fees. An API key now manages only its own mode's Stripe connection, and `golang.org/x/net` and the Postgres driver pgx carry their security fixes. PDFs print accented names whole, CI checks the migrations on Postgres 18, and the restore and usage-billing runbooks no longer charge a paid invoice again or bill usage in the wrong period.

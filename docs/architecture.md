@@ -60,6 +60,7 @@ A paid invoice cannot be voided or written off; issue a credit note instead.
   - public links, such as the hosted invoice page;
   - incoming webhooks;
   - two signed-in areas: Stripe credential settings (`internal/tenantstripe`) and team members and invites (`internal/dashmembers`);
+  - the restore commands (`hardcount restore begin` and `catch-up`), which read every account's Stripe webhooks and Stripe connection after a database restore;
   - `hardcount-bench-seed`, which sets up a database for a benchmark.
 - **Every tenant-scoped operation states its mode.** Test mode and live mode are separate data in one tenant. Each entry point puts the mode on the request context with `postgres.WithLivemode`: the auth middleware from the key or session, public links from their row, background jobs per row or per mode. Nothing guesses a missing mode:
   - `postgres.Livemode` returns `ErrLivemodeUnset`, and `BeginTx` refuses a `TxTenant` without a mode or a tenant ID;

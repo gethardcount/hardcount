@@ -119,118 +119,34 @@ func (h *Handler) handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse the event
-	var raw struct {
-		ID       string `json:"id"`
-		Type     string `json:"type"`
-		Created  int64  `json:"created"`
-		Livemode bool   `json:"livemode"`
-		Data     struct {
-			Object json.RawMessage `json:"object"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &raw); err != nil {
+	event, metaTenant, err := parseStripeEvent(body, lookup.TenantID, lookup.Livemode)
+	switch {
+	case errors.Is(err, errEventUnreadable):
 		respond.BadRequest(w, r, "invalid JSON")
 		return
-	}
-
-	// The credentials row's livemode is authoritative — it's what the secret
-	// was registered against. A tenant can't cross the streams by forging a
-	// payload livemode because the HMAC above already rejected anything not
-	// signed by the mode-specific secret.
-	if raw.Livemode != lookup.Livemode {
+	case errors.Is(err, errEventModeMismatch):
 		slog.WarnContext(r.Context(), "stripe webhook livemode mismatch",
 			"endpoint_id", endpointID,
 			"tenant_id", lookup.TenantID,
 			"endpoint_mode", lookup.Livemode,
-			"payload_mode", raw.Livemode,
-			"stripe_event_id", raw.ID,
+			"payload_mode", !lookup.Livemode,
+			"stripe_event_id", event.StripeEventID,
 		)
 		respond.BadRequest(w, r, "livemode mismatch")
 		return
-	}
-
-	// Extract payment intent details from the event object
-	var obj struct {
-		ID     string `json:"id"`
-		Object string `json:"object"`
-		// PaymentIntent is read only from a Dispute, whose own id is not a
-		// payment's (see below).
-		PaymentIntent json.RawMessage `json:"payment_intent"`
-		Status        string          `json:"status"`
-		Amount        int64           `json:"amount"`
-		Currency      string          `json:"currency"`
-		Customer      string          `json:"customer"`
-		LastError     *struct {
-			Message string `json:"message"`
-		} `json:"last_payment_error"`
-		Metadata map[string]string `json:"metadata"`
-	}
-	_ = json.Unmarshal(raw.Data.Object, &obj)
-
-	// Defense in depth: hardcount_tenant_id in metadata should match the
-	// endpoint's tenant. If they disagree, someone's Stripe account is
-	// configured with the wrong endpoint — reject so we don't write one
-	// tenant's webhook into another's invoice rows.
-	metaTenant := obj.Metadata["hardcount_tenant_id"]
-	if metaTenant != "" && metaTenant != lookup.TenantID {
+	case errors.Is(err, errEventOtherTenant):
 		slog.WarnContext(r.Context(), "stripe webhook tenant mismatch",
 			"endpoint_id", endpointID,
 			"endpoint_tenant", lookup.TenantID,
 			"metadata_tenant", metaTenant,
-			"stripe_event_id", raw.ID,
+			"stripe_event_id", event.StripeEventID,
 		)
 		respond.BadRequest(w, r, "tenant mismatch")
 		return
-	}
-
-	if metaTenant == "" && !endpointAuthoritativeEvent(raw.Type) {
-		// Not a Hardcount-originated payment intent (tenant fires their own
-		// Stripe objects at the same endpoint). Acknowledge and skip.
-		//
-		// Exception: a few event types are recognized as Hardcount-originated from
-		// the object itself, not a metadata marker — Stripe Checkout doesn't
-		// copy a session's metadata onto the SetupIntent it creates, so a
-		// Hardcount setup_intent.succeeded legitimately arrives with empty
-		// metadata. Dropping it here silently loses the saved card; the
-		// handler instead maps the SetupIntent's `customer` back to the Hardcount
-		// customer. The endpoint's tenant is already authoritative (per-tenant
-		// secret + HMAC), and the cross-tenant mismatch guard above still runs.
+	case errors.Is(err, errEventNotHardcount):
+		// The tenant's own Stripe object at the same endpoint: acknowledge.
 		respond.JSON(w, r, http.StatusOK, map[string]string{"status": "skipped", "reason": "no hardcount metadata"})
 		return
-	}
-
-	// Scrub Stripe's free-text failure message before it enters Hardcount data.
-	// Persisted to stripe_webhook_events.failure_message and echoed into
-	// invoices.last_payment_error via handlePaymentFailed — scrubbing at
-	// ingress keeps PII (card last4, emails) out of both.
-	failureMsg := ""
-	if obj.LastError != nil {
-		failureMsg = errs.Scrub(obj.LastError.Message)
-	}
-
-	amount := obj.Amount
-	// The audit row's payment_intent_id names the payment. For a Dispute the
-	// object's own id is the dispute's (du_…), so the disputed PaymentIntent
-	// goes there instead.
-	paymentIntentID := obj.ID
-	if obj.Object == "dispute" {
-		paymentIntentID = stripeObjectID(obj.PaymentIntent)
-	}
-	event := domain.StripeWebhookEvent{
-		StripeEventID:      raw.ID,
-		EventType:          raw.Type,
-		ObjectType:         obj.Object,
-		PaymentIntentID:    paymentIntentID,
-		PaymentStatus:      obj.Status,
-		AmountCents:        &amount,
-		Currency:           obj.Currency,
-		CustomerExternalID: obj.Customer,
-		FailureMessage:     failureMsg,
-		InvoiceID:          obj.Metadata["hardcount_invoice_id"],
-		Payload:            map[string]any{"raw": string(body)},
-		OccurredAt:         time.Unix(raw.Created, 0).UTC(),
-		Livemode:           lookup.Livemode,
 	}
 
 	// Stage ctx with the endpoint's tenant + livemode before handing off —
@@ -240,8 +156,8 @@ func (h *Handler) handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.stripe.HandleWebhook(ctx, lookup.TenantID, event); err != nil {
 		slog.ErrorContext(ctx, "webhook processing failed",
-			"stripe_event_id", raw.ID,
-			"event_type", raw.Type,
+			"stripe_event_id", event.StripeEventID,
+			"event_type", event.EventType,
 			"tenant_id", lookup.TenantID,
 			"error", err,
 		)
@@ -259,6 +175,116 @@ func (h *Handler) handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, r, http.StatusOK, map[string]string{"status": "processed"})
+}
+
+// The reasons parseStripeEvent refuses an event body. The webhook handler
+// answers each one with its own status. The restore catch-up skips the event.
+var (
+	errEventUnreadable   = errors.New("invalid JSON")
+	errEventModeMismatch = errors.New("livemode mismatch")
+	errEventOtherTenant  = errors.New("tenant mismatch")
+	errEventNotHardcount = errors.New("no hardcount metadata")
+)
+
+// parseStripeEvent reads a Stripe event body for the account that received
+// it: the tenant and mode of the webhook endpoint, or of the credentials the
+// restore catch-up listed it with. Both paths run these guards, so an event
+// from a Stripe account that several tenants share goes to the same tenant
+// either way. The errors:
+//   - errEventUnreadable: the body is not JSON.
+//   - errEventModeMismatch: the body's livemode is not the account's. The
+//     account's mode is authoritative: its key or signing secret is
+//     mode-specific, so a body for the other mode was not meant for it.
+//   - errEventOtherTenant: hardcount_tenant_id names another tenant, returned
+//     as metaTenant. Someone pointed a Stripe account at the wrong endpoint,
+//     and writing the event into this tenant's rows would cross tenants.
+//   - errEventNotHardcount: no hardcount_tenant_id, and the type is not one
+//     the account is authoritative for (endpointAuthoritativeEvent). It is
+//     the tenant's own Stripe object, not Hardcount's.
+//
+// The returned event carries its StripeEventID even with an error, for the
+// log line.
+func parseStripeEvent(body []byte, tenantID string, livemode bool) (event domain.StripeWebhookEvent, metaTenant string, err error) {
+	var raw struct {
+		ID       string `json:"id"`
+		Type     string `json:"type"`
+		Created  int64  `json:"created"`
+		Livemode bool   `json:"livemode"`
+		Data     struct {
+			Object json.RawMessage `json:"object"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return domain.StripeWebhookEvent{}, "", errEventUnreadable
+	}
+	event.StripeEventID = raw.ID
+	if raw.Livemode != livemode {
+		return event, "", errEventModeMismatch
+	}
+
+	var obj struct {
+		ID     string `json:"id"`
+		Object string `json:"object"`
+		// PaymentIntent is read only from a Dispute, whose own id is not a
+		// payment's (see below).
+		PaymentIntent json.RawMessage `json:"payment_intent"`
+		Status        string          `json:"status"`
+		Amount        int64           `json:"amount"`
+		Currency      string          `json:"currency"`
+		Customer      string          `json:"customer"`
+		LastError     *struct {
+			Message string `json:"message"`
+		} `json:"last_payment_error"`
+		Metadata map[string]string `json:"metadata"`
+	}
+	_ = json.Unmarshal(raw.Data.Object, &obj) // an unreadable object has no fields: the guard below skips it, and an authoritative type's handler refuses its empty id
+
+	metaTenant = obj.Metadata["hardcount_tenant_id"]
+	if metaTenant != "" && metaTenant != tenantID {
+		return event, metaTenant, errEventOtherTenant
+	}
+	if metaTenant == "" && !endpointAuthoritativeEvent(raw.Type) {
+		// A few event types are Hardcount's by the object itself, not by a
+		// metadata marker. Stripe Checkout does not copy a session's
+		// metadata onto the SetupIntent it creates, so Hardcount's
+		// setup_intent.succeeded arrives with empty metadata, and the
+		// handler maps the SetupIntent's customer back to the Hardcount
+		// customer instead.
+		return event, "", errEventNotHardcount
+	}
+
+	// Scrub Stripe's free-text failure message before it enters Hardcount
+	// data. It is saved to stripe_webhook_events.failure_message and copied
+	// into invoices.last_payment_error by handlePaymentFailed, so scrubbing
+	// here keeps PII (card last4, emails) out of both.
+	failureMsg := ""
+	if obj.LastError != nil {
+		failureMsg = errs.Scrub(obj.LastError.Message)
+	}
+
+	amount := obj.Amount
+	// The audit row's payment_intent_id names the payment. For a Dispute the
+	// object's own id is the dispute's (du_…), so the disputed PaymentIntent
+	// goes there instead.
+	paymentIntentID := obj.ID
+	if obj.Object == "dispute" {
+		paymentIntentID = stripeObjectID(obj.PaymentIntent)
+	}
+	return domain.StripeWebhookEvent{
+		StripeEventID:      raw.ID,
+		EventType:          raw.Type,
+		ObjectType:         obj.Object,
+		PaymentIntentID:    paymentIntentID,
+		PaymentStatus:      obj.Status,
+		AmountCents:        &amount,
+		Currency:           obj.Currency,
+		CustomerExternalID: obj.Customer,
+		FailureMessage:     failureMsg,
+		InvoiceID:          obj.Metadata["hardcount_invoice_id"],
+		Payload:            map[string]any{"raw": string(body)},
+		OccurredAt:         time.Unix(raw.Created, 0).UTC(),
+		Livemode:           livemode,
+	}, metaTenant, nil
 }
 
 // endpointAuthoritativeEvent reports whether an event type may be processed

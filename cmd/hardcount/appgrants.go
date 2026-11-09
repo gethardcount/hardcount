@@ -9,11 +9,13 @@ import (
 // appTableNeeds lists the tables where the app role holds less than full
 // read-write by design (the 00180 baseline's grants): the audit log is
 // append-only, lease rows are never deleted, and leader_status is read-only.
-// Every other table needs SELECT, INSERT, UPDATE and DELETE.
+// The restore marker is read-only too (migration 00223): only the owner
+// role writes it. Every other table needs SELECT, INSERT, UPDATE and DELETE.
 var appTableNeeds = map[string][]string{
-	"audit_log":     {"SELECT", "INSERT"},
-	"leader_leases": {"SELECT", "INSERT", "UPDATE"},
-	"leader_status": {"SELECT"},
+	"audit_log":       {"SELECT", "INSERT"},
+	"leader_leases":   {"SELECT", "INSERT", "UPDATE"},
+	"leader_status":   {"SELECT"},
+	"restore_catchup": {"SELECT"},
 }
 
 var fullTableNeeds = []string{"SELECT", "INSERT", "UPDATE", "DELETE"}

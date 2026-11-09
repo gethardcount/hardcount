@@ -155,14 +155,13 @@ the data with SQL. Instead:
 ## Skip the emails and webhooks queued before a restore
 
 After a restore, Hardcount sends every `pending` row of `email_outbox` and
-`webhook_outbox` when its jobs resume. Rows the old database had already sent
-after the backup go out a second time. To skip the rows queued before you
-started the restored Hardcount, mark them sent, while the `email_outbox` and
-`webhook_outbox` jobs are still paused
+`webhook_outbox` once it starts. Rows the old database had already sent
+after the backup go out a second time. To skip the rows the backup holds,
+mark them sent before you start the restored Hardcount
 ([Restore Hardcount](../restore.md#queued-emails-and-webhooks)). Put the time
-you noted just before that start in both lines. The rows queued after it stay
-`pending`: they are the receipts and webhooks of the payments recorded while
-matching Hardcount with Stripe.
+you noted just before the catch-up in both lines. The rows queued after it
+stay `pending`: they are the receipts and webhooks of the payments the
+catch-up recorded.
 
 ```sql
 SET app.bypass_rls = 'on';

@@ -3,7 +3,9 @@ package main
 import (
 	"database/sql"
 	"os"
+	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -96,17 +98,31 @@ func TestMissingAppGrants_NamesTheMissingGrant(t *testing.T) {
 	}
 }
 
-// The tables the baseline grants narrowly are asked only for what it grants:
-// asking the audit log for UPDATE would refuse every correctly set-up database.
+// The tables the baseline or a later migration grants narrowly are asked
+// only for what it grants: asking the audit log for UPDATE would refuse
+// every correctly set-up database.
 func TestAppTableNeeds_MatchTheBaselineGrants(t *testing.T) {
 	baseline, err := os.ReadFile("../../internal/platform/migrate/baseline/00180_baseline.sql")
 	if err != nil {
 		t.Fatalf("read baseline: %v", err)
 	}
+	sqls := string(baseline)
+	migrations, err := filepath.Glob("../../internal/platform/migrate/sql/*.sql")
+	if err != nil || len(migrations) == 0 {
+		t.Fatalf("list migrations: %v (%d files)", err, len(migrations))
+	}
+	sort.Strings(migrations)
+	for _, f := range migrations {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		sqls += "\n" + string(b)
+	}
 	for table, privs := range appTableNeeds {
 		line := "ON TABLE public." + table + " TO hardcount_app;"
 		var grant string
-		for _, l := range strings.Split(string(baseline), "\n") {
+		for _, l := range strings.Split(sqls, "\n") {
 			if strings.HasPrefix(l, "GRANT ") && strings.HasSuffix(l, line) {
 				grant = l
 			}

@@ -187,13 +187,10 @@ On one VM:
    carries its access rights, including the rights to tables that a later
    upgrade creates.
 
-4. Pause the background jobs, check the restored database, and start the
-   old release. The pause keeps billing from charging again for an invoice
-   paid after the backup.
-   - Run the five `leader_pause` lines of
-     [Pause the background jobs](ops/restore.md#pause-the-background-jobs) in
-     the database shell
-     (`docker compose exec postgres psql -U hardcount -d hardcount`).
+4. Put back the old release, catch the database up with Stripe, and start
+   the release. The restore marked the database as restored and paused
+   billing and dunning, so the old release will not start until the
+   catch-up has run.
    - Put back the old release's files and images, and see its plan. This
      example goes back to `v0.9.2`.
 
@@ -206,15 +203,29 @@ On one VM:
      docker compose run --rm hardcount-api migrate status
      ```
 
-     **You see:** `state:        up to date, nothing to apply`. That is
-     check 1 of
-     [Check the restored database](ops/restore.md#check-the-restored-database).
-     Run checks 2 and 3 there too.
-   - Put the holds of item 1 of
-     [Before you restore](ops/restore.md#before-you-restore) in place: your
-     app's calls, the dashboard and the customer payment pages. Note the
-     database's time, `SELECT now();`, in the database shell. Then start the
-     release.
+     **You see:** `state:        up to date, nothing to apply`.
+   - Run the checks of
+     [Check the restored database](ops/restore.md#check-the-restored-database)
+     before the catch-up: they catch a wrong backup before anything writes
+     to Stripe.
+   - Run the catch-up with the old release, as in
+     [Run the catch-up](ops/restore.md#run-the-catch-up), which also lists
+     its exit codes:
+     `docker compose run --rm hardcount-api restore catch-up`.
+     **You see:** `catch-up complete; billing and dunning are still paused`.
+
+     A release from before the catch-up answers `unknown command: restore`,
+     and it does not wait for the marker. For it, remove the marker table in
+     the database shell
+     (`docker compose exec postgres psql -U hardcount -d hardcount`) with
+     `DROP TABLE restore_catchup;`. Then match Hardcount with Stripe as that
+     release's own `/opt/hardcount/docs/ops/restore.md` says, from the step
+     after its restore, instead of the rest of this page.
+   - Decide on the
+     [queued emails and webhooks](ops/restore.md#queued-emails-and-webhooks),
+     and set the holds of item 3 of
+     [Start Hardcount](ops/restore.md#start-hardcount): block the payment
+     pages, and hold the calls that charge. Then start the release.
 
      ```bash
      docker compose up -d
@@ -225,19 +236,21 @@ On one VM:
      `curl -fsS http://localhost:8080/health/ready` answers
      `"status":"ok"`.
 
-5. Put back what the restore removed. Follow
-   [Match Hardcount with Stripe](ops/restore.md#match-hardcount-with-stripe)
-   and the sections after it, to the end of that page. Hardcount already runs
-   since step 4, so skip its step 2: the time you noted in step 4 is the one
-   it asks for. The last sections resume the background jobs.
+5. Put back what the restore removed, and resume billing and dunning.
+   Follow
+   [Redo the changes made after the backup](ops/restore.md#redo-the-changes-made-after-the-backup)
+   and the sections after it, to the end of that page.
 
-With a managed Postgres, stop every copy and put the holds in place. Restore
-the snapshot or the point in time you noted into the database, and
-[pause the background jobs](ops/restore.md#pause-the-background-jobs). Put
-the old release's image or binary in place on every copy. Then run the
-[checks of the restored database](ops/restore.md#check-the-restored-database)
-with that release: its `migrate status` says `up to date`. Note the
-database's time, then start the old release on every copy, and do step 5.
+With a managed Postgres, stop every copy. Restore the snapshot or the point
+in time you noted into the database, and mark it as restored with the old
+release's `hardcount restore begin`. A release from before the catch-up has
+no such command: follow its own restore page, as step 4 says. Put the old release's image or binary
+in place on every copy. Then run that release's `migrate status`, which says
+`up to date`, the
+[checks of the restored database](ops/restore.md#check-the-restored-database),
+and its `hardcount restore catch-up`. Set the holds of
+[Start Hardcount](ops/restore.md#start-hardcount), start the old release on
+every copy, and do step 5.
 How a restore works, and what to check before you start:
 [Restore Hardcount](ops/restore.md).
 

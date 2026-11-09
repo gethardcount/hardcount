@@ -44,11 +44,11 @@ In the code, the first kind of transaction is `postgres.TxTenant` and the
    ORDER BY relname;
    ```
 
-   **You see:** exactly these six, which hold no account data or are read
+   **You see:** exactly these seven, which hold no account data or are read
    before the account is known: `goose_db_version`, `leader_leases`,
-   `login_throttle`, `password_reset_tokens`, `tenants`, `users`. Any other
-   table here, or one with row security on but not forced (which lets its
-   owner skip it), means isolation is broken.
+   `login_throttle`, `password_reset_tokens`, `restore_catchup`, `tenants`,
+   `users`. Any other table here, or one with row security on but not forced
+   (which lets its owner skip it), means isolation is broken.
 3. **Check the leaked query.** Was it run with `app.tenant_id` set
    correctly? Was `app.bypass_rls` involved?
 

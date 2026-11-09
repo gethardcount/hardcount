@@ -649,6 +649,7 @@ func paymentIntentResult(pi *stripe.PaymentIntent) PaymentIntentResult {
 		CreatedAt:           pi.Created,
 		Purpose:             pi.Metadata["hardcount_purpose"],
 		InvoiceID:           pi.Metadata["hardcount_invoice_id"],
+		TenantID:            pi.Metadata["hardcount_tenant_id"],
 		AmountReceivedCents: pi.AmountReceived,
 		AnchorAt:            anchorFromPIMetadata(pi.Metadata),
 	}
