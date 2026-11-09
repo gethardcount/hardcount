@@ -100,7 +100,21 @@ decide.
 |---|---|---|
 | `already_exists` | A value that must be unique is taken, such as a customer's `external_id`. `param` names it. | Use another value, or read the one that exists |
 | `invalid_state` | The resource is in the wrong state for this action, such as advancing a test clock that is still advancing | Read it, wait or change it, then try again |
+| `concurrent_change` | Postgres stopped the request to break a deadlock with another change to the same records. Only cancel, item changes, record payment, collect, credit-note issue and create with `auto_issue` answer it. | Send the same request again. With an `Idempotency-Key`, the same key works. Some steps stay done (below). |
 | `already_bootstrapped` | `POST /v1/bootstrap` after the first account exists | Do not retry |
+
+After `concurrent_change`, a step that the request saved on its own before
+Postgres stopped it stays done:
+
+- **Cancel and item changes:** the invoice for a billing period that had
+  already ended. It may already be charged. The request sent again does not
+  bill that period twice.
+- **Collect:** the customer's credit applied to the invoice. Collect answers
+  `concurrent_change` only when that credit covers the whole invoice. Sent
+  again, it answers `422`, because nothing is left due, and it does not mark
+  the invoice paid.
+- **Create with `auto_issue`:** the note it made, which is voided. The
+  request sent again makes and issues a new note.
 
 **Idempotency** ([how idempotency keys work](idempotency.md))
 

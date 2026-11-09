@@ -12836,6 +12836,10 @@ paths:
             or a `stripe_refund_id` that a credit note already records, or
             that is still in flight at Stripe. Codes `payment_in_flight` and
             `payment_unidentifiable`: a charge on the invoice is unresolved.
+            Code `concurrent_change`: with `auto_issue`, Postgres stopped the
+            issue to break a deadlock with another change to the same records,
+            and the note made was voided; send the same request again, with
+            the same `Idempotency-Key`, to make and issue a new one.
           content:
             application/json:
               schema:
@@ -16124,6 +16128,11 @@ paths:
             could not be invoiced; retry billing first. Code
             `funding_invoice_tax_pending`: an invoice the relief would credit
             is a draft whose tax is not calculated yet; retry once it is.
+            Code `concurrent_change`: Postgres stopped the cancel to break a
+            deadlock with another change to the same records, so the
+            subscription is not canceled; send the same request again, with
+            the same `Idempotency-Key`. A period that had ended and was
+            billed first stays billed.
           content:
             application/json:
               schema:
@@ -17454,7 +17463,11 @@ paths:
             invoiced; retry billing first. Code
             `funding_invoice_tax_pending`: an invoice a decrease would
             credit is a draft whose tax is not calculated yet; retry once it
-            is.
+            is. Code `concurrent_change`: Postgres stopped the change to break
+            a deadlock with another change to the same records, so the item
+            is unchanged; send the same request again, with the same
+            `Idempotency-Key`. A period that had ended and was billed first
+            stays billed.
           content:
             application/json:
               schema:
@@ -20174,7 +20187,10 @@ paths:
           description: |
             The payment cannot be recorded. Codes: `invalid_state` (draft,
             voided or already paid), `payment_in_flight` or
-            `payment_unidentifiable` (a card charge is unresolved).
+            `payment_unidentifiable` (a card charge is unresolved), and
+            `concurrent_change` (Postgres stopped the request to break a
+            deadlock with another change to the same records; send the same
+            request again, with the same `Idempotency-Key`).
           content:
             application/json:
               schema:
@@ -20447,7 +20463,12 @@ paths:
             the customer's bank refused the saved card for good on this
             invoice (a hard decline such as `lost_card`), so Hardcount does
             not charge it again and nothing reached Stripe; the customer needs
-            a different card, or can pay on the hosted invoice page.
+            a different card, or can pay on the hosted invoice page. Code
+            `concurrent_change`: the customer's credit covered the invoice,
+            and Postgres stopped the settle to break a deadlock with another
+            change to the same records. Nothing was charged, and the credit
+            stays applied, so the invoice is open with nothing due. Collect
+            sent again answers `422`.
           content:
             application/json:
               schema:
@@ -21357,7 +21378,10 @@ paths:
             Nothing was issued. Code `invalid_state`: the credit note is not a
             draft. Code `credit_note_exceeds_invoice`: on an unpaid invoice,
             the note is now more than the amount due plus the credit applied
-            (the invoice changed after the draft was made).
+            (the invoice changed after the draft was made). Code
+            `concurrent_change`: Postgres stopped the issue to break a
+            deadlock with another change to the same records; send the same
+            request again, with the same `Idempotency-Key`.
           content:
             application/json:
               schema:
