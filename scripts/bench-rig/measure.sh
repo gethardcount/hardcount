@@ -236,8 +236,8 @@ one_run() {
     usum=$(printf '%s' "$out" | sed -n 's/^  usage-aggregate *p50 [0-9.]*ms *p99 \([0-9.]*\)ms.*/\1/p' | head -1)
     printf '%s' "$out" | grep -q "RESPONSIVE under load" && probe="RESPONSIVE"
     printf '%s' "$out" | grep -q "DEGRADED" && probe="DEGRADED"
-    # NO SPACES in this token: one_run's result is consumed with `set --`, which
-    # word-splits. A space here shifted every following field — the first ladder
+    # NO SPACES in this token: one_run's result is split into fields at each
+    # space. A space here shifted every following field — the first ladder
     # rung on the 4xlarge rig failed on "qty!=written(p99/310.9ms)" with a
     # drift of x180523269 while ingest was in fact clean.
     [ -n "$usum" ] && probe="$probe(usage-aggregate_p99=${usum}ms)"
@@ -271,8 +271,8 @@ for cfg in $CONFIGS; do
   p50s=""; p99s=""; evss=""; passed=0; failed_runs=0; hard_fail=0
   for r in $(seq 1 "$REPEATS"); do
     state=$(table_state)
-    set -- $(one_run "$rate" "$batch" "$DURATION" "$label-run$r")
-    claimed=$1; written=$2; evs=$3; p50=$4; p99=$5; dropped=$6; rc=$7; nfail=$8; samples=$9; probe=${10}; qsent=${11}; qwritten=${12}; drift=${13}
+    read -r claimed written evs p50 p99 dropped rc nfail samples probe qsent qwritten drift \
+      <<< "$(one_run "$rate" "$batch" "$DURATION" "$label-run$r")"
 
     # THE GATE. Every clause is a way a bad run used to enter the median.
     reasons=""
