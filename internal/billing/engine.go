@@ -3823,7 +3823,7 @@ func (e *Engine) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscri
 	// (ADR-090, ADR-040): the own-tx callers (BillOnCreate) emit the row via
 	// finalizeAuditEmit, and the coordinator-tx callers (BillOnCreateTx, the
 	// cross-interval swap through BillOnPlanSwapTx, the cancel through
-	// BillFinalOnImmediateCancelTx) emit it on the coordinator tx; the invoice
+	// BillCancelTx) emit it on the coordinator tx; the invoice
 	// store queues the event on the same tx. So this post-commit path runs
 	// only the external, best-effort effects — tax commit, auto-charge — none
 	// of which may ride a DB tx.
@@ -3888,30 +3888,69 @@ func (e *Engine) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscri
 // marked auto_charge_pending and the no-PM notifier fires. Dunning
 // takes over from there on a failed charge.
 func (e *Engine) BillFinalOnImmediateCancel(ctx context.Context, sub domain.Subscription) (domain.Invoice, error) {
-	return e.billFinalOnImmediateCancelImpl(ctx, nil, sub, unpricedUsage{})
+	ctx, span := startFinalOnCancelSpan(ctx, "billing.BillFinalOnImmediateCancel", sub)
+	defer span.End()
+	unpriced := unpricedUsage{}
+	p, err := e.priceFinalOnCancel(ctx, nil, sub, unpriced)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	return e.writeFinalOnCancel(ctx, nil, sub, p, unpriced)
 }
 
-// BillFinalOnImmediateCancelTx is the in-tx variant: it inserts the
-// final-on-cancel invoice on the caller's coordinator tx (ADR-056) and leaves
-// the external finalize (audit + tax commit + auto-charge) to the caller's
-// post-commit FinalizeOnCreateInvoice. Used by CancelAtomicWithBill so a billing
-// failure rolls the cancel back rather than orphaning a canceled sub with an
-// uninvoiced partial period. Returns an empty invoice (nil error) for the no-op
-// cases (nothing to bill on cancel).
+// BillCancelTx writes a cancel's final invoice and its relief on the cancel's
+// transaction (ADR-056, ADR-118), so a failure of either rolls the cancel
+// back. It runs three steps, in this order:
+//  1. Price the final invoice: lines and tax. Nothing is written and no
+//     tenant-wide lock is taken, so the tax call (a network call for a Stripe
+//     Tax tenant) holds up no other invoice or credit note.
+//  2. Write the relief (BillOnCancelDraftsTx). It takes the credit-note lock
+//     of each invoice it credits, then the tenant's number row for each note.
+//  3. Number and insert the final invoice, which takes the number row again.
 //
-// afterCommit counts the usage the cancel left unpriced (#981). It is never
-// nil, and the caller runs it once its transaction commits. Counting here
-// instead would count again on every retry of a cancel whose transaction
-// rolled back after this returned: a refused relief is saved as a billing
-// failure and retried on backoff (ADR-119).
-func (e *Engine) BillFinalOnImmediateCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (inv domain.Invoice, afterCommit func(), err error) {
+// The relief comes before the invoice number because every credit-note
+// writer takes an invoice's credit-note lock before the number row. Holding
+// the number row while asking for a credit-note lock deadlocks with a credit
+// note on that invoice (ADR-118 amendment 2026-11-09).
+//
+// inv is empty when there is nothing to bill. Neither write applies credits:
+// after commit the caller runs FinishRelief, then FinalizeOnCreateInvoice.
+// afterCommit is never nil, and the caller runs it only once tx commits. It
+// counts the usage the invoice left unpriced (#981), which a cancel retried
+// after a rollback must not count twice (ADR-119).
+func (e *Engine) BillCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (inv domain.Invoice, r domain.Relief, afterCommit func(), err error) {
+	afterCommit = func() {}
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
-		return domain.Invoice{}, nil, err
+		return domain.Invoice{}, domain.Relief{}, afterCommit, err
 	}
+	ctx, span := startFinalOnCancelSpan(ctx, "billing.BillCancelTx", sub)
+	defer span.End()
 	unpriced := unpricedUsage{}
-	inv, err = e.billFinalOnImmediateCancelImpl(ctx, tx, sub, unpriced)
-	return inv, func() { unpriced.record(live, sub) }, err
+	afterCommit = func() { unpriced.record(live, sub) }
+
+	p, err := e.priceFinalOnCancel(ctx, tx, sub, unpriced)
+	if err != nil {
+		return domain.Invoice{}, domain.Relief{}, afterCommit, fmt.Errorf("final-on-cancel invoice: %w", err)
+	}
+	if r, err = e.BillOnCancelDraftsTx(ctx, tx, sub); err != nil {
+		return domain.Invoice{}, domain.Relief{}, afterCommit, fmt.Errorf("cancel proration relief: %w", err)
+	}
+	if inv, err = e.writeFinalOnCancel(ctx, tx, sub, p, unpriced); err != nil {
+		return domain.Invoice{}, domain.Relief{}, afterCommit, fmt.Errorf("final-on-cancel invoice: %w", err)
+	}
+	return inv, r, afterCommit, nil
+}
+
+// startFinalOnCancelSpan starts a trace span for billing a cancel: the final
+// invoice, and in BillCancelTx also the relief.
+func startFinalOnCancelSpan(ctx context.Context, name string, sub domain.Subscription) (context.Context, trace.Span) {
+	return telemetry.Tracer("billing").Start(ctx, name,
+		trace.WithAttributes(
+			attribute.String("subscription_id", sub.ID),
+			attribute.String("tenant_id", sub.TenantID),
+		),
+	)
 }
 
 // The usage-line suffixes of a partial window: an immediate cancel ended it,
@@ -4059,27 +4098,57 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	return lineItems, subtotal, nil
 }
 
-func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx, sub domain.Subscription, unpriced unpricedUsage) (domain.Invoice, error) {
+// finalOnCancelKind is what pricing a cancel's final invoice decided.
+type finalOnCancelKind int
+
+const (
+	// finalOnCancelNone: a guard found nothing to bill (not canceled, no
+	// period, a never-activated trial, no items). Nothing is written.
+	finalOnCancelNone finalOnCancelKind = iota
+	// finalOnCancelZero: the subtotal is zero or less. No invoice is written,
+	// only the row for usage below zero, if there is any.
+	finalOnCancelZero
+	// finalOnCancelBill: the invoice is written.
+	finalOnCancelBill
+)
+
+// finalOnCancel is a cancel's final invoice as priceFinalOnCancel priced it:
+// what writeFinalOnCancel needs, with nothing written yet.
+type finalOnCancel struct {
+	kind            finalOnCancelKind
+	live            bool
+	periodStart     time.Time
+	canceledAt      time.Time
+	billingLoc      *time.Location
+	netDays         int
+	invoiceCurrency string
+	lineItems       []domain.InvoiceLineItem
+	belowZero       netNegativeUsage
+	taxApp          TaxApplication
+	now             time.Time
+	dueAt           time.Time
+}
+
+// priceFinalOnCancel runs the guards of a cancel's final invoice and prices
+// it: the threshold watermark, the lines and the tax. It writes nothing and
+// takes neither the tenant's number row nor a credit-note lock. With tx it
+// reads the watermark on tx. It refuses (InvalidState, code unbilled_period)
+// a cancel at or after current_period_end.
+func (e *Engine) priceFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.Subscription, unpriced unpricedUsage) (finalOnCancel, error) {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
-		return domain.Invoice{}, err
+		return finalOnCancel{}, err
 	}
-	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.BillFinalOnImmediateCancel",
-		trace.WithAttributes(
-			attribute.String("subscription_id", sub.ID),
-			attribute.String("tenant_id", sub.TenantID),
-		),
-	)
-	defer span.End()
+	p := finalOnCancel{live: live}
 
 	if sub.Status != domain.SubscriptionCanceled {
-		return domain.Invoice{}, nil
+		return p, nil
 	}
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
-		return domain.Invoice{}, nil
+		return p, nil
 	}
 	if sub.CanceledAt == nil {
-		return domain.Invoice{}, nil
+		return p, nil
 	}
 	periodStart := *sub.CurrentBillingPeriodStart
 	periodEnd := *sub.CurrentBillingPeriodEnd
@@ -4088,7 +4157,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	// canceled_at at or before period_start is defensive: nothing of this
 	// period ran, so there is nothing to bill.
 	if !canceledAt.After(periodStart) {
-		return domain.Invoice{}, nil
+		return p, nil
 	}
 
 	// Never-activated trial write-off (ADR-069): a sub canceled straight out
@@ -4108,7 +4177,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	if sub.TrialEndAt != nil && sub.ActivatedAt == nil {
 		slog.Info("immediate cancel of a never-activated trial — no final invoice (trials are free)",
 			"subscription_id", sub.ID, "tenant_id", sub.TenantID)
-		return domain.Invoice{}, nil
+		return p, nil
 	}
 
 	// canceled_at at or after period_end: the period ended and nobody closed
@@ -4124,7 +4193,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		if sub.TestClockID != "" {
 			next = "finish or retry the clock advance, then cancel again"
 		}
-		return domain.Invoice{}, errs.InvalidState(
+		return finalOnCancel{}, errs.InvalidState(
 			"this subscription has a billing period that ended and is not invoiced yet; " + next).
 			WithCode("unbilled_period")
 	}
@@ -4147,7 +4216,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	// (ADR-066 amendment 2026-10-23).
 	wm, err := e.loadThresholdWatermarkTx(ctx, tx, sub.TenantID, sub.ID, periodStart, periodEnd)
 	if err != nil {
-		return domain.Invoice{}, err
+		return finalOnCancel{}, err
 	}
 
 	// Resolve plans for every item — needed for in_arrears proration
@@ -4159,12 +4228,12 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		}
 		pl, err := e.pricing.GetPlan(ctx, sub.TenantID, it.PlanID)
 		if err != nil {
-			return domain.Invoice{}, fmt.Errorf("get plan %s: %w", it.PlanID, err)
+			return finalOnCancel{}, fmt.Errorf("get plan %s: %w", it.PlanID, err)
 		}
 		plans[it.PlanID] = pl
 	}
 	if len(sub.Items) == 0 {
-		return domain.Invoice{}, nil
+		return p, nil
 	}
 
 	// Invoice currency — actual precedence (see billOnePeriod's note;
@@ -4173,7 +4242,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	invoiceCurrency := plans[sub.Items[0].PlanID].Currency
 	invoiceCurrency, err = e.invoiceCurrency(ctx, sub, invoiceCurrency)
 	if err != nil {
-		return domain.Invoice{}, err
+		return finalOnCancel{}, err
 	}
 
 	// Compute the final invoice's line items over the partial cancel
@@ -4183,30 +4252,57 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	// invoice, and a read failure leaves no orphan tax_calculations row.
 	netDays, err := e.netPaymentTermDays(ctx, sub.TenantID)
 	if err != nil {
-		return domain.Invoice{}, err
+		return finalOnCancel{}, err
 	}
 	billingLoc, err := e.tenantLocation(ctx, sub.TenantID)
 	if err != nil {
-		return domain.Invoice{}, err
+		return finalOnCancel{}, err
 	}
 	// The cancel's final invoice is the last one for this period, so usage
-	// it leaves unpriced is billed nowhere. Without tx it is counted here
-	// once the decision is durable: no invoice, or the invoice written. With
-	// tx, the caller's transaction can still roll back, so it is left in
-	// unpriced for the caller to count after its commit.
+	// it leaves unpriced is billed nowhere. Without tx, writeFinalOnCancel
+	// counts it once the decision is durable: no invoice, or the invoice
+	// written. With tx, the caller's transaction can still roll back, so it
+	// is left in unpriced for the caller to count after its commit.
 	belowZero := netNegativeUsage{}
 	lineItems, subtotal, err := e.buildCancelLineItems(ctx, sub, wm, plans, invoiceCurrency, periodStart, canceledAt, billingLoc, unpriced, belowZero, cancelUsageSuffix)
 	if err != nil {
-		return domain.Invoice{}, err
+		return finalOnCancel{}, err
 	}
+	p.periodStart, p.canceledAt, p.belowZero = periodStart, canceledAt, belowZero
+	if subtotal <= 0 {
+		p.kind = finalOnCancelZero
+		return p, nil
+	}
+
+	// Apply tax.
+	taxApp, err := e.ApplyTaxToLineItems(tax.WithCalculationScope(ctx, "cancel:"+sub.ID+":"+canceledAt.Format(time.RFC3339Nano)), sub.TenantID, sub.CustomerID, invoiceCurrency, subtotal, 0, lineItems)
+	if err != nil {
+		return finalOnCancel{}, fmt.Errorf("apply tax on cancel: %w", err)
+	}
+	p.kind = finalOnCancelBill
+	p.billingLoc, p.netDays, p.invoiceCurrency = billingLoc, netDays, invoiceCurrency
+	p.lineItems, p.taxApp = lineItems, taxApp
+	p.now = e.effectiveNow(ctx, sub)
+	p.dueAt = domain.AddDaysIn(p.now, netDays, billingLoc)
+	return p, nil
+}
+
+// writeFinalOnCancel writes what priceFinalOnCancel priced: the invoice with
+// its number, finalize audit row and usage-below-zero row, or, for a zero
+// subtotal, only that row. With tx it writes on tx and leaves the tax commit
+// and collection to the caller's post-commit FinalizeOnCreateInvoice. Without
+// tx it writes in its own transaction, then commits the tax and collects.
+func (e *Engine) writeFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.Subscription, p finalOnCancel, unpriced unpricedUsage) (domain.Invoice, error) {
 	// Usage below zero billed 0 (#1193). Its row rides the transaction that
 	// makes this decision final: the caller's, the invoice's, or (no tx and
 	// no invoice) one of its own.
 	noteBelowZero := func(tx *sql.Tx, inv domain.Invoice) error {
-		return e.noteNetNegativeTx(ctx, tx, sub, belowZero, domain.BillingReasonSubscriptionCancel, periodStart, canceledAt, inv)
+		return e.noteNetNegativeTx(ctx, tx, sub, p.belowZero, domain.BillingReasonSubscriptionCancel, p.periodStart, p.canceledAt, inv)
 	}
-
-	if subtotal <= 0 {
+	switch p.kind {
+	case finalOnCancelNone:
+		return domain.Invoice{}, nil
+	case finalOnCancelZero:
 		// Nothing to bill — no in_arrears base AND no usage. The
 		// customer canceled before they consumed anything billable.
 		// Skip the $0 invoice (matches BillOnCreate's behavior).
@@ -4216,26 +4312,19 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 			}
 			return domain.Invoice{}, nil
 		}
-		if len(belowZero) > 0 {
+		if len(p.belowZero) > 0 {
 			if err := e.subs.WithTenantTx(ctx, sub.TenantID, func(tx *sql.Tx) error {
 				return noteBelowZero(tx, domain.Invoice{})
 			}); err != nil {
 				return domain.Invoice{}, fmt.Errorf("usage below zero row (cancel): %w", err)
 			}
 		}
-		unpriced.record(live, sub)
+		unpriced.record(p.live, sub)
 		return domain.Invoice{}, nil
 	}
 
-	// Apply tax.
-	taxApp, err := e.ApplyTaxToLineItems(tax.WithCalculationScope(ctx, "cancel:"+sub.ID+":"+canceledAt.Format(time.RFC3339Nano)), sub.TenantID, sub.CustomerID, invoiceCurrency, subtotal, 0, lineItems)
-	if err != nil {
-		return domain.Invoice{}, fmt.Errorf("apply tax on cancel: %w", err)
-	}
-	now := e.effectiveNow(ctx, sub)
-	dueAt := domain.AddDaysIn(now, netDays, billingLoc)
+	taxApp := p.taxApp
 	totalWithTax := taxApp.SubtotalCents - taxApp.DiscountCents + taxApp.TaxAmountCents
-
 	invoiceNumber, err := e.nextInvoiceNumber(ctx, tx, sub.TenantID)
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("mint invoice number on cancel: %w", err)
@@ -4245,27 +4334,27 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		TenantID:        sub.TenantID,
 		CustomerID:      sub.CustomerID,
 		SubscriptionID:  sub.ID,
-		BillingTimezone: billingLoc.String(),
+		BillingTimezone: p.billingLoc.String(),
 		InvoiceNumber:   invoiceNumber,
 		// Tax-deferred + pause-collection gate (matches billOnePeriod).
 		// Pre-fix this path hardcoded Finalized regardless of tax;
 		// invoices with tax_status=pending finalized with
 		// TaxAmountCents=0, lying about authoritative amounts.
-		Status:        domain.InvoiceFinalizationStatus(taxApp.TaxStatus, sub.PauseCollection, canceledAt),
+		Status:        domain.InvoiceFinalizationStatus(taxApp.TaxStatus, sub.PauseCollection, p.canceledAt),
 		PaymentStatus: domain.PaymentPending,
-		Currency:      invoiceCurrency,
+		Currency:      p.invoiceCurrency,
 		SubtotalCents: taxApp.SubtotalCents,
 		DiscountCents: taxApp.DiscountCents,
 		// ONE assignment carries every tax fact (see domain/tax_facts.go).
 		TaxFacts:           taxApp.TaxFacts,
 		TotalAmountCents:   totalWithTax,
 		AmountDueCents:     totalWithTax,
-		BillingPeriodStart: periodStart,
-		BillingPeriodEnd:   canceledAt,
-		IssuedAt:           &now,
-		DueAt:              &dueAt,
-		CreatedAt:          now,
-		NetPaymentTermDays: netDays,
+		BillingPeriodStart: p.periodStart,
+		BillingPeriodEnd:   p.canceledAt,
+		IssuedAt:           &p.now,
+		DueAt:              &p.dueAt,
+		CreatedAt:          p.now,
+		NetPaymentTermDays: p.netDays,
 		BillingReason:      domain.BillingReasonSubscriptionCancel,
 		IsSimulated:        sub.TestClockID != "",
 	}
@@ -4277,7 +4366,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		// auto-charge) runs post-commit via FinalizeOnCreateInvoice; the AUDIT row
 		// and invoice.finalized ride THIS coordinator tx, so they commit
 		// atomically with the cancel.
-		created, err := e.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, sub.TenantID, invToCreate, lineItems)
+		created, err := e.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, sub.TenantID, invToCreate, p.lineItems)
 		if err != nil {
 			return domain.Invoice{}, err
 		}
@@ -4290,7 +4379,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		return created, nil
 	}
 
-	inv, err := e.invoices.CreateInvoiceWithLineItemsAudited(ctx, sub.TenantID, invToCreate, lineItems, func(tx *sql.Tx, out domain.Invoice) error {
+	inv, err := e.invoices.CreateInvoiceWithLineItemsAudited(ctx, sub.TenantID, invToCreate, p.lineItems, func(tx *sql.Tx, out domain.Invoice) error {
 		if err := e.emitFinalizeAuditTx(ctx, tx, out); err != nil {
 			return err
 		}
@@ -4300,14 +4389,14 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		if errors.Is(err, errs.ErrAlreadyExists) {
 			slog.Info("subscription_cancel final invoice already exists (idempotent skip)",
 				"subscription_id", sub.ID,
-				"period_start", periodStart,
-				"canceled_at", canceledAt,
+				"period_start", p.periodStart,
+				"canceled_at", p.canceledAt,
 			)
 			return domain.Invoice{}, nil
 		}
 		return domain.Invoice{}, fmt.Errorf("create final-on-cancel invoice: %w", err)
 	}
-	unpriced.record(live, sub)
+	unpriced.record(p.live, sub)
 
 	// The finalize AUDIT row and invoice.finalized already committed inside
 	// the create tx above.
@@ -4325,10 +4414,10 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	slog.Info("subscription_cancel final invoice generated",
 		"invoice_id", inv.ID,
 		"subscription_id", sub.ID,
-		"period_start", periodStart,
-		"canceled_at", canceledAt,
+		"period_start", p.periodStart,
+		"canceled_at", p.canceledAt,
 		"total_cents", totalWithTax,
-		"line_items", len(lineItems),
+		"line_items", len(p.lineItems),
 	)
 	return inv, nil
 }
@@ -4464,8 +4553,8 @@ func (e *Engine) prepareCancelCredit(ctx context.Context, sub domain.Subscriptio
 // rolls the cancel back: never a canceled subscription whose relief was lost.
 // The caller runs FinishRelief after commit.
 //
-// Engine-writes-on-the-subscription-store's-tx is the BillFinalOnImmediateCancelTx
-// precedent (the final invoice already inserts on this same tx).
+// BillCancelTx calls it after pricing the final invoice and before numbering
+// it: the relief's credit-note locks come before the tenant's number row.
 func (e *Engine) BillOnCancelDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (domain.Relief, error) {
 	in, ok, err := e.prepareCancelCredit(ctx, sub)
 	if err != nil {

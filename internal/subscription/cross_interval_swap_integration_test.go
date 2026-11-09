@@ -39,11 +39,8 @@ func (b *swapBillErrBiller) BillOnCreate(context.Context, domain.Subscription) (
 func (b *swapBillErrBiller) BillFinalOnImmediateCancel(context.Context, domain.Subscription) (domain.Invoice, error) {
 	return domain.Invoice{}, nil
 }
-func (b *swapBillErrBiller) BillFinalOnImmediateCancelTx(context.Context, *sql.Tx, domain.Subscription) (domain.Invoice, func(), error) {
-	return domain.Invoice{}, func() {}, nil
-}
-func (b *swapBillErrBiller) BillOnCancelDraftsTx(context.Context, *sql.Tx, domain.Subscription) (domain.Relief, error) {
-	return domain.Relief{}, nil
+func (b *swapBillErrBiller) BillCancelTx(context.Context, *sql.Tx, domain.Subscription) (domain.Invoice, domain.Relief, func(), error) {
+	return domain.Invoice{}, domain.Relief{}, func() {}, nil
 }
 func (b *swapBillErrBiller) BillOnPlanSwapDraftsTx(context.Context, *sql.Tx, domain.Subscription, time.Time) (domain.Relief, error) {
 	return domain.Relief{}, nil

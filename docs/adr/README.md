@@ -97,7 +97,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [054](054-effective-unit-price-decimal-display.md) | 2026-06-17 | Accepted | Invoices | Show per-unit prices at full precision; one backend function picks the billed or effective rate |
 | [055](055-anniversary-month-end-anchor.md) | 2026-06-18 | Accepted | Billing | Anniversary billing keeps the original day of month, clamped to each month's last day |
 | [056](056-atomic-cross-interval-plan-swap.md) | 2026-06-19 | Accepted | Subscriptions | A plan swap across billing intervals restructures the cycle in one transaction |
-| [057](057-atomic-recoverable-downgrade-clawback.md) | 2026-06-20 | Accepted | Credits | A downgrade's clawback credit note is created in the change transaction and issued with retry |
+| [057](057-atomic-recoverable-downgrade-clawback.md) | 2026-06-20 | Accepted (amended) | Credits | A downgrade's clawback credit note is created in the change transaction and issued with retry |
 | [058](058-billing-date-math-tenant-timezone.md) | 2026-06-09 | Accepted | Timezones | All month and year billing date math is anchored in the tenant timezone |
 | [059](059-guard-invoice-mutations-while-payment-in-flight.md) | 2026-06-22 | Accepted | Payments | In-flight payments block void, offline payment and write-off (parked excepted); clawbacks wait |
 | [060](060-no-payment-method-dunning-enrollment.md) | 2026-06-23 | Accepted (amended) | Dunning | Invoices with no payment method enter dunning, like declined charges |
