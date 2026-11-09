@@ -1057,7 +1057,8 @@ func (s *PostgresStore) ResetEmailStatus(ctx context.Context, tenantID, customer
 // otherwise no-ops. NEVER downgrades 'complained' (ADR-098): a spam
 // complaint outranks a bounce, and provider webhooks arrive in any order
 // — a Bounce landing after a SpamComplaint is a benign no-op, not an
-// ErrNotFound (the SMTP-path caller logs ErrNotFound as a real miss).
+// ErrNotFound. ErrNotFound means the row is gone: both callers skip it as
+// a customer deleted after their blind-index lookup.
 // Each call queues customer.email_bounced in its transaction, that no-op
 // included (see markEmailSuppressed).
 func (s *PostgresStore) MarkEmailBounced(ctx context.Context, tenantID, customerID, reason string) error {
@@ -1079,8 +1080,10 @@ func (s *PostgresStore) MarkEmailComplained(ctx context.Context, tenantID, custo
 // transaction: one event per signal, also when the monotonic guard leaves a
 // complained row as it is. The event carries the customer as this
 // transaction left it, with the provider's reason beside it (ADR-131). A
-// failed insert fails the write, so the caller (the Postmark webhook) gets
-// the error and the provider sends the signal again.
+// failed insert fails the call, and the write rolls back with it. The
+// Postmark webhook then answers 5xx, and Postmark sends the signal again.
+// The SMTP bounce path (ReportBounce) has nothing that sends it again, so it
+// logs the failure at ERROR.
 func (s *PostgresStore) markEmailSuppressed(ctx context.Context, tenantID, customerID, reason, status, eventType string) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {

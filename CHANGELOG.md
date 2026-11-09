@@ -33,7 +33,7 @@ original text.
 ### Fixed
 
 - **A refund of another account's payment, on a Stripe account two Hardcount accounts share, is acknowledged.** Its webhook failed, and Stripe sent it again for three days. ([#1633](https://github.com/gethardcount/hardcount/pull/1633))
-- **Dunning and customer webhook events are no longer lost to a crash, a deploy or a dropped request.** `dunning.escalated`, `dunning.resolved`, `customer.email_bounced` and `customer.email_complained` were queued just after their change was saved, and a crash or a cancelled request in between dropped them. Each is now saved with its change. ([#1636](https://github.com/gethardcount/hardcount/pull/1636))
+- **Dunning and customer webhook events are no longer lost to a crash, a deploy or a dropped request.** `dunning.escalated`, `dunning.resolved`, `customer.email_bounced` and `customer.email_complained` were queued just after their change was saved, and a crash or a cancelled request in between dropped them. Each is now saved with its change. A bounce from your SMTP server that cannot be saved is logged at ERROR, because nothing sends it again. ([#1636](https://github.com/gethardcount/hardcount/pull/1636))
 
 ## [0.9.3] - 2026-11-09
 
