@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/logging"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tax"
 )
@@ -1403,7 +1403,7 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 		if len(ids) > 0 {
 			lost, err := s.disputes.LostDisputesByInvoices(ctx, tenantID, ids)
 			if err != nil {
-				slog.Log(ctx, respond.ErrorLevel(ctx, err), "invoice: attention could not read lost disputes", "error", err,
+				slog.Log(ctx, logging.ErrorLevel(ctx, err), "invoice: attention could not read lost disputes", "error", err,
 					"tenant_id", tenantID, "invoices", len(ids))
 			}
 			f.lostDispute = lost
@@ -1424,7 +1424,7 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 		if len(ids) > 0 {
 			review, err := s.stripeRefunds.StripeRefundsNeedingReview(ctx, tenantID, ids)
 			if err != nil {
-				slog.Log(ctx, respond.ErrorLevel(ctx, err), "invoice: attention could not read refunds made in Stripe", "error", err,
+				slog.Log(ctx, logging.ErrorLevel(ctx, err), "invoice: attention could not read refunds made in Stripe", "error", err,
 					"tenant_id", tenantID, "invoices", len(ids))
 			}
 			f.refundReview = review
