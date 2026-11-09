@@ -1925,15 +1925,24 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	if h.invoices != nil && sub.CurrentBillingPeriodStart != nil {
 		// A single-row lookup is right here: it only routes paid vs unpaid.
 		resolved, lookupErr := h.invoices.FindBaseInvoiceForPeriod(ctx, tenantID, sub.ID, *sub.CurrentBillingPeriodStart) //nolint:forbidigo // single-invoice-ok: paid/unpaid routing gate only
-		if lookupErr != nil {
-			slog.InfoContext(ctx, "item proration deferred: in_advance source invoice not found for current period",
+		if errors.Is(lookupErr, errs.ErrNotFound) {
+			slog.InfoContext(ctx, "item proration deferred: no in_advance base invoice for the current period yet",
 				"subscription_id", sub.ID,
 				"item_id", spec.itemID,
 				"change_type", spec.changeType,
 				"period_start", *sub.CurrentBillingPeriodStart,
-				"error", lookupErr,
 			)
 			return nil, nil
+		}
+		// Any other error leaves it unknown whether the period was charged.
+		// Refuse the change: going on would commit it uncharged, and cycle
+		// close never bills the rest of a period paid in advance. A second
+		// run is safe (errs.Unavailable): this transaction rolls back, and
+		// the period close the handlers run first does nothing a second time.
+		if lookupErr != nil {
+			return nil, errs.Unavailable("proration_unavailable",
+				"could not check whether this period's invoice is paid, so the change was not made — please retry",
+				fmt.Errorf("read the current period's base invoice: %w", lookupErr))
 		}
 		owesNothing := resolved.AmountDueCents == 0 && resolved.TaxStatus == domain.InvoiceTaxOK
 		if !resolved.PaymentInFlight() && resolved.PaymentStatus != domain.PaymentSucceeded && !owesNothing {
@@ -2016,11 +2025,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 				// ApplyTaxToLineItems). Without a retryable tax_error_code the
 				// reconciler's filter skips the invoice forever.
 				taxResult.TaxErrorCode = string(tax.Classify(err))
-				reason := tax.CleanMessage(err.Error())
-				if len(reason) > 500 {
-					reason = reason[:500]
-				}
-				taxResult.TaxPendingReason = reason
+				taxResult.TaxPendingReason = errs.Clip(tax.CleanMessage(err.Error()), 500)
 				deferredAt := now
 				taxResult.TaxDeferredAt = &deferredAt
 			} else {

@@ -80,7 +80,7 @@ trap cleanup_on_failure ERR
 # (The archive is written via stdout, so a wrapped binary needs no mounts.)
 PG_DUMP="${PG_DUMP:-pg_dump}"
 
-command -v ${PG_DUMP%% *} >/dev/null 2>&1 || die "pg_dump not found in PATH." 1
+command -v "${PG_DUMP%% *}" >/dev/null 2>&1 || die "pg_dump not found in PATH." 1
 
 mkdir -p "$BACKUP_DIR" || die "Cannot create backup directory: $BACKUP_DIR" 1
 

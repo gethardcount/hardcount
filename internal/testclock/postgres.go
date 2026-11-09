@@ -262,8 +262,8 @@ func (s *PostgresStore) CompleteAdvance(ctx context.Context, tenantID, id string
 }
 
 // MarkFailed flips advancing → internal_failure and persists the
-// reason. Caller truncates to ~500 chars; full payload stays in
-// structured slog.
+// reason, cut to about 500 bytes between two characters; the full
+// payload stays in structured slog.
 func (s *PostgresStore) MarkFailed(ctx context.Context, tenantID, id, reason string) (domain.TestClock, error) {
 	return s.transitionWithReason(ctx, tenantID, id, "internal_failure",
 		[]string{"advancing"}, reason, false,
@@ -307,7 +307,13 @@ func (s *PostgresStore) transitionWithReason(
 		query = `UPDATE test_clocks SET status = $1, last_failure_reason = $2,
 			updated_at = now()
 			WHERE id = $3 AND status = ANY($4)			RETURNING ` + clockCols
-		args = []any{to, truncateReason(reason), id, allowedFrom}
+		// The dashboard shows the reason in one panel: keep 500 bytes, or
+		// 499 and "…" when the reason is longer. The full text is in the log.
+		stored := errs.Clip(reason, 500)
+		if len(reason) > 500 {
+			stored = errs.Clip(reason, 499) + "…"
+		}
+		args = []any{to, stored, id, allowedFrom}
 	}
 	err = tx.QueryRowContext(ctx, query, args...).Scan(scanDest(&clk)...)
 	if err == sql.ErrNoRows {
@@ -328,17 +334,6 @@ func (s *PostgresStore) transitionWithReason(
 		return domain.TestClock{}, err
 	}
 	return clk, nil
-}
-
-// truncateReason caps the failure reason at a length the
-// dashboard can render in a single inline panel without scroll.
-// Full payload stays in slog for ops grep.
-func truncateReason(s string) string {
-	const max = 500
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-1] + "…"
 }
 
 // transition is the atomic CAS helper for status changes: UPDATE … WHERE

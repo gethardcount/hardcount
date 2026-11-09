@@ -5,6 +5,8 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+
+	"github.com/gethardcount/hardcount/internal/errs"
 )
 
 // ErrorCode is the typed classification of a tax-provider failure.
@@ -80,7 +82,7 @@ func CleanMessage(raw string) string {
 		return env.Message
 	}
 	if len(stripped) > 200 {
-		return stripped[:200] + "…"
+		return errs.Clip(stripped, 200) + "…"
 	}
 	return stripped
 }

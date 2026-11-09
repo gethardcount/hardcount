@@ -85,8 +85,8 @@ runs again and gets `409` too. Use an `external_id` you have not used yet.
 
 | The first request | A retry with the same key gets |
 |---|---|
-| Finished with any status except `409` or `422`, including other `4xx` and `5xx` answers | The first status and body, plus `Idempotent-Replayed: true`. The request does not run again. A crash is the exception: see [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
-| Finished with `409` or `422` | A new run. These answers are not stored, so the key is free again. |
+| Finished with any status except `409`, `422` or `503`, including other `4xx` and `5xx` answers | The first status and body, plus `Idempotent-Replayed: true`. The request does not run again. A crash is the exception: see [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
+| Finished with `409`, `422` or `503` | A new run. These answers are not stored, so the key is free again. |
 | Is still running | Hardcount waits up to 5 seconds for it, then answers `409` `conflict_idempotency`. Retry later with the same key. |
 | Finished, but the retry's method, path or body differs | `422` `idempotency_error`. Your code reused a key for a different request. |
 | Started more than 5 minutes ago and never recorded an answer | `409` `conflict_idempotency_unresolved`. See [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
@@ -100,13 +100,21 @@ may not call the route, or a `404` is stored like any other answer.
 Fix the request, then send it with a new key: the fixed request has a
 different body, so the old key answers `422` `idempotency_error`.
 
-**A stored `5xx` comes back on every retry with that key.** Hardcount stores
-it on purpose: the first request may have charged a card or written data
-before it failed, and running it again could do that twice. After a `5xx`:
+**A stored `500`, `502` or `504` comes back on every retry with that key.**
+Hardcount stores it on purpose: the first request may have charged a card or
+written data before it failed, and running it again could do that twice.
+After one of these:
 
 1. Read the resource to see whether the change happened, for example with
    `GET /v1/customers?external_id=cust_idem_1`.
 2. If it did not happen, send the request again with a new key.
+
+**A `503` is never stored.** Hardcount answers `503` only when a second run
+is safe: something the request needed failed, and nothing it did would be
+done twice. For example, an item change that cannot read the current
+period's invoice is not made, and answers `503` `proration_unavailable`.
+Wait the seconds in `Retry-After` when the answer has it, then send the same
+request with the same key.
 
 **Some answers come before the key is checked and are never stored.** A
 retry with the same key runs normally after them:
@@ -163,9 +171,12 @@ take an API key. These routes ignore it, and run every time:
    same key. If the key is more than 24 hours old, it has expired, and the
    same key gets this answer until the cleanup deletes it. Read the resource
    instead, as in step 5.
-5. On a `5xx`, or `409` `conflict_idempotency_unresolved`, read the resource
-   first. Send the request with a new key only if the change is not there.
-6. On another `4xx`, do not retry as it is. Fix the request, then send it
+5. On `503`, wait the seconds in `Retry-After` when the answer has it, then
+   send it with the same key.
+6. On another `5xx`, or `409` `conflict_idempotency_unresolved`, read the
+   resource first. Send the request with a new key only if the change is not
+   there.
+7. On another `4xx`, do not retry as it is. Fix the request, then send it
    with a new key. Every code is in [Errors](errors.md).
 
 Usage events are simpler. An event sent again with the same key is never
