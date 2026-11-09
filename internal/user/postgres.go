@@ -166,6 +166,22 @@ func (s *PostgresStore) CreateInTx(ctx context.Context, tx *sql.Tx, email, passw
 	return u, nil
 }
 
+// AttachTenantInTx is AttachTenant on the caller's transaction: it adds
+// (user_id, tenant_id, role) to user_tenants, and does nothing when the
+// membership already exists. The invite accept uses it so the membership
+// commits with the invitation's claim. No commit here; the caller owns the
+// tx.
+func (s *PostgresStore) AttachTenantInTx(ctx context.Context, tx *sql.Tx, userID, tenantID, role string) error {
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO user_tenants (user_id, tenant_id, role)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (user_id, tenant_id) DO NOTHING
+	`, userID, tenantID, role); err != nil {
+		return fmt.Errorf("attach tenant: %w", err)
+	}
+	return nil
+}
+
 func (s *PostgresStore) TenantsForUser(ctx context.Context, userID string) ([]domain.UserTenant, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {

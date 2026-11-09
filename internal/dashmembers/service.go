@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -24,24 +25,24 @@ import (
 const InviteTTL = 7 * 24 * time.Hour
 
 // UserDirectory is the narrow slice of the user package the invite flow
-// needs. Satisfied by *user.Service (CreateUser) + *user.PostgresStore
-// (lookups/attach) via the router's adapter — dashmembers never imports
-// the user package, keeping the auth dependency one-directional.
+// needs. The router's adapter satisfies it with user.HashPassword and
+// *user.PostgresStore. dashmembers never imports the user package, keeping
+// the auth dependency one-directional.
 type UserDirectory interface {
 	// GetByEmail returns errs.ErrNotFound when no account exists.
 	GetByEmail(ctx context.Context, email string) (domain.User, error)
 	// TenantsForUser lists the user's memberships.
 	TenantsForUser(ctx context.Context, userID string) ([]domain.UserTenant, error)
-	// CreateUser validates the password internally, creates the account,
-	// and attaches the tenant with the role — the bootstrap-owner path's
-	// exact primitive.
-	CreateUser(ctx context.Context, email, plaintext, tenantID, role string) (domain.User, error)
-	// ValidatePassword runs CreateUser's password rules without creating
-	// anything, so the accept flow refuses a bad password before it uses up
-	// the invitation.
-	ValidatePassword(plaintext string) error
-	// AttachTenant adds a membership for an EXISTING user.
-	AttachTenant(ctx context.Context, userID, tenantID, role string) error
+	// HashPassword checks a new account's password against the password
+	// rules and returns its bcrypt hash. The accept flow calls it before it
+	// claims the invitation, so a refused password leaves the invite usable.
+	HashPassword(plaintext string) (string, error)
+	// CreateInTx creates the account and its membership with the role, on
+	// the caller's transaction. The bootstrap owner is created the same way.
+	CreateInTx(ctx context.Context, tx *sql.Tx, email, passwordHash, tenantID, role string) (domain.User, error)
+	// AttachTenantInTx adds a membership for an existing user, on the
+	// caller's transaction.
+	AttachTenantInTx(ctx context.Context, tx *sql.Tx, userID, tenantID, role string) error
 }
 
 // SessionRevoker kills every session of a removed member — session rows
@@ -51,9 +52,10 @@ type SessionRevoker interface {
 	RevokeAllForUser(ctx context.Context, userID string) error
 }
 
-// InviteEmailSender enqueues the invite email (outbox-backed).
+// InviteEmailSender queues the invite email in email_outbox on the caller's
+// transaction, so the email commits with the invitation.
 type InviteEmailSender interface {
-	SendMemberInvite(ctx context.Context, tenantID, to, inviterEmail, tenantName, acceptURL string) error
+	SendMemberInviteTx(ctx context.Context, tx *sql.Tx, tenantID, to, inviterEmail, tenantName, acceptURL string) error
 }
 
 // TenantNamer resolves the workspace name for the accept-page header.
@@ -193,32 +195,28 @@ func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email str
 	if err != nil {
 		return Invitation{}, err
 	}
-	now := s.clock.Now(ctx)
-	inv, err := s.store.CreateInvitation(ctx, Invitation{
+	tenantName := s.tenantName(ctx, tenantID)
+	acceptURL := s.dashboardBaseURL + "/accept-invite?token=" + rawToken
+	// The invitation and its email commit together. A pending invitation
+	// with no email is a dead end for the invitee, and it blocks the
+	// operator's retry through the pending-unique index. So a failed enqueue
+	// fails the invite and writes nothing.
+	return s.store.CreateInvitation(ctx, Invitation{
 		TenantID:        tenantID,
 		Email:           email,
 		TokenHash:       tokenHash,
 		InvitedByUserID: inviterUserID,
 		Role:            "member",
-		ExpiresAt:       now.Add(InviteTTL),
-	})
-	if err != nil {
-		return Invitation{}, err
-	}
-
-	tenantName := s.tenantName(ctx, tenantID)
-	acceptURL := s.dashboardBaseURL + "/accept-invite?token=" + rawToken
-	if s.email != nil {
-		if err := s.email.SendMemberInvite(ctx, tenantID, email, inv.InvitedByEmail, tenantName, acceptURL); err != nil {
-			// The outbox enqueue failing is a hard error — an invite row
-			// with no email is a silent dead end for the invitee. Revoke
-			// the row so the operator's retry isn't blocked by the
-			// pending-unique index.
-			_ = s.store.RevokeInvitation(ctx, tenantID, inv.ID, now)
-			return Invitation{}, fmt.Errorf("enqueue invite email: %w", err)
+		ExpiresAt:       s.clock.Now(ctx).Add(InviteTTL),
+	}, func(tx *sql.Tx, inv Invitation) error {
+		if s.email == nil {
+			return nil
 		}
-	}
-	return inv, nil
+		if err := s.email.SendMemberInviteTx(ctx, tx, tenantID, email, inv.InvitedByEmail, tenantName, acceptURL); err != nil {
+			return fmt.Errorf("enqueue invite email: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *Service) tenantName(ctx context.Context, tenantID string) string {
@@ -255,31 +253,15 @@ func (s *Service) Revoke(ctx context.Context, tenantID, invitationID string) err
 // sessions (session rows pin the tenant, so an active session would
 // otherwise keep full access after the membership row is gone).
 // Guards: no self-removal (lockout footgun — someone else must remove
-// you) and never the last member (an ownerless workspace is
-// unrecoverable without psql).
+// you) and never the last member (ErrLastMember: an ownerless workspace is
+// unrecoverable without psql). The store checks the last-member rule in the
+// transaction that deletes, so two concurrent removals cannot both pass it.
 func (s *Service) RemoveMember(ctx context.Context, tenantID, actorUserID, targetUserID string) error {
 	if targetUserID == "" {
 		return errs.Required("user_id")
 	}
 	if actorUserID != "" && actorUserID == targetUserID {
 		return errs.InvalidState("you cannot remove yourself — another member must remove you")
-	}
-	members, err := s.store.ListMembers(ctx, tenantID)
-	if err != nil {
-		return err
-	}
-	if len(members) <= 1 {
-		return errs.InvalidState("cannot remove the last member of the workspace")
-	}
-	found := false
-	for _, m := range members {
-		if m.UserID == targetUserID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return errs.ErrNotFound
 	}
 	if err := s.store.RemoveMember(ctx, tenantID, targetUserID); err != nil {
 		return err
@@ -345,7 +327,9 @@ type AcceptResult struct {
 
 // AcceptInvite consumes the token (single-use CAS) and attaches the
 // membership — creating the account first when none exists (password
-// required and validated in that case; ignored otherwise).
+// required and validated in that case; ignored otherwise). The claim, the
+// account and the membership commit in one transaction: when any of them
+// fails, nothing is written and the invitation stays usable.
 func (s *Service) AcceptInvite(ctx context.Context, token, password string) (AcceptResult, error) {
 	inv, err := s.lookupPending(ctx, token)
 	if err != nil {
@@ -357,38 +341,38 @@ func (s *Service) AcceptInvite(ctx context.Context, token, password string) (Acc
 	if lookupErr != nil && !isNew {
 		return AcceptResult{}, lookupErr
 	}
-	// A new account's password is checked before the token is claimed: a
-	// password refused after the claim (too short, too long, breached) used
-	// up the invitation, and the invitee's retry was "no longer valid".
+	// A new account's password is checked and hashed before the claim. The
+	// bcrypt work then stays outside the transaction, and a refused password
+	// (too short, too long, breached) leaves the invitation pending.
+	var passwordHash string
 	if isNew {
-		if err := s.users.ValidatePassword(password); err != nil {
-			return AcceptResult{}, err
-		}
-	}
-
-	// Claim the token BEFORE the side effects — the CAS is the
-	// exactly-once gate (a concurrent second accept or a revoke racing
-	// us loses here). If a side effect below fails the invite is burned;
-	// the operator re-invites (pending-unique allows it after this row
-	// leaves pending) — safer than a reusable token.
-	if err := s.store.AcceptInvitation(ctx, inv.ID, s.clock.Now(ctx)); err != nil {
-		if errors.Is(err, errs.ErrNotFound) {
-			return AcceptResult{}, errs.Invalid("token", "this invitation is no longer valid — ask for a new invite")
-		}
-		return AcceptResult{}, err
-	}
-
-	if isNew {
-		u, err := s.users.CreateUser(ctx, inv.Email, password, inv.TenantID, inv.Role)
+		passwordHash, err = s.users.HashPassword(password)
 		if err != nil {
 			return AcceptResult{}, err
 		}
-		return AcceptResult{UserID: u.ID, Email: inv.Email, TenantID: inv.TenantID, MintSession: true, NewAccount: true}, nil
 	}
-	if err := s.users.AttachTenant(ctx, existing.ID, inv.TenantID, inv.Role); err != nil {
+
+	// The CAS is the exactly-once gate: a concurrent second accept, or a
+	// revoke racing this one, loses there and join does not run.
+	res := AcceptResult{UserID: existing.ID, Email: inv.Email, TenantID: inv.TenantID, MintSession: isNew, NewAccount: isNew}
+	err = s.store.AcceptInvitation(ctx, inv.ID, s.clock.Now(ctx), func(tx *sql.Tx) error {
+		if !isNew {
+			return s.users.AttachTenantInTx(ctx, tx, existing.ID, inv.TenantID, inv.Role)
+		}
+		u, err := s.users.CreateInTx(ctx, tx, inv.Email, passwordHash, inv.TenantID, inv.Role)
+		if err != nil {
+			return err
+		}
+		res.UserID = u.ID
+		return nil
+	})
+	if errors.Is(err, errs.ErrNotFound) {
+		return AcceptResult{}, errs.Invalid("token", "this invitation is no longer valid — ask for a new invite")
+	}
+	if err != nil {
 		return AcceptResult{}, err
 	}
-	return AcceptResult{UserID: existing.ID, Email: inv.Email, TenantID: inv.TenantID, MintSession: false, NewAccount: false}, nil
+	return res, nil
 }
 
 func (s *Service) lookupPending(ctx context.Context, token string) (Invitation, error) {

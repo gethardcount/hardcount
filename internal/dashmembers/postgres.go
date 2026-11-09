@@ -23,13 +23,14 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// PostgresStore persists invitations and reads memberships. Queries run
+// PostgresStore persists invitations and reads memberships. Most queries run
 // under TxBypass like the sibling auth tables (users, sessions,
 // password_reset_tokens): the accept path runs before any tenant context
 // exists. tenant_id predicates scope every tenant-shaped query at the
 // application layer; the table still carries the 0006 RLS fence
 // (bypass-admitting, m0139) as the structural backstop for any future
-// tenant-scoped query.
+// tenant-scoped query. CreateInvitation runs under TxTenant instead: the
+// invite email's outbox row commits on its transaction and needs the mode.
 type PostgresStore struct {
 	db *postgres.DB
 }
@@ -78,8 +79,13 @@ func scanInvitation(scan func(...any) error) (Invitation, error) {
 // pending invite per tenant+email) as a clean 409.
 var ErrPendingInviteExists = errs.AlreadyExists("email", "a pending invitation for this email already exists — revoke it first to re-send")
 
-func (s *PostgresStore) CreateInvitation(ctx context.Context, inv Invitation) (Invitation, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
+// CreateInvitation inserts a pending invitation and calls send on the same
+// transaction with the stored row, so the invitation and its email commit
+// together or not at all. When send fails, nothing is written and its error
+// is returned. ctx must carry the mode (postgres.WithLivemode): this is a
+// tenant transaction, and the email_outbox insert takes its mode from it.
+func (s *PostgresStore) CreateInvitation(ctx context.Context, inv Invitation, send func(tx *sql.Tx, inv Invitation) error) (Invitation, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, inv.TenantID)
 	if err != nil {
 		return Invitation{}, err
 	}
@@ -101,6 +107,9 @@ func (s *PostgresStore) CreateInvitation(ctx context.Context, inv Invitation) (I
 			return Invitation{}, ErrPendingInviteExists
 		}
 		return Invitation{}, fmt.Errorf("create invitation: %w", err)
+	}
+	if err := send(tx, inv); err != nil {
+		return Invitation{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return Invitation{}, err
@@ -184,10 +193,14 @@ func (s *PostgresStore) RevokeInvitation(ctx context.Context, tenantID, id strin
 	return tx.Commit()
 }
 
-// AcceptInvitation CASes accepted_at on a pending, unexpired invite —
-// the exactly-once gate for the accept flow (a replayed link or a
-// concurrent second accept loses the CAS and reads the fresh state).
-func (s *PostgresStore) AcceptInvitation(ctx context.Context, id string, at time.Time) error {
+// AcceptInvitation claims a pending, unexpired invite with a CAS on
+// accepted_at, then calls join on the same transaction to write the account
+// and the membership. The claim and the membership commit together or not at
+// all. The CAS is the exactly-once gate: a replayed link, or a concurrent
+// second accept, gets errs.ErrNotFound and join does not run. When join
+// fails, nothing is written and its error is returned, so the invitation
+// stays pending and the invitee can try again.
+func (s *PostgresStore) AcceptInvitation(ctx context.Context, id string, at time.Time, join func(tx *sql.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return err
@@ -201,8 +214,15 @@ func (s *PostgresStore) AcceptInvitation(ctx context.Context, id string, at time
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
 		return errs.ErrNotFound
+	}
+	if err := join(tx); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -239,8 +259,15 @@ func (s *PostgresStore) ListMembers(ctx context.Context, tenantID string) ([]Mem
 	return out, rows.Err()
 }
 
-// RemoveMember deletes the (user, tenant) membership. The service guards
-// self-removal and last-member removal before calling.
+// ErrLastMember is RemoveMember's refusal to remove a workspace's only
+// member. Nobody could sign in to the workspace again, and only psql could
+// add a member back.
+var ErrLastMember = errs.InvalidState("cannot remove the last member of the workspace")
+
+// RemoveMember deletes the (user, tenant) membership unless it is the
+// tenant's last one. It returns ErrLastMember for the last member, and
+// errs.ErrNotFound when userID is not a member. The service refuses
+// self-removal before calling.
 func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, userID string) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -248,12 +275,38 @@ func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, userID strin
 	}
 	defer postgres.Rollback(tx)
 
-	res, err := tx.ExecContext(ctx,
-		`DELETE FROM user_tenants WHERE tenant_id = $1 AND user_id = $2`, tenantID, userID)
+	// One removal at a time per tenant, with the count inside the DELETE.
+	// Otherwise two members removing each other at once each count two
+	// members in their own snapshot, each delete the other, and leave none.
+	// Behind the lock, the second DELETE starts after the first commits, so
+	// its count sees one member and it deletes nothing. The lock is held to
+	// commit.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		"user_tenants:"+tenantID); err != nil {
+		return fmt.Errorf("acquire membership lock: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `
+		DELETE FROM user_tenants
+		WHERE tenant_id = $1 AND user_id = $2
+		  AND (SELECT count(*) FROM user_tenants WHERE tenant_id = $1) > 1`,
+		tenantID, userID)
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		var member bool
+		if err := tx.QueryRowContext(ctx, `
+			SELECT EXISTS (SELECT 1 FROM user_tenants WHERE tenant_id = $1 AND user_id = $2)`,
+			tenantID, userID).Scan(&member); err != nil {
+			return err
+		}
+		if member {
+			return ErrLastMember
+		}
 		return errs.ErrNotFound
 	}
 	return tx.Commit()

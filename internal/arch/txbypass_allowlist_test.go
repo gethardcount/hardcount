@@ -132,9 +132,9 @@ var txBypassUsers = map[string]string{
 	"internal/tenantstripe/postgres.go Store.MarkVerifyFailed": "stripe",
 
 	// Signed-in, one tenant: team members and invites (accepting an invite
-	// runs from its emailed link).
+	// runs from its emailed link). Creating an invitation runs under
+	// TxTenant.
 	"internal/dashmembers/postgres.go PostgresStore.AcceptInvitation":         "members",
-	"internal/dashmembers/postgres.go PostgresStore.CreateInvitation":         "members",
 	"internal/dashmembers/postgres.go PostgresStore.GetInvitationByTokenHash": "members",
 	"internal/dashmembers/postgres.go PostgresStore.ListInvitations":          "members",
 	"internal/dashmembers/postgres.go PostgresStore.ListMembers":              "members",

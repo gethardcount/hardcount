@@ -2,6 +2,7 @@ package dashmembers_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/dashmembers"
-	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/email"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -20,24 +21,47 @@ import (
 
 // --- test doubles ---------------------------------------------------------
 
-// capturingEmail records the invite email instead of sending it; the
-// accept-URL token is how tests get hold of the plaintext token (it is
-// never returned by the API, mirroring production).
+// capturingEmail queues the invite email through the real OutboxSender, on
+// the invitation's transaction, and records it. The accept-URL token is how
+// tests get hold of the plaintext token (it is never returned by the API,
+// mirroring production). With fail set, it queues the email and then fails,
+// so a test sees whether the email row rolls back with the invitation.
 type capturingEmail struct {
-	sent []capturedInvite
-	fail bool
+	outbox *email.OutboxSender
+	sent   []capturedInvite
+	fail   bool
 }
 
 type capturedInvite struct {
 	tenantID, to, inviterEmail, tenantName, acceptURL string
 }
 
-func (c *capturingEmail) SendMemberInvite(_ context.Context, tenantID, to, inviterEmail, tenantName, acceptURL string) error {
+func (c *capturingEmail) SendMemberInviteTx(ctx context.Context, tx *sql.Tx, tenantID, to, inviterEmail, tenantName, acceptURL string) error {
+	if err := c.outbox.SendMemberInviteTx(ctx, tx, tenantID, to, inviterEmail, tenantName, acceptURL); err != nil {
+		return err
+	}
 	if c.fail {
 		return errors.New("injected enqueue failure")
 	}
 	c.sent = append(c.sent, capturedInvite{tenantID, to, inviterEmail, tenantName, acceptURL})
 	return nil
+}
+
+// countInviteEmails counts the tenant's member_invite rows in email_outbox.
+func countInviteEmails(t *testing.T, db *postgres.DB, tenantID string) int {
+	t.Helper()
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer postgres.Rollback(tx)
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM email_outbox WHERE tenant_id = $1 AND email_type = $2`,
+		tenantID, email.TypeMemberInvite).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 // lastToken pulls the raw token out of the most recent accept URL.
@@ -61,26 +85,12 @@ func (s staticTenantNamer) GetTenantName(context.Context, string) (string, error
 }
 
 // userDirAdapter mirrors the production memberUserDirectoryAdapter
-// (internal/api) — service for CreateUser, store for lookups.
-type userDirAdapter struct {
-	svc   *user.Service
-	store *user.PostgresStore
-}
+// (internal/api): the store for lookups and writes, user.HashPassword for
+// the password rules.
+type userDirAdapter struct{ *user.PostgresStore }
 
-func (a userDirAdapter) GetByEmail(ctx context.Context, email string) (domain.User, error) {
-	return a.store.GetByEmail(ctx, email)
-}
-func (a userDirAdapter) TenantsForUser(ctx context.Context, userID string) ([]domain.UserTenant, error) {
-	return a.store.TenantsForUser(ctx, userID)
-}
-func (a userDirAdapter) CreateUser(ctx context.Context, email, plaintext, tenantID, role string) (domain.User, error) {
-	return a.svc.CreateUser(ctx, email, plaintext, tenantID, role)
-}
-func (a userDirAdapter) AttachTenant(ctx context.Context, userID, tenantID, role string) error {
-	return a.store.AttachTenant(ctx, userID, tenantID, role)
-}
-func (a userDirAdapter) ValidatePassword(plaintext string) error {
-	return user.ValidatePassword(plaintext)
+func (userDirAdapter) HashPassword(plaintext string) (string, error) {
+	return user.HashPassword(plaintext)
 }
 
 // --- harness --------------------------------------------------------------
@@ -106,12 +116,12 @@ func newHarness(t *testing.T, tenantName string) *harness {
 	userStore := user.NewPostgresStore(db)
 	userSvc := user.NewService(userStore, nil)
 	sessionSvc := session.NewService(session.NewPostgresStore(db))
-	emails := &capturingEmail{}
+	emails := &capturingEmail{outbox: email.NewOutboxSender(email.NewOutboxStore(db))}
 	clk := clock.NewFake(time.Now().UTC())
 
 	svc := dashmembers.NewService(
 		dashmembers.NewPostgresStore(db),
-		userDirAdapter{svc: userSvc, store: userStore},
+		userDirAdapter{userStore},
 		sessionSvc,
 		emails,
 		staticTenantNamer{name: tenantName},
@@ -142,7 +152,7 @@ func newHarness(t *testing.T, tenantName string) *harness {
 // burned (single-use), second accept and stale preview both rejected.
 func TestInviteAcceptNewUser(t *testing.T) {
 	h := newHarness(t, "Team Golden")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	inv, err := h.svc.Invite(ctx, h.tenantID, h.owner, "Newbie@Example.COM")
 	if err != nil {
@@ -223,7 +233,7 @@ func TestInviteAcceptNewUser(t *testing.T) {
 // possession alone must not log into an already-privileged account.
 func TestInviteAcceptExistingUser(t *testing.T) {
 	h := newHarness(t, "Team Existing")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	// The invitee already has an account on ANOTHER workspace.
 	otherTenant := testutil.CreateTestTenant(t, h.db, "Other Workspace")
@@ -270,7 +280,7 @@ func TestInviteAcceptExistingUser(t *testing.T) {
 // duplicate pending blocked, already-a-member blocked, bad email blocked.
 func TestInviteGates(t *testing.T) {
 	h := newHarness(t, "Team Gates")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	// No user identity (Bearer API key path) → rejected.
 	if _, err := h.svc.Invite(ctx, h.tenantID, "", "a@example.com"); err == nil {
@@ -319,7 +329,7 @@ func TestInviteGates(t *testing.T) {
 // generic validation error (no state oracle).
 func TestRevokedAndExpiredTokens(t *testing.T) {
 	h := newHarness(t, "Team Tokens")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	// Revoked.
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "revoked@example.com"); err != nil {
@@ -359,7 +369,7 @@ func TestRevokedAndExpiredTokens(t *testing.T) {
 // full access after the membership row is gone).
 func TestRemoveMember(t *testing.T) {
 	h := newHarness(t, "Team Remove")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	// Last member: the bootstrap owner can't be removed.
 	if err := h.svc.RemoveMember(ctx, h.tenantID, h.owner, h.owner); !errors.Is(err, errs.ErrInvalidState) {
@@ -408,22 +418,40 @@ func TestRemoveMember(t *testing.T) {
 	}
 }
 
-// TestInviteEmailEnqueueFailure: if the outbox enqueue fails, the invite
-// row must not survive as a pending dead end (it would block re-invites
-// via the pending-unique index while the invitee never got a link).
+// TestInviteEmailEnqueueFailure: the invitation and its email commit
+// together or not at all. When the enqueue fails, no invitation row is left
+// (a pending one would block re-invites via the pending-unique index while
+// the invitee never got a link) and no email row either.
+//
+// Mutation: queue the email after CreateInvitation commits, and a failed
+// enqueue leaves an invitation row.
 func TestInviteEmailEnqueueFailure(t *testing.T) {
 	h := newHarness(t, "Team EmailFail")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	h.email.fail = true
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "ghost@example.com"); err == nil {
 		t.Fatal("invite must fail loudly when the email enqueue fails")
 	}
+	_, invs, err := h.svc.List(ctx, h.tenantID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(invs) != 0 {
+		t.Fatalf("a failed email enqueue left %d invitation rows, want none: the invitation and its email commit together or not at all", len(invs))
+	}
+	if n := countInviteEmails(t, h.db, h.tenantID); n != 0 {
+		t.Fatalf("a failed invite left %d invite email rows, want none", n)
+	}
 
-	// The slot is free: a retry with a working sender succeeds.
+	// The slot is free: a retry with a working sender succeeds, and its
+	// email row commits with it.
 	h.email.fail = false
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "ghost@example.com"); err != nil {
 		t.Fatalf("retry after enqueue failure must succeed: %v", err)
+	}
+	if n := countInviteEmails(t, h.db, h.tenantID); n != 1 {
+		t.Fatalf("invite email rows after the retry: got %d, want 1", n)
 	}
 }
 
@@ -433,7 +461,7 @@ func TestInviteEmailEnqueueFailure(t *testing.T) {
 // later invite of the same address, once email works, is not blocked.
 func TestInviteRefusedWhenEmailNotConfigured(t *testing.T) {
 	h := newHarness(t, "Team NoSMTP")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	h.svc.SetEmailConfigured(false)
 	_, err := h.svc.Invite(ctx, h.tenantID, h.owner, "ghost@example.com")
@@ -462,7 +490,7 @@ func TestInviteRefusedWhenEmailNotConfigured(t *testing.T) {
 // no duplicate membership/account is created.
 func TestConcurrentAccept(t *testing.T) {
 	h := newHarness(t, "Team Race")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "race@example.com"); err != nil {
 		t.Fatalf("invite: %v", err)
@@ -507,11 +535,11 @@ func TestConcurrentAccept(t *testing.T) {
 // short, too long or on the breached list burned the invitation: the invitee
 // saw "too short", fixed it, and got "this invitation is no longer valid".
 //
-// Mutation: move the ValidatePassword call after AcceptInvitation, and the
-// retry with a good password is refused.
+// Mutation: commit the claim on its own and check the password after it, and
+// the retry with a good password is refused.
 func TestAcceptInvite_RejectedPasswordKeepsTheInvite(t *testing.T) {
 	h := newHarness(t, "Team Retry Password")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "retry@example.com"); err != nil {
 		t.Fatalf("invite: %v", err)
