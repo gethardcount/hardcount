@@ -21,12 +21,15 @@ original text.
 
 **Before upgrading:**
 
+- `scripts/backup.sh` now writes each dump so that only the user who runs it can read it, and creates a missing backup folder that only that user can open. A job that copies the dumps as another user can no longer read them: run that job as the user that runs `backup.sh`.
 - A subscription whose cycle close kept failing on a long Stripe Tax error, until billing parked it, stays parked after the upgrade. Its log line `bill subscription failed` reads `invalid byte sequence for encoding "UTF8"` (SQLSTATE 22021). Call `POST /v1/subscriptions/{id}/retry-billing` for each one.
 - Quick-start installs: the quick start now listens only on 127.0.0.1, and `./quickstart.sh destroy` asks you to type the project name first. Scripts pass `--yes`. It takes its settings only from its `.env`, not from your shell. It refuses to run while a quick start in another folder has its Compose project: run `./quickstart.sh destroy` in that folder first. An `.env` that an earlier `quickstart.sh` wrote still listens on every network interface: put `127.0.0.1:` before the port on its `NGINX_HTTP_PORT` line, as in `NGINX_HTTP_PORT=127.0.0.1:8080`, then run `./quickstart.sh`.
 - One migration runs on start: `00223_restore_catchup` adds the `restore_catchup` table, which marks a restored database.
 - Hardcount now refuses to start on a database `scripts/restore.sh` restored, or `hardcount restore begin` marked, and the restore pauses billing and dunning. A script that does this must change:
   - **A restore that replaces your live database** runs `hardcount restore catch-up` before it starts Hardcount. After a snapshot or point-in-time restore, it runs `hardcount restore begin` first ([Restore Hardcount](docs/ops/restore.md)).
   - **A copy,** such as a staging database refreshed from a live dump, must never run the catch-up: it writes to your live Stripe account. Remove the mark with `DELETE FROM restore_catchup;` instead, and follow the rules for starting a copy ([Back up Hardcount](docs/ops/backup-considerations.md#4-run-the-restore-drill)).
+- Compose installs: `deploy/compose/nginx.conf` now includes `nginx-log-redact.conf`, which `docker-compose.yml` mounts. Check out the release, as for any upgrade, so all three arrive together. If you run `nginx.conf` outside this Compose file, copy `nginx-log-redact.conf` too, or nginx will not start ([#1651](https://github.com/gethardcount/hardcount/pull/1651)).
+- The dashboard's pages, the hosted invoice page among them, now refuse to be shown in a frame, on any site. If your site frames one, link to it instead ([#1651](https://github.com/gethardcount/hardcount/pull/1651)).
 - If a webhook endpoint listens for only one of `payment_method.attached` and `payment_method.updated`, subscribe it to both. A Stripe event that changes nothing on a saved card now sends no webhook. One Stripe Checkout setup session sends two Stripe events for its card, so the card can arrive as either webhook ([Payment methods](docs/api/webhook-events.md#payment-methods-datapayment_method)).
 
 ### Added
@@ -44,6 +47,8 @@ original text.
 
 ### Fixed
 
+- **A cancel, item change, record payment, collect or credit-note issue that loses a database deadlock no longer replays a stored `500`.** It answers `409` `concurrent_change`, which is not stored, so the same request with the same `Idempotency-Key` runs again and finishes. Before, that key replayed the `500` for 24 hours. Collect answers this way only when it charges no card, and credit-note create only in its `auto_issue` step ([Errors](docs/api/errors.md#409-conflict)). ([#1652](https://github.com/gethardcount/hardcount/pull/1652))
+- **Collect pays an invoice that credit already covers.** An unpaid invoice with nothing due, left when the settle after a credit apply failed, answered `422` "invoice has no amount due", and only dunning or the automatic charge settled it. Collect now marks it paid with no card charge, unless a charge on it is still in flight. ([#1652](https://github.com/gethardcount/hardcount/pull/1652))
 - **A plan change that voids an unused invoice no longer deadlocks with a credit note on it.** This was a change of billing interval on a period's first day, while that period's invoice was unpaid. Either side could fail. Both now finish. No amounts were affected. ([#1649](https://github.com/gethardcount/hardcount/pull/1649))
 - **A cancel and a credit note on the invoice that prepaid the period no longer deadlock.** An immediate or scheduled cancel that bills a final invoice could stop, or be stopped by, a credit note or a recorded Stripe refund on that invoice at the same moment. Both now finish. No amounts were affected. ([#1649](https://github.com/gethardcount/hardcount/pull/1649))
 - **A cut to fit no longer splits a character.** A long error or webhook answer cut inside an accented letter or emoji, or an answer that is not text, made Postgres refuse the write. A cycle close then failed on every retry, a failed email or webhook was retried without end, a test clock stayed advancing, and a delivered webhook was sent again. ([#1644](https://github.com/gethardcount/hardcount/pull/1644))
@@ -62,7 +67,10 @@ original text.
 
 ### Security
 
+- **The dev Postgres, Redis and Mailpit, and the restore drill, listen only on 127.0.0.1.** Another machine on your network could reach them with a known password or none. Dumps from `scripts/backup.sh` are now readable only by their owner. The restore drill also removes its copy of the restored data when it ends; before, each run left one in a Docker volume. With Docker Engine on Linux, a container can no longer reach the dev Mailpit ([Mailpit](docs/ops/email-setup.md#mailpit-local-development)). ([#1653](https://github.com/gethardcount/hardcount/pull/1653))
+- **The Compose stack's nginx logs `[redacted]` in place of a link's token, and the dashboard's pages refuse to be framed.** A hosted invoice, card update, invite or password-reset link holds a token that works like a password. Both nginx access logs wrote it, in the URL and in the Referer. The dashboard's pages now also send `X-Frame-Options`, a `frame-ancestors` policy, `nosniff` and `Referrer-Policy`. ([#1651](https://github.com/gethardcount/hardcount/pull/1651))
 - **The quick start listens only on this computer.** It served the dashboard and API on every network interface, over plain HTTP, with a live key already made. A new quick-start `.env` sets `NGINX_HTTP_PORT=127.0.0.1:8080`. From another machine, use an SSH tunnel ([quick start](docs/quick-start.md)). ([#1635](https://github.com/gethardcount/hardcount/pull/1635))
+- **Postgres now also keeps each account's Stripe keys apart when they are saved, listed or removed.** Settings → Payments and `/v1/settings/stripe` run these under row-level security, as the caller's account and mode. Hardcount's code already refused another account's or mode's keys. Now the database refuses them too. Nothing changes for a caller managing its own keys. ([#1655](https://github.com/gethardcount/hardcount/pull/1655))
 
 ## [0.9.3] - 2026-11-09
 

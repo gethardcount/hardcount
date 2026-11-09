@@ -173,7 +173,7 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 		"name": "Min charge policy", "enabled": true, "retry_days": []int{1, 3},
 	}}).want(t, 201, "create dunning policy")
 
-	if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{
+	if _, err := tenantstripe.NewStore(db).Upsert(callerCtx(tenantID, false), tenantstripe.UpsertInput{
 		TenantID: tenantID, Livemode: false, SecretKey: "sk_test_min_charge", PublishableKey: "pk_test_min_charge",
 	}); err != nil {
 		t.Fatalf("connect stripe: %v", err)

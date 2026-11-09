@@ -2118,7 +2118,8 @@ func useRequestEdge(r chi.Router, trustProxy string) {
 // CORS preflight answered before routing), it redacts the segment after
 // any known token prefix instead, because an unmatched request on those
 // prefixes may still hold a secret. A new {token} route adds its prefix
-// here.
+// here, and to deploy/compose/nginx-log-redact.conf, which keeps it out of
+// the Compose stack's nginx access logs.
 func loggablePath(r *http.Request) string {
 	if rctx := chi.RouteContext(r.Context()); rctx != nil {
 		if pat := rctx.RoutePattern(); pat != "" {

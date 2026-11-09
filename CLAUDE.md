@@ -21,7 +21,7 @@ Each rule is explained in the section named after it.
   - (c) the `billing` coordinator. The billing engine orchestrates peers through narrow **consumer-defined** interfaces.
 - A new cross-domain import edge fails `internal/arch/boundaries_test.go` until it is justified in the allowlist.
 - PostgreSQL with Row-Level Security for tenant isolation on most API requests: `db.BeginTx(ctx, postgres.TxTenant, tenantID)`.
-  - Some work runs under `postgres.TxBypass`, where RLS does not apply, and must filter by tenant itself. Examples: background jobs, sign-in and sessions, public links, incoming webhooks, Stripe credential settings, and team members. The full list is in `docs/architecture.md` (Design rules).
+  - Some work runs under `postgres.TxBypass`, where RLS does not apply, and must filter by tenant itself. Examples: background jobs, sign-in and sessions, public links, incoming webhooks, reading an account's Stripe keys to call Stripe, and team members. The full list is in `docs/architecture.md` (Design rules).
   - A new `TxBypass` use fails `internal/arch/txbypass_allowlist_test.go` until it is listed.
 - chi/v5 for HTTP routing.
 - API key auth with 2 stored key types: secret and ingest (`api_keys_key_type_check`, ADR-133).

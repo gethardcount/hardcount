@@ -8,25 +8,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/crypto"
-	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // TestStore_TenantAndModeScoping_RealPostgres runs the store's queries against
-// a real database. The store opens every transaction with RLS bypassed and
-// scopes rows with hand-written tenant_id / livemode predicates, so those
-// predicates are the only thing keeping one tenant's (or one mode's) Stripe
-// keys apart from another's. Three rows are seeded — tenant A test, tenant A
-// live, tenant B test — each with its own key strings, so a read or write
-// that reaches the wrong row shows up as the wrong string.
+// a real database, each write as the caller its row belongs to. Three rows are
+// seeded — tenant A test, tenant A live, tenant B test — each with its own key
+// strings, so a read or write that reaches the wrong row shows up as the wrong
+// string. GetPlaintext, GetByID and MarkVerifyFailed bypass RLS, so their
+// hand-written tenant_id / livemode predicates are the only thing keeping one
+// tenant's (or one mode's) Stripe keys apart from another's. The methods that
+// run as the caller are also checked against rows that are not the caller's
+// in TestStore_RefusesOtherTenantAndMode_RealPostgres.
 //
 // All key strings are obviously fake and carry only the real prefix.
 func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	admin := testutil.AdminPool(t)
-	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// The real AES-GCM encryptor, not the no-op default: the at-rest
@@ -40,6 +42,12 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 
 	tenantA := testutil.CreateTestTenant(t, db, "Tenant Stripe A")
 	tenantB := testutil.CreateTestTenant(t, db, "Tenant Stripe B")
+	// The callers each row belongs to. Tenant B has no live row, but a
+	// request from B in live mode is still a caller.
+	aTestCaller := asCaller(ctx, tenantA, false)
+	aLiveCaller := asCaller(ctx, tenantA, true)
+	bTestCaller := asCaller(ctx, tenantB, false)
+	bLiveCaller := asCaller(ctx, tenantB, true)
 
 	const (
 		aTestSK = "sk_test_FAKE_tenant_a_test_AT01"
@@ -54,7 +62,7 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 
 	// --- seed: two modes for tenant A, one row for tenant B ---
 
-	aTest, err := store.Upsert(ctx, UpsertInput{
+	aTest, err := store.Upsert(aTestCaller, UpsertInput{
 		TenantID: tenantA, Livemode: false,
 		SecretKey: aTestSK, PublishableKey: aTestPK, WebhookSecret: aTestWH,
 	})
@@ -62,14 +70,14 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 		t.Fatalf("upsert A test: %v", err)
 	}
 	// No webhook secret: the insert must leave the column NULL.
-	aLive, err := store.Upsert(ctx, UpsertInput{
+	aLive, err := store.Upsert(aLiveCaller, UpsertInput{
 		TenantID: tenantA, Livemode: true,
 		SecretKey: aLiveSK, PublishableKey: aLivePK,
 	})
 	if err != nil {
 		t.Fatalf("upsert A live: %v", err)
 	}
-	bTest, err := store.Upsert(ctx, UpsertInput{
+	bTest, err := store.Upsert(bTestCaller, UpsertInput{
 		TenantID: tenantB, Livemode: false,
 		SecretKey: bTestSK, PublishableKey: bTestPK, WebhookSecret: bTestWH,
 	})
@@ -137,19 +145,30 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 		t.Errorf("GetPlaintext(B, live) err = %v, want ErrNotFound", err)
 	}
 
-	listA, err := store.ListByTenant(ctx, tenantA)
-	if err != nil {
-		t.Fatalf("list A: %v", err)
+	// only returns the one row the caller lists for tenantID.
+	only := func(step, name string, caller context.Context, tenantID string) domain.StripeProviderCredentials {
+		t.Helper()
+		rows, err := store.ListByTenant(caller, tenantID)
+		if err != nil {
+			t.Fatalf("%s: list as %s: %v", step, name, err)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("%s: list as %s = %+v, want one row", step, name, rows)
+		}
+		return rows[0]
 	}
-	if len(listA) != 2 || listA[0].ID != aLive.ID || listA[1].ID != aTest.ID {
-		t.Errorf("list A = %+v, want [A live, A test]", listA)
+	// Each caller lists its own tenant's row in its own mode, and no other.
+	if got := only("seed", "A test", aTestCaller, tenantA); got.ID != aTest.ID {
+		t.Errorf("list as A test = %s, want A test %s", got.ID, aTest.ID)
 	}
-	listB, err := store.ListByTenant(ctx, tenantB)
-	if err != nil {
-		t.Fatalf("list B: %v", err)
+	if got := only("seed", "A live", aLiveCaller, tenantA); got.ID != aLive.ID {
+		t.Errorf("list as A live = %s, want A live %s", got.ID, aLive.ID)
 	}
-	if len(listB) != 1 || listB[0].ID != bTest.ID {
-		t.Errorf("list B = %+v, want [B test]", listB)
+	if got := only("seed", "B test", bTestCaller, tenantB); got.ID != bTest.ID {
+		t.Errorf("list as B test = %s, want B test %s", got.ID, bTest.ID)
+	}
+	if got, err := store.ListByTenant(bLiveCaller, tenantB); err != nil || len(got) != 0 {
+		t.Errorf("list as B live = %+v, err %v, want no rows", got, err)
 	}
 
 	// Endpoint lookup: tenant and mode come from the row, and a row with no
@@ -169,7 +188,7 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 	// keeps the stored one ---
 
 	const aTestSK2 = "sk_test_FAKE_tenant_a_test_AT02"
-	rotated, err := store.Upsert(ctx, UpsertInput{
+	rotated, err := store.Upsert(aTestCaller, UpsertInput{
 		TenantID: tenantA, Livemode: false,
 		SecretKey: aTestSK2, PublishableKey: aTestPK,
 	})
@@ -190,7 +209,7 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 	// secret, again without one, leaves the column NULL ---
 
 	const aLiveSK2 = "sk_live_FAKE_tenant_a_live_AL02"
-	resaved, err := store.Upsert(ctx, UpsertInput{
+	resaved, err := store.Upsert(aLiveCaller, UpsertInput{
 		TenantID: tenantA, Livemode: true,
 		SecretKey: aLiveSK2, PublishableKey: aLivePK,
 	})
@@ -213,7 +232,7 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 	// --- update, replace: a supplied webhook secret overwrites the stored one ---
 
 	const aTestWH2 = "whsec_FAKE_tenant_a_test_AW02"
-	if _, err := store.Upsert(ctx, UpsertInput{
+	if _, err := store.Upsert(aTestCaller, UpsertInput{
 		TenantID: tenantA, Livemode: false,
 		SecretKey: aTestSK2, PublishableKey: aTestPK, WebhookSecret: aTestWH2,
 	}); err != nil {
@@ -225,7 +244,7 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 	// --- SetWebhookSecret touches only its own (tenant, mode) ---
 
 	const aLiveWH = "whsec_FAKE_tenant_a_live_AW03"
-	set, err := store.SetWebhookSecret(ctx, tenantA, true, aLiveWH)
+	set, err := store.SetWebhookSecret(aLiveCaller, tenantA, true, aLiveWH)
 	if err != nil {
 		t.Fatalf("set A live webhook secret: %v", err)
 	}
@@ -240,7 +259,7 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 	wantPlain("set webhook", tenantA, true, aLiveSK2, aLiveWH)
 	wantPlain("set webhook", tenantA, false, aTestSK2, aTestWH2)
 	wantPlain("set webhook", tenantB, false, bTestSK, bTestWH)
-	if _, err := store.SetWebhookSecret(ctx, tenantB, true, aLiveWH); !errors.Is(err, errs.ErrNotFound) {
+	if _, err := store.SetWebhookSecret(bLiveCaller, tenantB, true, aLiveWH); !errors.Is(err, errs.ErrNotFound) {
 		t.Errorf("SetWebhookSecret(B, live) with no such row: err = %v, want ErrNotFound", err)
 	}
 
@@ -251,18 +270,9 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 	// those two rows.
 	wantVerify := func(step, wantAccount string, wantVerified bool, wantErr string) {
 		t.Helper()
-		listA, err := store.ListByTenant(ctx, tenantA)
-		if err != nil {
-			t.Fatalf("%s: list A: %v", step, err)
-		}
-		listB, err := store.ListByTenant(ctx, tenantB)
-		if err != nil {
-			t.Fatalf("%s: list B: %v", step, err)
-		}
-		if len(listA) != 2 || len(listB) != 1 {
-			t.Fatalf("%s: got %d rows for A and %d for B, want 2 and 1", step, len(listA), len(listB))
-		}
-		live, test, other := listA[0], listA[1], listB[0]
+		test := only(step, "A test", aTestCaller, tenantA)
+		live := only(step, "A live", aLiveCaller, tenantA)
+		other := only(step, "B test", bTestCaller, tenantB)
 		if test.StripeAccountID != wantAccount || (test.VerifiedAt != nil) != wantVerified || test.LastVerifiedError != wantErr {
 			t.Errorf("%s: A test verify state = (%q, verified=%v, err=%q), want (%q, %v, %q)", step,
 				test.StripeAccountID, test.VerifiedAt != nil, test.LastVerifiedError, wantAccount, wantVerified, wantErr)
@@ -282,18 +292,12 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 	wantVerify("verify failed", "", false, "fake verify failure")
 	wantKind := func(step, want string) {
 		t.Helper()
-		rows, err := store.ListByTenant(ctx, tenantA)
-		if err != nil {
-			t.Fatalf("%s: list A: %v", step, err)
-		}
-		for _, r := range rows {
-			if !r.Livemode && r.LastVerifiedErrorKind != want {
-				t.Errorf("%s: A test error kind = %q, want %q", step, r.LastVerifiedErrorKind, want)
-			}
+		if got := only(step, "A test", aTestCaller, tenantA).LastVerifiedErrorKind; got != want {
+			t.Errorf("%s: A test error kind = %q, want %q", step, got, want)
 		}
 	}
 	wantKind("verify failed", VerifyErrorRejected)
-	if err := store.MarkVerified(ctx, tenantA, false, "acct_FAKE_a_test", "Tenant A Test"); err != nil {
+	if err := store.MarkVerified(aTestCaller, tenantA, false, "acct_FAKE_a_test", "Tenant A Test"); err != nil {
 		t.Fatalf("mark A test verified: %v", err)
 	}
 	wantVerify("verified", "acct_FAKE_a_test", true, "")
@@ -301,7 +305,7 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 
 	// --- delete removes only its own row ---
 
-	if err := store.Delete(ctx, tenantA, false); err != nil {
+	if err := store.Delete(aTestCaller, tenantA, false); err != nil {
 		t.Fatalf("delete A test: %v", err)
 	}
 	if _, err := store.GetPlaintext(ctx, tenantA, false); !errors.Is(err, errs.ErrNotFound) {
@@ -309,7 +313,7 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 	}
 	wantPlain("delete", tenantA, true, aLiveSK2, aLiveWH)
 	wantPlain("delete", tenantB, false, bTestSK, bTestWH)
-	if err := store.Delete(ctx, tenantA, false); !errors.Is(err, errs.ErrNotFound) {
+	if err := store.Delete(aTestCaller, tenantA, false); !errors.Is(err, errs.ErrNotFound) {
 		t.Errorf("second delete of A test: err = %v, want ErrNotFound", err)
 	}
 	var remaining int

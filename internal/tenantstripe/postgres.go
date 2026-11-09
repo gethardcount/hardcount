@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/crypto"
@@ -16,12 +17,19 @@ import (
 // A request-scoped view returns metadata only (last4 + verified status); the
 // internal path returns plaintext secrets for making Stripe API calls.
 //
-// All operations run under TxBypass and filter by (tenant_id, livemode)
-// explicitly in WHERE clauses. GetByID must: the inbound Stripe webhook finds
-// its row by endpoint id before it knows the tenant or mode. Callers (service,
-// resolver, webhook verifier) are responsible for authorizing tenant and mode
-// access before invoking store methods: the Service's request-facing methods
-// let a caller manage only its own mode's connection.
+// Upsert, MarkVerified, ListByTenant, SetWebhookSecret and Delete run as the
+// caller in ctx (see callerTx). Only the Stripe connection routes
+// (/v1/settings/stripe) reach them. Their arguments name the row, and
+// row-level security refuses a row of another tenant or of the caller's other
+// mode. Keep the tenant_id and livemode filters in their SQL: without them, a
+// call naming another row would act on the caller's own row instead.
+//
+// The other methods run under TxBypass. GetByID must: the inbound Stripe
+// webhook finds its row by endpoint id before it knows the tenant or mode.
+// ListAccounts lists every tenant for the restore catch-up. GetPlaintext,
+// MarkVerifyFailed and ClearKeyRejected serve the calls Hardcount makes to
+// Stripe, from background jobs as well as requests, and filter by tenant_id
+// and livemode in their own WHERE clauses.
 type Store struct {
 	db  *postgres.DB
 	enc *crypto.Encryptor
@@ -29,6 +37,16 @@ type Store struct {
 
 func NewStore(db *postgres.DB) *Store {
 	return &Store{db: db, enc: crypto.NewNoop()}
+}
+
+// callerTx opens a TxTenant transaction as the caller in ctx: the tenant the
+// auth middleware set (auth.TenantID) and the mode (postgres.WithLivemode).
+// It never takes the tenant from a method's arguments: row-level security
+// would then check a row against the tenant the row itself names. A ctx
+// without the tenant returns postgres.ErrTenantUnset, and one without the
+// mode returns postgres.ErrLivemodeUnset, before anything opens.
+func (s *Store) callerTx(ctx context.Context) (*sql.Tx, error) {
+	return s.db.BeginTx(ctx, postgres.TxTenant, auth.TenantID(ctx))
 }
 
 // SetEncryptor wires the AES-GCM encryptor used for secret_key and
@@ -64,7 +82,9 @@ type PlaintextSecrets struct {
 }
 
 // Upsert writes a new credential row or updates the existing one for
-// (tenant, livemode). Returns the public view (no secrets).
+// (tenant, livemode). Returns the public view (no secrets). It runs as the
+// caller in ctx: a row of another tenant or mode is refused by the database
+// (SQLSTATE 42501).
 func (s *Store) Upsert(ctx context.Context, in UpsertInput) (domain.StripeProviderCredentials, error) {
 	if in.TenantID == "" {
 		return domain.StripeProviderCredentials{}, errs.Required("tenant_id")
@@ -93,7 +113,7 @@ func (s *Store) Upsert(ctx context.Context, in UpsertInput) (domain.StripeProvid
 		webhookLast4 = sql.NullString{String: last4(in.WebhookSecret), Valid: true}
 	}
 
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
+	tx, err := s.callerTx(ctx)
 	if err != nil {
 		return domain.StripeProviderCredentials{}, err
 	}
@@ -141,9 +161,10 @@ func (s *Store) Upsert(ctx context.Context, in UpsertInput) (domain.StripeProvid
 
 // MarkVerified stamps verified_at, clears last_verified_error, and records
 // the verified Stripe account identity returned by Stripe on a successful
-// V1Accounts.Retrieve call.
+// V1Accounts.Retrieve call. It runs as the caller in ctx, so a row of another
+// tenant or mode is left alone.
 func (s *Store) MarkVerified(ctx context.Context, tenantID string, livemode bool, accountID, accountName string) error {
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
+	tx, err := s.callerTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -218,13 +239,12 @@ func (s *Store) ClearKeyRejected(ctx context.Context, tenantID string, livemode 
 	return tx.Commit()
 }
 
-// ListByTenant returns the public view (no secrets) for all modes connected
-// under the tenant. Never more than two rows (test + live). Service.List
-// keeps only the caller's own mode.
+// ListByTenant returns the public view (no secrets) of the tenant's
+// connection in the caller's mode. It runs as the caller in ctx, so row-level
+// security shows at most one row: the caller's own tenant and mode. Another
+// tenant's ID returns no rows.
 func (s *Store) ListByTenant(ctx context.Context, tenantID string) ([]domain.StripeProviderCredentials, error) {
-	// Scoped by tenant_id explicitly, like every method here: the handler
-	// enforces that the caller's auth matches tenantID before we reach here.
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
+	tx, err := s.callerTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +257,6 @@ func (s *Store) ListByTenant(ctx context.Context, tenantID string) ([]domain.Str
 		       verified_at, last_verified_error, last_verified_error_kind, created_at, updated_at
 		FROM stripe_provider_credentials
 		WHERE tenant_id = $1
-		ORDER BY livemode DESC
 	`, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list stripe credentials: %w", err)
@@ -330,7 +349,8 @@ func (s *Store) GetPlaintext(ctx context.Context, tenantID string, livemode bool
 
 // SetWebhookSecret updates only the webhook_secret_encrypted / _last4 columns
 // on an existing (tenant, livemode) row. Returns errs.ErrNotFound when no row
-// exists — the tenant must complete Connect (API keys) first. The API-key
+// exists — the tenant must complete Connect (API keys) first. It runs as the
+// caller in ctx, so a row of another tenant or mode is not found. The API-key
 // verify status is left untouched: verified_at / last_verified_error are
 // unchanged because we haven't re-probed Stripe.
 func (s *Store) SetWebhookSecret(ctx context.Context, tenantID string, livemode bool, plaintext string) (domain.StripeProviderCredentials, error) {
@@ -347,7 +367,7 @@ func (s *Store) SetWebhookSecret(ctx context.Context, tenantID string, livemode 
 	}
 	lastFour := last4(plaintext)
 
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
+	tx, err := s.callerTx(ctx)
 	if err != nil {
 		return domain.StripeProviderCredentials{}, err
 	}
@@ -437,9 +457,11 @@ func (s *Store) GetByID(ctx context.Context, id string) (EndpointLookup, error) 
 	return out, nil
 }
 
-// Delete removes the credentials for a single (tenant, mode).
+// Delete removes the credentials for a single (tenant, mode). Returns
+// errs.ErrNotFound when no row exists. It runs as the caller in ctx, so a row
+// of another tenant or mode is not found.
 func (s *Store) Delete(ctx context.Context, tenantID string, livemode bool) error {
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
+	tx, err := s.callerTx(ctx)
 	if err != nil {
 		return err
 	}

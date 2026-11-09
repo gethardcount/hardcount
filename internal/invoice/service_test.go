@@ -147,6 +147,22 @@ func (m *memStore) MarkPaidOffline(ctx context.Context, tenantID, id string, pai
 	return inv, nil
 }
 
+// SettleZeroDue mirrors the real store's predicate. The fake has no charge
+// hold, so it never refuses for one.
+func (m *memStore) SettleZeroDue(ctx context.Context, tenantID, id string, paidAt time.Time) (domain.Invoice, bool, error) {
+	inv, ok := m.invoices[id]
+	if !ok || inv.TenantID != tenantID {
+		return domain.Invoice{}, false, errs.ErrNotFound
+	}
+	if inv.Status != domain.InvoiceFinalized || inv.AmountDueCents != 0 ||
+		(inv.TaxStatus != "" && inv.TaxStatus != domain.InvoiceTaxOK) ||
+		(inv.PaymentStatus != domain.PaymentPending && inv.PaymentStatus != domain.PaymentFailed) {
+		return inv, false, nil
+	}
+	paid, err := m.MarkPaid(ctx, tenantID, id, "", paidAt)
+	return paid, err == nil, err
+}
+
 // Tx variant: the fake ignores tx; the closure sees the current in-memory
 // invoice as the locked prior, and an error restores it (the rollback).
 func (m *memStore) UpdateStatusWithReversalPriorTx(ctx context.Context, _ *sql.Tx, tenantID, id string, status domain.InvoiceStatus, fn func(tx *sql.Tx, prior domain.Invoice) error) (domain.Invoice, error) {
