@@ -2008,7 +2008,9 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded, onFailed }: 
   // One Idempotency-Key per dialog open, sent with every submit from it. A
   // draft's lines cannot be removed, so a click after a lost answer must get
   // the first line back, not add a second one. The dialog unmounts on close,
-  // so the next open makes a new key.
+  // so the next open makes a new key. That is why it cannot close while a
+  // try is out: the line may land after the page reloads, and a new opening
+  // would add it again.
   const [idemKey] = useState(() => crypto.randomUUID())
   const [description, setDescription] = useState('')
   const [lineType, setLineType] = useState('add_on')
@@ -2052,7 +2054,7 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded, onFailed }: 
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+    <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add line item</DialogTitle>
@@ -2103,7 +2105,7 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded, onFailed }: 
             </p>
           )}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
             <Button type="submit" disabled={saving}>
               {saving ? <><Loader2 size={14} className="animate-spin mr-2" />Adding...</> : 'Add line item'}
             </Button>

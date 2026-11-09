@@ -58,7 +58,11 @@ the screen, and that the main things an operator does work end to end.
   at them: the browser holds the settings read, then answers it with Net 15.
   When the browser loses the answer to a Save draft, Add line item or Issue
   credit note, a second click must make one invoice, line or note. For an
-  invoice and a line, both clicks must send the same Idempotency-Key.
+  invoice and a line, both clicks must send the same Idempotency-Key, and
+  the page must show what landed before the second click. New invoice must
+  say the result is unknown, and Add line item must not close while its
+  request is out. The next opening of either dialog must send a new key and
+  make a second invoice or line.
   It also opens the notice for a refund made in Stripe (Record as
   credit note, Attach to a note whose refund failed, Dismiss), the "Recorded
   from Stripe" tag, and Retry refund's refusal while such a refund is not

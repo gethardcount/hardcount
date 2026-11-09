@@ -32,6 +32,7 @@ import { customerNeedsPaymentMethod } from '@/lib/paymentReadiness'
 import { NO_CARD_SENTENCE, NO_CARD_TITLE } from '@/lib/subscriptionNotices'
 import { cardLabel, removeCardSentence } from '@/lib/paymentMethodCopy'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
+import { NO_ANSWER_TITLE, outcomeUnknown } from '@/lib/errorCopy'
 import { useCustomerCurrency, useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
 import { useTenantSettings } from '@/hooks/useTenantSettings'
 import { paymentTermOptions } from '@/lib/paymentTerms'
@@ -1230,6 +1231,7 @@ export default function CustomerDetailPage() {
           customerCurrency={customerCurrency}
           hasCard={paymentMethodsList === undefined ? undefined : paymentMethods.some(pm => pm.is_default)}
           onClose={() => setShowNewInvoice(false)}
+          onFailed={() => invalidateMoneySurfaces(queryClient, { customerId: id })}
           onCreated={({ invoice, result }) => {
             setShowNewInvoice(false)
             // Finalizing (Save & send) applies the customer's credit to the
@@ -1724,7 +1726,14 @@ const blankLine = (): ComposerLine => ({
   commitExpiresAt: '',
 })
 
-function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onClose, onCreated }: {
+// What New invoice says when the create's answer is lost. The dialog sends
+// one Idempotency-Key per opening, so saving again returns the invoice the
+// first try made. A changed form is refused under that key (422), so the
+// sentence asks for no changes.
+const NEW_INVOICE_NO_ANSWER =
+  "The server didn't answer, so the invoice may have been made. Save again without changes: that can't make a second invoice."
+
+function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onClose, onCreated, onFailed }: {
   customerId: string
   customer: Customer
   customerCurrency: CustomerCurrency
@@ -1733,6 +1742,9 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
   hasCard: boolean | undefined
   onClose: () => void
   onCreated: (result: { invoice: Invoice; result: NewInvoiceResult }) => void
+  // Reads the customer's invoices again: a try that failed may still have
+  // made the invoice, and the list behind the dialog must show it.
+  onFailed: () => void
 }) {
   // Default currency: the customer's currency (lib/customerCurrency), so a
   // customer on a EUR plan opens in EUR. When the billing profile or a live
@@ -1768,6 +1780,8 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
   const [errors, setErrors] = useState<{
     lines?: Record<number, { description?: string; quantity?: string; unitAmount?: string; commit?: string }>
     form?: string
+    // The form message is a lost answer: the invoice may exist.
+    noAnswer?: boolean
     period?: string
   }>({})
   const [submitting, setSubmitting] = useState<null | 'draft' | 'send'>(null)
@@ -1970,6 +1984,10 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
 
       onCreated({ invoice, result })
     } catch (err) {
+      // A failed try may still have made the invoice, as when its answer was
+      // lost on the way back. Read the customer's invoices again, so the list
+      // behind the dialog shows one that landed.
+      onFailed()
       const message = err instanceof Error ? err.message : 'Failed to create invoice'
       // Partial-success messaging: if we got an invoice ID but failed mid-flight
       // (line item add, finalize, etc.) tell the operator what survived so they
@@ -1978,6 +1996,8 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
         setErrors({
           form: `Draft ${invoice.invoice_number} created, but a later step failed: ${message}. Open the invoice detail page to continue.`,
         })
+      } else if (outcomeUnknown(err)) {
+        setErrors({ form: NEW_INVOICE_NO_ANSWER, noAnswer: true })
       } else {
         setErrors({ form: message })
       }
@@ -2286,11 +2306,14 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
             </div>
           </div>
 
-          {errors.form && (
+          {errors.form && (errors.noAnswer ? (
+            // Uncertain, not failed, so not drawn as an error (lib/errorCopy).
+            <Callout tone="amber" title={NO_ANSWER_TITLE} role="status">{errors.form}</Callout>
+          ) : (
             <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
               {errors.form}
             </div>
-          )}
+          ))}
         </div>
 
         <DialogFooter>
