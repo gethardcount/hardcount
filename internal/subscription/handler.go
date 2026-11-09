@@ -2016,11 +2016,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 				// ApplyTaxToLineItems). Without a retryable tax_error_code the
 				// reconciler's filter skips the invoice forever.
 				taxResult.TaxErrorCode = string(tax.Classify(err))
-				reason := tax.CleanMessage(err.Error())
-				if len(reason) > 500 {
-					reason = reason[:500]
-				}
-				taxResult.TaxPendingReason = reason
+				taxResult.TaxPendingReason = errs.Clip(tax.CleanMessage(err.Error()), 500)
 				deferredAt := now
 				taxResult.TaxDeferredAt = &deferredAt
 			} else {

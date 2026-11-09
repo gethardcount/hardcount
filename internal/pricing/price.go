@@ -72,7 +72,7 @@ func checkMatch(field string, m map[string]string) (map[string]string, error) {
 		case strings.TrimSpace(k) == "":
 			return nil, errs.Invalid(field, "a label name is empty")
 		case len(k) > domain.MaxDimensionKeyLength:
-			return nil, errs.Invalid(field, fmt.Sprintf("label %q is longer than %d characters", k[:20]+"…", domain.MaxDimensionKeyLength))
+			return nil, errs.Invalid(field, fmt.Sprintf("label %q is longer than %d characters", errs.Clip(k, 20)+"…", domain.MaxDimensionKeyLength))
 		case v == "":
 			return nil, errs.Invalid(field, fmt.Sprintf("label %q has an empty value", k))
 		case len(v) > domain.MaxDimensionKeyLength:

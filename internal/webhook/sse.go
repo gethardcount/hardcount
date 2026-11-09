@@ -177,17 +177,5 @@ func hashPayload(payload map[string]any) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// truncateBody is the wire-shape contract guard: response bodies are
-// capped at 4KB before hitting the dashboard so a misbehaving receiver
-// returning a megabyte HTML page doesn't blow out the deliveries-list
-// payload size.
-func truncateBody(s string) string {
-	const max = 4 * 1024
-	if len(s) <= max {
-		return s
-	}
-	return s[:max]
-}
-
 // _ ensures context import is used when the file is built standalone.
 var _ = context.Background

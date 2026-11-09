@@ -22,6 +22,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -612,10 +613,7 @@ func (s *Service) spawnAttempts(ctx context.Context, event domain.WebhookEvent, 
 // with exponential backoff or marks the delivery as permanently failed.
 func (s *Service) scheduleRetryOrFail(ctx context.Context, tenantID string, d domain.WebhookDelivery, errMsg string) {
 	d.AttemptCount++
-	if len(errMsg) > 500 {
-		errMsg = errMsg[:500]
-	}
-	d.ErrorMessage = errMsg
+	d.ErrorMessage = errs.Clip(errMsg, 500)
 
 	// Permanent fail once every retry slot is spent: after the
 	// AttemptCount-th failure the next retry would read
@@ -1071,6 +1069,10 @@ func (s *Service) retryOne(ctx context.Context, d domain.WebhookDelivery) {
 	rowCancel()
 }
 
+// maxStoredResponseBytes is how much of a receiver's answer a delivery keeps
+// in response_body: the first 1 KB, as text.
+const maxStoredResponseBytes = 1024
+
 // attemptDelivery POSTs one existing delivery row (first attempt from
 // the Dispatch fan-out, or a claimed retry) and CAS-marks the outcome.
 // Publishes the outcome frame to the SSE bus so the dashboard's live
@@ -1113,10 +1115,12 @@ func (s *Service) attemptDelivery(ctx context.Context, d domain.WebhookDelivery,
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	// Read up to one character past the stored length. errs.Clip then
+	// chooses the cut, and leaves out whole a character across the limit.
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxStoredResponseBytes+utf8.UTFMax))
 
 	d.HTTPStatusCode = resp.StatusCode
-	d.ResponseBody = string(respBody)
+	d.ResponseBody = errs.Clip(string(respBody), maxStoredResponseBytes)
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		now := time.Now().UTC()
