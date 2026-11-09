@@ -60,6 +60,11 @@ the screen, and that the main things an operator does work end to end.
   recorded. CI connects no Stripe, so the refund and the server's answers to
   those buttons are stubbed in the browser; each test checks what the
   buttons send.
+  When the browser loses the answer to Issue credit note, the dialog must
+  say the result is unknown and count the note that landed. A try after
+  closing and reopening it, on the invoice page and the credit notes page,
+  must send the same Idempotency-Key and make no second note. Other values
+  under that key are refused, and the next try must make a new note.
 - `activity.spec.ts` takes screenshots of the activity cards for people to
   compare: the invoice and subscription Activity cards, a Dunning run and the
   customer's Sent emails, at 1440px and 390px wide. It runs each story for a

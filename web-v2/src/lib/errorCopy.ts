@@ -126,27 +126,36 @@ export function errorRequestId(err: unknown): string | undefined {
 }
 
 // outcomeUnknown is true when the action may have taken effect but no answer
-// says so: a change sent with no response back (timeout or dropped
-// connection), or a charge Stripe never answered (payment_outcome_unknown).
-// A caller title like "Failed to void" or "Couldn't charge" would then be a
-// guess, so the toast says the result is unknown instead.
+// says whether it did:
+//   - a change sent with no response back (timeout or dropped connection);
+//   - a change answered by a bare 5xx: no code, internal_error or timeout.
+//     The proxy answers 502 or 504 while the API restarts or runs out of
+//     time, and the API's own fault can come after the change was saved.
+//     The server stores a 5xx under the request's Idempotency-Key for this
+//     reason (internal/api/middleware/idempotency.go);
+//   - a charge Stripe never answered (payment_outcome_unknown).
+// A 5xx with its own code, such as a card decline (provider_error), says what
+// happened, so it stays a failure. A caller title like "Failed to void" or
+// "Couldn't charge" would otherwise be a guess, so the toast says the result
+// is unknown instead.
 export function outcomeUnknown(err: unknown): boolean {
   const api = asApiError(err)
   if (!api) return false
   if (api.code === 'payment_outcome_unknown') return true
-  if (api.status !== 0 || !api.method) return false
-  return api.method !== 'GET' && api.method !== 'HEAD'
+  if (!api.method || api.method === 'GET' || api.method === 'HEAD') return false
+  if (api.status === 0) return true
+  return api.status >= 500 && (!api.code || api.code === 'internal_error' || api.code === 'timeout')
 }
 
 export const NO_ANSWER_TITLE = 'Result unknown'
 export const NO_ANSWER_MESSAGE =
-  "The server didn't answer, so this may have gone through. Refresh to check before trying again."
+  "The server didn't say whether this went through. Refresh to check before trying again."
 
 export interface ErrorToast {
   // false: show nothing. A 401 is handled once for the whole dashboard
   // (sign-in redirect), so each failed request must not also toast.
   show: boolean
-  // 'warning' when the action may have gone through (no answer came back):
+  // 'warning' when the action may have gone through (outcomeUnknown):
   // that is uncertain, not a failure, so it is not drawn as an error.
   tone: 'error' | 'warning'
   title: string
@@ -161,8 +170,8 @@ export function errorToast(err: unknown, title?: string): ErrorToast {
   const copyId = errorRequestId(err)
   const show = classifyError(err) !== 'session'
   if (outcomeUnknown(err)) {
-    // Stripe's own sentence says what happens next; a request with no
-    // response has nothing to add beyond "check before retrying".
+    // Stripe's own sentence says what happens next. No answer, or a bare
+    // 5xx, has nothing to add beyond "check before retrying".
     if (asApiError(err)?.code === 'payment_outcome_unknown') {
       return { show, tone: 'warning', title: 'Payment result unknown', description: body, copyId }
     }

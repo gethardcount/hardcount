@@ -2,6 +2,8 @@
 // happened — never from what was requested. Pure, so each branch is pinned by
 // tests/actionOutcomes.test.ts; the pages only render the result.
 
+import { errorSentence, outcomeUnknown } from './errorCopy'
+
 export type OutcomeTone = 'success' | 'info' | 'warning' | 'error'
 
 export interface Outcome {
@@ -180,4 +182,45 @@ export const STRIPE_REFUND_UNRESOLVED = 'stripe_refund_unresolved'
 
 export function isStripeRefundUnresolved(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === STRIPE_REFUND_UNRESOLVED
+}
+
+// What Issue credit note says when its request fails. A note can start a card
+// refund, so the dialog must tell a try that may have made the note from one
+// the server refused.
+//
+// The try may have made the note when:
+//   - no answer says whether it did (lib/errorCopy outcomeUnknown): no
+//     answer at all, or a bare 5xx;
+//   - the server is still running a request with the same key
+//     (conflict_idempotency), or one never finished
+//     (conflict_idempotency_unresolved);
+//   - the error is not the API's, so the request may have been sent.
+// Such a try keeps its Idempotency-Key (lib/retryKeys). The next try sends it
+// again, and the server returns the note instead of making a second one.
+// Any other answer refused the note, so the next try is a new note.
+export const ISSUE_CREDIT_UNKNOWN =
+  "The credit note may have been made. The amounts above are read again, so they count it if it was. Issuing again from this page with the same values can't make a second note."
+
+// The server refuses other values under a key it has seen (422
+// idempotency_error). After a try whose result is unknown, that means the
+// operator changed the note.
+export const ISSUE_CREDIT_VALUES_DIFFER =
+  'Nothing was issued. These values differ from the try whose result is unknown. Check the amounts above: issuing again makes a new note.'
+
+export interface IssueCreditFailure {
+  // true: the try may have made the note, so its key is kept.
+  unknown: boolean
+  message: string
+}
+
+export function issueCreditFailure(err: unknown): IssueCreditFailure {
+  const { status, code } = typeof err === 'object' && err !== null ? (err as { status?: unknown; code?: unknown }) : {}
+  if (
+    typeof status !== 'number' || status === 0 || outcomeUnknown(err) ||
+    code === 'conflict_idempotency' || code === 'conflict_idempotency_unresolved'
+  ) {
+    return { unknown: true, message: ISSUE_CREDIT_UNKNOWN }
+  }
+  if (code === 'idempotency_error') return { unknown: false, message: ISSUE_CREDIT_VALUES_DIFFER }
+  return { unknown: false, message: errorSentence(err) }
 }

@@ -10,6 +10,9 @@ import {
   collectOutcome,
   emailStepAfterFinalize,
   isEmailNotConfigured,
+  ISSUE_CREDIT_UNKNOWN,
+  ISSUE_CREDIT_VALUES_DIFFER,
+  issueCreditFailure,
   isStripeRefundUnresolved,
   marginCardView,
   newInvoiceOutcome,
@@ -172,4 +175,47 @@ test('Retry refund refused over an unrecorded refund made in Stripe is told apar
   assert.equal(isStripeRefundUnresolved({ code: 'stripe_refund_unresolved' }), true)
   assert.equal(isStripeRefundUnresolved({ code: 'invalid_state' }), false)
   assert.equal(isStripeRefundUnresolved(null), false)
+})
+
+// An API error as lib/api throws it, for the request Issue credit note sends.
+function apiError(message: string, status: number, code?: string): Error {
+  return Object.assign(new Error(message), { status, code, method: 'POST' })
+}
+
+// Issue credit note can start a card refund. A try whose answer does not
+// settle it may have made the note, so the dialog says the result is
+// unknown and the next try sends the same Idempotency-Key: the server then
+// returns that note instead of making a second one.
+test('Issue credit note: a try that may have made the note reads as unknown, so the next try keeps its key', () => {
+  const unknown: [string, unknown][] = [
+    ['no answer', apiError('Failed to fetch', 0, 'network')],
+    ['no answer in 40 seconds', apiError('No response from the server within 40 seconds.', 0, 'timeout')],
+    ['a proxy 502 with no body', apiError('Bad Gateway', 502)],
+    ['a server fault', apiError('an internal error occurred', 500, 'internal_error')],
+    ['the same key still running', apiError('A request with this idempotency key is still being processed. Please retry.', 409, 'conflict_idempotency')],
+    ['the same key never finished', apiError('A request with this idempotency key started 6m ago and never recorded an outcome', 409, 'conflict_idempotency_unresolved')],
+    ['an error from the page, not the API', new TypeError('network error')],
+  ]
+  for (const [name, err] of unknown) {
+    assert.deepEqual(issueCreditFailure(err), { unknown: true, message: ISSUE_CREDIT_UNKNOWN }, name)
+  }
+  // It names the note, never the raw transport text.
+  assert.doesNotMatch(ISSUE_CREDIT_UNKNOWN, /fetch|40 seconds|idempotency/i)
+})
+
+test('Issue credit note: a refusal is a known failure in the server sentence, and the next try is a new note', () => {
+  assert.deepEqual(
+    issueCreditFailure(apiError('credit note total exceeds what is still creditable on this invoice', 409, 'invalid_state')),
+    { unknown: false, message: 'Credit note total exceeds what is still creditable on this invoice.' },
+  )
+  assert.deepEqual(
+    issueCreditFailure(apiError('Stripe refused the refund: charge already refunded', 502, 'provider_error')),
+    { unknown: false, message: 'Stripe refused the refund: charge already refunded.' },
+  )
+})
+
+test('Issue credit note: other values under a kept key are refused, and the sentence says why in plain words', () => {
+  const err = apiError('Keys for idempotent requests can only be used with the same parameters they were first used with.', 422, 'idempotency_error')
+  assert.deepEqual(issueCreditFailure(err), { unknown: false, message: ISSUE_CREDIT_VALUES_DIFFER })
+  assert.doesNotMatch(ISSUE_CREDIT_VALUES_DIFFER, /idempotent|parameters/i)
 })

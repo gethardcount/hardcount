@@ -14,6 +14,7 @@ import { api, downloadPDF, formatCents, formatRate, formatLineQuantity, formatDa
 import { formatCivilPeriod, formatInvoiceDate, formatYMDInTZ, usageFilterEndYMD } from '@/lib/dates'
 import { canIssueCreditNote } from '@/lib/creditNoteCeilings'
 import { IssueCreditDialog } from '@/components/IssueCreditDialog'
+import { newRetryKeys } from '@/lib/retryKeys'
 import { pollIntervalForInvoice } from '@/lib/invoicePolling'
 import { amountInputError, dollarsToWholeCents, wholeUnits } from '@/lib/priceInput'
 import { collectOutcome, writeOffOutcome } from '@/lib/actionOutcomes'
@@ -161,6 +162,9 @@ export default function InvoiceDetailPage() {
   const [showRotatePublicTokenConfirm, setShowRotatePublicTokenConfirm] = useState(false)
   const [showEmailModal, setShowEmailModal] = useState(false)
   const [showCreditModal, setShowCreditModal] = useState(false)
+  // Issue credit note's Idempotency-Keys. They live here, not in the dialog,
+  // so closing and reopening it after a result unknown keeps the key.
+  const [creditNoteKeys] = useState(newRetryKeys)
   const [showAddLineItem, setShowAddLineItem] = useState(false)
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null)
 
@@ -453,8 +457,8 @@ export default function InvoiceDetailPage() {
     // credit), still confirming, or an outcome recorded during the call.
     onSuccess: (updated) => { invalidateAll(); setShowCollectConfirm(false); showOutcome(collectOutcome(updated)) },
     // A refusal means nothing was charged; "Couldn't charge" says that and
-    // no more. No answer (or Stripe never answering) gets "result unknown"
-    // from errorToast, since the card may have been charged.
+    // no more. No answer, a bare 5xx, or Stripe never answering gets "result
+    // unknown" from errorToast, since the card may have been charged.
     onError: (err) => { setShowCollectConfirm(false); showApiError(err, "Couldn't charge") },
   })
 
@@ -1839,6 +1843,7 @@ export default function InvoiceDetailPage() {
         <IssueCreditDialog
           invoice={invoice}
           existingCreditNotes={capCreditNotes}
+          retryKeys={creditNoteKeys}
           onClose={() => setShowCreditModal(false)}
           onCreated={() => { setShowCreditModal(false); toast.success('Credit note issued'); invalidateAll() }}
         />

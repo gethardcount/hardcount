@@ -145,7 +145,36 @@ test('Stripe never answering a charge reads as unknown, with its own sentence an
 })
 
 test('a Stripe refusal keeps the caller title: nothing was charged', () => {
-  const err = new FakeApiError('Card was declined: insufficient funds.', 502, { code: 'provider_error', requestId: 'req_8' })
+  const err = new FakeApiError('Card was declined: insufficient funds.', 502, { code: 'provider_error', requestId: 'req_8', method: 'POST' })
   assert.equal(outcomeUnknown(err), false)
   assert.equal(errorToast(err, "Couldn't charge").title, "Couldn't charge")
+})
+
+// A bare 5xx says nothing about what became of a change. The proxy answers
+// 502 or 504 while the API restarts or runs out of time, and the API's own
+// 500 can come after the change was saved. The server stores a 5xx under the
+// request's Idempotency-Key for that reason. So the toast must not say
+// "Couldn't charge" or "Try again".
+test('a change answered by a bare 5xx says the result is unknown, with Copy ID', () => {
+  const bare: [number, string | undefined][] = [[502, undefined], [504, undefined], [500, 'internal_error'], [504, 'timeout']]
+  for (const [status, code] of bare) {
+    const err = new FakeApiError('Bad Gateway', status, { code, requestId: 'req_5', method: 'POST' })
+    assert.equal(outcomeUnknown(err), true, `${status} ${code}`)
+    assert.deepEqual(errorToast(err, "Couldn't charge"), {
+      show: true,
+      tone: 'warning',
+      title: NO_ANSWER_TITLE,
+      description: NO_ANSWER_MESSAGE,
+      copyId: 'req_5',
+    })
+  }
+  // The server did answer, so the sentence must not say it didn't.
+  assert.doesNotMatch(NO_ANSWER_MESSAGE, /didn't answer/)
+})
+
+test('a load answered by a 5xx stays a server error: a read changes nothing', () => {
+  const err = new FakeApiError('an internal error occurred', 500, { code: 'internal_error', method: 'GET' })
+  assert.equal(outcomeUnknown(err), false)
+  assert.equal(errorToast(err, 'Export failed').tone, 'error')
+  assert.equal(errorToast(err, 'Export failed').title, 'Export failed')
 })

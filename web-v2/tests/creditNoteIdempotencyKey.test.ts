@@ -1,11 +1,11 @@
-// "Issue credit note" sends the Idempotency-Key that its dialog made when it
-// opened, and sends the same key again on a retry (#1273). Without the key, a
-// retry after a lost answer ran the action twice: a second credit note and a
-// second card refund. With it, the server answers the retry with the first
-// request's answer.
+// "Issue credit note" sends an Idempotency-Key, and sends the same key again
+// on a retry (#1273). Without the key, a retry after a lost answer ran the
+// action twice: a second credit note and a second card refund. With it, the
+// server answers the retry with the first request's answer.
 import { afterEach, test, vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { api, type CreditNote } from '../src/lib/api.ts'
+import { outcomeUnknown } from '../src/lib/errorCopy.ts'
 
 type CreditNoteBody = Parameters<typeof api.createCreditNote>[0]
 
@@ -44,4 +44,23 @@ test('a retry after a lost answer sends the same Idempotency-Key as the first tr
   await issueCreditNote(body, key)
 
   assert.deepEqual(sentKeys, [key, key])
+})
+
+// The proxy in front of the API answers 502 with an HTML page while the API
+// restarts, which may be after the note was made. The error must carry the
+// request's method, so the dashboard can tell this change from a load and
+// say the result is unknown instead of "failed".
+test('a bare 502 from the proxy on Issue credit note reads as a result unknown', async () => {
+  vi.stubGlobal('fetch', async () => new Response('<html><body>502 Bad Gateway</body></html>', {
+    status: 502,
+    statusText: 'Bad Gateway',
+    headers: { 'Content-Type': 'text/html' },
+  }))
+
+  const err: unknown = await issueCreditNote(body, 'e1d2c3b4-a5f6-4e7d-8c9b-0a1f2e3d4c5b').then(() => null, (e: unknown) => e)
+
+  assert.ok(err instanceof Error)
+  assert.equal((err as Error & { status?: number }).status, 502)
+  assert.equal((err as Error & { method?: string }).method, 'POST')
+  assert.equal(outcomeUnknown(err), true)
 })

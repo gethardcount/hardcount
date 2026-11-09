@@ -675,6 +675,86 @@ test('a failed refresh keeps the invoice page and an open dialog, and Retry reco
   await expect(notice).toHaveCount(0)
 })
 
+// Issue credit note after a lost answer. The note may have been made, so
+// the dialog says the result is unknown, not "Failed to fetch". It reads
+// the invoice's notes again, so its amounts count a note that landed. The
+// page keeps the Idempotency-Key, so a try after closing and reopening the
+// dialog sends the same key and gets the first note back. An answer that
+// settles the try, here the server's 422 for other values under that key,
+// lets the next try make a new note. Both pages that open the dialog do this.
+test('Issue credit note after a lost answer says the result is unknown, counts the note, and keeps its key when reopened', async ({ page }) => {
+  const { customer, invoice } = await billedCustomer()
+  const keys: (string | undefined)[] = []
+  page.on('request', req => {
+    if (req.method() === 'POST' && new URL(req.url()).pathname === '/v1/credit-notes') keys.push(req.headers()['idempotency-key'])
+  })
+  const issueButton = (dialog: Locator) => dialog.getByRole('button', { name: 'Issue credit note' })
+  const fill = async (dialog: Locator, amount: string) => {
+    // The dialog puts the focus on Reason as it opens. Typing before that
+    // can land in the wrong box.
+    await expect(dialog.getByLabel('Reason')).toBeFocused()
+    await dialog.getByLabel('Reason').fill('E2E result unknown')
+    await dialog.getByLabel(/^Amount/).fill(amount)
+  }
+  const unknownResult = (dialog: Locator) => dialog.getByRole('status').filter({ hasText: 'Result unknown' })
+
+  // Invoice page: the answer to a 10.00 note is lost.
+  let drop = await dropNextCreditNoteAnswer(page)
+  await page.goto(`/invoices/${invoice.id}`)
+  const openFromInvoice = async () => {
+    await (await invoiceActions(page)).getByRole('menuitem', { name: 'Issue credit note' }).click()
+    return page.getByRole('dialog', { name: 'Issue credit note' })
+  }
+  let dialog = await openFromInvoice()
+  await fill(dialog, '10.00')
+  await issueButton(dialog).click()
+  expect(await drop.serverStatus, 'the first try reached the server and made the note').toBe(201)
+  await expect(unknownResult(dialog)).toContainText('The credit note may have been made.')
+  await expect(dialog.getByText('Failed to fetch')).toHaveCount(0)
+  await expect(dialog.getByText(`${usd(1000)} of ${usd(invoice.total_amount_cents)} already credited by earlier credit notes.`)).toBeVisible()
+
+  // Closed and opened again, it counts the note and sends the same key, so
+  // the server returns the note it made.
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dialog).toBeHidden()
+  dialog = await openFromInvoice()
+  await expect(dialog.getByText(`max ${usd(invoice.total_amount_cents - 1000)}`)).toBeVisible()
+  await fill(dialog, '10.00')
+  await issueButton(dialog).click()
+  await expect(dialog).toBeHidden()
+  expect(await creditNotesFor(invoice.id), 'the try after reopening got the first note back').toHaveLength(1)
+  expect(keys[0], 'the first try sends a key').toBeTruthy()
+  expect(keys, 'the try after reopening sends the same key').toEqual([keys[0], keys[0]])
+
+  // Credit notes page: the answer to a 5.00 note is lost, and the dialog is
+  // opened again for the same invoice. Other values under the kept key are
+  // refused, which settles the try, so the next click makes a new note.
+  drop = await dropNextCreditNoteAnswer(page)
+  await page.goto('/credit-notes')
+  dialog = await issueFromCreditNotesPage(page, customer.display_name, invoice.invoice_number)
+  await fill(dialog, '5.00')
+  await issueButton(dialog).click()
+  expect(await drop.serverStatus, 'the first try reached the server and made the note').toBe(201)
+  await expect(unknownResult(dialog)).toBeVisible()
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dialog).toBeHidden()
+  dialog = await issueFromCreditNotesPage(page, customer.display_name, invoice.invoice_number)
+  await expect(dialog.getByText(`max ${usd(invoice.total_amount_cents - 1500)}`)).toBeVisible()
+  await fill(dialog, '6.00')
+  await issueButton(dialog).click()
+  await expect(dialog.getByText('Nothing was issued.', { exact: false })).toBeVisible()
+  expect(await creditNotesFor(invoice.id), 'other values under the kept key make nothing').toHaveLength(2)
+  await issueButton(dialog).click()
+  await expect(dialog).toBeHidden()
+
+  const notes = await creditNotesFor(invoice.id)
+  expect(notes.map(n => n.total_cents).sort((a, b) => a - b)).toEqual([500, 600, 1000])
+  expect(keys.slice(2, 4), 'the try after reopening sends the same key').toEqual([keys[2], keys[2]])
+  expect(keys[4], 'the refusal settles the try, so the next one has a new key').toBeTruthy()
+  expect(keys[4], 'the refusal settles the try, so the next one has a new key').not.toBe(keys[2])
+  expect(keys, 'one request per click').toHaveLength(5)
+})
+
 // The list finds a customer's invoices by the customer: search matches the
 // name or email, not only the invoice number, and a picker filters to one
 // customer (C-15).
