@@ -755,7 +755,9 @@ func (h *Handler) recordOfflinePayment(w http.ResponseWriter, r *http.Request) {
 
 	inv, err := h.svc.RecordOfflinePayment(r.Context(), tenantID, id, input.Note)
 	if err != nil {
-		respond.FromError(w, r, err, "invoice")
+		// Nothing commits before the paid flip, so a payment that lost a
+		// deadlock may be sent again (ADR-136).
+		respond.FromError(w, r, respond.DeadlockAsConflict(r, err), "invoice")
 		return
 	}
 
@@ -1027,7 +1029,11 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		settled, serr := h.svc.SettleZeroDue(r.Context(), tenantID, id)
 		h.releaseCollectHold(r.Context(), tenantID, id, hold)
 		if serr != nil {
-			respond.FromError(w, r, serr, "invoice")
+			// A settle that lost a deadlock may be sent again: no charge was
+			// sent, and the credit applied above stays applied, so a resend
+			// finds nothing due and draws no credit twice (ADR-136). Only this
+			// branch: a deadlock after a card charge keeps its stored 500.
+			respond.FromError(w, r, respond.DeadlockAsConflict(r, serr), "invoice")
 			return
 		}
 		// A credit-paid invoice is recovered exactly as a card-paid one is, so

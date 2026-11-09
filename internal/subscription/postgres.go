@@ -1157,9 +1157,9 @@ func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, in
 // it: this transaction then waits for the invoice, holds it when the pause
 // commits, and its ReleaseDunningPauseTx waits for the subscription row
 // lock. A transaction holding the subscription that then waits for this
-// invoice's row lock deadlocks with it (40P01, one side fails and is
-// retried). The period closers' watermark read takes FOR KEY SHARE, which
-// does not wait for a payment, for this reason.
+// invoice's row lock deadlocks with it (40P01: one side fails; ADR-136 lists
+// who runs it again). The period closers' watermark read takes FOR KEY
+// SHARE, which does not wait for a payment, for this reason.
 func (s *PostgresStore) LockDunningPauseTx(ctx context.Context, tx *sql.Tx, invoiceID string) error {
 	var one int
 	err := tx.QueryRowContext(ctx, `

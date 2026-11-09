@@ -182,8 +182,14 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 			if _, verr := h.svc.Void(r.Context(), tenantID, cn.ID); verr != nil {
 				slog.ErrorContext(r.Context(), "credit note created but its issue failed, and voiding the draft failed too; the draft stays: issue or void it by hand",
 					"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "issue_error", err, "void_error", verr)
+				// The draft stays, so a resend would make a second note: a
+				// lost deadlock keeps the error the idempotency layer stores.
+				respond.FromError(w, r, err, "credit_note")
+				return
 			}
-			respond.FromError(w, r, err, "credit_note")
+			// The draft is voided, so an issue that lost a deadlock may be
+			// sent again; the resend makes and issues a new note (ADR-136).
+			respond.FromError(w, r, respond.DeadlockAsConflict(r, err), "credit_note")
 			return
 		}
 		// Issue() adds its own `credit_note.issued` row on its coordinator tx
@@ -302,7 +308,10 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		respond.FromError(w, r, err, "credit_note")
+		// An issue that lost a deadlock may be sent again: nothing commits
+		// before its transaction, and once that commits the draft→issued
+		// CAS refuses a second issue (ADR-136).
+		respond.FromError(w, r, respond.DeadlockAsConflict(r, err), "credit_note")
 		return
 	}
 
