@@ -44,6 +44,7 @@ type prebillVoidRig struct {
 	subStore *subscription.PostgresStore
 	subSvc   *subscription.Service
 	invStore *invoice.PostgresStore
+	cn       *creditnote.Service
 	dstore   *dunning.PostgresStore
 	dsvc     *dunning.Service
 	stopper  *recordingCollectionStopper
@@ -71,8 +72,8 @@ func newPrebillVoidRig(t *testing.T, name string, policy domain.DunningPolicy) *
 	r.invStore = invoice.NewPostgresStore(db)
 	settings := tenant.NewSettingsStore(db)
 	creditSvc := credit.NewService(credit.NewPostgresStore(db))
-	cnSvc := creditnote.NewService(creditnote.NewPostgresStore(db), r.invStore, nil, &cnGrantAdapter{creditSvc})
-	cnSvc.SetNumberGenerator(settings)
+	r.cn = creditnote.NewService(creditnote.NewPostgresStore(db), r.invStore, nil, &cnGrantAdapter{creditSvc})
+	r.cn.SetNumberGenerator(settings)
 
 	cust, err := customer.NewPostgresStore(db).Create(ctx, r.tenantID, domain.Customer{
 		ExternalID: "cus_prebill_void", DisplayName: "Prebill Void", Email: "ap@prebill-void.test",
@@ -126,8 +127,8 @@ func newPrebillVoidRig(t *testing.T, name string, policy domain.DunningPolicy) *
 	e.SetInvoiceEmailer(&testInvoiceEmailer{})
 	e.SetDunningResolver(&testDunningResolver{})
 	e.SetInvoiceVoider(invSvc)
-	e.SetCreditNoteAdjuster(cnSvc)
-	e.SetCreditHeadroomReader(cnSvc)
+	e.SetCreditNoteAdjuster(r.cn)
+	e.SetCreditHeadroomReader(r.cn)
 
 	r.sub, err = r.subStore.Create(ctx, r.tenantID, domain.Subscription{
 		Code: "sub-prebill-void", DisplayName: "Prebill Void", CustomerID: cust.ID,

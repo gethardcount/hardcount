@@ -286,7 +286,7 @@ The alternative was to store the returned amount as the note's `credit_amount_ce
 
 ### What did not change
 
-- `create()` takes no invoice row lock. Its amount-due cap is an early refusal only: a draft reserves nothing, so two drafts that each fit can together exceed what is due. `Issue()` is where a note is fitted to the invoice. A row lock in `create()` would also invert the lock order of transactions that draft several notes (they take the per-invoice advisory locks first).
+- `create()` takes no invoice row lock. Its amount-due cap is an early refusal only: a draft reserves nothing, so two drafts that each fit can together exceed what is due. `Issue()` is where a note is fitted to the invoice. A row lock in `create()` would also invert the lock order of transactions that draft several notes (they take the per-invoice advisory locks first). (Amended 2026-11-09: `create()` now takes its invoice row `FOR KEY SHARE`, which inverts no order. See the [amendment](#amendment-2026-11-09-create-takes-its-invoice-row-for-key-share).)
 - No backfill. The widened doctor check lists any invoice the old clamp over-relieved; the remedy is a manual credit grant for the excess.
 
 ### Sizing: a note may cover applied credits (same day, second change)
@@ -351,3 +351,17 @@ Stripe does the same: a credit note that "reduces the balance of an open invoice
 Example: credits paid 20.00 of a 100.00 invoice, the card failed on 80.00, the operator waived it, then canceled halfway. Before G3 the 20.00 of credits went back to the balance; with G3 nothing did.
 
 Now both paths place what fits and log the rest at ERROR: the example returns the 20.00. The same applies to a card-paid invoice that an operator partly credited: the customer gets the total minus what was already credited. That is new for card-paid invoices: since #278 they got nothing once the unused part exceeded their room. Each invoice's caps are unchanged, so the credit on an invoice still never exceeds its total. A note created at the same time is still caught by the credit-note cap, which rolls the change back for a retry. A full waive leaves no room, so it still gives no relief.
+
+## Amendment (2026-11-09): `create()` takes its invoice row `FOR KEY SHARE`
+
+**Decision.** `create()` takes its invoice's row `FOR KEY SHARE` right after the credit-note lock, before `buildCreditNote` numbers the note (`createUnderInvoiceLockInTx`). The insert's foreign-key check took this lock anyway, only later: after the tenant's number row.
+
+**Why.** A cancel or plan swap that voids a wholly unused invoice holds its row `FOR UPDATE`, then waits for the number row to number its final or new invoice. A create on that invoice held the number row and then waited for the row at its foreign-key check. Postgres aborted one of them as a deadlock (`40P01`). With the row taken first, the create and the void wait for each other in one order (ADR-118 amendment 2026-11-09).
+
+**Why "What did not change" above still holds.**
+
+- A key share does not conflict with the `FOR NO KEY UPDATE` that `Issue()` and the refund paths take, so it reverses no lock order of a transaction that takes the per-invoice advisory locks first.
+- It conflicts only with `FOR UPDATE`. A void, a finalize or a charge claim takes that in its own transaction, and takes neither the credit-note lock nor the number row. Such a writer now waits for a create from its credit-note lock onward, not only from its insert.
+- The amount-due cap is still only an early refusal: the lock reserves nothing.
+
+Commit relief (`CreateUnderInvoiceLockDynamicTx`) does not take the row early. It runs only on a paid commit invoice, which no void can take.

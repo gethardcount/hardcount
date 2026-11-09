@@ -1,6 +1,6 @@
 # ADR-097: A due mid-period `cancel_at` fires as an immediate cancel at that instant
 
-**Status**: Accepted 2026-07-18 (amended by [ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md) on 2026-10-12 and [ADR-120](120-invoice-grace-period-for-late-usage.md) on 2026-10-14)
+**Status**: Accepted 2026-07-18. Amended by [ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md) on 2026-10-12 and 2026-11-09, and by [ADR-120](120-invoice-grace-period-for-late-usage.md) on 2026-10-14.
 **Context**: FLOW TC8 walkthrough live-find; fixes the stranded-cancel money bug.
 
 ## Summary
@@ -43,13 +43,13 @@ as-is; this ADR fixes the *firing* side.
    (`CancelAtomicWithBill`): one tx that CAS-flips the sub
    (`canceled_at = cancel_at`, schedule fields cleared,
    `subscription.canceled` webhook enqueued with `canceled_by="schedule"`),
-   then — inside the same tx — bills the final partial period
-   (`BillFinalOnImmediateCancelTx`: usage to `cancel_at` + prorated
-   in_arrears base) and writes prepaid-relief credit-note drafts
-   (`BillOnCancelDraftsTx`: unused prepaid in_advance portion returns as
-   balance credit, never cash — the shipped six-platform-verified policy).
-   Post-commit: finalize the final invoice, issue the drafts (or the
-   unpaid-source `BillOnCancel` fallback) — identical to the operator path.
+   then, inside the same tx, makes one `BillCancelTx` call. It prices the
+   final partial period (usage to `cancel_at` + prorated in_arrears base),
+   writes the prepaid relief (the unused prepaid in_advance portion returns
+   as balance credit, never cash — the shipped six-platform-verified
+   policy), and only then numbers and inserts the final invoice (ADR-118
+   amendment 2026-11-09). Post-commit: issue the relief, then commit the
+   final invoice's tax and collect it — identical to the operator path.
 
    The engine reaches this through a narrow consumer-defined executor
    interface implemented by `subscription.Service` (the coordinator wires

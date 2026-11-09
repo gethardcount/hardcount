@@ -43,7 +43,7 @@ func TestCancel_ReliefWrittenInTxThenFinished(t *testing.T) {
 		t.Errorf("proration credit = %d, want 5000 (the relief's balance credit)", credit)
 	}
 	if fb.draftTxCalls != 1 {
-		t.Errorf("BillOnCancelDraftsTx calls = %d, want 1", fb.draftTxCalls)
+		t.Errorf("cancel relief runs = %d, want 1", fb.draftTxCalls)
 	}
 	if fb.finishCalls != 1 || len(fb.finishedDrafts) != 1 || fb.finishedDrafts[0] != "cn_draft_1" {
 		t.Errorf("FinishRelief not run with the drafts; calls=%d ids=%v", fb.finishCalls, fb.finishedDrafts)
