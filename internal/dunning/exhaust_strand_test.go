@@ -24,12 +24,12 @@ type escalateFailsOnce struct {
 	failed bool
 }
 
-func (s *escalateFailsOnce) UpdateRunIfActive(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expected int, then func(*sql.Tx) error) (bool, error) {
-	if run.State == domain.DunningEscalated && !s.failed {
+func (s *escalateFailsOnce) EscalateRun(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expected int, extra map[string]any, then func(*sql.Tx) error) (bool, error) {
+	if !s.failed {
 		s.failed = true
 		return false, errors.New("connection reset during the escalation write")
 	}
-	return s.memStore.UpdateRunIfActive(ctx, tenantID, run, expected, then)
+	return s.memStore.EscalateRun(ctx, tenantID, run, expected, extra, then)
 }
 
 // finalAttemptRun puts a run one retry short of exhaustion, due now.
@@ -325,11 +325,8 @@ func TestFinalAttempt_LeaseHidesRunDuringCharge(t *testing.T) {
 // escalateAlwaysFails models an escalation write that can never land.
 type escalateAlwaysFails struct{ *memStore }
 
-func (s escalateAlwaysFails) UpdateRunIfActive(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expected int, then func(*sql.Tx) error) (bool, error) {
-	if run.State == domain.DunningEscalated {
-		return false, errors.New("escalation write keeps failing")
-	}
-	return s.memStore.UpdateRunIfActive(ctx, tenantID, run, expected, then)
+func (s escalateAlwaysFails) EscalateRun(context.Context, string, domain.InvoiceDunningRun, int, map[string]any, func(*sql.Tx) error) (bool, error) {
+	return false, errors.New("escalation write keeps failing")
 }
 
 // TestProcessDueRunsForClock_PersistentExhaustFailure_Terminates: when the

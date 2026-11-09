@@ -33,10 +33,11 @@ type Store interface {
 	// ResolveRun is the exactly-once resolve transition: it flips the run to its
 	// resolved fields ONLY if it is not already resolved (CAS on
 	// `state <> 'resolved'`) and reports whether THIS call won the transition.
-	// The caller fires the non-idempotent side-effects (the resolved timeline row +
-	// the dunning.resolved webhook) only on a win, so two resolvers racing the same
-	// run (e.g. a card-settle resolve and processRun's own resolve) emit exactly one
-	// dunning.resolved per recovery.
+	// The winner's transaction also queues the dunning.resolved webhook, so two
+	// resolvers racing the same run (e.g. a card-settle resolve and processRun's
+	// own resolve) emit exactly one dunning.resolved per recovery, and a failed
+	// insert fails the resolve. The caller writes the resolved timeline row only
+	// on a win.
 	//
 	// fromActiveOnly narrows the CAS to `state = 'active'`. The automated
 	// processRun/exhaustRun resolves pass true: they act on a run they LISTED as
@@ -52,6 +53,11 @@ type Store interface {
 	// refused (ha-8). It returns an error, writing nothing, for an active run
 	// with no next_action_at (SB-1: the due-run pickers would never see it again).
 	UpdateRunIfActive(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, then func(tx *sql.Tx) error) (bool, error)
+	// EscalateRun is UpdateRunIfActive for the escalated run. When the write
+	// applies, its transaction also queues the dunning.escalated webhook with
+	// extra beside the run, before then's SAVEPOINT. A failed insert fails the
+	// escalation, so the escalation and its event commit together or not at all.
+	EscalateRun(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, extra map[string]any, then func(tx *sql.Tx) error) (bool, error)
 	// ClaimExhaustion moves an exhausted run's next_action_at from the value the
 	// caller listed (expectedNext) to lease, only while the row is still active
 	// at expectedAttempts with that next_action_at. Exactly one processor wins;

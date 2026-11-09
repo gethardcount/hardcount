@@ -8,8 +8,8 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
-// captureDispatcher records every dispatched event for assertion.
-type captureDispatcher struct {
+// webhookRecorder records the webhook events memStore queues, for assertion.
+type webhookRecorder struct {
 	events []capturedDunningEvent
 }
 
@@ -18,12 +18,11 @@ type capturedDunningEvent struct {
 	payload   map[string]any
 }
 
-func (c *captureDispatcher) Dispatch(_ context.Context, _, eventType string, payload map[string]any) error {
+func (c *webhookRecorder) record(eventType string, payload map[string]any) {
 	c.events = append(c.events, capturedDunningEvent{eventType: eventType, payload: payload})
-	return nil
 }
 
-func (c *captureDispatcher) firstOf(eventType string) (map[string]any, bool) {
+func (c *webhookRecorder) firstOf(eventType string) (map[string]any, bool) {
 	for _, e := range c.events {
 		if e.eventType == eventType {
 			return e.payload, true
@@ -32,7 +31,7 @@ func (c *captureDispatcher) firstOf(eventType string) (map[string]any, bool) {
 	return nil, false
 }
 
-func (c *captureDispatcher) countOf(eventType string) int {
+func (c *webhookRecorder) countOf(eventType string) int {
 	n := 0
 	for _, e := range c.events {
 		if e.eventType == eventType {
@@ -52,8 +51,7 @@ func (c *captureDispatcher) countOf(eventType string) int {
 func TestResolveRunNow_Idempotent_FiresEventOnce(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, &noopRetrier{}, nil)
-	disp := &captureDispatcher{}
-	svc.SetEventDispatcher(disp)
+	disp := &store.webhooks
 	ctx := context.Background()
 
 	run, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
@@ -83,8 +81,7 @@ func TestResolveRunNow_Idempotent_FiresEventOnce(t *testing.T) {
 func TestServiceResolveRun_Idempotent_AfterAutomatedResolve(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, &noopRetrier{}, nil)
-	disp := &captureDispatcher{}
-	svc.SetEventDispatcher(disp)
+	disp := &store.webhooks
 	ctx := context.Background()
 
 	run, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
@@ -116,8 +113,7 @@ func TestDunningResolved_EventFires(t *testing.T) {
 	t.Run("ResolveRun", func(t *testing.T) {
 		store := newMemStore()
 		svc := NewService(store, &noopRetrier{}, nil)
-		disp := &captureDispatcher{}
-		svc.SetEventDispatcher(disp)
+		disp := &store.webhooks
 		ctx := context.Background()
 
 		run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
@@ -135,8 +131,7 @@ func TestDunningResolved_EventFires(t *testing.T) {
 	t.Run("ResolveByInvoice", func(t *testing.T) {
 		store := newMemStore()
 		svc := NewService(store, &noopRetrier{}, nil)
-		disp := &captureDispatcher{}
-		svc.SetEventDispatcher(disp)
+		disp := &store.webhooks
 		ctx := context.Background()
 
 		if _, err := svc.StartDunning(ctx, "t1", "inv_2", "cus_2", time.Now(), domain.DunningCausePaymentFailed); err != nil {

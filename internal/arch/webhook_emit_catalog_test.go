@@ -46,8 +46,8 @@ import (
 // function whose only calls queue a fixed event type, so each caller of a
 // helper holds a site too. The test does not see a new call of a function
 // that holds a site and does other work too, such as
-// dunning.Service.resolveRunAt or payment.Stripe.SettleSucceeded: the call
-// reaches a site already counted. A PR
+// payment.Stripe.SettleSucceeded: the call reaches a site already counted.
+// A PR
 // that moves such a site must list that function's callers in its site-set.
 // The walk follows calls, so a helper passed as a function value is not
 // followed.
@@ -70,10 +70,6 @@ var standaloneSinkNames = map[string]bool{"Dispatch": true, "EnqueueStandalone":
 // type leaves the list, mark it "Always sent" in docs/api/webhook-events.md
 // (TestAlwaysSentMarksMatchTheBacklog checks the two agree).
 var standaloneWebhookBacklog = map[string]int{
-	"customer.Service.MarkEmailBounced customer.email_bounced":          1,
-	"customer.Service.MarkEmailComplained customer.email_complained":    1,
-	"dunning.Service.exhaustRun dunning.escalated":                      1,
-	"dunning.Service.resolveRunAt dunning.resolved":                     1,
 	"payment.Stripe.RecordCheckoutCard payment_method.updated":          1,
 	"payment.Stripe.SettleSucceeded payment.amount_mismatch":            1,
 	"payment.Stripe.SettleSucceeded payment.duplicate_charge":           2,

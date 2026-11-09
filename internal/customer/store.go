@@ -43,12 +43,15 @@ type Store interface {
 	// Postmark webhook reuses the same path for async hard bounces
 	// (ADR-098). Idempotent — repeated calls just refresh the timestamp.
 	// Never downgrades an existing 'complained' (benign no-op, not an error).
+	// Each call queues customer.email_bounced in its transaction, that no-op
+	// included, and a failed insert fails the call.
 	MarkEmailBounced(ctx context.Context, tenantID, customerID, reason string) error
 
 	// MarkEmailComplained records a spam complaint — the most severe
 	// recipient state, written only by the provider's SpamComplaint
 	// webhook (ADR-098). Idempotent; outranks and is never replaced by
-	// a later bounce.
+	// a later bounce. Each call queues customer.email_complained in its
+	// transaction, and a failed insert fails the call.
 	MarkEmailComplained(ctx context.Context, tenantID, customerID, reason string) error
 
 	// ResetEmailStatus clears any prior bounce/complain flag on the

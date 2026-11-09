@@ -100,7 +100,7 @@ type inFlightHarness struct {
 	svc     *Service
 	clk     *clock.Fake
 	emails  *recordingEmailNotifier
-	events  *captureDispatcher
+	events  *webhookRecorder
 	holds   *recordingHoldReleaser
 	invoice *mutableInvGet
 	runID   string
@@ -115,17 +115,17 @@ func newInFlightHarness(t *testing.T, retrier PaymentRetrier) *inFlightHarness {
 	start := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	h := &inFlightHarness{
 		t: t, ctx: context.Background(), store: newMemStore(), clk: clock.NewFake(start),
-		emails: &recordingEmailNotifier{}, events: &captureDispatcher{}, holds: &recordingHoldReleaser{},
+		emails: &recordingEmailNotifier{}, holds: &recordingHoldReleaser{},
 		invoice: &mutableInvGet{inv: domain.Invoice{
 			ID: "inv_1", CustomerID: "cus_1", InvoiceNumber: "INV-1", Status: domain.InvoiceFinalized,
 			PaymentStatus: domain.PaymentFailed, AmountDueCents: 5000,
 		}},
 		start: start,
 	}
+	h.events = &h.store.webhooks
 	h.svc = NewService(h.store, retrier, h.clk)
 	h.svc.SetEmailNotifier(h.emails)
 	h.svc.SetCustomerEmailFetcher(stubCustomerEmail{})
-	h.svc.SetEventDispatcher(h.events)
 	h.svc.SetRetryHoldReleaser(h.holds)
 	h.svc.SetSubscriptionPauser(nil, h.invoice)
 	run, err := h.svc.StartDunning(h.ctx, "t1", "inv_1", "cus_1", time.Time{}, domain.DunningCausePaymentFailed)
@@ -542,7 +542,6 @@ func TestRetryInFlight_FinalRetryFailingAtOnceEscalatesAtTheFailure(t *testing.T
 	h.svc = NewService(wrapped, h.svc.retrier, h.clk)
 	h.svc.SetEmailNotifier(h.emails)
 	h.svc.SetCustomerEmailFetcher(stubCustomerEmail{})
-	h.svc.SetEventDispatcher(h.events)
 	h.svc.SetRetryHoldReleaser(h.holds)
 	h.svc.SetSubscriptionPauser(nil, h.invoice)
 	run := h.run()

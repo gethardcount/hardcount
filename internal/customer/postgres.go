@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -21,11 +22,27 @@ type PostgresStore struct {
 	db      *postgres.DB
 	enc     *crypto.Encryptor
 	blinder *crypto.Blinder
+	outbox  OutboxEnqueuer
+}
+
+// OutboxEnqueuer inserts a webhook-event row on the caller's tx, so the event
+// commits or rolls back with the change that caused it (ADR-040
+// transactional outbox). Satisfied by *webhook.OutboxStore; declared here so
+// this store needs no webhook import. Same seam as the subscription, invoice,
+// credit and dunning stores.
+type OutboxEnqueuer interface {
+	Enqueue(ctx context.Context, tx *sql.Tx, tenantID, eventType string, payload map[string]any) (string, error)
 }
 
 func NewPostgresStore(db *postgres.DB) *PostgresStore {
 	return &PostgresStore{db: db}
 }
+
+// SetOutboxEnqueuer wires customer.email_bounced and .email_complained into
+// the transaction of the suppression write each reports. Optional: when
+// unset (narrow tests), no event is enqueued. Production boot refuses an
+// unset one (webhook.MustWiredOutbox).
+func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 
 // SetEncryptor configures PII field encryption for customer data at rest.
 // When set, email, display_name (Customer) and legal_name, email, phone,
@@ -1040,9 +1057,12 @@ func (s *PostgresStore) ResetEmailStatus(ctx context.Context, tenantID, customer
 // otherwise no-ops. NEVER downgrades 'complained' (ADR-098): a spam
 // complaint outranks a bounce, and provider webhooks arrive in any order
 // — a Bounce landing after a SpamComplaint is a benign no-op, not an
-// ErrNotFound (the SMTP-path caller logs ErrNotFound as a real miss).
+// ErrNotFound. ErrNotFound means the row is gone: both callers skip it as
+// a customer deleted after their blind-index lookup.
+// Each call queues customer.email_bounced in its transaction, that no-op
+// included (see markEmailSuppressed).
 func (s *PostgresStore) MarkEmailBounced(ctx context.Context, tenantID, customerID, reason string) error {
-	return s.markEmailSuppressed(ctx, tenantID, customerID, reason, string(domain.EmailStatusBounced))
+	return s.markEmailSuppressed(ctx, tenantID, customerID, reason, string(domain.EmailStatusBounced), domain.EventCustomerEmailBounced)
 }
 
 // MarkEmailComplained flips email_status to 'complained' — the top of the
@@ -1050,43 +1070,51 @@ func (s *PostgresStore) MarkEmailBounced(ctx context.Context, tenantID, customer
 // is the provider's SpamComplaint webhook (ADR-098; the state 0050
 // anticipated but nothing wrote until now): a complaint is at least as
 // severe as a hard bounce, and provider-side it is effectively
-// irreversible. Idempotent; never downgraded by later bounces.
+// irreversible. Idempotent; never downgraded by later bounces. Each call
+// queues customer.email_complained in its transaction.
 func (s *PostgresStore) MarkEmailComplained(ctx context.Context, tenantID, customerID, reason string) error {
-	return s.markEmailSuppressed(ctx, tenantID, customerID, reason, string(domain.EmailStatusComplained))
+	return s.markEmailSuppressed(ctx, tenantID, customerID, reason, string(domain.EmailStatusComplained), domain.EventCustomerEmailComplained)
 }
 
-func (s *PostgresStore) markEmailSuppressed(ctx context.Context, tenantID, customerID, reason, status string) error {
+// markEmailSuppressed writes the suppression and queues eventType on the same
+// transaction: one event per signal, also when the monotonic guard leaves a
+// complained row as it is. The event carries the customer as this
+// transaction left it, with the provider's reason beside it (ADR-131). A
+// failed insert fails the call, and the write rolls back with it. The
+// Postmark webhook then answers 5xx, and Postmark sends the signal again.
+// The SMTP bounce path (ReportBounce) has nothing that sends it again, so it
+// logs the failure at ERROR.
+func (s *PostgresStore) markEmailSuppressed(ctx context.Context, tenantID, customerID, reason, status, eventType string) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
 	}
 	defer postgres.Rollback(tx)
 
-	res, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE customers SET email_status = $3,
 			email_last_bounced_at = NOW(),
 			email_bounce_reason = NULLIF($1, ''),
 			updated_at = NOW()
 		WHERE id = $2 AND email_status <> 'complained'
-	`, reason, customerID, status)
+	`, reason, customerID, status); err != nil {
+		return err
+	}
+	// No row is a real miss the caller should hear about. A row the
+	// monotonic guard skipped (already 'complained') is not: the write is a
+	// benign no-op, and the signal still gets its event.
+	c, err := s.scanCustomerFull(tx.QueryRowContext(ctx,
+		`SELECT `+customerFullCols+` FROM customers WHERE id = $1`, customerID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return errs.ErrNotFound
+	}
 	if err != nil {
 		return err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		// Distinguish "row absent" (a real miss the caller should hear
-		// about) from "row present but already 'complained'" (the
-		// monotonic guard blocked a downgrade — benign no-op).
-		var exists bool
-		if err := tx.QueryRowContext(ctx,
-			`SELECT EXISTS(SELECT 1 FROM customers WHERE id = $1)`, customerID,
-		).Scan(&exists); err != nil {
-			return err
+	if s.outbox != nil {
+		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, eventType, domain.CustomerWebhookData(c, map[string]any{"reason": reason})); err != nil {
+			return fmt.Errorf("enqueue %s: %w", eventType, err)
 		}
-		if !exists {
-			return errs.ErrNotFound
-		}
-		return nil
 	}
 	return tx.Commit()
 }

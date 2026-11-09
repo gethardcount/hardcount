@@ -19,12 +19,13 @@ Producers persist an event/email intent inside the business-op
 transaction; a background dispatcher drains the queue with retry +
 DLQ.
 
-> **Amendment (2026-08-30): the four money emails and 31 webhook event types are queued in the transaction; other emails and 10 webhook event types are queued after it.**
-> The paragraph above is true of 31 of the 41 webhook event types: the
+> **Amendment (2026-08-30): the four money emails and 35 webhook event types are queued in the transaction; other emails and 6 webhook event types are queued after it.**
+> The paragraph above is true of 35 of the 41 webhook event types: the
 > five `invoice.*` events, the 16 `subscription.*` events,
 > `payment.succeeded`, `payment.failed`, `payment.dispute_opened`,
-> `payment.dispute_closed`, `payment.refunded_in_stripe`,
-> `dunning.started`, and the four `credit.*` events.
+> `payment.dispute_closed`, `payment.refunded_in_stripe`, the three
+> `dunning.*` events, the two `customer.*` events, and the four `credit.*`
+> events.
 > `invoice.finalized`, `.voided`, `.marked_uncollectible` and
 > `.payment_recorded` joined them on 2026-11-05: the invoice store queues
 > each in the transaction of its change, for an invoice born finalized and
@@ -32,9 +33,13 @@ DLQ.
 > 2026-11-08. The subscription store queues each in the transaction of its
 > change. That covers the operator's schedule, pause, resume and trial
 > actions, the item changes, the threshold fire and the scheduled plan
-> changes the billing run applies. The other 10 are queued after the commit:
-> `dunning.escalated` and `.resolved`, `customer.email_bounced` and
-> `.email_complained`, the four payment anomalies
+> changes the billing run applies. `dunning.escalated` and `.resolved`, and
+> `customer.email_bounced` and `.email_complained`, joined them on
+> 2026-11-09. The dunning store queues `dunning.escalated` in the
+> escalation's transaction, and `dunning.resolved` in the transaction of
+> the resolve's compare-and-set, for its winner only. The customer store
+> queues each suppression event with its write. The other 6 are queued
+> after the commit: the four payment anomalies
 > (`payment.duplicate_charge`, `.amount_mismatch`, `.currency_mismatch`
 > and `.received_on_voided_invoice`), and `payment_method.attached` and
 > `.updated`. Post-commit events go

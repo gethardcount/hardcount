@@ -24,7 +24,11 @@ type memStore struct {
 	hookErrs  []error // errors returned by UpdateRunIfActive `then` hooks (non-vetoing)
 	// started records the dunning.started payloads StartRun enqueued (the
 	// PostgresStore's in-tx outbox row).
-	started  []map[string]any
+	started []map[string]any
+	// webhooks records the dunning.escalated and dunning.resolved events
+	// EscalateRun and ResolveRun queue when their write applies, as the
+	// PostgresStore queues them in the write's transaction.
+	webhooks webhookRecorder
 	startErr error // when set, StartRun fails and writes nothing (all-or-none)
 	// awaiting is each run's awaiting_payment_intent_id (#1289).
 	awaiting map[string]string
@@ -282,6 +286,7 @@ func (m *memStore) ResolveRun(_ context.Context, _ string, run domain.InvoiceDun
 	}
 	m.runs[run.ID] = run
 	delete(m.awaiting, run.ID)
+	m.webhooks.record(domain.EventDunningResolved, domain.DunningRunWebhookData(run, nil))
 	return true, nil
 }
 
@@ -291,6 +296,21 @@ func (m *memStore) ResolveRun(_ context.Context, _ string, run domain.InvoiceDun
 // attempt-count CAS — rather than stubbing "true": a fake that always applies
 // would keep every stale-processor test green forever (fake-fidelity rule).
 func (m *memStore) UpdateRunIfActive(_ context.Context, _ string, run domain.InvoiceDunningRun, expectedAttempts int, then func(tx *sql.Tx) error) (bool, error) {
+	return m.writeIfActive(run, expectedAttempts, nil, then)
+}
+
+// EscalateRun mirrors the real store: UpdateRunIfActive's guarded write, and
+// dunning.escalated queued only when it applies.
+func (m *memStore) EscalateRun(_ context.Context, _ string, run domain.InvoiceDunningRun, expectedAttempts int, extra map[string]any, then func(tx *sql.Tx) error) (bool, error) {
+	if run.State != domain.DunningEscalated {
+		return false, fmt.Errorf("EscalateRun with a run in state %q", run.State)
+	}
+	return m.writeIfActive(run, expectedAttempts, func() {
+		m.webhooks.record(domain.EventDunningEscalated, domain.DunningRunWebhookData(run, extra))
+	}, then)
+}
+
+func (m *memStore) writeIfActive(run domain.InvoiceDunningRun, expectedAttempts int, onWrite func(), then func(tx *sql.Tx) error) (bool, error) {
 	if err := refuseStrandingWrite(run); err != nil {
 		return false, err
 	}
@@ -303,6 +323,9 @@ func (m *memStore) UpdateRunIfActive(_ context.Context, _ string, run domain.Inv
 	}
 	m.runs[run.ID] = run
 	delete(m.awaiting, run.ID) // every write but the in-flight one clears it
+	if onWrite != nil {
+		onWrite()
+	}
 	// Mirror the real store: the hook runs only when the write applied, and
 	// its error never vetoes (recorded for tests).
 	if then != nil {

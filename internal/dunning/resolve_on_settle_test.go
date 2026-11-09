@@ -94,9 +94,8 @@ func (r *resolvingTransientRetrier) RetryPayment(ctx context.Context, tenantID, 
 // run stays resolved and dunning.resolved fires exactly once.
 func TestProcessRun_TransientSkip_DoesNotClobberConcurrentResolve(t *testing.T) {
 	store := newMemStore()
-	disp := &captureDispatcher{}
+	disp := &store.webhooks
 	svc := NewService(store, &noopRetrier{}, nil)
-	svc.SetEventDispatcher(disp)
 	svc.SetRetrier(&resolvingTransientRetrier{svc: svc})
 
 	run := dueRunAt(t, store, svc, 1)
@@ -377,13 +376,12 @@ func (c *resolvingCanceler) Cancel(ctx context.Context, tenantID, _ string) erro
 // contradictory dunning.escalated fires on top of the settle's dunning.resolved.
 func TestExhaustRun_ResolvedDuringTerminalAction_NoEscalatedClobber(t *testing.T) {
 	store := newMemStore()
-	disp := &captureDispatcher{}
+	disp := &store.webhooks
 	p := store.policies[store.defaultID]
 	p.FinalSubscriptionAction = domain.SubActionCancel
 	store.policies[store.defaultID] = p
 
 	svc := NewService(store, &noopRetrier{}, nil)
-	svc.SetEventDispatcher(disp)
 	svc.SetSubscriptionPauser(&recordingPauser{}, stubInvGet{inv: unpaidInv()})
 	canceler := &resolvingCanceler{svc: svc}
 	svc.SetSubscriptionCanceler(canceler)

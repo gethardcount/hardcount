@@ -2081,7 +2081,7 @@ the period's usage so far, or a usage count on one item.
 An email to a customer bounced, and Hardcount stopped emailing that address.
 `reason` is the email provider's.
 
-**Also in `data`:** `reason`.
+**Always sent.** **Also in `data`:** `reason`.
 
 <details>
 <summary>Example message</summary>
@@ -2118,7 +2118,7 @@ An email to a customer bounced, and Hardcount stopped emailing that address.
 A customer marked an email from Hardcount as spam, and Hardcount stopped
 emailing that address. `reason` is the email provider's.
 
-**Also in `data`:** `reason`.
+**Always sent.** **Also in `data`:** `reason`.
 
 <details>
 <summary>Example message</summary>
@@ -2204,7 +2204,7 @@ Payment retries ran out, and the final action from your policy was taken.
 `subscription_canceled+invoice_marked_uncollectible`, and empty when nothing
 applied.
 
-**Also in `data`:** `final_subscription_action`, `final_invoice_action`,
+**Always sent.** **Also in `data`:** `final_subscription_action`, `final_invoice_action`,
 `applied`.
 
 <details>
@@ -2246,7 +2246,7 @@ applied.
 Payment retries ended early, for example because the invoice was paid or
 someone resolved it by hand. The run's `resolution` says why.
 
-**Also in `data`:** nothing.
+**Always sent.** **Also in `data`:** nothing.
 
 <details>
 <summary>Example message</summary>

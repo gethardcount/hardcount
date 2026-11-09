@@ -25,10 +25,11 @@ retries.
 3. **Some events survive a crash; others may not.** The
    [catalog](api/webhook-events.md) marks the first kind *Always sent*:
    they are saved together with the change that caused them, so a crash
-   cannot drop them. Every `invoice.*` and `subscription.*` event is one of
-   them. The other events are queued just after the change is saved, and a
-   crash or a database error at that moment can drop one. *Always sent*
-   does not mean always delivered. Any event can still go undelivered:
+   cannot drop them. Every `invoice.*`, `subscription.*`, `customer.*`,
+   `dunning.*` and `credit.*` event is one of them. The other events are
+   queued just after the change is saved, and a crash or a database error
+   at that moment can drop one. *Always sent* does not mean always
+   delivered. Any event can still go undelivered:
    - To an endpoint that keeps failing, a delivery is marked failed after 6
      attempts over about 26 hours 36 minutes ([Retries](#retries)). Send it
      again from the dashboard or the API ([Send a delivery again](#send-a-delivery-again)).
