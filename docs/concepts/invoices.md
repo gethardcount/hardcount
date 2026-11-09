@@ -125,7 +125,9 @@ and `amount_due_cents` is 0. The total stays $28.84.
 ## Due date and number
 
 - **Due date.** `due_at` is the issue date plus your payment terms: 30 days
-  unless you change the setting, from 0 (due on receipt) to 365.
+  unless you change the setting, from 0 (due on receipt) to 365. New invoice
+  in the dashboard starts at the setting, and you can pick other terms for
+  that one invoice.
 - **Number.** Each invoice gets the next number in its mode, such as
   `HC-000001`. Test and live mode count apart. The prefix is a setting.
 

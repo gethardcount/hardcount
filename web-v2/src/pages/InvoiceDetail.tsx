@@ -1851,6 +1851,7 @@ export default function InvoiceDetailPage() {
           currency={invoice.currency}
           onClose={() => setShowAddLineItem(false)}
           onAdded={() => { setShowAddLineItem(false); toast.success('Line item added'); invalidateAll() }}
+          onFailed={invalidateAll}
         />
       )}
 
@@ -1999,9 +2000,16 @@ function OperatorContextCard({
   )
 }
 
-function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
+function AddLineItemDialog({ invoiceId, currency, onClose, onAdded, onFailed }: {
   invoiceId: string; currency: string; onClose: () => void; onAdded: () => void
+  // Reads the invoice again: a try that failed may still have added the line.
+  onFailed: () => void
 }) {
+  // One Idempotency-Key per dialog open, sent with every submit from it. A
+  // draft's lines cannot be removed, so a click after a lost answer must get
+  // the first line back, not add a second one. The dialog unmounts on close,
+  // so the next open makes a new key.
+  const [idemKey] = useState(() => crypto.randomUUID())
   const [description, setDescription] = useState('')
   const [lineType, setLineType] = useState('add_on')
   const [quantity, setQuantity] = useState('1')
@@ -2033,9 +2041,10 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
         line_type: lineType,
         quantity: qty,
         unit_amount_cents: unitCents,
-      })
+      }, idemKey)
       onAdded()
     } catch (err) {
+      onFailed()
       showApiError(err, 'Failed to add line item')
     } finally {
       setSaving(false)

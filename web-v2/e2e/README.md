@@ -54,7 +54,12 @@ the screen, and that the main things an operator does work end to end.
   browser), a credit note before and
   after an offline payment, void and write-off, and the credit notes page.
   Each journey checks the dashboard and the customer's payment page against
-  the API. It also opens the notice for a refund made in Stripe (Record as
+  the API. New invoice must wait for the account's payment terms and start
+  at them: the browser holds the settings read, then answers it with Net 15.
+  When the browser loses the answer to a Save draft, Add line item or Issue
+  credit note, a second click must make one invoice, line or note. For an
+  invoice and a line, both clicks must send the same Idempotency-Key.
+  It also opens the notice for a refund made in Stripe (Record as
   credit note, Attach to a note whose refund failed, Dismiss), the "Recorded
   from Stripe" tag, and Retry refund's refusal while such a refund is not
   recorded. CI connects no Stripe, so the refund and the server's answers to
