@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // P7 / ADR-073: APP_DATABASE_URL fail-closed matrix. resolveAppURL is
@@ -93,15 +95,8 @@ func TestCheckRLSCapability_FlagsBypassRoles(t *testing.T) {
 	}
 
 	// A BYPASSRLS (non-superuser) role must also be flagged.
-	if _, err := adminPool.Exec(`DROP ROLE IF EXISTS hardcount_p7_bypass`); err != nil {
-		t.Fatalf("drop role: %v", err)
-	}
-	if _, err := adminPool.Exec(`CREATE ROLE hardcount_p7_bypass WITH LOGIN BYPASSRLS PASSWORD 'p7-test-pw'`); err != nil {
-		t.Fatalf("create role: %v", err)
-	}
-	t.Cleanup(func() { _, _ = adminPool.Exec(`DROP ROLE IF EXISTS hardcount_p7_bypass`) })
-
-	bypassURL := rewriteUser(t, adminURL, "hardcount_p7_bypass", "p7-test-pw")
+	bypassRole := testutil.CreateRole(t, "hardcount_p7_bypass", "p7-test-pw", "BYPASSRLS")
+	bypassURL := rewriteUser(t, adminURL, bypassRole, "p7-test-pw")
 	bypassPool, err := sql.Open("pgx", bypassURL)
 	if err != nil {
 		t.Fatalf("open bypass: %v", err)
@@ -111,7 +106,7 @@ func TestCheckRLSCapability_FlagsBypassRoles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("capability(bypass): %v", err)
 	}
-	if role != "hardcount_p7_bypass" || !canBypass {
+	if role != bypassRole || !canBypass {
 		t.Fatalf("role=%q canBypass=%v — BYPASSRLS role must be flagged", role, canBypass)
 	}
 }
