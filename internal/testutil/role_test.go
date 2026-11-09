@@ -72,7 +72,11 @@ func TestCreateRole_LeavesNoRole(t *testing.T) {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
-	t.Cleanup(func() { _, _ = admin.Exec(`DROP TABLE IF EXISTS public._testutil_role_probe`) })
+	t.Cleanup(func() {
+		if _, err := admin.Exec(`DROP TABLE IF EXISTS public._testutil_role_probe`); err != nil {
+			t.Errorf("drop probe table: %v", err)
+		}
+	})
 
 	t.Run("create", func(t *testing.T) {
 		if got := CreateRole(t, prefix, password, ""); got != role {
