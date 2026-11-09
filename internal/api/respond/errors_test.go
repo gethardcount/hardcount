@@ -169,6 +169,42 @@ func TestFromError_UnknownError(t *testing.T) {
 	}
 }
 
+// An errs.Unavailable refusal answers 503 with Retry-After: 1, its own code
+// and message, and never its cause. A not-found in the cause does not turn it
+// into a 404. The cause goes to the log at ERROR.
+func TestFromError_Unavailable(t *testing.T) {
+	const message = "could not read this period's invoice — please retry"
+	causes := map[string]error{
+		"database error":     fmt.Errorf("connection reset by peer"),
+		"not-found in cause": fmt.Errorf("connection reset by peer: %w", errs.ErrNotFound),
+	}
+	for name, cause := range causes {
+		t.Run(name, func(t *testing.T) {
+			buf := captureLogs(t)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest("POST", "/", nil)
+
+			err := fmt.Errorf("proration in atomic addItem tx: %w",
+				errs.Unavailable("proration_unavailable", message, cause))
+			FromError(rec, req, err, "subscription")
+
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status: got %d, want 503", rec.Code)
+			}
+			if got := rec.Header().Get("Retry-After"); got != "1" {
+				t.Errorf("Retry-After: got %q, want 1", got)
+			}
+			body := decodeError(t, rec)
+			if body.Type != "api_error" || body.Code != "proration_unavailable" || body.Message != message {
+				t.Errorf("body: got %+v, want api_error proration_unavailable %q", body, message)
+			}
+			if !strings.Contains(buf.String(), "connection reset by peer") || !strings.Contains(buf.String(), `"level":"ERROR"`) {
+				t.Errorf("want the cause logged at ERROR, got %s", buf.String())
+			}
+		})
+	}
+}
+
 // fakeSafeMessageError is a test double that opts into operator-safe
 // rendering via the SafeMessageError marker interface.
 type fakeSafeMessageError struct{ raw, safe string }
