@@ -355,7 +355,7 @@ jobs:
       - name: Start API
         run: |
           nohup go run ./cmd/hardcount > server.log 2>&1 &
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             curl -sf http://localhost:8080/health >/dev/null 2>&1 && break
             sleep 1
           done
@@ -480,7 +480,7 @@ jobs:
       - name: Start API
         run: |
           nohup go run ./cmd/hardcount > server.log 2>&1 &
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             curl -sf http://localhost:8080/health >/dev/null 2>&1 && break
             sleep 1
           done
@@ -511,7 +511,7 @@ jobs:
           cd web-v2
           npm run build
           HARDCOUNT_API_TARGET=http://127.0.0.1:8080 nohup npx vite preview --host 127.0.0.1 --port 4173 --strictPort > preview.log 2>&1 &
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl -sf http://127.0.0.1:4173/ >/dev/null 2>&1 && break
             sleep 1
           done
@@ -625,7 +625,10 @@ jobs:
           QS=$(sed -n 's/^HARDCOUNT_VERSION="\(.*\)"$/\1/p' deploy/compose/quickstart.sh)
           ENV=$(sed -n 's|^# HARDCOUNT_IMAGE=ghcr.io/gethardcount/hardcount:\(v[0-9.]*\)$|\1|p' deploy/compose/.env.example)
           echo "quickstart.sh: $QS   .env.example: $ENV"
-          [ -n "$QS" ] && [ "$QS" = "$ENV" ] || { echo "::error::deploy/compose/quickstart.sh HARDCOUNT_VERSION ($QS) must equal the image tag in deploy/compose/.env.example ($ENV)"; exit 1; }
+          if [ -z "$QS" ] || [ "$QS" != "$ENV" ]; then
+            echo "::error::deploy/compose/quickstart.sh HARDCOUNT_VERSION ($QS) must equal the image tag in deploy/compose/.env.example ($ENV)"
+            exit 1
+          fi
 
       # quickstart.sh shares its folder with installs made by hand, and its
       # destroy deletes data. It must refuse an .env it did not write (a copy
@@ -856,9 +859,9 @@ jobs:
             VERSION="dev-${GITHUB_SHA::7}"
             REF_TAG="${GITHUB_SHA}"
           fi
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "ref_tag=${REF_TAG}" >> "$GITHUB_OUTPUT"
           {
+            echo "version=${VERSION}"
+            echo "ref_tag=${REF_TAG}"
             echo "tags<<TAGS"
             echo "${REPO}:${REF_TAG}"
             echo "${REPO}:latest"
