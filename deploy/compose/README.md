@@ -9,7 +9,7 @@ This folder runs Hardcount on one machine: Postgres, Redis, the Hardcount API, t
 
 Production on one VM runs the published release images, set by `HARDCOUNT_IMAGE` and `HARDCOUNT_DASHBOARD_IMAGE` in `.env`. Leave those two lines out, and `docker compose up -d` builds both images from your checkout. The first build takes a few minutes. Everything else is the same.
 
-To upgrade a stack built from source, run these in `deploy/compose`. This example moves to `v0.9.2`.
+To upgrade a stack built from source, run these in `deploy/compose`. This example moves to `v0.9.3`.
 
 A Velox install (Hardcount's name before v0.9.0) cannot be upgraded: see [Coming from Velox](../../docs/upgrades.md#coming-from-velox).
 
@@ -25,7 +25,7 @@ A Velox install (Hardcount's name before v0.9.0) cannot be upgraded: see [Coming
 
    ```bash
    git fetch --tags
-   git checkout v0.9.2
+   git checkout v0.9.3
    docker compose build
    ```
 

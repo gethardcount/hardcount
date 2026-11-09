@@ -11,7 +11,7 @@ import (
 // anthropicPricesChecked is the date anthropicListPrices was last compared
 // with Anthropic's pricing page. When you check the page again, update the
 // table and this date (docs/dev/release-checklist.md).
-const anthropicPricesChecked = "2026-11-01"
+const anthropicPricesChecked = "2026-11-09"
 
 // anthropicPricingPage is the page the table is copied from.
 const anthropicPricingPage = "https://platform.claude.com/docs/en/about-claude/pricing"
@@ -51,8 +51,8 @@ var anthropicListPrices = []anthropicListPrice{
 	{"claude-haiku-5.5", "prompt_up_to_100k", "0.10", "0.50", "0.01", "0.125", "0.20", true, anthropicPricesChecked},
 	{"claude-haiku-5.5", "prompt_over_100k", "0.50", "2.50", "0.05", "0.625", "1", true, anthropicPricesChecked},
 	{"claude-haiku-4.5", "", "1", "5", "0.10", "1.25", "2", true, anthropicPricesChecked},
-	{"claude-3.5-haiku", "", "0.80", "4", "0.08", "1", "1.60", true, anthropicPricesChecked},
 	// No longer on the page; the recipe keeps the last published price.
+	{"claude-3.5-haiku", "", "0.80", "4", "0.08", "1", "1.60", false, "2026-11-01"},
 	{"claude-3.5-sonnet", "", "3", "15", "0.30", "3.75", "6", false, "2026-07-26"},
 	{"claude-3-opus", "", "15", "75", "1.50", "18.75", "30", false, "2026-07-26"},
 	{"claude-3-sonnet", "", "3", "15", "0.30", "3.75", "6", false, "2026-07-26"},

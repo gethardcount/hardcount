@@ -21,14 +21,7 @@ original text.
 
 **Before upgrading:**
 
-- Postgres 14 is end of life on 2026-11-12, and Hardcount no longer lists it as supported. Move to 16, the version the tests run on. 15, 17 and 18 are expected to work ([which Postgres works](docs/ops/postgres-requirements.md#which-postgres-works)).
-- Set `HOSTED_INVOICE_BASE_URL`, `CUSTOMER_PORTAL_URL` and `PAYMENT_UPDATE_RETURN_URL`, in every environment: none has a default any more. While one is unset, the flow it serves is refused instead of sending the customer to `http://localhost:5173`. The hosted invoice page shows no Pay button, setup links answer 409 `return_address_not_set`, and the "add a payment method" email is not sent. Saved-card charges and retries are unaffected. A quick-start `.env` made earlier lacks two of them: add the `HOSTED_INVOICE_BASE_URL` and `PAYMENT_UPDATE_RETURN_URL` lines `quickstart.sh` now writes ([settings](docs/settings.md)).
-- Webhook receivers under Stripe Tax: `invoice.finalized` for a finalized draft (by an operator, or after a tax retry) no longer carries the `tax_transaction_id` that finalize records. Hardcount records it just after the event, as it already did for invoices a subscription bills. Read it with `GET /v1/invoices/{id}`.
-- Stripe Tax with tax-inclusive pricing: before you upgrade, run the query in [Invoices an earlier version under-billed](docs/ops/tax-calculation.md#invoices-an-earlier-version-under-billed). Since v0.2.0, a tax retry could lower an invoice's total by about its tax. Upgrading does not restore a lowered draft, and after it a retry changes the lines the query looks for. Void each lowered draft and bill it again, or bill the difference ([#1628](https://github.com/gethardcount/hardcount/pull/1628)).
-- API callers: an API key now manages only its own mode's Stripe connection, and `PUT /v1/settings` takes only a dashboard session. A script that connects live Stripe with a test key, or changes settings with any key, gets `403`. Use a live key for live mode, and change settings in the dashboard ([#1618](https://github.com/gethardcount/hardcount/pull/1618)).
-- `DATABASE_URL` and `APP_DATABASE_URL` are now read the way `psql` reads them. Percent-encode special characters in the user name and password, such as `@` as `%40`. An unencoded `@` used to work. Now Hardcount refuses to start, and the error names the setting. A `+` is no longer read as a space, and an IPv6 host needs brackets: `@[::1]:5432` ([settings](docs/settings.md#database), [#1625](https://github.com/gethardcount/hardcount/pull/1625)).
-- If a database URL repeats a parameter such as `sslmode`, Hardcount now uses the last value instead of the first, which can turn TLS off. Remove the duplicate.
-- Compose installs: an `@` in `POSTGRES_PASSWORD` or `HARDCOUNT_APP_DB_PASSWORD` now stops start-up, because Compose puts both into the database URLs as written. Set each such password to a new value from `openssl rand -hex 24`. Postgres reads these settings only when it creates its data, so also set each new password on its database user with `ALTER ROLE` ([how](deploy/compose/README.md#if-something-goes-wrong)).
+- One migration runs on start: `00223_restore_catchup` adds the `restore_catchup` table, which marks a restored database.
 - Hardcount now refuses to start on a database `scripts/restore.sh` restored, or `hardcount restore begin` marked, and the restore pauses billing and dunning. A script that does this must change:
   - **A restore that replaces your live database** runs `hardcount restore catch-up` before it starts Hardcount. After a snapshot or point-in-time restore, it runs `hardcount restore begin` first ([Restore Hardcount](docs/ops/restore.md)).
   - **A copy,** such as a staging database refreshed from a live dump, must never run the catch-up: it writes to your live Stripe account. Remove the mark with `DELETE FROM restore_catchup;` instead, and follow the rules for starting a copy ([Back up Hardcount](docs/ops/backup-considerations.md#4-run-the-restore-drill)).
@@ -36,6 +29,31 @@ original text.
 ### Added
 
 - **A restored database catches up with Stripe before Hardcount serves it.** Started on a restored database, Hardcount could charge or refund again money Stripe moved after the backup. Now the restore pauses billing and dunning, and Hardcount refuses to start until `hardcount restore catch-up` has applied Stripe's events since the backup. What it must not apply is listed for you to handle. That is a payment whose invoice the restore lost, a refund whose credit note it lost or whose tax the old server may have reversed, and an event it could not apply. [Restore Hardcount](docs/ops/restore.md) is much shorter. ([#1633](https://github.com/gethardcount/hardcount/pull/1633))
+
+### Fixed
+
+- **A refund of another account's payment, on a Stripe account two Hardcount accounts share, is acknowledged.** Its webhook failed, and Stripe sent it again for three days. ([#1633](https://github.com/gethardcount/hardcount/pull/1633))
+
+## [0.9.3] - 2026-11-09
+
+Two under-billing fixes: a refreshed tax-inclusive Stripe Tax draft keeps its total, and a scheduled plan change no longer drops the other items' base fees. An API key now manages only its own mode's Stripe connection, and `golang.org/x/net` and the Postgres driver pgx carry their security fixes. PDFs print accented names whole, CI checks the migrations on Postgres 18, and the restore and usage-billing runbooks no longer charge a paid invoice again or bill usage in the wrong period.
+
+**Before upgrading:**
+
+- **First, before you upgrade (Stripe Tax with tax-inclusive pricing only):** run the query in [Invoices an earlier version under-billed](docs/ops/tax-calculation.md#invoices-an-earlier-version-under-billed). Since v0.2.0, a tax retry could lower an invoice's total by about its tax. Upgrading does not restore a lowered draft, and after it a retry changes the lines the query looks for. Void each lowered draft and bill it again, or bill the difference ([#1628](https://github.com/gethardcount/hardcount/pull/1628)).
+- Migrations: none, so no migration can stop this upgrade. The one new reason start-up stops is a database URL with an unencoded `@` (below). With two or more copies, upgrade one copy at a time ([Upgrade two or more copies](docs/upgrades.md#upgrade-two-or-more-copies)).
+- Set `HOSTED_INVOICE_BASE_URL`, `CUSTOMER_PORTAL_URL` and `PAYMENT_UPDATE_RETURN_URL`, in every environment: none has a default any more. While one is unset, the flow it serves is refused instead of sending the customer to `http://localhost:5173`. The hosted invoice page shows no Pay button, setup links answer 409 `return_address_not_set`, and the "add a payment method" email is not sent. Saved-card charges and retries are unaffected. A quick-start `.env` made earlier lacks two of them: add the `HOSTED_INVOICE_BASE_URL` and `PAYMENT_UPDATE_RETURN_URL` lines `quickstart.sh` now writes ([settings](docs/settings.md)).
+- `DATABASE_URL` and `APP_DATABASE_URL` are now read the way `psql` reads them. Percent-encode special characters in the user name and password, such as `@` as `%40`. An unencoded `@` used to work. Now Hardcount refuses to start, and the error names the setting. A `+` is no longer read as a space, and an IPv6 host needs brackets: `@[::1]:5432` ([settings](docs/settings.md#database), [#1625](https://github.com/gethardcount/hardcount/pull/1625)).
+- If a database URL repeats a parameter such as `sslmode`, Hardcount now uses the last value instead of the first, which can turn TLS off. Remove the duplicate.
+- Compose installs: an `@` in `POSTGRES_PASSWORD` or `HARDCOUNT_APP_DB_PASSWORD` now stops start-up, because Compose puts both into the database URLs as written. Set each such password to a new value from `openssl rand -hex 24`. Postgres reads these settings only when it creates its data, so also set each new password on its database user with `ALTER ROLE` ([how](deploy/compose/README.md#if-something-goes-wrong)).
+- Stripe: nothing to add.
+- API callers: an API key now manages only its own mode's Stripe connection, and `PUT /v1/settings` takes only a dashboard session. A script that connects live Stripe with a test key, or changes settings with any key, gets `403`. Use a live key for live mode, and change settings in the dashboard ([#1618](https://github.com/gethardcount/hardcount/pull/1618)).
+- API callers: on a subscription with more than one item, an unknown `new_plan_id` on `PATCH /v1/subscriptions/{id}/items/{itemID}` now always answers 422 with `param: new_plan_id`, not sometimes `param: items` ([#1607](https://github.com/gethardcount/hardcount/pull/1607)). Canceling a scheduled plan change answers 409, not 200, when the change took effect while the cancel ran ([#1617](https://github.com/gethardcount/hardcount/pull/1617)).
+- Webhook receivers under Stripe Tax: `invoice.finalized` for a finalized draft (by an operator, or after a tax retry) no longer carries the `tax_transaction_id` that finalize records. Hardcount records it just after the event, as it already did for invoices a subscription bills. Read it with `GET /v1/invoices/{id}`.
+- Postgres 14 is end of life on 2026-11-12, and Hardcount no longer lists it as supported. Move to 16, the version the tests run on. 15, 17 and 18 are expected to work ([which Postgres works](docs/ops/postgres-requirements.md#which-postgres-works)).
+- Scheduled plan changes: run the query in [Base fees missed at a scheduled plan change](docs/ops/runbook/plan-change-missed-base-fees.md#check). It lists each base fee that a period invoice of 0.9.2 or earlier left out, on a subscription with more than one item billed in advance. It only reads, and finds them before or after the upgrade. Bill each missed fee on a one-off invoice, or forgive it ([#1624](https://github.com/gethardcount/hardcount/pull/1624)).
+- Accounts set to a time zone in Alberta, Manitoba, the Northwest Territories or Morocco: the API image's time zone data was an hour off there since their 2026 clock changes. This release corrects it ([#1619](https://github.com/gethardcount/hardcount/pull/1619)). Their billing period boundaries move back to the right hour, so the first period that closes after the upgrade can be an hour longer or shorter.
+- On a Compose install: this release changes `deploy/compose/docker-compose.yml`. If you edited it, move your changes to `docker-compose.override.yml` first ([how](docs/settings.md#your-own-changes-the-override-file)), or `git checkout` refuses. Then check out the `v0.9.3` tag, change the image tags in `.env` to `v0.9.3`, add the two return-address lines above if `quickstart.sh` wrote your `.env`, and run `docker compose pull` and `docker compose up -d --no-build` ([Upgrade on one VM](docs/upgrades.md#upgrade-on-one-vm)). The tag's Compose file moves Redis to 8.10.2, so the rate-limit counts start again from zero.
 
 ### Changed
 
@@ -50,7 +68,6 @@ original text.
 
 ### Fixed
 
-- **A refund of another account's payment, on a Stripe account two Hardcount accounts share, is acknowledged.** Its webhook failed, and Stripe sent it again for three days. ([#1633](https://github.com/gethardcount/hardcount/pull/1633))
 - **Invoice and credit-note PDFs print accented letters whole.** A name or address such as José Müller or São João printed as Jose Muller or Sao Joao, though copying its text gave the accents. Each PDF is made when it is opened, so earlier invoices now print correctly; PDFs already emailed stay as sent. The PDF library gopdf is now v0.38.4. ([#1631](https://github.com/gethardcount/hardcount/pull/1631))
 - **Docs: the LiteLLM replay bills each call in its own period, and the bulk billing retry lists again until it has retried every failing subscription it finds.** The runbook's replay records carried no `endTime`, so calls billed in the period of the replay. If you replayed with it, [the runbook](docs/ops/runbook/litellm-spend-gap.md#if-you-replayed-with-an-earlier-version-of-this-page) finds those calls. Late usage is billed once, on a one-off invoice with an idempotency key. ([#1627](https://github.com/gethardcount/hardcount/pull/1627))
 - **The audit log no longer records a scheduled plan change that was canceled as it came due.** A cancel that landed while the billing run applied the change still left a `subscription.pending_change_applied` row, with an empty `new_plan_id`. ([#1624](https://github.com/gethardcount/hardcount/pull/1624))
@@ -5546,7 +5563,8 @@ Documentation only: the README heading "Fewer dependencies" uses typographic quo
 
 ---
 
-[Unreleased]: https://github.com/gethardcount/hardcount/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/gethardcount/hardcount/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/gethardcount/hardcount/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/gethardcount/hardcount/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/gethardcount/hardcount/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/gethardcount/hardcount/compare/v0.8.2...v0.9.0
