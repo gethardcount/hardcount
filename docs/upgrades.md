@@ -204,6 +204,10 @@ On one VM:
      ```
 
      **You see:** `state:        up to date, nothing to apply`.
+   - Run the checks of
+     [Check the restored database](ops/restore.md#check-the-restored-database)
+     before the catch-up: they catch a wrong backup before anything writes
+     to Stripe.
    - Run the catch-up with the old release, as in
      [Run the catch-up](ops/restore.md#run-the-catch-up), which also lists
      its exit codes:
@@ -217,11 +221,11 @@ On one VM:
      `DROP TABLE restore_catchup;`. Then match Hardcount with Stripe as that
      release's own `/opt/hardcount/docs/ops/restore.md` says, from the step
      after its restore, instead of the rest of this page.
-   - Run the checks of
-     [Check the restored database](ops/restore.md#check-the-restored-database),
-     and decide on the
-     [queued emails and webhooks](ops/restore.md#queued-emails-and-webhooks).
-     Then start the release.
+   - Decide on the
+     [queued emails and webhooks](ops/restore.md#queued-emails-and-webhooks),
+     and set the holds of item 3 of
+     [Start Hardcount](ops/restore.md#start-hardcount): block the payment
+     pages, and hold the calls that charge. Then start the release.
 
      ```bash
      docker compose up -d
@@ -242,9 +246,11 @@ in time you noted into the database, and mark it as restored with the old
 release's `hardcount restore begin`. A release from before the catch-up has
 no such command: follow its own restore page, as step 4 says. Put the old release's image or binary
 in place on every copy. Then run that release's `migrate status`, which says
-`up to date`, its `hardcount restore catch-up`, and the
-[checks of the restored database](ops/restore.md#check-the-restored-database).
-Start the old release on every copy, and do step 5.
+`up to date`, the
+[checks of the restored database](ops/restore.md#check-the-restored-database),
+and its `hardcount restore catch-up`. Set the holds of
+[Start Hardcount](ops/restore.md#start-hardcount), start the old release on
+every copy, and do step 5.
 How a restore works, and what to check before you start:
 [Restore Hardcount](ops/restore.md).
 

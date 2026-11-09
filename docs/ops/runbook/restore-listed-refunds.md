@@ -8,21 +8,29 @@ The catch-up printed lines under `Refunds not applied, because applying them cou
 
 ## Why
 
-Each is a refund of a payment the restored database holds, made after the backup, which the restored database does not hold. Until you have handled it, issue no credit note that refunds its invoice: the invoice shows that money as refundable again.
+Each is a refund of a payment the restored database holds, made after the backup, which the restored database does not hold. The invoice shows that money as refundable again: until you have handled the refund, issue no credit note that refunds its invoice. Where this page has you record the refund in your own books only, the invoice keeps showing that amount as refundable. Lower any later refund or credit on that invoice by the amount, by hand.
 
 - **`made by Hardcount for credit note hc_cn_…`:** Hardcount made the refund for a credit note the restore lost, or left without the refund's ID. Applied as a webhook, it would be acknowledged with no record.
 - **`made in Stripe; the invoice was reported to Stripe Tax`:** someone refunded in Stripe after the backup. The old server may have recorded it as a credit note and reversed its tax in Stripe Tax. Applied again, it would reverse the tax a second time.
 
 ## Fix
 
-**`made by Hardcount for credit note hc_cn_…`.** Look up the note: `SET app.bypass_rls = 'on'; SELECT id, status, stripe_refund_id FROM credit_notes WHERE id = 'hc_cn_…';`
+**`made by Hardcount for credit note hc_cn_…`.** Look up the note, and the `tax_transaction_id` of the invoice the line names:
+
+```sql
+SET app.bypass_rls = 'on';
+SELECT id, status, stripe_refund_id FROM credit_notes WHERE id = 'hc_cn_…';
+SELECT tax_transaction_id FROM invoices WHERE id = 'hc_inv_…';
+```
+
+Then, by what you see:
 
 - **`issued`, without this refund's ID:** click **Retry refund** on it. Hardcount finds the refund by its metadata and records it, without refunding again.
-- **`draft`:** click **Void** on it. Issuing it can refund the customer a second time.
+- **`draft`:** click **Void** on it. Issuing it can refund the customer a second time. The refund is then recorded nowhere: go on as for **No row**, below, by the invoice's `tax_transaction_id`.
 - **No row, and the invoice's `tax_transaction_id` is empty:** record the refund with a credit note as in step 1 of [A refund made in Stripe](refund-made-in-stripe.md#fix). Put the amount in `out_of_band_amount_cents`, in place of `refund_amount_cents` and `stripe_refund_id`, and the refund's ID in the reason.
 - **No row, and `tax_transaction_id` is set:** the old server reversed the refund's tax in Stripe Tax when it issued the note, and a new credit note would reverse it again. Record the refund in your own books only.
 
-**`made in Stripe; the invoice was reported to Stripe Tax`.** Look in your Stripe Tax transactions for a reversal of the invoice's `tax_transaction_id` made after the backup time, for this refund's amount. If there is one, record the refund in your own books only. If not, record it with step 1 of [A refund made in Stripe](refund-made-in-stripe.md#fix), which reverses its tax once.
+**`made in Stripe; the invoice was reported to Stripe Tax`.** Read the invoice's `tax_transaction_id` with the second query above. Look in your Stripe Tax transactions for a reversal of the invoice's `tax_transaction_id` made after the backup time, for this refund's amount. If there is one, record the refund in your own books only. If not, record it with step 1 of [A refund made in Stripe](refund-made-in-stripe.md#fix), which reverses its tax once.
 
 ## Verify
 

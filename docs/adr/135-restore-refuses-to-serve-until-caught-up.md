@@ -61,7 +61,7 @@ Stripe documents the recovery for missed events: "If your webhook endpoint was t
 
 ### Risks / open items
 
-- **A backup older than 29 days** is refused: Stripe lists events for 30 days only. [A runbook page](../ops/runbook/restore-old-backup.md) keeps the manual steps for it.
+- **A backup more than 26 days old** is refused. The catch-up reads from 72 hours before the anchor, and Stripe lists events for 30 days only, so it refuses a start more than 29 days ago. [A runbook page](../ops/runbook/restore-old-backup.md) keeps the manual steps for it.
 - **Duplicate emails.** The catch-up's settles queue a receipt for a payment the old server may already have receipted. Outgoing emails and webhooks are queued, as in normal operation, and the restore page says how to skip the old ones.
 - **Stripe Tax.** A tax transaction reported to Stripe Tax after the backup can be reported again for an invoice billing builds again. This is unchanged by this ADR. A refund made in Stripe after the backup on an invoice reported to Stripe Tax is listed, not applied: the old server may already have reversed its tax under the credit note the restore lost. The operator checks Stripe Tax for that reversal before recording the refund.
 - **A copy is not a restore.** The catch-up writes to the live Stripe account: it expires live customers' payment pages, and the events it applies set customers' default cards and reverse tax in Stripe Tax. The backup page says to remove the marker by hand on a copy instead, and never to run the catch-up there.
