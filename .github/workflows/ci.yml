@@ -606,6 +606,31 @@ jobs:
       - name: quickstart.sh acts only on its own install
         run: scripts/ci/quickstart-own-install.sh
 
+      # ShellCheck is pinned to a release and to the SHA-256 of its
+      # linux.x86_64 archive. The release publishes no checksums file, so the
+      # hash is the asset digest GitHub's release API reports. Bump the
+      # version and the hash together. The runner image has its own
+      # shellcheck; this one goes first on PATH, so the image cannot change
+      # the result.
+      - name: Install ShellCheck
+        env:
+          SHELLCHECK_VERSION: 0.11.0
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+        run: |
+          set -euo pipefail
+          name="shellcheck-v${SHELLCHECK_VERSION}"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$name.tar.xz" \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/$name.linux.x86_64.tar.xz"
+          echo "$SHELLCHECK_SHA256  $RUNNER_TEMP/$name.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/$name.tar.xz" -C "$RUNNER_TEMP" "$name/shellcheck"
+          echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
+
+      # The scripts back up, restore and install Hardcount. A quoting bug in
+      # one, such as an unquoted path that splits at a space, is easy to miss
+      # in review. Local command: scripts/ci/shellcheck.sh.
+      - name: ShellCheck every shell script
+        run: scripts/ci/shellcheck.sh
+
       # Last, so a newly published advisory (the usual reason this fails, with
       # no change in this repo) does not hide the results of the steps above.
       # The matcher is removed so govulncheck's call traces stay plain text
