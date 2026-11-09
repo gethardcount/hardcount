@@ -1772,16 +1772,30 @@ func (a *hostedInvoiceStripeAdapter) expireStripeSession(ctx context.Context, sc
 // subscription with a scheduled cancel still bills until the cancel takes
 // effect, so it is included on purpose.
 type subscriptionCheckerAdapter struct {
-	subs  *subscription.PostgresStore
+	subs  subscriptionLister
 	plans *pricing.Service
 }
 
+// subscriptionLister is the subscription read the archive and currency
+// guards need. Satisfied by *subscription.PostgresStore.
+type subscriptionLister interface {
+	List(ctx context.Context, filter subscription.ListFilter) ([]domain.Subscription, int, error)
+}
+
+// NonTerminalForCustomer reads one status at a time: trialing, then active,
+// then draft when includeDraft is set. The customer service calls it under
+// the customer-rules lock, which creates and draft activations also take, so
+// those cannot move a subscription into the set between the reads. A trial
+// end (trialing to active) takes no customer lock. Reading trialing first
+// finds such a subscription in the first read if the trial has not ended,
+// and in the second if it has; an id already collected is skipped.
 func (a *subscriptionCheckerAdapter) NonTerminalForCustomer(ctx context.Context, tenantID, customerID string, includeDraft bool) ([]customer.NonTerminalSubscription, error) {
 	var out []customer.NonTerminalSubscription
-	statuses := []string{string(domain.SubscriptionActive), string(domain.SubscriptionTrialing)}
+	statuses := []string{string(domain.SubscriptionTrialing), string(domain.SubscriptionActive)}
 	if includeDraft {
 		statuses = append(statuses, string(domain.SubscriptionDraft))
 	}
+	collected := map[string]bool{}
 	for _, status := range statuses {
 		subs, _, err := a.subs.List(ctx, subscription.ListFilter{
 			TenantID:   tenantID,
@@ -1793,6 +1807,10 @@ func (a *subscriptionCheckerAdapter) NonTerminalForCustomer(ctx context.Context,
 			return nil, err
 		}
 		for _, sub := range subs {
+			if collected[sub.ID] {
+				continue
+			}
+			collected[sub.ID] = true
 			name := sub.DisplayName
 			if name == "" {
 				name = sub.Code

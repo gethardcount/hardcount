@@ -6091,8 +6091,8 @@ export const getActivateSubscriptionUrl = (id: string,) => {
  * billed in advance is invoiced in the same database transaction as
  * the activation: both are saved, or neither is. The plans'
  * currency must still match the customer's billing profile and the
- * customer's other `draft`, `trialing` and `active` subscriptions.
- * Takes no body.
+ * customer's other `draft`, `trialing` and `active` subscriptions,
+ * and the customer must not be archived. Takes no body.
  *
  * Sends the `subscription.activated` webhook event.
  * @summary Activate a draft subscription

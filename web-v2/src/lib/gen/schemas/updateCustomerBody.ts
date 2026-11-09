@@ -26,8 +26,9 @@ export type UpdateCustomerBody = {
      */
   email?: string;
   /**
-     * `archived` blocks new subscriptions for the customer.
-     * `active` lifts that.
+     * `archived` blocks new subscriptions for the customer
+     * and activating its draft subscriptions. `active` lifts
+     * that.
      */
   status?: UpdateCustomerBodyStatus;
   /** Policy ID, or `""` to use the account's default policy. */

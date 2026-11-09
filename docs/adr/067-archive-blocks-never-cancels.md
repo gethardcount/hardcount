@@ -1,11 +1,11 @@
 # ADR-067: Archive blocks new business — it never cancels, and it never lies
 
 **Date:** 2026-07-02
-**Status:** Accepted (shipped in P2a; amended by [ADR-100](100-currency-coherence-guard-ring.md) on 2026-07-26: the billing-profile currency guard)
+**Status:** Accepted (shipped in P2a; amended by [ADR-100](100-currency-coherence-guard-ring.md) on 2026-07-26: the billing-profile currency guard; amended 2026-11-10: the archive checks run under the customer-rules lock, and an archived customer's draft cannot be activated)
 
 ## Summary
 
-Archiving a customer is refused with 409 while any of their subscriptions still bills (active or trialing, including one with a scheduled cancel); archive never cancels anything. Auto-cancel would run the immediate-cancel path, which issues a final invoice and charges the saved card, so "archive to stop billing" would itself charge cards. Archived customers and archived plans accept no new subscriptions, while existing unpaid invoices stay collectible and dunning continues. Since 2026-10-18 an archived plan also cannot be added as a new item to an existing subscription (#1194); items already on it keep billing. The checker that finds billing subscriptions also refuses a billing-profile currency that differs from their plan currency, and since [ADR-100](100-currency-coherence-guard-ring.md) that currency check counts draft subscriptions too. Status: active, amended 2026-07-26 by ADR-100.
+Archiving a customer is refused with 409 while any of their subscriptions still bills (active or trialing, including one with a scheduled cancel); archive never cancels anything. Auto-cancel would run the immediate-cancel path, which issues a final invoice and charges the saved card, so "archive to stop billing" would itself charge cards. Archived customers accept no new subscriptions and no draft activation, and archived plans accept no new subscriptions, while existing unpaid invoices stay collectible and dunning continues. Since 2026-10-18 an archived plan also cannot be added as a new item to an existing subscription (#1194); items already on it keep billing. The checker that finds billing subscriptions also refuses a billing-profile currency that differs from their plan currency, and since [ADR-100](100-currency-coherence-guard-ring.md) that currency check counts draft subscriptions too. Status: active, amended 2026-07-26 by ADR-100.
 
 ## Context
 
@@ -65,3 +65,31 @@ sub), `TestArchive_AllowedWhenOnlyTerminalSubs` (+ unarchive),
 (mismatch 409 / case-normalize / format 400),
 `TestCreate_RejectsArchivedCustomer`, `TestCreate_RejectsArchivedPlan`
 (+ active-plan control). Each guard deleted → its test fails.
+
+Added 2026-11-10 (amendment below), in `internal/api`:
+`TestE2E_CustomerLock_ArchiveRacesCreate` (`create_first`, `archive_first`),
+`TestE2E_Activate_ArchivedCustomerRefused`,
+`TestE2E_CustomerUpdate_ConcurrentEditsKeepBothFields` and
+`TestSubscriptionChecker_TrialEndingBetweenReadsIsSeen`.
+
+## Amendment 2026-11-10: the archive checks run under the customer-rules lock
+
+The archive check and the archived checks in subscription create read only
+committed rows. So an archive and a create at the same moment could both
+pass: the customer ended archived with a subscription that bills. And
+activating a draft never read the customer's status, while the archive
+check skips drafts on purpose. Archiving a customer and then activating its
+draft started billing a customer the operator had retired.
+
+- **One lock orders them.** The archive check, the archived check in
+  create and a new archived check in draft activation all run under the
+  customer-rules lock ([ADR-130](130-usage-prices-belong-to-the-plan.md)
+  section 8 step 1a). Whichever takes it first, the other sees it.
+- **Activation refuses an archived customer** with 409 `invalid_state`.
+  Unarchive the customer first. The archive check still skips drafts.
+- **A customer update reads the row under the lock.** It applies only the
+  fields it was sent to the row as saved, so a rename no longer writes back
+  a stale `status` and un-archives the customer.
+- **The check reads `trialing` before `active`.** A trial end takes no
+  customer lock. Read in this order, a trial that ends between the two
+  reads is in the second one. An id already found is not listed twice.

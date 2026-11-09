@@ -13,7 +13,7 @@ billed by the plan's prices, whatever the quantity.
 
 | Status | What it means | What you do |
 |---|---|---|
-| `draft` | Set up, but not started. Bills nothing. | Start it with `POST /v1/subscriptions/{id}/activate`. |
+| `draft` | Set up, but not started. Bills nothing. | Start it with `POST /v1/subscriptions/{id}/activate`. A draft of an archived customer cannot start: unarchive the customer first. |
 | `trialing` | In a free trial. The trial bills nothing. | Nothing. It becomes `active` when the trial ends. |
 | `active` | Billing, period after period. | Nothing. |
 | `canceled` | Ended. It never bills again, and it cannot be restarted. | Create a new subscription to bill the customer again. |

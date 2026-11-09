@@ -26,9 +26,31 @@ type Store interface {
 	// that domain never reads the customers table directly — keeps
 	// decryption centralised on the customer-package read path.
 	ListByTestClockID(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Customer, int, error)
-	Update(ctx context.Context, tenantID string, c domain.Customer) (domain.Customer, error)
 
-	UpsertBillingProfile(ctx context.Context, tenantID string, bp domain.CustomerBillingProfile) (domain.CustomerBillingProfile, error)
+	// WithCustomerRulesLock opens a tenant transaction, takes the
+	// customer-rules lock (postgres.LockCustomerRulesTx), reads the customer
+	// on that transaction and calls fn with both. It commits when fn returns
+	// nil and rolls back otherwise. ErrNotFound when RLS shows no such
+	// customer; fn is then not called.
+	//
+	// The read comes after the lock, so locked holds every change that an
+	// earlier holder committed: another customer update, or a subscription
+	// create, activation or item change, which take the same lock. fn runs
+	// its checks on locked and then writes on tx. It takes no clock or row
+	// lock first, so it cannot deadlock with a test-clock teardown.
+	WithCustomerRulesLock(ctx context.Context, tenantID, id string, fn func(tx *sql.Tx, locked domain.Customer) error) error
+	// UpdateTx writes c's display name, email, CC list, status and dunning
+	// policy on tx and returns the saved row. When emailChanged is set it
+	// also clears the bounce and complaint state, which belonged to the old
+	// address: email_status becomes 'unknown' (the new address is untested)
+	// and the bounce reason and time are cleared. ErrNotFound when the row
+	// is gone. Call it inside WithCustomerRulesLock.
+	UpdateTx(ctx context.Context, tx *sql.Tx, c domain.Customer, emailChanged bool) (domain.Customer, error)
+
+	// UpsertBillingProfileTx writes the customer's billing profile on tx.
+	// Call it inside WithCustomerRulesLock, so its currency check and its
+	// write are one step against subscription creates.
+	UpsertBillingProfileTx(ctx context.Context, tx *sql.Tx, tenantID string, bp domain.CustomerBillingProfile) (domain.CustomerBillingProfile, error)
 	GetBillingProfile(ctx context.Context, tenantID, customerID string) (domain.CustomerBillingProfile, error)
 
 	// SetStripeCustomerID writes the canonical Stripe Customer mapping
@@ -53,14 +75,6 @@ type Store interface {
 	// a later bounce. Each call queues customer.email_complained in its
 	// transaction, and a failed insert fails the call.
 	MarkEmailComplained(ctx context.Context, tenantID, customerID, reason string) error
-
-	// ResetEmailStatus clears any prior bounce/complain flag on the
-	// customer — called by the service layer when the email value
-	// changes (operator edit, portal self-edit, billing-profile email
-	// change). Without this reset, a bounced flag on the OLD address
-	// silently suppresses sends to a brand-new untested address via
-	// the email.RecipientSuppressionChecker gate. Idempotent.
-	ResetEmailStatus(ctx context.Context, tenantID, customerID string) error
 
 	// SetCostDashboardToken writes (or rotates) the public cost-dashboard
 	// token on a customer row. Old tokens are discarded immediately —

@@ -132,6 +132,11 @@ type Store interface {
 	// rolls the create back rather than silently dropping the first-period base
 	// fee (the cycle scheduler skips the just-elapsed in_advance segment, so a
 	// lost day-1 invoice is a permanent revenue leak). billFn may be nil.
+	//
+	// The transaction takes the customer-rules lock before the insert and
+	// refuses an archived customer (InvalidState) or one RLS does not show
+	// (NotFound). billFn runs under that lock, so Service.Create runs its
+	// currency check there too.
 	CreateWithBill(ctx context.Context, tenantID string, s domain.Subscription, billFn func(tx *sql.Tx, created domain.Subscription) error) (domain.Subscription, error)
 
 	// Get and List hydrate the returned subscriptions with their current
@@ -304,6 +309,9 @@ type Store interface {
 	// activated in_advance sub's first base fee was silently never invoiced
 	// (the revenue-leak class ADR-056 fixed for trial→active). A billFn error
 	// rolls the activation back — never an active sub with a lost invoice.
+	// Right after the flip it takes the customer-rules lock and refuses a
+	// draft whose customer is archived (InvalidState), before the plans and
+	// billFn's invoice number.
 	ActivateDraftWithBill(ctx context.Context, tenantID, id string, at, periodStart, periodEnd time.Time, anchorDay int, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error)
 
 	// EndTrialEarlyWithBill flips trialing→active (resetting the period anchor)
@@ -333,16 +341,24 @@ type Store interface {
 	//
 	// Every write to subscription_items locks the subscription row first
 	// (#1270), so item writers wait for each other and for the period
-	// closers. A write that references more than one plan takes them next,
-	// in ascending id, before any other row (LockPlansTx, D08 §4.21).
+	// closers. A service item change takes the customer-rules lock next
+	// (LockForItemChangeTx). A write that references more than one plan
+	// takes them after that, in ascending id, before any other row
+	// (LockPlansTx, D08 §4.21).
 
-	// LockForItemChangeTx locks the subscription row on the caller's tx and
-	// returns the subscription with its live items, read after the lock
-	// (#1270). Because every item write takes the same lock first, a change
-	// that committed before the lock was granted is in what this returns,
-	// and a change that starts later waits for the caller's tx to end. Item
-	// changes price their proration from what this returns. ErrNotFound when
-	// the row is gone.
+	// LockForItemChangeTx locks the subscription row on the caller's tx, then
+	// takes the customer-rules lock (postgres.LockCustomerRulesTx), and
+	// returns the subscription with its live items, read after both locks
+	// (#1270). Because every item write takes the same row lock first, a
+	// change that committed before the lock was granted is in what this
+	// returns, and a change that starts later waits for the caller's tx to
+	// end. The customer-rules lock does the same for the customer's other
+	// subscriptions and its billing profile, so the add and plan-change
+	// checks after it are complete. Quantity changes and removals check no
+	// customer rule; they take the lock only because they share this
+	// function, and so wait for (and make wait) the customer's other
+	// subscription writes. Item changes price their proration from what
+	// this returns. ErrNotFound when the row is gone.
 	LockForItemChangeTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string) (domain.Subscription, error)
 
 	// LockPlansTx takes the plans FOR KEY SHARE on the caller's tx, in
