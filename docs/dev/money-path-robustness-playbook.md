@@ -229,12 +229,24 @@ Ordered by leverage. A "no" blocks the PR.
     validated", point at the exact upstream check for each invariant.
 12. **Grep your own diff** for `catchup will retry` / `next cycle` / `reconciler
     will catch` / `EnqueueStandalone` / `_ =` on side-effects. Prove each
-    named backstop exists and sweeps this state. Two tests fail a new send
-    queued after its commit: `internal/arch/webhook_emit_catalog_test.go`
-    for a webhook event, and `internal/arch/email_outbox_standalone_test.go`
-    for an email it does not list with a reason. Neither sees a hand-rolled
-    `BeginTx` + `Enqueue` + `Commit` with no business write in it; the
-    class B question in §4 does.
+    named backstop exists and sweeps this state.
+    - **Tests.** Two tests fail the common shapes of a new send queued after
+      its commit. `internal/arch/webhook_emit_catalog_test.go` fails a new
+      call that queues a webhook event after its commit.
+      `internal/arch/email_outbox_standalone_test.go` fails a call of an
+      `OutboxSender` method built on `enqueue`, unless the call is listed
+      with a reason.
+    - **What they miss.** Green tests do not prove that no new post-commit
+      send exists. Neither test sees a hand-rolled `BeginTx` + `Enqueue` +
+      `Commit` with no state write in it, or a send made through a function
+      value. The webhook test does not flag a new caller of a function that
+      queues an event after its commit and does other work too, such as
+      `payment.Stripe.SettleSucceeded`. The email test does not see a direct
+      `EnqueueStandalone` call, or a send from inside `internal/email`.
+    - **Who catches those.** The grep above finds a direct
+      `EnqueueStandalone`. For the rest, a reviewer checks each `Enqueue` the
+      diff reaches, including those in the functions it calls. Each must run
+      on the same `*sql.Tx` as its state write: the class B question in §4.
 
 ---
 
@@ -248,10 +260,12 @@ proof land on the table.
   the DB commit, and (c) two concurrent callers? If the answer is 'the CAS
   already guarantees exactly-once' with no atomic internal effect, an atomic
   option was skipped."
-- **B (dual-write):** "Does the internal side-effect share the state-change tx
-  (grep the `*sql.Tx` param), or run post-commit? If post-commit, is it a durable
-  enqueued obligation/marker, or a fire-and-forget a crash loses? Show me the
-  `Enqueue`-in-tx before the `.Dispatch(`."
+- **B (dual-write):** "Does each coupled effect, an internal write or an
+  outbox `Enqueue`, run on the same `*sql.Tx` as the state write? Follow its
+  `*sql.Tx` param back to the `BeginTx` that opened it. An `Enqueue` on a tx
+  opened just for it commits after the state write, so it runs post-commit. If
+  post-commit, what re-drives it after a crash: a marker or a state that a
+  sweep re-reads? If nothing does, a crash loses it."
 - **C (webhooks):** "If Stripe redelivers this exact event after `processEvent`
   committed but `IngestEvent` failed, does re-running double-count money or
   re-fire an outbound event? Does any money-state come from a browser redirect?"
