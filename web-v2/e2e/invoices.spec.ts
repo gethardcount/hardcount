@@ -875,7 +875,7 @@ test('Issue credit note after a lost answer says the result is unknown, counts t
   const unknownResult = (dialog: Locator) => dialog.getByRole('status').filter({ hasText: 'Result unknown' })
 
   // Invoice page: the answer to a 10.00 note is lost.
-  let drop = await dropNextCreditNoteAnswer(page)
+  let drop = await dropNextAnswer(page, '/v1/credit-notes')
   await page.goto(`/invoices/${invoice.id}`)
   const openFromInvoice = async () => {
     await (await invoiceActions(page)).getByRole('menuitem', { name: 'Issue credit note' }).click()
@@ -905,7 +905,7 @@ test('Issue credit note after a lost answer says the result is unknown, counts t
   // Credit notes page: the answer to a 5.00 note is lost, and the dialog is
   // opened again for the same invoice. Other values under the kept key are
   // refused, which settles the try, so the next click makes a new note.
-  drop = await dropNextCreditNoteAnswer(page)
+  drop = await dropNextAnswer(page, '/v1/credit-notes')
   await page.goto('/credit-notes')
   dialog = await issueFromCreditNotesPage(page, customer.display_name, invoice.invoice_number)
   await fill(dialog, '5.00')
@@ -958,7 +958,7 @@ test('Issue credit note keeps its key through an answer that says nothing about 
   }
 
   // The answer to a 10.00 note is lost.
-  const drop = await dropNextCreditNoteAnswer(page)
+  const drop = await dropNextAnswer(page, '/v1/credit-notes')
   await page.goto(`/invoices/${invoice.id}`)
   let dialog = await openDialog()
   await fill(dialog, '10.00')
