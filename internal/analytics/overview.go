@@ -11,6 +11,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/platform/logging"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -104,7 +105,7 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		slog.Error("analytics overview: begin tx", "error", err)
+		slog.Log(ctx, logging.ErrorLevel(ctx, err), "analytics overview: begin tx", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
@@ -118,7 +119,7 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 	// total. Defaults to USD when settings are unset (fresh tenant).
 	defaultCurrency, err := defaultCurrencyFor(ctx, tx)
 	if err != nil {
-		slog.Error("analytics overview: default currency", "error", err)
+		slog.Log(ctx, logging.ErrorLevel(ctx, err), "analytics overview: default currency", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
@@ -130,7 +131,7 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 	resp.MRR, err1 = currentMRR(ctx, tx, defaultCurrency)
 	resp.MRRPrev, err2 = mrrAtPointInTime(ctx, tx, period.Start, defaultCurrency)
 	if err := firstErr(err1, err2); err != nil {
-		slog.Error("analytics overview: mrr", "error", err)
+		slog.Log(ctx, logging.ErrorLevel(ctx, err), "analytics overview: mrr", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
@@ -141,7 +142,7 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 	resp.Revenue, err1 = sumPaidRevenue(ctx, tx, period.Start, period.End, defaultCurrency)
 	resp.RevenuePrev, err2 = sumPaidRevenue(ctx, tx, period.PrevStart, period.PrevEnd, defaultCurrency)
 	if err := firstErr(err1, err2); err != nil {
-		slog.Error("analytics overview: revenue", "error", err)
+		slog.Log(ctx, logging.ErrorLevel(ctx, err), "analytics overview: revenue", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
@@ -227,7 +228,7 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, q := range queries {
 		if err := tx.QueryRowContext(ctx, q.sql, q.args...).Scan(q.dst); err != nil {
-			slog.Error("analytics overview", "query", q.name, "error", err)
+			slog.Log(ctx, logging.ErrorLevel(ctx, err), "analytics overview", "query", q.name, "error", err)
 			respond.InternalError(w, r)
 			return
 		}
@@ -235,14 +236,14 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 
 	resp.OutstandingByCurrency, err = outstandingByCurrency(ctx, tx, defaultCurrency)
 	if err != nil {
-		slog.Error("analytics overview: outstanding by currency", "error", err)
+		slog.Log(ctx, logging.ErrorLevel(ctx, err), "analytics overview: outstanding by currency", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
 
 	resp.CreditBalanceByCurrency, err = creditBalanceByCurrency(ctx, tx, defaultCurrency)
 	if err != nil {
-		slog.Error("analytics overview: credit balance", "error", err)
+		slog.Log(ctx, logging.ErrorLevel(ctx, err), "analytics overview: credit balance", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
@@ -250,7 +251,7 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 	// MRR movement within the period
 	mvt, err := computeMRRMovement(ctx, tx, period.Start, period.End, defaultCurrency)
 	if err != nil {
-		slog.Error("analytics overview: mrr movement", "error", err)
+		slog.Log(ctx, logging.ErrorLevel(ctx, err), "analytics overview: mrr movement", "error", err)
 		respond.InternalError(w, r)
 		return
 	}

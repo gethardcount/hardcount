@@ -2,6 +2,7 @@ package respond
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -83,6 +85,62 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	return &buf
+}
+
+// safeCause is a SafeMessageError that wraps its cause, as a payment error
+// wraps the Stripe client's error.
+type safeCause struct{ cause error }
+
+func (e *safeCause) Error() string               { return "stripe: " + e.cause.Error() }
+func (e *safeCause) Unwrap() error               { return e.cause }
+func (e *safeCause) OperatorSafeMessage() string { return "the payment provider did not answer" }
+
+// TestFromError_ClientGoneLogsAtWarn: a handler error from a request whose
+// client went away, such as a closed browser tab, is logged at WARN with the
+// same fields. The same error on a live request, and the 30s route timeout,
+// stay at ERROR, the level operators alert on.
+// Mutation-verify: log at slog.LevelError in FromError → the "client went
+// away" rows log at ERROR.
+func TestFromError_ClientGoneLogsAtWarn(t *testing.T) {
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	timedOut, stop := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	t.Cleanup(stop)
+	canceled := fmt.Errorf("list invoices: %w", context.Canceled)
+
+	cases := []struct {
+		name    string
+		ctx     context.Context
+		err     error
+		wantMsg string
+		want    string
+	}{
+		{"client went away", gone, canceled, "unhandled error", "WARN"},
+		{"same error, request still live", context.Background(), canceled, "unhandled error", "ERROR"},
+		{"route timeout", timedOut, fmt.Errorf("list invoices: %w", context.DeadlineExceeded), "unhandled error", "ERROR"},
+		{"provider call, client went away", gone, &safeCause{context.Canceled}, "safe-message error returned", "WARN"},
+		{"provider call, request still live", context.Background(), &safeCause{context.Canceled}, "safe-message error returned", "ERROR"},
+		{"unavailable refusal, client went away", gone, errs.Unavailable("proration_unavailable", "retry", canceled), "request refused as unavailable; the client may send it again", "WARN"},
+		{"unavailable refusal, request still live", context.Background(), errs.Unavailable("proration_unavailable", "retry", canceled), "request refused as unavailable; the client may send it again", "ERROR"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := captureLogs(t)
+			req := httptest.NewRequest("GET", "/v1/invoices", nil).WithContext(tc.ctx)
+			FromError(httptest.NewRecorder(), req, tc.err, "invoice")
+
+			var entry map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+				t.Fatalf("want exactly one JSON log line, got %q: %v", buf.String(), err)
+			}
+			if entry["level"] != tc.want || entry["msg"] != tc.wantMsg {
+				t.Errorf("logged %v %q, want %s %q", entry["level"], entry["msg"], tc.want, tc.wantMsg)
+			}
+			if entry["error"] != tc.err.Error() || entry["resource"] != "invoice" {
+				t.Errorf("fields error=%v resource=%v, want %q and invoice", entry["error"], entry["resource"], tc.err.Error())
+			}
+		})
+	}
 }
 
 // The message-text fallback is the one branch that answers from an untyped

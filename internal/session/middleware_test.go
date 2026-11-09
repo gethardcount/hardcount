@@ -1,8 +1,12 @@
 package session
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,6 +56,53 @@ func TestMiddlewareOrAPIKey_CookieOutageDoesNotFallThrough(t *testing.T) {
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status: got %d, want 503 (no fall-through on outage)", rec.Code)
+	}
+}
+
+// canceledStore fails every lookup the way the Postgres store does when the
+// request's context is cancelled mid-query.
+type canceledStore struct{ fakeSessionStore }
+
+func (*canceledStore) GetByIDHash(context.Context, string) (Session, error) {
+	return Session{}, fmt.Errorf("get session: %w", context.Canceled)
+}
+
+// TestMiddlewareOrAPIKey_ClientGoneLogsAtWarn: when the session lookup fails
+// because the client went away (a closed browser tab), the 503 is logged at
+// WARN. The same error on a live request stays at ERROR, the level operators
+// alert on.
+func TestMiddlewareOrAPIKey_ClientGoneLogsAtWarn(t *testing.T) {
+	svc := NewService(&canceledStore{})
+	handler := MiddlewareOrAPIKey(svc, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("should not reach handler")
+	}))
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		want string
+	}{
+		{"client went away", gone, "WARN"},
+		{"request still live", context.Background(), "ERROR"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+			t.Cleanup(func() { slog.SetDefault(prev) })
+
+			handler.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess_deadbeef").WithContext(tc.ctx))
+
+			var entry map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+				t.Fatalf("want exactly one JSON log line, got %q: %v", buf.String(), err)
+			}
+			if entry["level"] != tc.want || entry["msg"] != "session resolve unavailable" {
+				t.Errorf("logged %v %q, want %s %q", entry["level"], entry["msg"], tc.want, "session resolve unavailable")
+			}
+		})
 	}
 }
 
