@@ -7,6 +7,12 @@
 #   PGB_MODE=ci scripts/pgbouncer-test.sh     # CI: --network host, DB at 127.0.0.1
 #   PGB_PACKAGES="./internal/platform/leader/" scripts/pgbouncer-test.sh
 #
+# Local mode reaches the dev Postgres through host.docker.internal. Docker
+# Desktop connects that name to this computer's 127.0.0.1, where the root
+# docker-compose.yml publishes Postgres. Docker Engine on Linux connects it
+# to the Docker bridge, which reaches no port bound to 127.0.0.1. There, use
+# PGB_MODE=ci: its host network reaches 127.0.0.1.
+#
 # Any statement that assumes a session — SET without LOCAL, a session
 # advisory lock, a prepared statement across transactions — passes on a
 # direct connection and can misbehave here. PgBouncer does not reject such a
@@ -31,7 +37,7 @@ else
   # see Docker's magic host.docker.internal name — hand it the IP.
   DB_HOST=$(docker run --rm --add-host=host.docker.internal:host-gateway alpine:3 getent ahostsv4 host.docker.internal | awk '{print $1}' | head -1)
   [ -n "$DB_HOST" ] || { echo "could not resolve the Docker host IP"; exit 1; }
-  NETFLAGS=(-p 6432:6432 --add-host=host.docker.internal:host-gateway)
+  NETFLAGS=(-p 127.0.0.1:6432:6432 --add-host=host.docker.internal:host-gateway)
 fi
 sed "s/@DB_HOST@/${DB_HOST}/g" "$DIR/pgbouncer.ini.tmpl" > "$CONF/pgbouncer.ini"
 cp "$DIR/userlist.txt" "$CONF/userlist.txt"

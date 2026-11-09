@@ -47,7 +47,7 @@ On managed Postgres, the provider's snapshots and PITR are your main backup. Tes
    ls -l /var/backups/hardcount/
    ```
 
-   **You see:** `hardcount_<date>_<time>.dump`, and `latest.dump` pointing at the newest one. The date and time are when the backup started, in UTC.
+   **You see:** `hardcount_<date>_<time>.dump`, and `latest.dump` pointing at the newest one. The date and time are when the backup started, in UTC. The dump's mode is `-rw-------`: only the user who ran `backup.sh` can read it, because it holds every customer's data.
 
 Options, all set as environment variables:
 
@@ -78,7 +78,7 @@ A backup counts only once you have restored it. The first drill found four defec
 
 1. It counts the rows in five key tables of the source database.
 2. It takes a backup with `backup.sh` into a temporary folder.
-3. It starts a Postgres container with the same major version as the source, on port 15432.
+3. It starts a Postgres container with the same major version as the source, on port 15432 of 127.0.0.1, with passwords made for this run. Another machine on your network cannot reach it.
 4. It restores the backup there with `restore.sh`.
 5. It counts the same rows again, compares them, and removes the container.
 
@@ -97,7 +97,7 @@ Each run adds one line to `~/.hardcount/drill.log`, so you can see how long back
 |---|---|---|
 | `SOURCE_DATABASE_URL` | `DATABASE_URL` | The database to back up and compare |
 | `DRILL_PG_IMAGE` | the source's major, else `postgres:16-alpine` | The Postgres image for the throwaway container |
-| `DRILL_PG_PORT` | `15432` | The port of the throwaway container. The drill stops if it is in use. |
+| `DRILL_PG_PORT` | `15432` | The port of the throwaway container, on 127.0.0.1. The drill stops if it is in use. |
 | `DRILL_LOG` | `~/.hardcount/drill.log` | Where the result lines go |
 | `CRITICAL_TABLES` | the five tables above | The tables whose row counts must match |
 

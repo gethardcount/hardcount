@@ -88,13 +88,14 @@ instead (see the [README](README.md)).
 ### Local services
 
 `docker compose up -d postgres redis mailpit` starts everything the API can
-use on your machine:
+use on your machine. The three containers listen on 127.0.0.1 only, so
+another machine on your network cannot reach them:
 
 | Service | Where | Notes |
 |---|---|---|
-| Postgres | `:5432` | Password `hardcount`. Data is kept in a Docker volume. |
-| Redis | `:6379` | Used for rate limiting. Optional outside production: without it, only sign-in (`/v1/auth`) is rate-limited. |
-| Mailpit | `:1025` (SMTP), `:8025` (web) | Catches every email Hardcount sends, so nothing leaves your machine. |
+| Postgres | `127.0.0.1:5432` | Password `hardcount`. Data is kept in a Docker volume. |
+| Redis | `127.0.0.1:6379` | Used for rate limiting. Optional outside production: without it, only sign-in (`/v1/auth`) is rate-limited. |
+| Mailpit | `127.0.0.1:1025` (SMTP), `127.0.0.1:8025` (web) | Catches every email Hardcount sends, so nothing leaves your machine. |
 | The API | `:8080` | Started by `make dev`. Not a container. |
 
 `make bootstrap` takes an optional owner email and password:
