@@ -16,6 +16,7 @@ interface InvoiceDetail extends Invoice {
   paid_at?: string
   voided_at?: string
   billing_timezone?: string
+  net_payment_term_days: number
 }
 interface LineItem { description: string; quantity: string; unit_amount_decimal: string; amount_cents: number }
 interface CreditNote {
@@ -39,16 +40,23 @@ async function creditBalance(customerId: string): Promise<number> {
   return usdBalance(await api<{ data: { currency: string; balance_cents: number }[] }>('GET', `/credits/balance/${customerId}`)).balance_cents
 }
 
-// Lets the next "Issue credit note" request reach the server, then drops the
-// answer on its way back to the browser, as when a slow refund outlasts the
-// browser's wait. serverStatus is what the server answered.
-async function dropNextCreditNoteAnswer(page: Page) {
+// Lets the next POST to `pathname` reach the server, then drops the answer on
+// its way back to the browser, as when a slow request, such as a refund,
+// outlasts the browser's wait. serverStatus is what the server answered. keys
+// is the Idempotency-Key of each POST to the path from then on, the dropped
+// one first. With `hold`, the dropped request waits for it before it goes to
+// the server, so the test can act while the request is still out.
+async function dropNextAnswer(page: Page, pathname: string, hold?: Promise<void>) {
   let settle!: (status: number) => void
   const serverStatus = new Promise<number>(resolve => { settle = resolve })
+  const keys: (string | undefined)[] = []
   let dropped = false
-  await page.route(url => url.pathname === '/v1/credit-notes', async route => {
-    if (dropped || route.request().method() !== 'POST') return route.fallback()
+  await page.route(url => url.pathname === pathname, async route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    keys.push(route.request().headers()['idempotency-key'])
+    if (dropped) return route.fallback()
     dropped = true
+    await hold
     // route.fetch sends the request from outside the page, without the
     // Sec-Fetch-Site header Chrome adds. The server's CSRF check would then
     // look up the Origin in its allowed list, empty on the test server, and
@@ -57,7 +65,7 @@ async function dropNextCreditNoteAnswer(page: Page) {
     await route.abort('failed')
     settle(answer.status())
   })
-  return { serverStatus }
+  return { serverStatus, keys }
 }
 
 // A calendar date as the dashboard and the payment page print it: "Nov 18, 2026".
@@ -575,7 +583,7 @@ test('issuing a credit note again after its answer was lost makes one note, from
 
   // Invoice page: the first answer is lost, so the operator clicks again. The
   // server answers with the note it already made, and makes no second one.
-  let drop = await dropNextCreditNoteAnswer(page)
+  let drop = await dropNextAnswer(page, '/v1/credit-notes')
   await page.goto(`/invoices/${invoice.id}`)
   await (await invoiceActions(page)).getByRole('menuitem', { name: 'Issue credit note' }).click()
   const fromInvoice = page.getByRole('dialog', { name: 'Issue credit note' })
@@ -594,7 +602,7 @@ test('issuing a credit note again after its answer was lost makes one note, from
     await dialog.getByLabel(/^Amount/).fill('5.00')
     return dialog
   }
-  drop = await dropNextCreditNoteAnswer(page)
+  drop = await dropNextAnswer(page, '/v1/credit-notes')
   await page.goto('/credit-notes')
   const fromList = await openListDialog()
   await issueButton(fromList).click()
@@ -608,6 +616,152 @@ test('issuing a credit note again after its answer was lost makes one note, from
   await issueButton(again).click()
   await expect(again).toBeHidden()
   expect(await creditNotesFor(invoice.id)).toHaveLength(3)
+})
+
+// New invoice starts at the account's payment terms (Settings, Payment terms)
+// and offers them, also when no preset has them. Until the settings read
+// answers, it sends nothing, because it would have to guess the terms. CI's
+// account is on Net 30, so the browser holds the settings read, then answers
+// it with Net 15. The billing profile sets the customer's currency, so New
+// invoice opens before the settings load.
+test('New invoice waits for the account payment terms, then uses them: on Net 15, the invoice is due 15 days after it is issued', async ({ page }) => {
+  const customer = await createCustomer()
+  await api('PUT', `/customers/${customer.id}/billing-profile`, { currency: 'USD' })
+  let release!: () => void
+  const released = new Promise<void>(resolve => { release = resolve })
+  await page.route(url => url.pathname === '/v1/settings', async route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    await released
+    const answer = await route.fetch({ headers: { ...route.request().headers(), 'sec-fetch-site': 'same-origin' } })
+    await route.fulfill({ response: answer, json: { ...(await answer.json()), net_payment_terms: 15 } })
+  })
+  await page.goto(`/customers/${customer.id}`)
+  await page.getByRole('button', { name: 'New invoice' }).click()
+  const composer = page.getByRole('dialog', { name: 'New invoice' })
+  await composer.getByPlaceholder('Implementation services').fill(`E2E net 15 ${uniq()}`)
+  await composer.getByLabel('Line 1 unit price in USD').fill('80')
+  await expect(composer.getByText("Loading the account's payment terms…", { exact: true })).toBeVisible()
+  await expect(composer.getByRole('button', { name: 'Save draft' })).toBeDisabled()
+  await expect(composer.getByRole('button', { name: 'Save & send' })).toBeDisabled()
+
+  release()
+  await expect(composer.getByLabel('Payment terms')).toContainText('Net 15')
+  await expect(composer.getByText('Due 15 days after the invoice is issued.')).toBeVisible()
+  await composer.getByRole('button', { name: 'Save draft' }).click()
+  await expect(composer).toBeHidden()
+
+  const [draft] = await invoicesFor(customer.id)
+  await api('POST', `/invoices/${draft.id}/finalize`)
+  const { invoice } = await getInvoice(draft.id)
+  expect(invoice.net_payment_term_days).toBe(15)
+  // Net N counts calendar days in the account's zone.
+  const ymd = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: invoice.billing_timezone || 'UTC' })
+  const issuedDay = new Date(`${ymd(invoice.issued_at!)}T00:00:00Z`)
+  issuedDay.setUTCDate(issuedDay.getUTCDate() + 15)
+  expect(ymd(invoice.due_at!)).toBe(issuedDay.toISOString().slice(0, 10))
+})
+
+// New invoice sends one Idempotency-Key per opening. Save draft again after a
+// lost answer gets the invoice the first try made, as Stripe's retries do.
+// The lost answer reads as unknown, not as a failure, and the customer page
+// reads its invoices again, so the invoice that landed shows before the
+// retry. The next opening makes a new key: the same lines saved again on
+// purpose make a second invoice.
+test('New invoice: Save draft again after a lost answer makes one invoice, and the next opening makes another', async ({ page }) => {
+  const customer = await createCustomer()
+  const drop = await dropNextAnswer(page, '/v1/invoices')
+  await page.goto(`/customers/${customer.id}`)
+  const description = `E2E lost answer ${uniq()}`
+  const openNewInvoice = async () => {
+    await page.getByRole('button', { name: 'New invoice' }).click()
+    const composer = page.getByRole('dialog', { name: 'New invoice' })
+    await composer.getByPlaceholder('Implementation services').fill(description)
+    await composer.getByLabel('Line 1 unit price in USD').fill('500')
+    return composer
+  }
+  let composer = await openNewInvoice()
+  const save = composer.getByRole('button', { name: 'Save draft' })
+  await save.click()
+  expect(await drop.serverStatus, 'the first try reached the server and made the invoice').toBe(201)
+  await expect(composer.getByText('Result unknown', { exact: true })).toBeVisible()
+  await expect(composer.getByText("The server didn't answer, so the invoice may have been made.")).toBeVisible()
+  await expect(composer.getByText('Failed to fetch')).toHaveCount(0)
+  const [made] = await invoicesFor(customer.id)
+  // The open dialog hides the page from role queries, so find the customer
+  // page's link to the invoice by its address.
+  await expect(page.locator(`a[href="/invoices/${made.id}"]`)).toBeVisible()
+  await save.click()
+  await expect(composer).toBeHidden()
+
+  expect(await invoicesFor(customer.id)).toHaveLength(1)
+  await expect(page.getByText(`Draft ${made.invoice_number} saved`)).toBeVisible()
+  expect(drop.keys[0], 'the first try sends a key').toBeTruthy()
+  expect(drop.keys, 'the second try sends the same key').toEqual([drop.keys[0], drop.keys[0]])
+
+  composer = await openNewInvoice()
+  await composer.getByRole('button', { name: 'Save draft' }).click()
+  await expect(composer).toBeHidden()
+  expect(drop.keys, 'the next opening sends one request').toHaveLength(3)
+  expect(drop.keys[2], 'the next opening sends a key').toBeTruthy()
+  expect(drop.keys[2], 'the next opening sends a new key').not.toBe(drop.keys[0])
+  expect(await invoicesFor(customer.id), 'the next opening makes a second invoice').toHaveLength(2)
+})
+
+// Add line item sends one Idempotency-Key per opening, and reads the invoice
+// again when a try fails, so the page shows a line that landed. There is no
+// way to remove a line from a draft, so a second one would stay. While a try
+// is out, the dialog cannot be closed: a new opening makes a new key, and
+// before the line lands the page cannot show it. The next opening makes a
+// new key: the same line added again on purpose is a second line.
+test('Add line item: adding again after a lost answer adds the line once, and the page shows it before the retry', async ({ page }) => {
+  const customer = await createCustomer()
+  const id = uniq()
+  const draft = await api<Invoice>('POST', '/invoices', {
+    customer_id: customer.id,
+    currency: 'USD',
+    line_items: [{ description: `E2E first line ${id}`, line_type: 'add_on', quantity: 1, unit_amount_cents: 4900 }],
+  })
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const drop = await dropNextAnswer(page, `/v1/invoices/${draft.id}/line-items`, held)
+  await page.goto(`/invoices/${draft.id}`)
+  await expect(page.getByRole('heading', { level: 1, name: draft.invoice_number, exact: true })).toBeVisible()
+  const description = `E2E setup fee ${id}`
+  const openAddLine = async () => {
+    await page.getByRole('button', { name: 'Add line item' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add line item' })
+    await dialog.getByLabel('Description').fill(description)
+    await dialog.getByLabel(/^Unit price/).fill('500.00')
+    return dialog
+  }
+  let addLine = await openAddLine()
+  const add = addLine.getByRole('button', { name: 'Add line item' })
+  await add.click()
+  await page.keyboard.press('Escape')
+  await expect(addLine.getByRole('button', { name: 'Cancel' }), 'Cancel waits for the try').toBeDisabled()
+  await expect(addLine, 'Escape does not close the dialog while the try is out').toBeVisible()
+  release()
+  expect(await drop.serverStatus, 'the first try reached the server and added the line').toBe(201)
+  // The open dialog hides the page from role queries, so find the row by tag.
+  const addedRow = page.locator('tr').filter({ hasText: description })
+  await expect(addedRow).toHaveCount(1)
+  await add.click()
+  await expect(addLine).toBeHidden()
+
+  const after = await getInvoice(draft.id)
+  expect(after.line_items.filter(l => l.description === description)).toHaveLength(1)
+  await expect(addedRow).toHaveCount(1)
+  expect(drop.keys[0], 'the first try sends a key').toBeTruthy()
+  expect(drop.keys, 'the second try sends the same key').toEqual([drop.keys[0], drop.keys[0]])
+
+  addLine = await openAddLine()
+  await addLine.getByRole('button', { name: 'Add line item' }).click()
+  await expect(addLine).toBeHidden()
+  expect(drop.keys, 'the next opening sends one request').toHaveLength(3)
+  expect(drop.keys[2], 'the next opening sends a key').toBeTruthy()
+  expect(drop.keys[2], 'the next opening sends a new key').not.toBe(drop.keys[0])
+  expect((await getInvoice(draft.id)).line_items.filter(l => l.description === description), 'the next opening adds a second line').toHaveLength(2)
+  await expect(addedRow).toHaveCount(2)
 })
 
 // Collect payment charges the customer's card at once, so it asks first,
