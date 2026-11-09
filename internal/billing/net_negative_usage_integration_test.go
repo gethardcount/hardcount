@@ -189,7 +189,7 @@ func TestNetNegativeUsage_ImmediateCancelTx_BillsZeroAndRecordsIt(t *testing.T) 
 		if _, err := tx.ExecContext(ctx, `UPDATE subscriptions SET status = 'canceled', canceled_at = $1 WHERE id = $2`, canceledAt, subID); err != nil {
 			t.Fatalf("cancel: %v", err)
 		}
-		inv, _, err := f.engine.BillFinalOnImmediateCancelTx(ctx, tx, sub)
+		inv, _, _, err := f.engine.BillCancelTx(ctx, tx, sub)
 		if err != nil {
 			postgres.Rollback(tx)
 			t.Fatalf("bill final (tx): %v (usage below zero must not fail the cancel)", err)

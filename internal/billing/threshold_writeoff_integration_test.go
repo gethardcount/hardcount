@@ -594,7 +594,7 @@ func TestThresholdVoid_vs_ImmediateCancel_VoidAfterRead(t *testing.T) {
 	r.closer.invs.afterWatermark, r.closer.invs.afterWatermarkTx = hook, hook
 	ctxCancel := r.at(r.tc)
 	if _, err := r.f.subStore.CancelAtomicWithBill(ctxCancel, r.f.tenantID, r.f.subID, func(tx *sql.Tx, canceled domain.Subscription) error {
-		_, _, err := r.closer.engine.BillFinalOnImmediateCancelTx(ctxCancel, tx, canceled)
+		_, _, _, err := r.closer.engine.BillCancelTx(ctxCancel, tx, canceled)
 		return err
 	}); err != nil {
 		t.Fatalf("cancel: %v", err)
