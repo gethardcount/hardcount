@@ -32,7 +32,7 @@ original text.
 
 ### Fixed
 
-- **New invoice starts at your payment terms, and a click after a lost answer makes one invoice.** New invoice started at Net 30 whatever Settings said. A second click after the server's answer was lost could make, and send, a second invoice. Add line item could add a line twice, and now reloads the invoice after a failure. ([#PR](https://github.com/gethardcount/hardcount/pull/PR))
+- **New invoice starts at your payment terms, and a click after a lost answer makes one invoice.** New invoice started at Net 30 whatever Settings said. A second click after the server's answer was lost could make, and send, a second invoice. Add line item could add a line twice, and now reloads the invoice after a failure. ([#1637](https://github.com/gethardcount/hardcount/pull/1637))
 - **A refund of another account's payment, on a Stripe account two Hardcount accounts share, is acknowledged.** Its webhook failed, and Stripe sent it again for three days. ([#1633](https://github.com/gethardcount/hardcount/pull/1633))
 - **Dunning and customer webhook events are no longer lost to a crash, a deploy or a dropped request.** `dunning.escalated`, `dunning.resolved`, `customer.email_bounced` and `customer.email_complained` were queued just after their change was saved, and a crash or a cancelled request in between dropped them. Each is now saved with its change. A bounce from your SMTP server that cannot be saved is logged at ERROR, because nothing sends it again. ([#1636](https://github.com/gethardcount/hardcount/pull/1636))
 
