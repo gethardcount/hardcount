@@ -98,6 +98,11 @@ func NewOutboxStore(db *postgres.DB) *OutboxStore {
 // a business-op store method so the event is persisted atomically with the
 // state change — if the tx rolls back, no event is emitted; if it commits,
 // the dispatcher will eventually deliver.
+//
+// It is the only way to queue a webhook event. A variant that opened a
+// transaction of its own would commit the event after its change, and a
+// crash in between would lose it (ADR-040);
+// internal/arch/webhook_emit_catalog_test.go fails if one is added.
 func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, eventType string, payload map[string]any) (string, error) {
 	if tenantID == "" {
 		return "", fmt.Errorf("outbox: tenant_id required")
@@ -117,27 +122,6 @@ func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, eventTy
 	`, id, tenantID, eventType, payloadJSON)
 	if err != nil {
 		return "", fmt.Errorf("outbox: insert: %w", err)
-	}
-	return id, nil
-}
-
-// EnqueueStandalone opens its own tenant-scoped tx to insert the outbox row.
-// Use when the caller has no tx already in scope — still durable because the
-// insert commits before return, but not atomic with the preceding business op.
-// Prefer Enqueue whenever a tx is available.
-func (s *OutboxStore) EnqueueStandalone(ctx context.Context, tenantID, eventType string, payload map[string]any) (string, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return "", fmt.Errorf("outbox: begin tx: %w", err)
-	}
-	defer postgres.Rollback(tx)
-
-	id, err := s.Enqueue(ctx, tx, tenantID, eventType, payload)
-	if err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
-		return "", fmt.Errorf("outbox: commit: %w", err)
 	}
 	return id, nil
 }

@@ -80,7 +80,7 @@ Terms the tables lean on:
 | # | Class | Invariant | Fix kind | Hardcount example |
 |---|-------|-----------|----------|---------------|
 | **A** | **Exactly-once / idempotency** | Every money mutation is idempotent-by-construction or dedup-key-guarded | dedup index / CAS / stable Stripe key | proration `idx_invoices_proration_dedup` → `invoice_proration_source_taken`; MarkPaid no-op re-read branch (avoids `amount_paid=amount_due` re-zero) |
-| **B** | **Dual-write atomicity** | Internal state + its coupled effect never diverge | coordinator-tx (internal, ADR-056) / outbox-in-tx (external, ADR-040); reconciler is the *fallback* | `invoice.paid`+`payment.succeeded` enqueue **in** the MarkPaid tx; cancel final-bill folded into the cancel tx (#307) |
+| **B** | **Dual-write atomicity** | Internal state + its coupled effect never diverge | coordinator-tx (internal, ADR-056) / outbox-in-tx (external, ADR-040); reconciler is the *fallback* | `invoice.paid`+`payment.succeeded` enqueue **in** the MarkPaid tx; `invoice.finalized` in the tx that inserts or finalizes the invoice; cancel final-bill folded into the cancel tx (#307) |
 | **C** | **External-truth / webhooks** | Stripe (signed webhook or server response) is the *sole* money-outcome authority; ingestion is idempotent + order-insensitive; never mark money-state from a browser redirect | write the dedup row **last** (after the effect commits); 5xx to force redelivery | dedup row after effect (`row present ⇒ effect committed`); hosted-pay `?status=success` is cosmetic only |
 | **D** | **Concurrency races (C1–C4)** | A transition is one atomic CAS; every write/effect/action around it is proven safe | see the C1–C4 sub-table | `SELECT … FOR UPDATE` gates + `ResolveRun WHERE state<>'resolved'` |
 | **E** | **Partial-failure & loud-fail** | A mid-flow crash is recoverable (record-before-effect + requeryable state, or one atomic tx); every money error is surfaced; **no comment claims a backstop that doesn't exist** | in-tx / requeryable state / ERROR+operator path | test-clock panic → `internal_failure` on a `WithoutCancel` ctx; PaymentUnknown loud-fail CRITICAL-with-PI |
@@ -94,7 +94,7 @@ Terms the tables lean on:
 
 | | Class | Tell | Fix |
 |--|-------|------|-----|
-| **C1** | Non-idempotent effect under a **new caller** *or* a **crash-retry** | an effect (`fireEvent`/`Dispatch`/email/Stripe call) fires unconditionally after a state write | fire **only on the winning CAS branch** (`RowsAffected==1`) *and/or* carry an internal dedup/source key |
+| **C1** | Non-idempotent effect under a **new caller** *or* a **crash-retry** | an effect (an outbox `Enqueue`, an email, a Stripe call) fires unconditionally after a state write | fire **only on the winning CAS branch** (`RowsAffected==1`) *and/or* carry an internal dedup/source key |
 | **C2** | Incomplete invariant rollout | a new guard/chokepoint is added, but not every writer routes through it | enumerate ALL writers, route each through the one chokepoint |
 | **C3** | Unguarded write racing a transition | `UPDATE … WHERE id=$X` with no state predicate | state-predicate `WHERE … AND status=<expected>` + `RowsAffected` gate |
 | **C4** | Irreversible action on a **stale precondition** | a tick-start / handler-start check that goes stale across a Stripe (or DB) round-trip | re-read the precondition **immediately before** the irreversible action |
@@ -148,7 +148,7 @@ Write the site-set as a checklist in the PR description. Check each box
 **against grep output**, not against memory:
 
 ```
-grep -n "TxTenant\|MarkPaid\|resolveRunNow\|transitionInTx\|\.Dispatch(\|fireEvent" internal/<domain>/
+grep -n "TxTenant\|MarkPaid\|resolveRunNow\|transitionInTx\|[Ee]nqueue\|\.Send" internal/<domain>/
 ```
 
 If a new writer can't reuse the existing chokepoint (`transitionAtomic`,
@@ -187,6 +187,8 @@ Ordered by leverage. A "no" blocks the PR.
    - Internal DB write → threaded `*sql.Tx` in-tx (ADR-056).
    - External call → `OutboxStore.Enqueue(ctx, tx, …)` in the commit tx
      (ADR-040), or a self-clearing marker column + scheduler sweep.
+   - `EnqueueStandalone` only where no business transaction exists;
+     `internal/arch/email_outbox_standalone_test.go` pins the list.
 4. **The UPDATE itself is idempotent?** Keep a no-op re-read branch for when
    the transition already ran (guard the `amount_paid=amount_due` re-zeroing
    class). The CAS lists the states the row may come from
@@ -228,6 +230,23 @@ Ordered by leverage. A "no" blocks the PR.
 12. **Grep your own diff** for `catchup will retry` / `next cycle` / `reconciler
     will catch` / `EnqueueStandalone` / `_ =` on side-effects. Prove each
     named backstop exists and sweeps this state.
+    - **Tests.** Two tests fail the common shapes of a new send queued after
+      its commit. `internal/arch/webhook_emit_catalog_test.go` fails when
+      the webhook package gains a function or method that takes an event
+      type but no `*sql.Tx`, so `OutboxStore.Enqueue` on a caller's
+      transaction stays the only way to queue a webhook event.
+      `internal/arch/email_outbox_standalone_test.go` fails a call of an
+      `OutboxSender` method built on `enqueue`, unless the call is listed
+      with a reason.
+    - **What they miss.** Green tests do not prove that no new post-commit
+      send exists. Neither test sees a hand-rolled `BeginTx` + `Enqueue` +
+      `Commit` with no state write in it. The email test also does not see a
+      send made through a function value, a direct `EnqueueStandalone` call,
+      or a send from inside `internal/email`.
+    - **Who catches those.** The grep above finds a direct
+      `EnqueueStandalone`. For the rest, a reviewer checks each `Enqueue` the
+      diff reaches, including those in the functions it calls. Each must run
+      on the same `*sql.Tx` as its state write: the class B question in §4.
 
 ---
 
@@ -241,10 +260,12 @@ proof land on the table.
   the DB commit, and (c) two concurrent callers? If the answer is 'the CAS
   already guarantees exactly-once' with no atomic internal effect, an atomic
   option was skipped."
-- **B (dual-write):** "Does the internal side-effect share the state-change tx
-  (grep the `*sql.Tx` param), or run post-commit? If post-commit, is it a durable
-  enqueued obligation/marker, or a fire-and-forget a crash loses? Show me the
-  `Enqueue`-in-tx before the `.Dispatch(`."
+- **B (dual-write):** "Does each coupled effect, an internal write or an
+  outbox `Enqueue`, run on the same `*sql.Tx` as the state write? Follow its
+  `*sql.Tx` param back to the `BeginTx` that opened it. An `Enqueue` on a tx
+  opened just for it commits after the state write, so it runs post-commit. If
+  post-commit, what re-drives it after a crash: a marker or a state that a
+  sweep re-reads? If nothing does, a crash loses it."
 - **C (webhooks):** "If Stripe redelivers this exact event after `processEvent`
   committed but `IngestEvent` failed, does re-running double-count money or
   re-fire an outbound event? Does any money-state come from a browser redirect?"
