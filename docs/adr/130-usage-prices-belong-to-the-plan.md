@@ -489,7 +489,7 @@ state change) takes the clock first and holds no plan, and `FOR SHARE`
 does not conflict with an override write's `FOR SHARE` read of its
 customer's clock.
 
-**Step 1a: the customer-rules lock** (amended 2026-11-10, [#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).
+**Step 1a: the customer-rules lock** (amended 2026-11-10, [#1659](https://github.com/gethardcount/hardcount/pull/1659)).
 Four rules span a customer's subscriptions:
 
 - one live item per meter (section 4 step 1);
