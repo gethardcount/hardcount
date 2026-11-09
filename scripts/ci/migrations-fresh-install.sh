@@ -16,11 +16,14 @@
 # Then two more checks:
 #   restore drill  back up a HEAD database with scripts/backup.sh and restore
 #                  it into an empty database with scripts/restore.sh: it must
-#                  succeed, equal the database backed up, and be up to date.
+#                  succeed, mark the database as restored so serve refuses
+#                  to start, equal the database backed up, and be up to date.
 #                  Then restore it over a newer database, one where a later
 #                  migration added a table that refers to a backed-up one:
 #                  the restore must stop and change nothing
-#                  (docs/ops/restore.md, "Before you restore").
+#                  (docs/ops/restore.md, "Before you restore"). Then the
+#                  restore marker with a backup that lacks its table, and
+#                  with a marker that fails after pg_restore.
 #   Postgres 15    HEAD applies on postgres:15 and reports up to date. 15 is
 #                  the oldest major the docs expect to work.
 #   Postgres 18    The same on postgres:18, the newest Postgres major. The
@@ -141,15 +144,18 @@ q() { docker exec -i "$1" psql -v ON_ERROR_STOP=1 -qAt -U "$(superuser "$2")" -d
 head_hardcount() { local url=$1; shift; DATABASE_URL="$url" "$HARDCOUNT_BIN" "$@"; }
 
 # dump CONTAINER SETUP KIND: a comparable dump, without the version record
-# and without the lines that differ between any two dumps.
+# and without the lines that differ between any two dumps. A data dump is
+# sorted: an UPDATE moves a row in its table, such as the billing pause a
+# restore sets and the drill clears, and the order of rows means nothing.
 dump() {
-  local c=$1 setup=$2 kind=$3
+  local c=$1 setup=$2 kind=$3 order="cat"
   local flags=(--schema-only)
-  [ "$kind" = data ] && flags=(--data-only --column-inserts)
+  [ "$kind" = data ] && flags=(--data-only --column-inserts) && order="sort"
   docker exec "$c" pg_dump -U "$(superuser "$setup")" -d "$(dbname "$setup")" "${flags[@]}" \
       -T public.goose_db_version \
     | grep -v -E '^\\(un)?restrict |^-- Dumped (from database|by pg_dump) version ' \
-    | sed -E "s/^(INSERT INTO public\.leader_leases \([^)]*\) VALUES \('[a-z_]+', )[0-9]+,/\1<holder_token>,/"
+    | sed -E "s/^(INSERT INTO public\.leader_leases \([^)]*\) VALUES \('[a-z_]+', )[0-9]+,/\1<holder_token>,/" \
+    | "$order"
 }
 
 versions() { q "$1" "$2" "SELECT string_agg(version_id::text, ',' ORDER BY version_id) FROM public.goose_db_version"; }
@@ -213,6 +219,45 @@ fresh_install() {
   echo "$setup: installed, versions $(versions "$c" "$setup")"
 }
 
+# check_marker CONTAINER LABEL: the restore marked the database as restored
+# and paused the two jobs that charge cards, billing and dunning.
+check_marker() {
+  local role
+  [ "$(q "$1" compose "SELECT set_by FROM public.restore_catchup")" = restore.sh ] \
+    || fail "$2: scripts/restore.sh wrote no restore marker"
+  for role in billing dunning; do
+    [ "$(q "$1" compose "SELECT paused_by FROM public.leader_leases WHERE role = '$role'")" = restore ] \
+      || fail "$2: scripts/restore.sh did not pause $role"
+  done
+}
+
+# expect_serve_refused URL LABEL NAME [VAR=value ...]: HEAD's serve, on a
+# database marked as restored, exits 2 and names the catch-up before it
+# listens. A serve still running after 30 seconds started: it is stopped and
+# the check fails.
+expect_serve_refused() {
+  local url=$1 label=$2 out="$OUT/serve-$3.txt" pid code=0
+  shift 3
+  env DATABASE_URL="$url" APP_ENV=local PORT=18080 "$@" "$HARDCOUNT_BIN" serve > "$out" 2>&1 &
+  pid=$!
+  for _ in $(seq 1 30); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid"
+    wait "$pid" 2>/dev/null || true
+    cat "$out"
+    fail "$label: serve started on a database marked as restored"
+  fi
+  wait "$pid" || code=$?
+  if [ "$code" != 2 ] || ! grep -q 'hardcount restore catch-up' "$out"; then
+    cat "$out"
+    fail "$label: serve exited $code, want 2 with a message naming hardcount restore catch-up"
+  fi
+  echo "$label: serve refused to start on the restored database"
+}
+
 restore_drill() {
   say "restore drill: a HEAD backup restored into an empty database"
   local c=mig-restore e=mig-restore-empty url eurl kind backup
@@ -237,6 +282,13 @@ restore_drill() {
     || fail "restore drill: scripts/restore.sh failed to restore the backup into an empty database"
   grep -q 'Restore complete' "$OUT/restore.txt" \
     || fail "restore drill: scripts/restore.sh did not report a complete restore"
+  # The restore marked the database as restored and paused billing and
+  # dunning, and serve refuses to start until the catch-up has run
+  # (ADR-135). Clear the marker and the pauses so the dumps below compare
+  # the restored data with the source.
+  check_marker "$e" "restore drill"
+  expect_serve_refused "$eurl" "restore drill" restored
+  q "$e" compose "DELETE FROM public.restore_catchup; SELECT public.leader_unpause('billing'); SELECT public.leader_unpause('dunning')" >/dev/null
   for kind in schema data; do
     dump "$e" compose "$kind" > "$OUT/restore-$kind.sql"
     if ! diff -u "$OUT/restore-source-$kind.sql" "$OUT/restore-$kind.sql" > "$OUT/restore-$kind.diff"; then
@@ -286,6 +338,70 @@ restore_drill() {
   echo "restore drill: the restore over a newer database stopped, nothing changed"
 }
 
+# restore_marker_drill: the restore marker in two harder cases (ADR-135).
+#   - A backup without the marker table, as one made before migration
+#     00223: restore.sh creates the table, and serve refuses to start even
+#     when it runs the migrations first.
+#   - A failure in the marker's own statements, after pg_restore wrote the
+#     whole archive: the restore rolls back and the target is unchanged.
+#     The failure is a check on restore_catchup in the backup that refuses
+#     the marker restore.sh writes.
+restore_marker_drill() {
+  say "restore drill: the restore marker"
+  local c=mig-marker e=mig-marker-empty url eurl backup kind
+  CONTAINERS+=("$c" "$e")
+  start_pg "$c" "$POSTGRES16_IMAGE" compose
+  url=$(dsn compose "$PG_PORT")
+  head_hardcount "$url" migrate
+  q "$c" compose "DROP TABLE public.restore_catchup"
+  DATABASE_URL="$url" BACKUP_DIR="$WORK/marker-backups-1" \
+    PG_DUMP="docker run --rm -i --network host $POSTGRES16_IMAGE pg_dump" \
+    "$ROOT/scripts/backup.sh"
+  backup=$(find "$WORK/marker-backups-1" -type f -name 'hardcount_*.dump' | head -1)
+  [ -n "$backup" ] || fail "restore marker drill: scripts/backup.sh wrote no backup"
+
+  start_pg "$e" "$POSTGRES16_IMAGE" compose
+  eurl=$(dsn compose "$PG_PORT")
+  DATABASE_URL="$eurl" HARDCOUNT_RESTORE_CONFIRM=yes \
+    PG_RESTORE="docker run --rm -i --network host $POSTGRES16_IMAGE pg_restore" \
+    "$ROOT/scripts/restore.sh" "$backup" > "$OUT/restore-marker.txt" 2>&1 \
+    || { cat "$OUT/restore-marker.txt"; fail "restore marker drill: a backup without the marker table did not restore"; }
+  check_marker "$e" "restore marker drill"
+  expect_serve_refused "$eurl" "restore marker drill" migrate-on-boot RUN_MIGRATIONS_ON_BOOT=true
+
+  echo "a failure in the marker's statements rolls the restore back"
+  q "$c" compose "CREATE TABLE public.restore_catchup (
+    id boolean PRIMARY KEY DEFAULT true CHECK (id),
+    set_at timestamptz NOT NULL DEFAULT now(),
+    set_by text NOT NULL CONSTRAINT refuses_restore_sh CHECK (set_by <> 'restore.sh'),
+    anchor timestamptz)"
+  DATABASE_URL="$url" BACKUP_DIR="$WORK/marker-backups-2" \
+    PG_DUMP="docker run --rm -i --network host $POSTGRES16_IMAGE pg_dump" \
+    "$ROOT/scripts/backup.sh"
+  backup=$(find "$WORK/marker-backups-2" -type f -name 'hardcount_*.dump' | head -1)
+  [ -n "$backup" ] || fail "restore marker drill: scripts/backup.sh wrote no second backup"
+  for kind in schema data; do
+    dump "$e" compose "$kind" > "$OUT/marker-before-$kind.sql"
+  done
+  if DATABASE_URL="$eurl" HARDCOUNT_RESTORE_CONFIRM=yes \
+    PG_RESTORE="docker run --rm -i --network host $POSTGRES16_IMAGE pg_restore" \
+    "$ROOT/scripts/restore.sh" "$backup" > "$OUT/restore-marker-fail.txt" 2>&1; then
+    cat "$OUT/restore-marker-fail.txt"
+    fail "restore marker drill: the restore succeeded although its marker was refused"
+  fi
+  if ! grep -q 'single-transaction restore was rolled back' "$OUT/restore-marker-fail.txt" \
+    || ! grep -q 'refuses_restore_sh' "$OUT/restore-marker-fail.txt"; then
+    cat "$OUT/restore-marker-fail.txt"
+    fail "restore marker drill: the restore failed, but not on the marker, or without rolling back"
+  fi
+  for kind in schema data; do
+    dump "$e" compose "$kind" > "$OUT/marker-after-$kind.sql"
+    diff -u "$OUT/marker-before-$kind.sql" "$OUT/marker-after-$kind.sql" > "$OUT/marker-$kind.diff" \
+      || fail "restore marker drill: the restore that failed on its marker changed the $kind"
+  done
+  echo "restore marker drill: the marker held in both cases"
+}
+
 # other_major MAJOR IMAGE: HEAD applies on another Postgres major, under the
 # compose setup, and reports up to date.
 other_major() {
@@ -304,6 +420,7 @@ fresh_install compose
 fresh_install managed
 fresh_install citest
 restore_drill
+restore_marker_drill
 other_major 15 "$POSTGRES15_IMAGE"
 other_major 18 "$POSTGRES18_IMAGE"
 say "migrations: all checks passed"

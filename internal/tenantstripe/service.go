@@ -280,6 +280,12 @@ func (s *Service) GetPlaintext(ctx context.Context, tenantID string, livemode bo
 	return s.store.GetPlaintext(ctx, tenantID, livemode)
 }
 
+// ListAccounts returns every tenant and mode with stored Stripe keys, across
+// all tenants, for the restore catch-up. Not wired to any HTTP route.
+func (s *Service) ListAccounts(ctx context.Context) ([]Account, error) {
+	return s.store.ListAccounts(ctx)
+}
+
 // MarkKeyRejected records that Stripe refused this tenant's key for the mode
 // when a charge used it (401, or 403 for a restricted key without
 // permission). Settings → Payments then shows the same notice a failed

@@ -134,6 +134,11 @@ type Server struct {
 	// (ADR-015). The service is built here, and main.go runs it with the
 	// other background workers.
 	TestClockSvc *testclock.Service
+
+	// RestoreCatchUp applies Stripe's events to a restored database through
+	// the same webhook handlers serve uses (ADR-135). `hardcount restore
+	// catch-up` runs it; serve never does.
+	RestoreCatchUp *payment.CatchUp
 }
 
 // ServerOption sets a boot-time value that NewServer passes to the services it
@@ -145,6 +150,15 @@ type serverOptions struct {
 	invoiceGrace time.Duration
 	appEnv       string
 	rateLimits   config.RateLimits
+	stripeKeys   map[tenantstripe.Account]string
+}
+
+// WithStripeKeys sets Stripe secret keys that replace the stored ones for
+// the life of this Server, and are never saved. Only `hardcount restore
+// catch-up --stripe-key` passes it: for a key Stripe refuses since it was
+// stored, or an account connected after the backup.
+func WithStripeKeys(keys map[tenantstripe.Account]string) ServerOption {
+	return func(o *serverOptions) { o.stripeKeys = keys }
 }
 
 // WithAppEnv sets the environment to config.Config.Env, which is APP_ENV as
@@ -231,7 +245,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		return stripe.NewClient(secretKey)
 	})
 	tenantStripeH := tenantstripe.NewHandler(tenantStripeSvc)
-	stripeClients := payment.NewStripeClients(tenantStripeSvc)
+	var stripeCreds payment.StripeCredentials = tenantStripeSvc
+	if len(o.stripeKeys) > 0 {
+		stripeCreds = payment.KeyOverrides(tenantStripeSvc, o.stripeKeys)
+	}
+	stripeClients := payment.NewStripeClients(stripeCreds)
 
 	// Build the payment-methods service early. The dunning retrier, the
 	// invoice handler and the billing engine read payment-method status
@@ -1430,6 +1448,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		PaymentReconciler:   paymentReconciler,
 		LoginThrottle:       loginThrottle,
 		TestClockSvc:        testClockSvc,
+		RestoreCatchUp:      payment.NewCatchUp(stripeAdapter, stripeClients, tenantStripeSvc, customerStore, creditNoteStore),
 	}
 
 	// Redis is for distributed rate limiting. cmd/hardcount/main.go opens and

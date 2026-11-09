@@ -27,6 +27,8 @@ Stripe troubleshooting is out of scope.
 | Someone cannot sign in: "Too many sign-in attempts", or `hardcount_auth_login_total{outcome="throttled"}` rising | [Sign-in says "Too many sign-in attempts"](sign-in-throttled.md) |
 | `hardcount migrate` or the start-up stops with `migration … failed`, `goose_db_version`, `no migration record` or `another Hardcount process is migrating` | [A database upgrade stopped](migration-failed-midway.md) |
 | Data is lost or the database server is gone, and you must restore a backup | [Restore Hardcount](../restore.md) |
+| `hardcount restore catch-up` says it would read Stripe events from more than 29 days ago | [Restore a backup older than 26 days](restore-old-backup.md) |
+| `hardcount restore catch-up` lists refunds it did not apply | [Refunds a restore's catch-up did not apply](restore-listed-refunds.md) |
 | `hardcount migrate` or the start-up stops with `this database was made by Velox` | [The database was made by Velox](migration-failed-midway.md#the-database-was-made-by-velox) |
 | An upgrade stops with `waited 5s for a table lock` | [A database upgrade stopped: table lock](migration-failed-midway.md#it-waited-5s-for-a-table-lock) |
 | `hardcount_stripe_key_unusable_total` rising, or "Stripe refused this tenant's API key" in the logs: charges paused until the key is fixed in Settings → Payments | [Health checks, alerts and logs](monitoring.md) |

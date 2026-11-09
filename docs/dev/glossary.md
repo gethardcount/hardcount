@@ -15,7 +15,7 @@ them to use Hardcount.
   with `db.BeginTx`. TxTenant sets the tenant (and test or live mode), so
   RLS shows only that tenant's rows. TxBypass turns RLS off, so the query
   must filter by tenant itself. Background jobs, sign-in, public links,
-  incoming webhooks and two signed-in areas use it
+  incoming webhooks, two signed-in areas and the restore commands use it
   ([list](../architecture.md#design-rules)).
   [More](../adr/003-postgresql-rls-multi-tenancy.md#decision)
 - **Table and column names behind the words above**:
@@ -51,6 +51,11 @@ them to use Hardcount.
   add up. It exits 1 when it finds a problem, or 2 if a check cannot run. It
   runs in CI and needs a database role that can see every row.
   [More](records/product-stability-plan.md)
+- **restore marker and restore catch-up**: After a database restore, a row
+  in `restore_catchup` (the restore marker) makes `hardcount serve` refuse
+  to start. `hardcount restore catch-up` reads the Stripe events since the
+  backup, applies them as webhook deliveries, and then deletes the row.
+  [More](../adr/135-restore-refuses-to-serve-until-caught-up.md)
 
 ### Working on the code
 

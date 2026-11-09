@@ -255,6 +255,43 @@ func (s *Store) ListByTenant(ctx context.Context, tenantID string) ([]domain.Str
 	return out, rows.Err()
 }
 
+// Account is one Stripe connection: a tenant and the mode its keys are for.
+type Account struct {
+	TenantID string
+	Livemode bool
+}
+
+// ListAccounts returns every tenant and mode with stored Stripe keys, across
+// all tenants, ordered by tenant with live mode first. Its one caller is the
+// restore catch-up (`hardcount restore catch-up`, ADR-135), which reads the
+// Stripe events of every account. It returns no secrets.
+func (s *Store) ListAccounts(ctx context.Context) ([]Account, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT tenant_id, livemode FROM stripe_provider_credentials
+		ORDER BY tenant_id, livemode DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list stripe accounts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Account
+	for rows.Next() {
+		var a Account
+		if err := rows.Scan(&a.TenantID, &a.Livemode); err != nil {
+			return nil, fmt.Errorf("scan stripe account: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // GetPlaintext returns the decrypted secrets for a specific (tenant, mode).
 // Used by the Stripe client resolver and webhook verifier — never exposed
 // over the API.
