@@ -1115,8 +1115,11 @@ func (s *Service) attemptDelivery(ctx context.Context, d domain.WebhookDelivery,
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Read up to one character past the stored length. errs.Clip then
-	// chooses the cut, and leaves out whole a character across the limit.
+	// Read utf8.UTFMax bytes past the stored length, so that a character
+	// across the 1 KB limit arrives whole and errs.Clip leaves it out. A
+	// read that stops at exactly 1 KB can split that character. Clip turns
+	// the part it read into a U+FFFD and keeps it when it fits, so the
+	// stored answer would show a character the receiver never sent.
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxStoredResponseBytes+utf8.UTFMax))
 
 	d.HTTPStatusCode = resp.StatusCode

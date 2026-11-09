@@ -121,6 +121,14 @@ func TestDelivery_2xxAnswerThatIsNotCleanText_IsMarkedDeliveredOnce(t *testing.T
 			want: strings.Repeat("a", 1023),
 		},
 		{
+			// The 1 KB cut lands after the first 3 of the 4 bytes of "😀"
+			// (bytes 1021 to 1024). The stored text ends before it, not
+			// with a U+FFFD the receiver never sent.
+			name: "a 4-byte character across the 1 KB cut",
+			body: strings.Repeat("a", 1021) + "😀 and more",
+			want: strings.Repeat("a", 1021),
+		},
+		{
 			// A receiver that answers with bytes that are not UTF-8 text,
 			// here the start of a PNG. Each run of invalid bytes, and each
 			// NUL, is stored as U+FFFD.
