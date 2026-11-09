@@ -14,7 +14,7 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
   - **D1: cancel or cross-interval plan swap against a paid flip**, while dunning's pause on the subscription is being written. A paid flip locks the invoice, then waits for the subscription to lift the pause (the comment on `subscription.PostgresStore.LockDunningPauseTx`). The cancel or swap holds the subscription, then waits for the invoice to void it. The paid flips are record payment, collect's credit-covered settle, credit-note issue and the issue step of create with `auto_issue`.
   - **D2: test-clock teardown against a period closer** ([ADR-066](066-threshold-money-semantics.md)). The teardown deletes the clock's invoices, then its subscriptions. A cancel, a swap or a period close holds the subscription, then reads the threshold invoice.
   - **D3: held usage release or discard against LiteLLM ingest.** They lock the same held rows in different orders.
-  - **D4: cancel against a credit-note create.** The cancel takes the invoice-number lock, then the credit-note invoice lock. Credit-note create (with or without `auto_issue`), the refund route, commit-relief create and recording a refund made in Stripe take them the other way. P1-08 ([#1649](https://github.com/gethardcount/hardcount/pull/1649)) removes it: the cancel writes its relief before it numbers its final invoice.
+  - **D4: cancel against a credit-note create, now removed.** The cancel took the invoice-number lock, then the credit-note invoice lock. Credit-note create (with or without `auto_issue`), the refund route, commit-relief create and recording a refund made in Stripe took them the other way. P1-08 ([#1649](https://github.com/gethardcount/hardcount/pull/1649)) removed it: the cancel writes its relief before it numbers its final invoice. It also has a credit-note create lock its invoice row before it numbers the note, so a relief that voids an unused invoice no longer deadlocks with a credit note on that invoice.
 - **The same race already answers 409 when it does not deadlock.** When a payment lands between a cancel's funding read and its void, the void answers `409` `invoice_changed`, and [Errors](../api/errors.md) tells the client to read again and retry. Clients of cancel and plan change already handle a `409` followed by a resend.
 
 ## Decision
@@ -44,7 +44,7 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
    | Stripe webhooks | Stripe, which sends the event again after a `5xx` |
    | The reconciler, the collector, the period close and the scheduled cancel | Their job, on its next tick |
    | Collect's card branch | Not converted. Stripe may have taken the money, so the stored `500` is the answer the idempotency layer chose, and the webhook settles the invoice |
-   | The D4 writers: credit-note create, the refund route, commit-relief create and a refund made in Stripe | Not converted. Their only documented deadlock is D4 |
+   | The D4 writers: credit-note create, the refund route, commit-relief create and a refund made in Stripe | Not converted. Their only documented deadlock was D4, which P1-08 removed |
    | Any other request | Not converted. A 40P01 there is still a stored `500` |
 
 ## Why this design
@@ -68,7 +68,7 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
   - D1 has no small fix. `LockDunningPauseTx` locks the subscription only after a pause has committed, on purpose. Locking it on every payment would make each payment wait behind closers that hold the subscription across their tax call.
   - D2: the teardown could lock the clock's subscriptions right after the clock row. After this ADR, neither side leaves a stored `500`.
   - D3: release and discard could lock in key order. Neither side is stored.
-  - D4: P1-08.
+  - D4: P1-08 fixed it this way.
 
 ## Consequences
 
@@ -82,8 +82,7 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
 - **Revisit trigger.** The WARN line "request lost a database deadlock" names a pair. A pair that recurs gets a lock-order fix and its pair test, under the money-path playbook (section 5, item 6).
 - **A resend repeats the work the lost attempt did before Postgres stopped it.** For a cancel or a prorated item change that includes the tax calculation, whose row stays with no invoice. The `invoice_changed` `409` already has the same cost.
 - **Collect does not finish after its `409`.** The credit stays applied, so the invoice is open with nothing due. Collect sent again answers `422` "invoice has no amount due": its pre-check, and the charge claim behind it, admit only an invoice with an amount due. The same state follows any failure of that settle today, not only a deadlock. A dunning retry settles such an invoice (it marks an invoice with nothing due paid), and so does the auto-charge sweep while the invoice still waits for its automatic charge. Collect itself does not.
-- **The D4 writers** keep a stored `500` for a 40P01 until P1-08 is in the same release.
-- **Other transactions.** A 40P01 in any other request stays a stored `500`. None has a documented deadlock.
+- **Other transactions.** A 40P01 in any other request, the D4 writers included, stays a stored `500`. None has a documented deadlock now.
 
 ## References
 
