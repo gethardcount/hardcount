@@ -27,7 +27,7 @@ original text.
 - Hardcount now refuses to start on a database `scripts/restore.sh` restored, or `hardcount restore begin` marked, and the restore pauses billing and dunning. A script that does this must change:
   - **A restore that replaces your live database** runs `hardcount restore catch-up` before it starts Hardcount. After a snapshot or point-in-time restore, it runs `hardcount restore begin` first ([Restore Hardcount](docs/ops/restore.md)).
   - **A copy,** such as a staging database refreshed from a live dump, must never run the catch-up: it writes to your live Stripe account. Remove the mark with `DELETE FROM restore_catchup;` instead, and follow the rules for starting a copy ([Back up Hardcount](docs/ops/backup-considerations.md#4-run-the-restore-drill)).
-- Compose installs: `deploy/compose/nginx.conf` now includes `nginx-log-redact.conf`, which `docker-compose.yml` mounts. Check out the release, as for any upgrade, so all three arrive together. If you run `nginx.conf` outside this Compose file, copy `nginx-log-redact.conf` too, or nginx will not start.
+- Compose installs: `deploy/compose/nginx.conf` now includes `nginx-log-redact.conf`, which `docker-compose.yml` mounts. Check out the release, as for any upgrade, so all three arrive together. If you run `nginx.conf` outside this Compose file, copy `nginx-log-redact.conf` too, or nginx will not start ([#1651](https://github.com/gethardcount/hardcount/pull/1651)).
 - The dashboard's pages, the hosted invoice page among them, now refuse to be shown in a frame on another site. If your site frames one, link to it instead.
 - If a webhook endpoint listens for only one of `payment_method.attached` and `payment_method.updated`, subscribe it to both. A Stripe event that changes nothing on a saved card now sends no webhook. One Stripe Checkout setup session sends two Stripe events for its card, so the card can arrive as either webhook ([Payment methods](docs/api/webhook-events.md#payment-methods-datapayment_method)).
 
@@ -60,7 +60,7 @@ original text.
 
 ### Security
 
-- **The Compose stack's nginx logs `[redacted]` in place of a link's token, and the dashboard's pages refuse to be framed.** A hosted invoice, card update, invite or password-reset link holds a token that works like a password. Both nginx access logs wrote it, in the URL and in the Referer. The dashboard's pages now also send `X-Frame-Options`, a `frame-ancestors` policy, `nosniff` and `Referrer-Policy`.
+- **The Compose stack's nginx logs `[redacted]` in place of a link's token, and the dashboard's pages refuse to be framed.** A hosted invoice, card update, invite or password-reset link holds a token that works like a password. Both nginx access logs wrote it, in the URL and in the Referer. The dashboard's pages now also send `X-Frame-Options`, a `frame-ancestors` policy, `nosniff` and `Referrer-Policy`. ([#1651](https://github.com/gethardcount/hardcount/pull/1651))
 - **The quick start listens only on this computer.** It served the dashboard and API on every network interface, over plain HTTP, with a live key already made. A new quick-start `.env` sets `NGINX_HTTP_PORT=127.0.0.1:8080`. From another machine, use an SSH tunnel ([quick start](docs/quick-start.md)). ([#1635](https://github.com/gethardcount/hardcount/pull/1635))
 
 ## [0.9.3] - 2026-11-09
