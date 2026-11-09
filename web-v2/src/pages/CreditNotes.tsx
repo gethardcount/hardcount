@@ -21,6 +21,7 @@ import { ScrollPane } from '@/components/ui/scroll-pane'
 import { SimulatedBadge } from '@/components/TestClockBadge'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
 import { IssueCreditDialog } from '@/components/IssueCreditDialog'
+import { newRetryKeys, type RetryKeys } from '@/lib/retryKeys'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { useSortable, type SortDir } from '@/hooks/useSortable'
 import { useUrlState } from '@/hooks/useUrlState'
@@ -117,6 +118,10 @@ export default function CreditNotesPage() {
   const [showCreate, setShowCreate] = useState(false)
   // The invoice picked in the chooser; its own dialog then issues the note.
   const [creditInvoice, setCreditInvoice] = useState<Invoice | null>(null)
+  // Issue credit note's Idempotency-Keys, one per invoice. They live here, not
+  // in the dialog, so choosing the same invoice again after a result unknown
+  // keeps the key.
+  const [creditNoteKeys] = useState(newRetryKeys)
   const [confirmIssue, setConfirmIssue] = useState<string | null>(null)
   const [confirmVoid, setConfirmVoid] = useState<string | null>(null)
   const [sendTarget, setSendTarget] = useState<CreditNote | null>(null)
@@ -637,6 +642,7 @@ export default function CreditNotesPage() {
       {creditInvoice && (
         <IssueCreditForInvoice
           invoice={creditInvoice}
+          retryKeys={creditNoteKeys}
           onClose={() => setCreditInvoice(null)}
           onCreated={() => {
             setCreditInvoice(null)
@@ -870,8 +876,9 @@ function ChooseInvoiceDialog({ onClose, onChoose }: {
 // IssueCreditForInvoice opens the invoice page's dialog for the chosen
 // invoice, once its existing credit notes are loaded: the dialog's ceilings
 // count every non-voided note, as the server does.
-function IssueCreditForInvoice({ invoice, onClose, onCreated }: {
+function IssueCreditForInvoice({ invoice, retryKeys, onClose, onCreated }: {
   invoice: Invoice
+  retryKeys: RetryKeys
   onClose: () => void
   onCreated: () => void
 }) {
@@ -890,6 +897,7 @@ function IssueCreditForInvoice({ invoice, onClose, onCreated }: {
     <IssueCreditDialog
       invoice={invoice}
       existingCreditNotes={existing}
+      retryKeys={retryKeys}
       onClose={onClose}
       onCreated={onCreated}
     />
