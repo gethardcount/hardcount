@@ -28,7 +28,7 @@ original text.
   - **A restore that replaces your live database** runs `hardcount restore catch-up` before it starts Hardcount. After a snapshot or point-in-time restore, it runs `hardcount restore begin` first ([Restore Hardcount](docs/ops/restore.md)).
   - **A copy,** such as a staging database refreshed from a live dump, must never run the catch-up: it writes to your live Stripe account. Remove the mark with `DELETE FROM restore_catchup;` instead, and follow the rules for starting a copy ([Back up Hardcount](docs/ops/backup-considerations.md#4-run-the-restore-drill)).
 - Compose installs: `deploy/compose/nginx.conf` now includes `nginx-log-redact.conf`, which `docker-compose.yml` mounts. Check out the release, as for any upgrade, so all three arrive together. If you run `nginx.conf` outside this Compose file, copy `nginx-log-redact.conf` too, or nginx will not start ([#1651](https://github.com/gethardcount/hardcount/pull/1651)).
-- The dashboard's pages, the hosted invoice page among them, now refuse to be shown in a frame on another site. If your site frames one, link to it instead.
+- The dashboard's pages, the hosted invoice page among them, now refuse to be shown in a frame, on any site. If your site frames one, link to it instead ([#1651](https://github.com/gethardcount/hardcount/pull/1651)).
 - If a webhook endpoint listens for only one of `payment_method.attached` and `payment_method.updated`, subscribe it to both. A Stripe event that changes nothing on a saved card now sends no webhook. One Stripe Checkout setup session sends two Stripe events for its card, so the card can arrive as either webhook ([Payment methods](docs/api/webhook-events.md#payment-methods-datapayment_method)).
 
 ### Added
