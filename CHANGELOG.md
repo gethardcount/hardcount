@@ -32,10 +32,6 @@ original text.
 
 - **A restored database catches up with Stripe before Hardcount serves it.** Started on a restored database, Hardcount could charge or refund again money Stripe moved after the backup. Now the restore pauses billing and dunning, and Hardcount refuses to start until `hardcount restore catch-up` has applied Stripe's events since the backup. What it must not apply is listed for you to handle. That is a payment whose invoice the restore lost, a refund whose credit note it lost or whose tax the old server may have reversed, and an event it could not apply. [Restore Hardcount](docs/ops/restore.md) is much shorter. ([#1633](https://github.com/gethardcount/hardcount/pull/1633))
 
-### Changed
-
-- **CI keeps the tools it downloads in the Actions cache.** For contributors: golangci-lint, lychee, Vale, reviewdog, Syft, Grype and Cosign came from GitHub releases on every run, so a failed download failed the run. A run that finds them in the cache downloads nothing. Each download is checked against its release's checksum. ([#1643](https://github.com/gethardcount/hardcount/pull/1643))
-
 ### Removed
 
 - **The metric `hardcount_webhook_outbox_enqueue_failures_total` ([#1639](https://github.com/gethardcount/hardcount/pull/1639)).** It counted webhook events lost because they could not be queued after their change was saved. Every event is now saved with its change, and a change whose event cannot be saved fails, so no event is lost this way. Remove any alert on the metric.
