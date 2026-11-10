@@ -273,12 +273,13 @@ func (m *memStore) TransitionStatus(ctx context.Context, tenantID, id string, fr
 	if to == domain.CreditNoteIssued {
 		cn.IssuedAt = &now
 		// As the real issue statement: a note with an amount, on an invoice
-		// Stripe Tax taxed, is marked as owing its tax reversal. Tests that
+		// Stripe Tax taxed (with or without tax), is marked as owing its tax
+		// reversal. Tests that
 		// depend on it hand the store their invoices (m.invoices).
 		cn.TaxReversalPending = false
 		if m.invoices != nil && cn.TotalCents > 0 {
 			if inv, ok := m.invoices.invoices[cn.InvoiceID]; ok {
-				cn.TaxReversalPending = inv.TaxProvider == "stripe_tax" && inv.TaxAmountCents > 0
+				cn.TaxReversalPending = inv.TaxProvider == "stripe_tax"
 			}
 		}
 	}

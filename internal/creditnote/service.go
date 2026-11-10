@@ -851,11 +851,12 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 			errsOut = append(errsOut, fmt.Errorf("get invoice for pending tax reversal %s: %w", cn.ID, err))
 			continue
 		}
-		// Nothing to reverse: the invoice has no upstream transaction, or one
-		// that carried zero tax (reversing that returns no transaction id, so
-		// the note would be re-driven on every tick). The issue statement marks
-		// neither shape; a marker an earlier version left on one is cleared.
-		if inv.TaxTransactionID == "" || inv.TaxAmountCents == 0 {
+		// Nothing to reverse: the invoice has no upstream transaction. The list
+		// takes only notes whose invoice has one, so this is a marker an
+		// earlier version left; it is cleared. A transaction that carried no
+		// tax is reversed like any other: it records the sale in Stripe's tax
+		// reports, and Stripe returns a reversal for it.
+		if inv.TaxTransactionID == "" {
 			if err := s.store.SetTaxReversalPending(ctx, cn.TenantID, cn.ID, false); err != nil {
 				errsOut = append(errsOut, fmt.Errorf("clear stale tax_reversal_pending for %s: %w", cn.ID, err))
 			}
@@ -878,12 +879,11 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 			continue
 		}
 		if res == nil || res.TransactionID == "" {
-			// A tax-bearing invoice (the gate above already excluded the
-			// no-transaction and zero-tax shapes) whose provider returned no
-			// reversal transaction has NOT been reversed — it comes only
-			// from a reverser that is not wired to a provider. Treat it as a
-			// failure: the marker stays, and the note is not counted (HA-13,
-			// 2026-08-30).
+			// An invoice with a transaction whose provider returned no
+			// reversal transaction has NOT been reversed: Stripe Tax answers
+			// with a reversal or an error, so this comes only from a reverser
+			// that is not wired to a provider. Treat it as a failure: the
+			// marker stays, and the note is not counted (HA-13, 2026-08-30).
 			errsOut = append(errsOut, fmt.Errorf("re-drive tax reversal for credit note %s: provider returned no reversal transaction", cn.ID))
 			continue
 		}

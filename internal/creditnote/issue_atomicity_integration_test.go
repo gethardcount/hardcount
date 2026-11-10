@@ -270,10 +270,12 @@ func TestIssue_MarksTheTaxReversalOwed_InTheIssueStatement(t *testing.T) {
 		}
 	})
 
-	t.Run("Stripe-taxed invoice with zero tax: not marked", func(t *testing.T) {
+	// A transaction with no tax still records the sale in Stripe's tax
+	// reports, and Stripe reverses it like any other.
+	t.Run("Stripe-taxed invoice with zero tax: marked", func(t *testing.T) {
 		cn := f.issue("CN-MARK-4", f.invoice("INV-MARK-4", "stripe_tax", 0, "tx_upstream_zero"), 5500)
-		if cn.TaxReversalPending {
-			t.Fatal("a zero-tax transaction has nothing to reverse")
+		if !cn.TaxReversalPending {
+			t.Fatal("a note on an invoice Stripe Tax recorded with no tax owes its reversal too")
 		}
 	})
 
@@ -347,6 +349,52 @@ func TestIssue_ReversalFails_TheSweepMakesIt(t *testing.T) {
 	}
 	if f.listed(draft.ID) {
 		t.Fatal("a note whose reversal is stored must leave the list")
+	}
+}
+
+// An invoice Stripe Tax recorded with no tax (an exempt customer, a place
+// with no registration) still has a tax transaction, which records the sale
+// in Stripe's tax reports. A credit note on it owes a reversal like any
+// other: the issue statement marks it, and when the inline reversal fails the
+// sweep makes it. Before, the note was not marked, the sweep would have
+// cleared a marker on it with no call, and a failed inline reversal was
+// never made: the refunded sale stayed on the report.
+func TestIssue_ZeroTaxInvoice_ReversalFails_TheSweepMakesIt(t *testing.T) {
+	f := newReversalFixture(t, "CN Zero Tax Reversal")
+	inv := f.invoice("INV-ZERO-REV", "stripe_tax", 0, "tx_upstream_zero")
+	draft, err := f.notes.Create(f.ctx, f.tenantID, domain.CreditNote{
+		InvoiceID: inv.ID, CustomerID: f.custID, CreditNoteNumber: "CN-ZERO-REV",
+		Status: domain.CreditNoteDraft, Reason: "fraudulent",
+		SubtotalCents: 4000, TotalCents: 4000,
+		CreditAmountCents: 4000,
+		Currency:          "USD", RefundStatus: domain.RefundNone,
+	})
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+
+	svc := creditnote.NewService(f.notes, f.invoices, nil, okGranterTx{})
+	svc.SetTaxReverser(failingReverser{})
+	if _, err := svc.Issue(f.ctx, f.tenantID, draft.ID); err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if got := f.note(draft.ID); !got.TaxReversalPending || got.TaxTransactionID != "" {
+		t.Fatalf("after Issue with the provider down: pending=%v tx=%q, want marked and no reversal", got.TaxReversalPending, got.TaxTransactionID)
+	}
+	if !f.listed(draft.ID) {
+		t.Fatal("the note must be listed for the reversal sweep")
+	}
+
+	rev := &recordingReverser{id: "tx_reversal_zero"}
+	svc.SetTaxReverser(rev)
+	if n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(f.ctx, 50); n != 1 || len(sweepErrs) != 0 {
+		t.Fatalf("sweep: reversed=%d errs=%v, want 1 and none", n, sweepErrs)
+	}
+	if len(rev.requests) != 1 || rev.requests[0].OriginalTransactionID != "tx_upstream_zero" || rev.requests[0].GrossAmountCents != 4000 {
+		t.Fatalf("reversal requests = %+v, want one against the invoice's transaction for the note's total", rev.requests)
+	}
+	if got := f.note(draft.ID); got.TaxTransactionID != "tx_reversal_zero" || got.TaxReversalPending {
+		t.Fatalf("after the sweep: tx=%q pending=%v, want the reversal stored and the marker cleared", got.TaxTransactionID, got.TaxReversalPending)
 	}
 }
 

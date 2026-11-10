@@ -785,8 +785,11 @@ func (s *PostgresStore) TransitionStatusTx(ctx context.Context, tx *sql.Tx, tena
 	// issue_pending=true on issued CNs forever (FLOW B17 walk, 2026-07-21).
 	//
 	// Issuing also records that a tax reversal is owed, in this statement:
-	// a note with an amount, on an invoice that Stripe Tax taxed and that
-	// carries tax, owes Stripe a reversal from the moment it is issued. The
+	// a note with an amount, on an invoice that Stripe Tax taxed, owes Stripe
+	// a reversal from the moment it is issued, with or without tax on the
+	// invoice. A transaction with no tax still records the sale in Stripe's
+	// tax reports, and Stripe reverses it like any other (checked in test
+	// mode, 2026-11-10: a full and a partial reversal each return one). The
 	// invoice's tax_provider is the test: only Stripe Tax records a tax
 	// transaction, and it records itself as the provider on every invoice it
 	// taxes, so a transaction id adds no case. The reversal itself is a Stripe
@@ -805,8 +808,7 @@ func (s *PostgresStore) TransitionStatusTx(ctx context.Context, tx *sql.Tx, tena
 					SELECT 1 FROM invoices i
 					WHERE i.id = credit_notes.invoice_id
 					  AND i.tenant_id = credit_notes.tenant_id
-					  AND i.tax_provider = 'stripe_tax'
-					  AND i.tax_amount_cents > 0))
+					  AND i.tax_provider = 'stripe_tax'))
 				ELSE tax_reversal_pending END
 		WHERE id=$5 AND status=$6
 		RETURNING customer_id`,

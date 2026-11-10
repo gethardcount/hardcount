@@ -309,7 +309,10 @@ exists, in the statement that already issues the note.
 
 - `TransitionStatusTx` (the only writer of `status='issued'`) sets
   `tax_reversal_pending` when the note has an amount and its invoice was taxed
-  by Stripe Tax and carries tax.
+  by Stripe Tax. (Until 2026-11-10 also only when the invoice carried tax: a
+  transaction with no tax was taken to have nothing to reverse. It records
+  the sale in Stripe's tax reports, and Stripe reverses it like any other, so
+  the condition is gone; see the CHANGELOG.)
 - `SetTaxTransaction` stores the reversal and clears the marker in one write.
 - `ListPendingCreditNoteTaxReversal` lists marked notes whose invoice has a tax
   transaction. The structural branch, its 24-hour window and the promote step
