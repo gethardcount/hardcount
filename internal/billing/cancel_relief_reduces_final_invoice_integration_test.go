@@ -113,8 +113,9 @@ type reliefRigOpts struct {
 	// day-1 invoice is paid, unless sameDay is set.
 	day1Credit int64
 	// sameDay cancels at 01:00 on the period's first day, with the usage at
-	// 00:30 and the day-1 invoice unpaid with nothing applied. The relief
-	// then voids the day-1 invoice. It needs card=false and no day1Credit.
+	// 00:30 and the day-1 invoice unpaid. The relief then voids the day-1
+	// invoice, and the void hands back any day1Credit applied to it. It needs
+	// card=false, and day1Credit below the base fee so nothing is paid.
 	sameDay bool
 }
 
@@ -126,8 +127,8 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 	if o.day1Credit > 0 && o.card {
 		t.Fatal("rig: a day-1 credit leaves the day-1 invoice unpaid, which needs card=false")
 	}
-	if o.sameDay && (o.card || o.day1Credit > 0) {
-		t.Fatal("rig: sameDay leaves the day-1 invoice unpaid with nothing applied, which needs card=false and no day1Credit")
+	if o.sameDay && (o.card || o.day1Credit >= reliefBaseCents) {
+		t.Fatal("rig: sameDay leaves the day-1 invoice unpaid, which needs card=false and a day1Credit below the base fee")
 	}
 	cancelAt, usageAt := reliefCancelAt, reliefPeriodStart.AddDate(0, 0, 2)
 	if o.sameDay {

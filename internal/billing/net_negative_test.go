@@ -201,6 +201,72 @@ func TestRunCycle_OnlyNetNegativeUsage_NoInvoice_StillRecorded(t *testing.T) {
 	}
 }
 
+// The cancel's twin of TestRunCycle_OnlyNetNegativeUsage_NoInvoice_StillRecorded:
+// a cancel whose only usage is below zero has nothing to bill, writes no
+// final invoice, and still writes the usage-below-zero row, on the cancel's
+// transaction (through PlanCancelBill's writer, as a cancel does).
+//
+// Mutation: drop the noteBelowZero call of the finalOnCancelZero arm in
+// writeFinalOnCancel → no row.
+func TestCancel_OnlyNetNegativeUsage_NoInvoice_StillRecorded(t *testing.T) {
+	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	cancelAt := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
+	sub := domain.Subscription{
+		ID: "sub_1", TenantID: "t1", CustomerID: "cus_1", Code: "neg",
+		Status:                    domain.SubscriptionActive,
+		Items:                     []domain.SubscriptionItem{{ID: "si_1", PlanID: "pln_neg", Quantity: 1}},
+		CurrentBillingPeriodStart: &periodStart,
+		CurrentBillingPeriodEnd:   &periodEnd,
+		NextBillingAt:             &periodEnd,
+	}
+	pricing := &mockPricing{
+		plans: map[string]domain.Plan{
+			"pln_neg": {ID: "pln_neg", Name: "Neg", Currency: "USD",
+				BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInArrears},
+		},
+		meters: map[string]domain.Meter{
+			"mtr_seats": {ID: "mtr_seats", EventName: "seats", Name: "Seats", Unit: "seats", Aggregation: "sum"},
+		},
+		prices: map[string][]domain.PlanPrice{
+			"pln_neg": {priceOf("prc_seat", "mtr_seats", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(5)})},
+		},
+	}
+	usage := &mockUsage{totals: map[string]int64{"mtr_seats": -7}}
+	invoices := &mockInvoices{}
+	engine := wireBaseTax(NewEngine(&mockSubs{subs: map[string]domain.Subscription{sub.ID: sub}}, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
+	aud := &fakeEngineAudit{}
+	engine.SetAuditLogger(aud)
+	ctx := postgres.WithLivemode(context.Background(), true)
+
+	write, err := engine.PlanCancelBill(ctx, sub, cancelAt)
+	if err != nil {
+		t.Fatalf("PlanCancelBill: %v (usage below zero must not fail the cancel)", err)
+	}
+	locked := sub
+	locked.Status, locked.CanceledAt = domain.SubscriptionCanceled, &cancelAt
+	inv, _, _, err := write(ctx, nil, locked)
+	if err != nil {
+		t.Fatalf("write the planned cancel: %v", err)
+	}
+	if inv.ID != "" || len(invoices.invoices) != 0 {
+		t.Fatalf("final invoice %q, stored=%d; want none (nothing to bill)", inv.ID, len(invoices.invoices))
+	}
+	rows := netNegativeRows(t, aud)
+	if len(rows) != 1 {
+		t.Fatalf("%s rows = %d, want 1", netNegativeAction, len(rows))
+	}
+	if got := noteMeters(t, rows[0]); len(got) != 1 || got["mtr_seats"] != "-7" {
+		t.Errorf("meters = %v, want mtr_seats: -7", got)
+	}
+	if got := rows[0].entry.Metadata["billing_reason"]; got != string(domain.BillingReasonSubscriptionCancel) {
+		t.Errorf("billing_reason = %v, want subscription_cancel", got)
+	}
+	if _, ok := rows[0].entry.Metadata["invoice_id"]; ok {
+		t.Errorf("invoice_id set on a cancel that built no invoice: %v", rows[0].entry.Metadata["invoice_id"])
+	}
+}
+
 // The cancel's final invoice follows the same rule, on both pricing paths.
 func TestBillFinalOnImmediateCancel_NetNegativeUsage(t *testing.T) {
 	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)

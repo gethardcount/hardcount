@@ -57,6 +57,24 @@ type prebillVoidRig struct {
 	dstore   *dunning.PostgresStore
 	dsvc     *dunning.Service
 	stopper  *recordingCollectionStopper
+	engine   *billing.Engine
+	// pricing is the engine's plan reader. A test sets its onGetPlan to act
+	// while the engine reads a plan, as a cancel does while it prices.
+	pricing *hookedPricing
+}
+
+// hookedPricing is a pricing adapter that runs onGetPlan, when set, before
+// each plan read.
+type hookedPricing struct {
+	*pricingStoreAdapter
+	onGetPlan func()
+}
+
+func (p *hookedPricing) GetPlan(ctx context.Context, tenantID, id string) (domain.Plan, error) {
+	if p.onGetPlan != nil {
+		p.onGetPlan()
+	}
+	return p.pricingStoreAdapter.GetPlan(ctx, tenantID, id)
 }
 
 // recordingCollectionStopper is the Stripe leg of a void (expire the Checkout
@@ -124,11 +142,13 @@ func newPrebillVoidRig(t *testing.T, name string, policy domain.DunningPolicy) *
 	invSvc.SetDunningResolver(r.dsvc)
 	r.invSvc = invSvc
 
+	r.pricing = &hookedPricing{pricingStoreAdapter: &pricingStoreAdapter{pricingStore}}
 	e := billing.NewEngine(
 		&subStoreAdapter{r.subStore}, &usageStoreAdapter{usage.NewPostgresStore(db)},
-		&pricingStoreAdapter{pricingStore}, &invoiceStoreAdapter{r.invStore},
+		r.pricing, &invoiceStoreAdapter{r.invStore},
 		creditSvc, settings, testPaymentSetupsNoPM{}, testChargerSentinel{}, clock.NewFake(periodStart.Add(time.Minute)),
 	)
+	r.engine = e
 	e.SetIntervalReader(r.subStore)
 	e.SetTaxProviderResolver(tax.NewResolver(nil))
 	e.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
@@ -209,6 +229,34 @@ func (r *prebillVoidRig) insertRun(policyID string, attempts int) {
 }
 
 func (r *prebillVoidRig) runID() string { return "run_" + r.day1.ID }
+
+// invoice reads one of the rig's invoices.
+func (r *prebillVoidRig) invoice(id string) domain.Invoice {
+	r.t.Helper()
+	inv, err := r.invStore.Get(r.ctx, r.tenantID, id)
+	if err != nil {
+		r.t.Fatalf("read invoice %s: %v", id, err)
+	}
+	return inv
+}
+
+// makeRunDueNow moves the run's next action to a minute ago, so the next tick
+// takes it.
+func (r *prebillVoidRig) makeRunDueNow() {
+	r.t.Helper()
+	tx, err := r.db.BeginTx(r.ctx, postgres.TxBypass, "")
+	if err != nil {
+		r.t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(r.ctx, `UPDATE invoice_dunning_runs SET next_action_at = $1 WHERE id = $2`,
+		time.Now().UTC().Add(-time.Minute), r.runID()); err != nil {
+		r.t.Fatalf("make the run due: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		r.t.Fatalf("commit: %v", err)
+	}
+}
 
 // dunningEvents counts the queued webhook events of eventType about the run,
 // read under the tenant's row-level security.
