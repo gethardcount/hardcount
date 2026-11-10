@@ -47,6 +47,7 @@ original text.
 
 ### Fixed
 
+- **hardcount-doctor reads every account's rows, whatever database user runs it.** Run as a user that is neither a superuser nor `BYPASSRLS`, such as the tables' owner on managed Postgres, it read no rows and printed `OK`. It now also exits 2 when accounts exist but it reads no customers and no invoices. ([#1660](https://github.com/gethardcount/hardcount/pull/1660))
 - **Two changes to the default dunning policy at once no longer answer `500`.** This was two **Set as default** calls, or one beside a new policy that takes the default. Both now finish, and one policy is the default. ([#1656](https://github.com/gethardcount/hardcount/pull/1656))
 - **Changes to a customer's default card no longer collide.** Two **Set as default** clicks at once, or one beside a card saved through a setup link, could answer `500`. Two cards removed at once could leave the rest with no default, so auto-charge found no card and dunning started. ([#1656](https://github.com/gethardcount/hardcount/pull/1656))
 - **A void by billing, dunning or a test clock now cancels the invoice's PaymentIntent at Stripe.** When a scheduled cancel or dunning's final cancel voided an unused prebill, the declined PaymentIntent recorded on it stayed open at Stripe (status `requires_payment_method`). No money moved: the customer could not pay through it. Voids from the dashboard or API already canceled it. ([#1657](https://github.com/gethardcount/hardcount/pull/1657))

@@ -22,12 +22,14 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // Check is one invariant: SQL whose result rows are violations. The query
 // must select `id` first (the violating row's primary key), then any columns
-// useful for triage. It runs with no tenant binding: the doctor sweeps
-// across tenants by design, on a connection that can see everything.
+// useful for triage. It runs with row-level security off and no tenant
+// binding (see beginRead): the doctor sweeps across tenants by design.
 type Check struct {
 	// Name is the stable identifier, kebab-case, unique across domains.
 	Name string
@@ -53,17 +55,22 @@ type Result struct {
 	Duration   time.Duration
 	Checks     int
 	Violations []Violation
-	// Errors are the checks that failed to run (schema drift, a connection
-	// error). A check that cannot run is itself a finding, and it is never
-	// skipped without a word.
+	// Errors are what keeps the sweep from vouching for the database: a
+	// check that failed to run (schema drift, a connection error), or a read
+	// that saw no customers and no invoices while tenants exist. Each is
+	// itself a finding, and none is skipped without a word.
 	Errors []error
 }
 
 // Run executes every check against db. It is read-only by construction:
 // checks are SELECTs, and Run also opens each transaction read-only, so a
-// mistyped check cannot write.
+// mistyped check cannot write. Before the checks, it adds an error when
+// tenants exist but it reads no customers and no invoices (see coverage).
 func Run(ctx context.Context, db *sql.DB, checks []Check) Result {
 	res := Result{Started: time.Now()}
+	if err := coverage(ctx, db); err != nil {
+		res.Errors = append(res.Errors, fmt.Errorf("read coverage: %w", err))
+	}
 	for _, c := range checks {
 		res.Checks++
 		if err := runOne(ctx, db, c, &res); err != nil {
@@ -74,12 +81,58 @@ func Run(ctx context.Context, db *sql.DB, checks []Check) Result {
 	return res
 }
 
-func runOne(ctx context.Context, db *sql.DB, c Check, res *Result) error {
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+// beginRead opens the read-only transaction that each check and the
+// coverage probe run in, under postgres.TxBypass. Every tenant table has
+// FORCE ROW LEVEL SECURITY, so without it any role that is neither a
+// superuser nor BYPASSRLS, the tables' owner included, reads no tenant rows.
+// The checks read every tenant on purpose and filter by none.
+func beginRead(ctx context.Context, db *sql.DB) (*sql.Tx, error) {
+	tx, err := postgres.NewDB(db, 0).BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		return nil, err
+	}
+	// A transaction may turn read-only after its first statement, here the
+	// bypass setting, and from then on it refuses every write.
+	if _, err := tx.ExecContext(ctx, `SET TRANSACTION READ ONLY`); err != nil {
+		postgres.Rollback(tx)
+		return nil, err
+	}
+	return tx, nil
+}
+
+// coverage returns an error when tenants exist but the sweep's read sees no
+// customers and no invoices. A sweep over such a read finds nothing whether
+// or not the data is sound, so it must not pass. The tenants table has no
+// row-level security, so its count does not depend on the role. Every
+// account's billing rows hang off its customers, so an account with a
+// customer and no invoice yet still gets a sweep.
+func coverage(ctx context.Context, db *sql.DB) error {
+	tx, err := beginRead(ctx, db)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer postgres.Rollback(tx)
+
+	var tenants int64
+	var customers, invoices bool
+	if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM tenants),
+		EXISTS (SELECT 1 FROM customers), EXISTS (SELECT 1 FROM invoices)`).Scan(&tenants, &customers, &invoices); err != nil {
+		return err
+	}
+	if tenants > 0 && !customers && !invoices {
+		return fmt.Errorf("%d tenant(s) exist, but the doctor read no customers and no invoices. "+
+			"Either the DATABASE_URL user cannot read the rows, or no account has a customer yet. "+
+			"The doctor reports OK only over rows it has read", tenants)
+	}
+	return nil
+}
+
+func runOne(ctx context.Context, db *sql.DB, c Check, res *Result) error {
+	tx, err := beginRead(ctx, db)
+	if err != nil {
+		return err
+	}
+	defer postgres.Rollback(tx)
 
 	rows, err := tx.QueryContext(ctx, c.SQL)
 	if err != nil {

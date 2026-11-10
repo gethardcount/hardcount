@@ -40,8 +40,10 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	// The doctor needs a role that sees every row (RLS-scoped roles make it
-	// silently blind — see internal/doctor).
+	// The doctor sweep and this test's own invoice reads run on the admin
+	// pool. The plain reads need it, because the admin role reads past
+	// row-level security. The doctor reads every tenant's rows under any role
+	// that can read the tables (see beginRead in internal/doctor/doctor.go).
 	adminURL := strings.TrimSpace(os.Getenv("TEST_ADMIN_DATABASE_URL"))
 	if adminURL == "" {
 		adminURL = "postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable"
