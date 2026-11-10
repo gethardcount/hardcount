@@ -570,3 +570,39 @@ Pinned by `internal/dunning/outbox_in_tx_integration_test.go`,
 `internal/dunning/exhaust_writeoff_race_integration_test.go` and
 `internal/api/dunning_retry_definite_decline_integration_test.go` on real
 Postgres, and `internal/dunning/exhaust_strand_test.go`.
+
+## Amendment 2026-11-10 — every attempt saves its schedule before the charge
+
+The [amendment of 2026-10-08](#amendment-2026-10-08--an-interrupted-exhaustion-is-finished-and-escalates-once)
+has the final attempt write its exhaustion lease at the pre-charge persist.
+A non-final attempt wrote its wait only after the charge. A stop between the
+two (a deploy, a lost leader lease, a failed write) left the run due with the
+attempt counted, and the next hourly pass charged the card again where the
+policy said to wait days.
+
+Now every attempt writes `nextActionAfterRetry` at the pre-charge persist:
+the wait before the next retry, or the lease after the last.
+
+- **The trade.** A retry interrupted before or during its charge is skipped,
+  where it used to run again within the hour. A skipped retry is preferred
+  to a repeated charge. On the last retry the final action then runs without
+  that charge, as before.
+- **The rewind runs detached.** A transient skip takes the attempt and the
+  schedule back. When the skip comes from the pass stopping, its context is
+  already cancelled, so the rewind runs on a detached context with a 10 s
+  limit. A rewind that still fails leaves the attempt counted, and is logged
+  at `ERROR` with `final_attempt`.
+- **A settled retry whose resolve fails is made due again**, on the same
+  detached context, so the next pass's pre-check ends the run instead of
+  leaving it active for the policy's wait.
+- **A hard stop** (a kill, not a shutdown) after the pre-charge write logs
+  nothing and leaves no timeline row: the attempt is counted and the run
+  follows its saved schedule.
+- **An unconfirmed charge that the pass stopped waiting for** is rewound and
+  not counted, as every other unclear outcome is. If Stripe did receive and
+  decline it, the next pass charges again as the same attempt once the
+  stale-hold sweep has cleared the charge hold.
+
+Pinned by `internal/dunning/schedule_before_charge_test.go` and
+`internal/dunning/schedule_before_charge_integration_test.go` on real
+Postgres.
