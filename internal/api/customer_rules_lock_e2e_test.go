@@ -402,6 +402,80 @@ func TestE2E_Activate_ArchivedCustomerRefused(t *testing.T) {
 	}
 }
 
+// TestE2E_CustomerLock_ArchiveRacesActivate: an archive and a draft's
+// activation for one customer at the same moment. A draft does not block an
+// archive, and an archived customer's draft cannot be activated. Whichever
+// takes the customer-rules lock first, the other sees it: the customer never
+// ends archived with a subscription that bills.
+//
+// Mutation-verify: drop the lock from ActivateDraftWithBill and keep its
+// status read → both subtests fail.
+func TestE2E_CustomerLock_ArchiveRacesActivate(t *testing.T) {
+	// The activation holds the lock while it waits at its invoice number.
+	// The archive waits for the lock, then counts the subscription as active.
+	// Without the lock the archive reads the draft, which does not block it.
+	t.Run("activate_first", func(t *testing.T) {
+		r := newLagRigBare(t, "in_advance", 0)
+		ctx := t.Context()
+		admin := testutil.AdminPool(t)
+		body := r.createBody("pro-seat", r.planA)
+		body["status"] = "draft"
+		subID := r.must(http.MethodPost, "/v1/subscriptions", lagP0, body, http.StatusCreated)["id"].(string)
+
+		gate := holdTenantNumberRow(t, ctx, admin, r.tenantID)
+		activate := r.start(http.MethodPost, "/v1/subscriptions/"+subID+"/activate", lagP0, nil)
+		testutil.WaitForLockWaitersOrDone(t, ctx, admin, "tenant_settings", 1, activate.done)
+		archive := r.start(http.MethodPatch, "/v1/customers/"+r.custID, lagP0, map[string]any{"status": "archived"})
+		testutil.WaitForLockWaitersOrDone(t, ctx, admin, "", 2, archive.done)
+		release(t, gate)
+
+		codeS, rawS := activate.wait(t, "the activation")
+		codeA, rawA := archive.wait(t, "the archive")
+		if codeS != http.StatusOK {
+			t.Fatalf("the activation = %d %s, want 200", codeS, rawS)
+		}
+		if errCode, msg := apiErr(rawA); codeA != http.StatusConflict || errCode != "invalid_state" || !strings.Contains(msg, "(pro-seat)") {
+			t.Fatalf("the archive = %d %s, want 409 invalid_state naming subscription pro-seat", codeA, rawA)
+		}
+		if got := r.customerField(r.custID, "status"); got != "active" {
+			t.Fatalf("customer status = %v, want active: it was archived with a subscription that bills", got)
+		}
+	})
+
+	// The archive holds the lock while it waits at its UPDATE. The
+	// activation waits for the lock, then reads the customer as archived and
+	// refuses. Without the lock it reads the status before the archive
+	// commits, and activates.
+	t.Run("archive_first", func(t *testing.T) {
+		r := newLagRigBare(t, "in_advance", 0)
+		ctx := t.Context()
+		admin := testutil.AdminPool(t)
+		body := r.createBody("pro-seat", r.planA)
+		body["status"] = "draft"
+		subID := r.must(http.MethodPost, "/v1/subscriptions", lagP0, body, http.StatusCreated)["id"].(string)
+
+		hold := holdCustomerRow(t, ctx, admin, r.custID)
+		archive := r.start(http.MethodPatch, "/v1/customers/"+r.custID, lagP0, map[string]any{"status": "archived"})
+		testutil.WaitForLockWaitersOrDone(t, ctx, admin, "UPDATE customers", 1, archive.done)
+		activate := r.start(http.MethodPost, "/v1/subscriptions/"+subID+"/activate", lagP0, nil)
+		testutil.WaitForLockWaitersOrDone(t, ctx, admin, "", 2, activate.done)
+		release(t, hold)
+
+		codeA, rawA := archive.wait(t, "the archive")
+		codeS, rawS := activate.wait(t, "the activation")
+		if codeA != http.StatusOK {
+			t.Fatalf("the archive = %d %s, want 200", codeA, rawA)
+		}
+		if errCode, msg := apiErr(rawS); codeS != http.StatusConflict || errCode != "invalid_state" || !strings.Contains(msg, "customer is archived") {
+			t.Fatalf("the activation = %d %s, want 409 invalid_state: customer is archived", codeS, rawS)
+		}
+		r.subID = subID
+		if st := r.sub().Status; st != "draft" {
+			t.Fatalf("subscription status = %s, want draft: it bills an archived customer", st)
+		}
+	})
+}
+
 // TestE2E_Activate_CustomerLockedBeforeTheNumberRow pins where activation
 // takes the customer-rules lock: before its invoice number. An activation
 // waits at the tenant's number row; a create for the same customer then
