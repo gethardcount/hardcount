@@ -5,7 +5,7 @@
 
 ## Summary
 
-The email and webhook outboxes (tables of messages waiting to be sent) claim a batch in one short transaction that stamps a time-limited lease, then send each row outside it. Each row's result is saved in its own small update, so a rollback never re-sends a delivered email. A retry or a give-up applies only to a row still `pending` under the claim that made the attempt. An email's sent mark applies to any row not already sent. A webhook event commits together with its row's sent mark, or not at all. Delivery is at-least-once, with at most one duplicate per crash or expired lease, and a `failed` row waits for an operator to requeue it. Amended 2026-08-30 and 2026-10-13: no retention window exists, and a sent or skipped email row drops its links and PDF from the stored payload. Amended 2026-11-10: each mark is tied to its claim, as above ([amendment](#amendment-2026-11-10--each-mark-is-tied-to-its-claim)). Status: active, amended; each worker now runs on one replica under a leader lease ([ADR-114](114-leader-leases-tick-scoped-fencing.md)).
+The email and webhook outboxes (tables of messages waiting to be sent) claim a batch in one short transaction that stamps a time-limited lease, then send each row outside it. Each row's result is saved in its own small update, so a rollback never re-sends a delivered email. A retry or a give-up applies only to a row still `pending` under the claim that made the attempt. An email's sent mark applies to any row not already sent. A webhook event commits together with its row's sent mark, or not at all. Delivery is at-least-once, with at most one duplicate per crash or expired lease, and a `failed` row waits for an operator to requeue it. Amended 2026-08-30 and 2026-10-13: no retention window exists, and a sent or skipped email row drops its links and PDF from the stored payload. Amended 2026-11-10: the retry, give-up and sent-mark rules above ([amendment](#amendment-2026-11-10--what-each-mark-may-change)). Status: active, amended; each worker now runs on one replica under a leader lease ([ADR-114](114-leader-leases-tick-scoped-fencing.md)).
 
 ## Context
 
@@ -173,7 +173,7 @@ its link and PDF are gone. Send a new email from the dashboard or the API
 instead. The residual's other proposal, encrypting the payload fields of
 unsent rows, is not done.
 
-## Amendment 2026-11-10 — each mark is tied to its claim
+## Amendment 2026-11-10 — what each mark may change
 
 Decision 3 guarded every mark with `status = 'pending'` alone. That is not
 enough when two claims of one row overlap.
