@@ -245,9 +245,9 @@ func TestBillFinalOnImmediateCancel_NetNegativeUsage(t *testing.T) {
 	aud := &fakeEngineAudit{}
 	engine.SetAuditLogger(aud)
 
-	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
+	inv, err := engine.BillFinalOnCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
-		t.Fatalf("BillFinalOnImmediateCancel: %v (usage below zero must not fail the cancel)", err)
+		t.Fatalf("BillFinalOnCancel: %v (usage below zero must not fail the cancel)", err)
 	}
 	if inv.ID == "" || inv.SubtotalCents != 400 {
 		t.Fatalf("final invoice = %q, subtotal %d; want one invoice of 400¢ (input tokens only)", inv.ID, inv.SubtotalCents)
@@ -343,8 +343,8 @@ func TestBillFinalOnImmediateCancel_AfterThresholdFire_NetNegativeRow(t *testing
 	aud := &fakeEngineAudit{}
 	engine.SetAuditLogger(aud)
 
-	if _, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub); err != nil {
-		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
+	if _, err := engine.BillFinalOnCancel(postgres.WithLivemode(context.Background(), true), sub); err != nil {
+		t.Fatalf("BillFinalOnCancel: %v", err)
 	}
 	rows := netNegativeRows(t, aud)
 	if len(rows) != 1 {

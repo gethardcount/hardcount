@@ -15,7 +15,7 @@ import (
 // TestBillFinalOnImmediateCancel_MultiDimMeterBilled locks the ADR-044 fix for
 // the cancel-path revenue leak: a meter priced via dimension-match pricing
 // rules (the AI `tokens` shape — one rule per {model, token_type}, meter
-// RatingRuleVersionID empty) was silently skipped by BillFinalOnImmediateCancel's
+// RatingRuleVersionID empty) was silently skipped by the cancel bill's
 // single-rule-only usage loop, so a mid-period immediate cancel emitted NO
 // invoice for all token usage. The cycle path, preview, and the threshold
 // scan all carry the AggregateClaims fork; this asserts the cancel
@@ -71,9 +71,9 @@ func TestBillFinalOnImmediateCancel_MultiDimMeterBilled(t *testing.T) {
 
 	engine := wireBaseTax(NewEngine(&mockSubs{subs: map[string]domain.Subscription{sub.ID: sub}}, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
+	inv, err := engine.BillFinalOnCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
-		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
+		t.Fatalf("BillFinalOnCancel: %v", err)
 	}
 
 	// Pre-fix: subtotal stayed 0 → the zero-subtotal guard returned an empty
@@ -154,9 +154,9 @@ func TestBillFinalOnImmediateCancel_SingleRuleMeterStillBilled(t *testing.T) {
 
 	engine := wireBaseTax(NewEngine(&mockSubs{subs: map[string]domain.Subscription{sub.ID: sub}}, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
+	inv, err := engine.BillFinalOnCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
-		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
+		t.Fatalf("BillFinalOnCancel: %v", err)
 	}
 	if inv.ID == "" {
 		t.Fatal("expected a final invoice for single-rule meter usage")
@@ -212,9 +212,9 @@ func TestBillFinalOnImmediateCancel_HonorsDueOnReceipt(t *testing.T) {
 
 	engine := wireBaseTax(NewEngine(&mockSubs{subs: map[string]domain.Subscription{sub.ID: sub}}, usage, pricing, invoices, nil, &zeroTermsSettings{}, nil, nil, billingTestClock()))
 
-	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
+	inv, err := engine.BillFinalOnCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
-		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
+		t.Fatalf("BillFinalOnCancel: %v", err)
 	}
 	if inv.NetPaymentTermDays != 0 {
 		t.Errorf("NetPaymentTermDays: got %d, want 0 (Due on receipt)", inv.NetPaymentTermDays)
