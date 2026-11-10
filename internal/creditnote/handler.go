@@ -163,7 +163,13 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	input := req.CreateInput
-	cn, err := h.svc.Create(r.Context(), tenantID, input)
+	// Create, the auto-issue and its compensating void run on a ctx the
+	// client cannot cancel (stepsBudget, as CreateRefund), so a disconnect
+	// cannot leave a draft half-way. A server stop between the create and
+	// the issue still can; the ERROR line below names it.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), stepsBudget)
+	defer cancel()
+	cn, err := h.svc.Create(ctx, tenantID, input)
 	if err != nil {
 		respond.FromError(w, r, err, "credit_note")
 		return
@@ -173,14 +179,14 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	// a refund made in Stripe comes back already issued: Create issues it on
 	// the transaction that creates it.
 	if input.AutoIssue && cn.Status == domain.CreditNoteDraft {
-		issued, err := h.svc.Issue(r.Context(), tenantID, cn.ID)
+		issued, err := h.svc.Issue(ctx, tenantID, cn.ID)
 		if err != nil {
 			// CN was created but issue failed — void the draft to avoid orphans.
 			// The void is itself a CAS-gated audited flip (svc.Void), so the
 			// created-then-voided pair leaves a truthful two-row trail. A void
 			// that fails leaves a draft behind: say so loudly, never silently.
-			if _, verr := h.svc.Void(r.Context(), tenantID, cn.ID); verr != nil {
-				slog.ErrorContext(r.Context(), "credit note created but its issue failed, and voiding the draft failed too; the draft stays: issue or void it by hand",
+			if _, verr := h.svc.Void(ctx, tenantID, cn.ID); verr != nil {
+				slog.ErrorContext(ctx, "credit note created but its issue failed, and voiding the draft failed too; the draft stays: issue or void it by hand",
 					"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "issue_error", err, "void_error", verr)
 				// The draft stays, so a resend would make a second note: a
 				// lost deadlock or lock wait keeps the error the idempotency

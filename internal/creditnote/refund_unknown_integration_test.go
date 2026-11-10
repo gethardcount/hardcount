@@ -261,13 +261,22 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		svc := creditnote.NewService(store, invStore, refunder)
 		svc.SetNumberGenerator(&seqNumbers{prefix: "UNKDLISSUE"})
 		svc.SetAuditLogger(audit.NewLogger(db)) // its row rides the same write
+		// The issue endpoint runs Issue on the request's context. (A refund,
+		// CreateRefund, runs on a context the request cannot cancel.)
+		draft, err := svc.Create(ctx, tenantID, creditnote.CreateInput{
+			InvoiceID: inv.ID, Reason: "requested_by_customer", RefundAmountCents: inv.TotalAmountCents,
+			Lines: []creditnote.CreditLineInput{{Description: "Refund", Quantity: 1, UnitAmountCents: inv.TotalAmountCents}},
+		})
+		if err != nil {
+			t.Fatalf("create the draft: %v", err)
+		}
 		reqCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		refunder.during = cancel
 
-		cn, err := svc.CreateRefund(reqCtx, tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"})
+		cn, err := svc.Issue(reqCtx, tenantID, draft.ID)
 		if err != nil {
-			t.Fatalf("CreateRefund: %v (want the issued note with refund_status unknown)", err)
+			t.Fatalf("Issue: %v (want the issued note with refund_status unknown)", err)
 		}
 		got, err := store.Get(ctx, tenantID, cn.ID)
 		if err != nil {
