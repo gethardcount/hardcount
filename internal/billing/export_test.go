@@ -3,6 +3,8 @@ package billing
 import (
 	"context"
 	"database/sql"
+	"testing"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -48,4 +50,13 @@ func (e *Engine) BillFinalOnCancel(ctx context.Context, sub domain.Subscription)
 		e.FinalizeOnCreateInvoice(ctx, sub, inv)
 	}
 	return inv, nil
+}
+
+// ShortenCommitBudget sets commitBudget to d for one test, so a test can run
+// a transaction past its budget without waiting 30 seconds.
+func ShortenCommitBudget(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := commitBudget
+	commitBudget = d
+	t.Cleanup(func() { commitBudget = prev })
 }

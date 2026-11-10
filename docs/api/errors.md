@@ -154,7 +154,7 @@ first:
 | `unpaid_invoice_blocks_change` | A change that charges more (an upgrade, an added item, more seats) while the current period's invoice is unpaid. A written-off invoice counts as unpaid. | Collect or void that invoice first; writing it off does not lift this |
 | `funding_invoice_tax_pending` | A change that credits unused time (a cancel, a downgrade, a removed item), while the invoice that billed that time is a draft whose tax is not worked out yet | Try again later |
 | `item_changed` | The subscription's items changed while the request ran | Read it again, then retry |
-| `subscription_period_moved` | The subscription moved to a new billing period while the request ran, or a spend-threshold invoice has already billed this subscription past the current time | Read it again, then retry, or schedule the change for the next period |
+| `subscription_period_moved` | The subscription moved to a new billing period while the request ran, or (an immediate change to a plan with another billing interval) a spend-threshold invoice has billed this subscription past the current time, or, billed in arrears, up to it | Read it again, then retry, or schedule the change for the next period. On a test clock, advance the clock first |
 | `billing_not_failing` | `retry-billing` on a subscription whose billing is not failing | Nothing to do |
 
 **Invoices and payments**

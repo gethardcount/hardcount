@@ -83,7 +83,9 @@ Concretely:
    already billed past the swap's effective instant, the swap returns 409
    `subscription_period_moved` rather than re-anchoring the period below the
    fire's window (which would re-bill `[now, fire end)` at the next close).
-   The operator's instant is never moved silently.
+   The operator's instant is never moved silently. An in_arrears swap is
+   also refused when the fire's window ends exactly at that instant
+   (2026-11-10 amendment): both invoices would take the key (start, instant).
 6. **A read-side alarm.** `hardcount-doctor` gains
    `usage_billed_once_per_subscription_meter_window`: the same usage instant
    of one (subscription, meter, rating-rule bucket) on two live invoices —
@@ -296,3 +298,61 @@ test `TestCloseVsThresholdFire_BothOrders_BillsUsageOnce` now races the
 keep-anchor fire: close first, the fire's CAS loses; fire first, the close's
 in-tx watermark re-read sees the fire and bills only the rest. Both orders
 are still asserted, and 1000c of usage is billed once in each.
+
+## Amendment 2026-11-10: the cycle close has no catch for a unique violation
+
+The cycle close read every unique violation on its invoice insert as "this
+period is already invoiced" and closed the period with no invoice: a second
+transaction advanced it, and nothing reported it. The CAS makes that read
+wrong. The period's CAS, its invoice and its advance are one transaction,
+so a racing closer misses its CAS before it inserts
+(`TestConcurrentBilling_ExactlyOneInvoice`), and a pre-ADR-115 row cannot
+exist (v0.9.0 installs fresh only). Two inputs still reached the catch, and
+for both the skip was the bug:
+
+- a counter or a period set back in the database (a number taken, or the
+  period's key taken by its own earlier invoice);
+- on a frozen test clock, a threshold fire at instant T followed by an
+  in_arrears cross-interval swap at the same T: the swap cut the period to
+  [start, T), whose invoice takes the key (sub, start, T) that the threshold
+  invoice holds, and the old plan's base fee for [start, T) was billed
+  nowhere. (Shown on main a08c6197: a fire three days into the period,
+  then the swap and the close; the close generated nothing and moved the
+  period on.)
+
+Now:
+
+- **The cycle close has no catch.** Any unique violation fails the bill with
+  its cause (`create invoice: …`), the period stays, and the run saves a
+  counted failure (ADR-119: retried on its waits, parked after 8). On a test
+  clock nothing is saved and the catch-up reports the error.
+  `GetInvoiceForPeriod` and the close's heal path are deleted; a $0 cycle
+  invoice is settled by the collector (ADR-116).
+- **A threshold fire skips only its own slot.** It reads a violation as
+  "a sibling fire wrote this cycle's threshold invoice" only for the
+  threshold slot or the period slot (`invoice_threshold_cycle_taken`,
+  `invoice_billing_period_taken`): the second of two fires at one instant
+  violates both, and Postgres names the one it checks first, which depends
+  on how the database was built. Any other violation (a number taken) is an
+  error the scan reports; before, it was logged at INFO.
+- **The in_arrears swap is refused at a fire's instant** (decision 5):
+  409 `subscription_period_moved`. The guard compares at the stored
+  precision (the swap's instant truncated to the microsecond), so a swap in
+  the same microsecond as the fire's end is refused too. It matters on a
+  clock that repeats an instant, a test clock: on a wall clock the fire's
+  window ends at or before the fire (one grace before it, ADR-120), and a
+  later swap's instant is after it. The in_advance swap's invoice starts at
+  the swap instant, so it does not clash.
+- **Upgrade:** a test-clock subscription already swapped at a fire's
+  instant and not yet closed fails its close with
+  `invoice_billing_period_taken`: void the threshold invoice if it is unpaid,
+  and the close bills the whole window; otherwise delete the clock.
+
+Tests: `TestCycleClose_InvoiceNumberCollision_FailsBillKeepsPeriod`,
+`TestBilling_PeriodSlotTaken_FailsBillKeepsPeriod`,
+`TestPlanSwap_InArrears_AtFireInstant_Refused` (and a swap in the same
+microsecond), `TestPlanSwap_InAdvance_AtFireInstant_Succeeds`,
+`TestThresholdFire_InvoiceNumberCollision_ReportsError`,
+`TestThresholdFire_SiblingFireAtTheInsert_Skips`,
+`TestBillOnePeriod_UniqueViolationFailsAndDoesNotAdvance`,
+`TestThresholdSlotTaken`.

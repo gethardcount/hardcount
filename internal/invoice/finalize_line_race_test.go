@@ -2,6 +2,7 @@ package invoice
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -16,7 +17,9 @@ type memAddingTaxRetrier struct {
 	add   bool
 }
 
-func (f *memAddingTaxRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
+func (f *memAddingTaxRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string,
+	_ func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
+) (domain.Invoice, error) {
 	return f.ComputeTaxForInvoice(ctx, tenantID, invoiceID)
 }
 

@@ -524,9 +524,9 @@ type InvoiceTaxRetryUpdate struct {
 	// backoff window ends. It is set per the exponential schedule in
 	// internal/billing/tax_retry.go while Status stays pending, and cleared
 	// (nil) when the status moves to ok or exempt. Auto-finalize on a clean
-	// tax outcome happens at the service layer, not inside this atomic
-	// update. That way it shares the public-token and tax-commit side
-	// effects of a manual Finalize.
+	// tax outcome rides on this update's transaction (UpdateTaxAtomic's
+	// then; see ADR-017), through the same finalize hook and steps after the
+	// commit as a manual Finalize.
 	//
 	// This update writes the column only on a draft. On a finalized invoice
 	// the same column is the next attempt of a failed tax commit or tax

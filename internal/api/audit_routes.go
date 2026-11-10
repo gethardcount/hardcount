@@ -265,7 +265,7 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	// --- invoices --------------------------------------------------------
 	{"POST", "/v1/invoices"}:                                                explicit("invoice.Service.Create → LogInTx(create, invoice) on the invoice's own tx."),
 	{"POST", "/v1/invoices/{id}/line-items"}:                                explicit("invoice.Service.AddLineItem → LogInTx(line_item_added) on the invoice tx. The catch-all wrote 'create invoice {id}' here — a row asserting an invoice the operator never created."),
-	{"POST", "/v1/invoices/{id}/finalize"}:                                  explicit("invoice.Service.Finalize → Log(finalize, invoice)."),
+	{"POST", "/v1/invoices/{id}/finalize"}:                                  explicit("invoice.Service.Finalize → LogInTx(finalize, invoice) on the finalize's own tx (finalizeHook)."),
 	{"POST", "/v1/invoices/{id}/void"}:                                      explicit("invoice.Service.Void → LogInTx(void, invoice) on the void coordinator tx (tax reversal + credit reversal share it)."),
 	{"POST", "/v1/invoices/{id}/mark-uncollectible"}:                        explicit("invoice.Service.MarkUncollectible → Log(update, invoice). Single service entry for operator + dunning terminal + resolve paths."),
 	{"POST", "/v1/invoices/{id}/record-payment"}:                            explicit("invoice.Service.RecordOfflinePayment → Log(update, invoice: payment_recorded)."),

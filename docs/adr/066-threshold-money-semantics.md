@@ -100,6 +100,10 @@ design: a heal failure WARNs and leaves the operator-visible pending row
 rather than blocking the cycle advance — stalling all future billing over a
 $0 paid-mark is the worse trade.
 
+(2026-11-10: the cycle branch is removed with the cycle close's catch, see
+the [ADR-115 amendment](115-one-closer-for-the-billing-period.md#amendment-2026-11-10-the-cycle-close-has-no-catch-for-a-unique-violation);
+the collector settles a $0 cycle invoice (ADR-116). The probe's heal stays.)
+
 ### 4. max/last split-billing (shipped, P1c)
 
 Non-additive aggregations (`max`, `last_during_period`, `last_ever` — the

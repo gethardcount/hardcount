@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
+	"log/slog"
 	neturl "net/url"
 	"os"
 	"strings"
@@ -108,6 +110,89 @@ func TestCheckRLSCapability_FlagsBypassRoles(t *testing.T) {
 	}
 	if role != bypassRole || !canBypass {
 		t.Fatalf("role=%q canBypass=%v — BYPASSRLS role must be flagged", role, canBypass)
+	}
+}
+
+// TestWarnIfNoIdleTxTimeout_WarnsOnlyAtZero: a role whose
+// idle_in_transaction_session_timeout is 0 gets one boot warning that names
+// the setting and the page that says how to set it. A role with a value gets
+// none.
+// Mutation-verify: drop the warning → the "at 0" case fails; warn whatever the
+// value → the "30s" case fails.
+func TestWarnIfNoIdleTxTimeout_WarnsOnlyAtZero(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test — requires postgres")
+	}
+	adminURL := testDBURL("TEST_ADMIN_DATABASE_URL",
+		"postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable")
+	admin := testutil.AdminPool(t)
+
+	cases := []struct {
+		name, prefix, value string
+		wantWarn            bool
+	}{
+		// Set to 0 on the role itself, so the case does not depend on the
+		// server's or the database's default.
+		{"at 0", "hardcount_idle_tx_off", "0", true},
+		{"30s", "hardcount_idle_tx_on", "'30s'", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			role := testutil.CreateRole(t, tc.prefix, "idle-tx-test-pw", "")
+			q := "ALTER ROLE " + role + " SET idle_in_transaction_session_timeout = " + tc.value
+			if _, err := admin.Exec(q); err != nil {
+				t.Fatalf("%s: %v", q, err)
+			}
+			pool, err := sql.Open("pgx", rewriteUser(t, adminURL, role, "idle-tx-test-pw"))
+			if err != nil {
+				t.Fatalf("open role pool: %v", err)
+			}
+			defer func() { _ = pool.Close() }()
+
+			var out bytes.Buffer
+			warnIfNoIdleTxTimeout(slog.New(slog.NewTextHandler(&out, nil)), pool, role)
+
+			got := out.String()
+			if !tc.wantWarn {
+				if got != "" {
+					t.Fatalf("role with the timeout at %s logged %q, want nothing", tc.value, got)
+				}
+				return
+			}
+			if n := strings.Count(got, "level=WARN"); n != 1 {
+				t.Fatalf("logged %q, want exactly one WARN line", got)
+			}
+			for _, want := range []string{
+				"idle_in_transaction_session_timeout",
+				"docs/ops/postgres-requirements.md#timeouts-on-the-limited-user",
+				"role=" + role,
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("warning %q does not contain %q", got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestWarnIfNoIdleTxTimeout_ReadFailureIsLogged: when the setting cannot be
+// read, the boot says the check did not run, and does not pass as if the
+// timeout were set.
+func TestWarnIfNoIdleTxTimeout_ReadFailureIsLogged(t *testing.T) {
+	pool, err := sql.Open("pgx", "postgres://nobody@127.0.0.1:1/none")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// A closed pool fails the read without dialling anything.
+	if err := pool.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	var out bytes.Buffer
+	warnIfNoIdleTxTimeout(slog.New(slog.NewTextHandler(&out, nil)), pool, "hardcount_app")
+	got := out.String()
+	if !strings.Contains(got, "level=WARN") || !strings.Contains(got, "idle_in_transaction_session_timeout") ||
+		!strings.Contains(got, "database is closed") {
+		t.Fatalf("logged %q, want a WARN naming the setting and the read error", got)
 	}
 }
 

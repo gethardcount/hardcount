@@ -93,7 +93,10 @@ numbers + paid calls per cycle for a busy scheduler.
 **This probe is an optimization, not the exactly-once mechanism.** Two
 concurrent scans can both pass it (check-then-act TOCTOU). The **partial unique
 index remains the correctness seam**: the loser lands on `errs.ErrAlreadyExists`
-and `fireThreshold` short-circuits, exactly as before. The probe's job is to make
+and `fireThreshold` short-circuits, exactly as before. (2026-11-10: it
+short-circuits only on the threshold slot or the period slot; any other
+unique violation is an error. See the
+[ADR-115 amendment](115-one-closer-for-the-billing-period.md#amendment-2026-11-10-the-cycle-close-has-no-catch-for-a-unique-violation).) The probe's job is to make
 the *common* re-tick cost one indexed lookup instead of a preview aggregation +
 tax call + burned number. Blind-scanning on a probe error would re-introduce the
 exact burn the probe exists to prevent, so a non-`ErrNotFound` probe error
