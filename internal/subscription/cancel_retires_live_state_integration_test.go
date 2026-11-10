@@ -166,7 +166,7 @@ func TestCancelWriters_RetireLiveOnlyState(t *testing.T) {
 		{"CancelAtomicWithBill", domain.SubscriptionActive, func(t *testing.T, sub domain.Subscription) (domain.Subscription, *domain.Subscription) {
 			r.schedule(sub, nil, true)
 			var saw *domain.Subscription
-			got, err := r.store.CancelAtomicWithBill(r.ctx, r.tenantID, sub.ID, billSaw(&saw))
+			got, err := r.store.CancelAtomicWithBill(r.ctx, r.tenantID, sub.ID, SnapshotOf(sub), r.now, billSaw(&saw))
 			if err != nil {
 				t.Fatalf("cancel: %v", err)
 			}
@@ -176,7 +176,7 @@ func TestCancelWriters_RetireLiveOnlyState(t *testing.T) {
 			at := r.now.Add(-time.Minute)
 			r.schedule(sub, &at, false)
 			var saw *domain.Subscription
-			got, err := r.store.FireScheduledCancellationWithBill(r.ctx, r.tenantID, sub.ID, at, billSaw(&saw))
+			got, err := r.store.FireScheduledCancellationWithBill(r.ctx, r.tenantID, sub.ID, SnapshotOf(sub), at, billSaw(&saw))
 			if err != nil {
 				t.Fatalf("fire: %v", err)
 			}

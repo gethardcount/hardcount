@@ -47,7 +47,7 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 	}
 	cancel := func(subID string, n int) {
 		t.Helper()
-		if _, err := store.CancelAtomic(at(n), tenantID, subID); err != nil {
+		if _, err := cancelNow(at(n), store, tenantID, subID); err != nil {
 			t.Fatalf("cancel %s: %v", subID, err)
 		}
 	}

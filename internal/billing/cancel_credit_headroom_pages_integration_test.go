@@ -113,7 +113,7 @@ func TestCancelCredit_HeadroomCountsEveryCreditNote(t *testing.T) {
 		t.Fatalf("begin tx: %v", err)
 	}
 	defer postgres.Rollback(tx)
-	r, err := e.BillOnCancelDraftsTx(ctx, tx, sub)
+	r, err := e.WriteCancelReliefTx(ctx, tx, sub)
 	if err != nil {
 		t.Fatalf("cancel credit: %v", err)
 	}

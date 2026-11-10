@@ -41,23 +41,33 @@ type CustomerReader interface {
 // nil-safe; without it, in_advance subs silently behave like
 // in_arrears (no day-1 invoice, no cancel proration). Implemented
 // by *billing.Engine.
+// BillWriter writes, on the caller's transaction, a bill planned before that
+// transaction opened (ADR-139). locked is the row the transaction's
+// compare-and-set returned. inv is empty when there is nothing to bill.
+// ErrWatermarkMoved means something the plan read changed before the
+// transaction, and nothing was written: the caller rolls back and plans
+// again. Any other error rolls the change back. After commit the caller runs
+// afterCommit (never nil on success: it counts usage the invoice left
+// unpriced, which a rolled-back, retried change must not count twice), then
+// FinishRelief, then FinalizeOnCreateInvoice.
+type BillWriter func(ctx context.Context, tx *sql.Tx, locked domain.Subscription) (inv domain.Invoice, r domain.Relief, afterCommit func(), err error)
+
 type Biller interface {
 	BillOnCreate(ctx context.Context, sub domain.Subscription) (domain.Invoice, error)
-	// BillCancelTx writes a cancel's final invoice and its relief on the
-	// caller's cancel tx (ADR-056, ADR-118). It prices the final invoice,
-	// then writes the relief: credit-note drafts (issue_pending) for paid and
-	// partly-used unpaid funding invoices, and an in-place void of a
-	// fully-unused unpaid one. Then it numbers and inserts the final invoice,
-	// so the relief's credit-note locks come before the tenant's number row,
-	// the order every credit-note writer keeps. inv is empty when there is
-	// nothing to bill. It refuses (InvalidState, code unbilled_period) a
-	// cancel at or after current_period_end: that period ended unbilled, and
-	// no billing run bills a canceled subscription. An error names the step
-	// that failed (the final invoice or the relief) and rolls the cancel
-	// back. After commit the caller runs afterCommit (never nil: it counts
-	// usage the invoice left unpriced, which a rolled-back, retried cancel
-	// must not count twice), then FinishRelief, then FinalizeOnCreateInvoice.
-	BillCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (inv domain.Invoice, r domain.Relief, afterCommit func(), err error)
+	// PlanCancelBill prices a cancel's final invoice and plans its relief
+	// (ADR-056, ADR-118), with no transaction open: sub is the row the
+	// cancel read, priced as canceled at at. The tax call (a network call
+	// for a Stripe Tax tenant) runs here, so no lock waits on it. The writer
+	// it returns writes the relief (credit-note drafts, issue_pending, for
+	// paid and partly-used unpaid funding invoices, and an in-place void of
+	// a fully-unused unpaid one) and then numbers and inserts the final
+	// invoice, so the relief's credit-note locks come before the tenant's
+	// number row, the order every credit-note writer keeps. It refuses
+	// (InvalidState, code unbilled_period) a cancel at or after
+	// current_period_end: that period ended unbilled, and no billing run
+	// bills a canceled subscription. An error names the step that failed
+	// (the final invoice or the relief).
+	PlanCancelBill(ctx context.Context, sub domain.Subscription, at time.Time) (BillWriter, error)
 	// FinishRelief runs a committed relief's post-commit legs (issue the
 	// drafts; the voids' tax reversal). Each leg is durable and recovered by
 	// its own sweep. Each void's invoice.voided committed with the relief. It
@@ -73,8 +83,8 @@ type Biller interface {
 	// period below that window would re-bill it at the next close, so the
 	// swap refuses instead.
 	ThresholdBilledThroughTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (*time.Time, error)
-	// BillOnPlanSwapDraftsTx is the plan-swap twin of the relief inside
-	// BillCancelTx: the refund for the OLD period's unused prepayment,
+	// BillOnPlanSwapDraftsTx is the plan-swap twin of the cancel's relief
+	// (PlanCancelBill): the refund for the OLD period's unused prepayment,
 	// written on the swap tx; any error rolls the swap back. sub is the
 	// PRE-swap snapshot. The caller runs FinishRelief after commit.
 	BillOnPlanSwapDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, at time.Time) (domain.Relief, error)
@@ -1673,6 +1683,36 @@ func sameItems(a, b []domain.SubscriptionItem) bool {
 	return true
 }
 
+// sameIntervals reports whether two reads of a subscription's billing
+// intervals hold the same rows on item, plan, quantity and start. Every item
+// change that alters what is billed writes a row, so an item added and then
+// removed, or a quantity changed and changed back, between the two reads
+// shows here although sameItems passes. ends_at is left out: a cancel's seal
+// writes it on its own transaction before it compares, and a removal also
+// shows in sameItems.
+func sameIntervals(a, b []domain.ItemInterval) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	type key struct {
+		item, plan string
+		quantity   int64
+		start      int64
+	}
+	count := make(map[key]int, len(a))
+	for _, iv := range a {
+		count[key{iv.SubscriptionItemID, iv.PlanID, iv.Quantity, iv.StartsAt.UnixNano()}]++
+	}
+	for _, iv := range b {
+		k := key{iv.SubscriptionItemID, iv.PlanID, iv.Quantity, iv.StartsAt.UnixNano()}
+		if count[k] == 0 {
+			return false
+		}
+		count[k]--
+	}
+	return true
+}
+
 // UpdateItem changes an item in a transaction of its own, for a change the
 // handler does not prorate: a scheduled plan change, or an immediate change
 // in the last hours of a period. It runs UpdateItemTx's checks
@@ -2140,19 +2180,40 @@ func CancelOrigin(ctx context.Context) string {
 // the engine knows WHEN, this domain owns HOW.
 //
 // The composition is Cancel's, with three deltas: the flip rides
-// FireScheduledCancellationWithBill (CAS on status AND cancel_at = at, so
-// a concurrent unschedule/re-schedule defeats the fire), canceled_at is
-// the contracted instant `at` rather than now, and provenance is
-// "schedule". Both benign race outcomes (already terminated; schedule
-// changed) surface as errs.InvalidState and return nil — whichever writer
-// won has left the sub in a state the scans resolve on their own.
+// FireScheduledCancellationWithBill (CAS on status, the period AND
+// cancel_at = at, so a concurrent unschedule/re-schedule defeats the fire),
+// canceled_at is the contracted instant `at` rather than now, and
+// provenance is "schedule". A row read as no longer active, or with another
+// cancel_at, returns nil before anything is priced, and so do the store's
+// two benign race outcomes (already terminated; schedule changed): whichever
+// writer won has left the sub in a state the scans resolve on their own.
+//
+// The bill is planned before the transaction (ADR-139), so the tax call
+// holds no lock. A period or item change that commits in between returns
+// ErrWatermarkMoved with nothing written; billSubscription re-reads once and
+// fires again.
 func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id string, at time.Time) error {
 	ctx = s.bindForSub(ctx, tenantID, id)
+
+	sub, err := s.store.Get(ctx, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if sub.Status != domain.SubscriptionActive || sub.CancelAt == nil || !sub.CancelAt.Equal(at) {
+		slog.InfoContext(ctx, "due scheduled cancel: benign race, skipping",
+			"subscription_id", id, "tenant_id", tenantID, "status", sub.Status,
+			"reason", "the subscription is no longer active with this cancel scheduled")
+		return nil
+	}
+	plan, err := s.planCancel(ctx, tenantID, sub, at)
+	if err != nil {
+		return fmt.Errorf("scheduled cancel: %w", err)
+	}
 
 	var finalInv domain.Invoice
 	afterBillCommit := func() {}
 	var relief domain.Relief
-	canceled, err := s.store.FireScheduledCancellationWithBill(ctx, tenantID, id, at, func(tx *sql.Tx, c domain.Subscription) error {
+	canceled, err := s.store.FireScheduledCancellationWithBill(ctx, tenantID, id, SnapshotOf(sub), at, func(tx *sql.Tx, c domain.Subscription) error {
 		emitAudit := func(r domain.Relief, currency string) error {
 			if s.audit == nil {
 				return nil
@@ -2174,10 +2235,7 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 			}
 			return nil
 		}
-		if s.biller == nil {
-			return emitAudit(domain.Relief{}, "")
-		}
-		inv, r, afterCommit, billErr := s.biller.BillCancelTx(ctx, tx, c)
+		inv, r, afterCommit, billErr := plan.writeTx(ctx, tx, s.store, c)
 		if billErr != nil {
 			return fmt.Errorf("scheduled cancel: %w", billErr)
 		}
@@ -2189,6 +2247,7 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 		// refusal is also an InvalidState, and skipping it silently left the
 		// subscription active past its cancel_at; it is returned, so the
 		// billing run reports it and saves it as a billing failure (ADR-119).
+		// ErrWatermarkMoved is returned too: billSubscription fires again.
 		if errs.Code(err) == ScheduledCancelSuperseded {
 			slog.InfoContext(ctx, "due scheduled cancel: benign race, skipping",
 				"subscription_id", id, "tenant_id", tenantID, "reason", err.Error())
@@ -2332,6 +2391,12 @@ func (s *Service) closeEndedPeriodFirstWithin(ctx context.Context, tenantID, id 
 //
 // It is the operator's cancel: an ended period is closed now, inside its
 // invoice grace or not. Dunning cancels through CancelForDunning.
+//
+// The final invoice and the relief are priced before the cancel's
+// transaction (ADR-139). When the subscription changes in between twice in a
+// row (its period, a threshold invoice, its items), the cancel writes nothing
+// and returns ErrWatermarkMoved; the handler answers 409 concurrent_change.
+// An ended period that an attempt closed first stays billed.
 func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subscription, int64, error) {
 	return s.cancel(ctx, tenantID, id, 0)
 }
@@ -2339,13 +2404,105 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 // CancelForDunning is dunning's cancel final action. It is Cancel, except
 // that it does not close a period still inside its invoice grace: it answers
 // *InsideInvoiceGraceError and changes nothing, and dunning runs it again
-// when the grace ends (ADR-120 amendment 2026-10-22).
+// when the grace ends (ADR-120 amendment 2026-10-22). Dunning's context is
+// bound to its instant, so both attempts cancel at that instant; a period
+// moved past it answers ErrWatermarkMoved, and dunning runs the action again
+// later with a new instant.
 func (s *Service) CancelForDunning(ctx context.Context, tenantID, id string) (domain.Subscription, int64, error) {
 	return s.cancel(ctx, tenantID, id, s.invoiceGrace)
 }
 
+// cancelAttempts is how many times a cancel plans its bill. The bill is
+// priced before the cancel's transaction (ADR-139), and something it read can
+// change before that transaction locks the row: a period close, a threshold
+// invoice, an item change. The cancel then wrote nothing, so it plans again
+// from the new row. A second change answers ErrWatermarkMoved: a subscription
+// two writers keep changing is not this call's to win by looping.
+const cancelAttempts = 2
+
+// cancel runs cancelOnce up to cancelAttempts times. Each attempt binds the
+// instant from the caller's context, not from the previous attempt's: on an
+// unbound context (the API's) the next attempt cancels at a new instant, and
+// on a bound one (dunning's, a test clock's) at the same one.
 func (s *Service) cancel(ctx context.Context, tenantID, id string, grace time.Duration) (domain.Subscription, int64, error) {
-	ctx = s.bindForSub(ctx, tenantID, id)
+	var err error
+	for attempt := 1; attempt <= cancelAttempts; attempt++ {
+		var canceled domain.Subscription
+		var credited int64
+		canceled, credited, err = s.cancelOnce(ctx, tenantID, id, grace)
+		if !errors.Is(err, ErrWatermarkMoved) {
+			return canceled, credited, err
+		}
+		slog.InfoContext(ctx, "cancel: the subscription changed while the cancel was priced; nothing was written",
+			"subscription_id", id, "tenant_id", tenantID, "attempt", attempt)
+	}
+	return domain.Subscription{}, 0, err
+}
+
+// errAlreadyTerminated is a cancel's answer for a row that is not draft,
+// trialing or active. The store gives the same answer when its
+// compare-and-set finds the row so.
+func errAlreadyTerminated(status domain.SubscriptionStatus) error {
+	return errs.InvalidState(fmt.Sprintf("cannot cancel %s subscription (already terminated)", status))
+}
+
+// plannedCancel is one cancel's bill, planned before its transaction: the
+// row and the billing-interval rows it was priced from, and the writer the
+// plan returned. write is nil when no biller is wired.
+type plannedCancel struct {
+	sub       domain.Subscription
+	intervals []domain.ItemInterval
+	write     BillWriter
+}
+
+// planCancel reads sub's billing-interval rows and plans the bill of sub
+// canceled at at, with no transaction open.
+func (s *Service) planCancel(ctx context.Context, tenantID string, sub domain.Subscription, at time.Time) (plannedCancel, error) {
+	pc := plannedCancel{sub: sub}
+	if s.biller == nil {
+		return pc, nil
+	}
+	intervals, err := s.store.ListItemIntervals(ctx, tenantID, sub.ID)
+	if err != nil {
+		return plannedCancel{}, fmt.Errorf("read billing intervals: %w", err)
+	}
+	w, err := s.biller.PlanCancelBill(ctx, sub, at)
+	if err != nil {
+		return plannedCancel{}, err
+	}
+	pc.intervals, pc.write = intervals, w
+	return pc, nil
+}
+
+// writeTx runs on the cancel's transaction, after its compare-and-set proved
+// the period (ADR-139). Every item writer locks the subscription row first,
+// so with the row held it proves the items: the live items read on tx
+// (locked.Items) must be the ones planned (sameItems), and the
+// billing-interval rows read on tx must be the ones read before the plan
+// (sameIntervals). Either change answers ErrWatermarkMoved, and nothing is
+// written. Then the writer writes the plan.
+func (pc plannedCancel) writeTx(ctx context.Context, tx *sql.Tx, store Store, locked domain.Subscription) (domain.Invoice, domain.Relief, func(), error) {
+	if pc.write == nil {
+		return domain.Invoice{}, domain.Relief{}, func() {}, nil
+	}
+	if !sameItems(locked.Items, pc.sub.Items) {
+		return domain.Invoice{}, domain.Relief{}, nil, ErrWatermarkMoved
+	}
+	onTx, err := store.ListItemIntervalsTx(ctx, tx, locked.ID)
+	if err != nil {
+		return domain.Invoice{}, domain.Relief{}, nil, fmt.Errorf("read billing intervals on the cancel's transaction: %w", err)
+	}
+	if !sameIntervals(onTx, pc.intervals) {
+		return domain.Invoice{}, domain.Relief{}, nil, ErrWatermarkMoved
+	}
+	return pc.write(ctx, tx, locked)
+}
+
+// cancelOnce is one attempt of a cancel: read, plan, then write in one
+// transaction. ErrWatermarkMoved means nothing was written and the cancel can
+// plan again.
+func (s *Service) cancelOnce(callerCtx context.Context, tenantID, id string, grace time.Duration) (domain.Subscription, int64, error) {
+	ctx := s.bindForSub(callerCtx, tenantID, id)
 
 	// A cancel can arrive after the period ended and before the billing run
 	// closed it. No run bills a canceled subscription, so the ended periods
@@ -2360,28 +2517,52 @@ func (s *Service) cancel(ctx context.Context, tenantID, id string, grace time.Du
 	if err != nil {
 		return domain.Subscription{}, 0, err
 	}
-	if closed && sub.Status == domain.SubscriptionCanceled {
-		// A scheduled cancel that was due fired inside the attempt, at its
-		// contracted instant, with its own invoice, audit row and event. The
-		// subscription is canceled, which is what was asked for.
-		return sub, 0, nil
+	if sub.Status == domain.SubscriptionCanceled {
+		if closed {
+			// A scheduled cancel that was due fired inside the attempt, at its
+			// contracted instant, with its own invoice, audit row and event.
+			// The subscription is canceled, which is what was asked for.
+			return sub, 0, nil
+		}
+		return domain.Subscription{}, 0, errAlreadyTerminated(sub.Status)
+	}
+
+	// The cancel instant, read once per attempt (ADR-139). Priced from a row
+	// whose period starts after it, the final invoice would bill nothing and
+	// the relief would skip the new period's prebill, while the
+	// compare-and-set passes on that row: the subscription would be canceled
+	// with the new period unrelieved. So that row is not planned; the next
+	// attempt reads a new instant (on the API's unbound context, normally at
+	// or after the new period's start). A trialing or draft row is planned:
+	// an instant before the first paid period is the free trial cancel
+	// (ADR-069).
+	at := clock.Now(ctx)
+	if sub.Status == domain.SubscriptionActive && sub.CurrentBillingPeriodStart != nil && sub.CurrentBillingPeriodStart.After(at) {
+		return domain.Subscription{}, 0, ErrWatermarkMoved
 	}
 
 	// The final partial-period invoice (in_arrears prorated base and usage
-	// from current_period_start to canceled_at) and the relief are written in
-	// the cancel's tx (ADR-056, ADR-118). A billing failure then rolls the
-	// cancel back: a canceled subscription with an uninvoiced partial period
-	// is revenue that no reconciler recovers. That includes a period that
-	// ended unbilled (canceled_at at or after current_period_end): the biller
-	// refuses it. BillCancelTx writes the relief before it numbers the final
-	// invoice, the lock order every credit-note writer keeps. Neither write
-	// applies credits. After commit the relief is issued first and the final
-	// invoice collected second, so the relief's balance credit reduces this
-	// invoice (finishReliefThenCollect).
+	// from current_period_start to canceled_at) and the relief are priced
+	// first, with no transaction open, so the tax call holds no lock
+	// (ADR-139). They are written in the cancel's tx (ADR-056, ADR-118),
+	// whose first statement is a compare-and-set on the period this plan was
+	// priced from. A billing failure then rolls the cancel back: a canceled
+	// subscription with an uninvoiced partial period is revenue that no
+	// reconciler recovers. That includes a period that ended unbilled
+	// (canceled_at at or after current_period_end): the biller refuses it.
+	// The writer writes the relief before it numbers the final invoice, the
+	// lock order every credit-note writer keeps. Neither write applies
+	// credits. After commit the relief is issued first and the final invoice
+	// collected second, so the relief's balance credit reduces this invoice
+	// (finishReliefThenCollect).
+	plan, err := s.planCancel(ctx, tenantID, sub, at)
+	if err != nil {
+		return domain.Subscription{}, 0, err
+	}
 	var finalInv domain.Invoice
 	afterBillCommit := func() {}
 	var relief domain.Relief
-	canceled, err := s.store.CancelAtomicWithBill(ctx, tenantID, id, func(tx *sql.Tx, c domain.Subscription) error {
+	canceled, err := s.store.CancelAtomicWithBill(ctx, tenantID, id, SnapshotOf(sub), at, func(tx *sql.Tx, c domain.Subscription) error {
 		// ADR-090 in-tx emission runs at the END of this closure (emitCancelAudit)
 		// so the atomic-path credit amount can ride the row — but it fires
 		// UNCONDITIONALLY: audit coverage must not be conditioned on the
@@ -2414,12 +2595,9 @@ func (s *Service) cancel(ctx context.Context, tenantID, id string, grace time.Du
 			}
 			return nil
 		}
-		if s.biller == nil {
-			return emitCancelAudit(domain.Relief{}, "")
-		}
-		// The biller's error names the step that failed: the final invoice or
+		// The writer's error names the step that failed: the final invoice or
 		// the relief. Any failure rolls the whole cancel back.
-		inv, r, afterCommit, billErr := s.biller.BillCancelTx(ctx, tx, c)
+		inv, r, afterCommit, billErr := plan.writeTx(ctx, tx, s.store, c)
 		if billErr != nil {
 			return billErr
 		}

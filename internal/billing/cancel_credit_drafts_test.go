@@ -62,7 +62,7 @@ func TestBillOnCancelDraftsTx_AllPaid_CreatesDrafts(t *testing.T) {
 	adjuster := &fakeCreditNoteAdjuster{}
 	e := wireCancelEngine(inv, pricing, adjuster)
 
-	r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
+	r, err := e.WriteCancelReliefTx(context.Background(), nil, sub)
 	if err != nil {
 		t.Fatalf("BillOnCancelDraftsTx: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestBillOnCancelDraftsTx_MixedPaidUnpaid_AllInTx(t *testing.T) {
 	adjuster := &fakeCreditNoteAdjuster{}
 	e := wireCancelEngine(inv, pricing, adjuster)
 
-	r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
+	r, err := e.WriteCancelReliefTx(context.Background(), nil, sub)
 	if err != nil {
 		t.Fatalf("BillOnCancelDraftsTx: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestBillOnCancelDraftsTx_UnpaidFullyUnused_VoidsInTx(t *testing.T) {
 	voider := &fakeInvoiceVoider{}
 	e.SetInvoiceVoider(voider)
 
-	r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
+	r, err := e.WriteCancelReliefTx(context.Background(), nil, sub)
 	if err != nil {
 		t.Fatalf("BillOnCancelDraftsTx: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestBillOnCancelDraftsTx_LookupError_Fails(t *testing.T) {
 	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv}, []domain.InvoiceLineItem{baseLine})
 	e := wireCancelEngine(inv, pricing, &fakeCreditNoteAdjuster{})
 	e.invoices = failingFundingLookup{inv}
-	if _, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub); err == nil {
+	if _, err := e.WriteCancelReliefTx(context.Background(), nil, sub); err == nil {
 		t.Fatal("a funding lookup error must fail the relief (and roll the cancel back)")
 	}
 }
@@ -184,7 +184,7 @@ func TestBillOnCancelDraftsTx_DraftError_PropagatesForRollback(t *testing.T) {
 	adjuster := &fakeCreditNoteAdjuster{draftErr: errors.New("draft insert failed")}
 	e := wireCancelEngine(inv, pricing, adjuster)
 
-	if _, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub); err == nil {
+	if _, err := e.WriteCancelReliefTx(context.Background(), nil, sub); err == nil {
 		t.Fatal("a draft-create failure must return an error (so the cancel rolls back)")
 	}
 }
@@ -210,7 +210,7 @@ func TestBillOnCancelDraftsTx_MultiPaidSource_RespectsHeadroom(t *testing.T) {
 	adjuster := &fakeCreditNoteAdjuster{}
 	e := wireCancelEngine(inv, pricing, adjuster)
 
-	r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
+	r, err := e.WriteCancelReliefTx(context.Background(), nil, sub)
 	if err != nil {
 		t.Fatalf("BillOnCancelDraftsTx: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestReliefTx_FullyUnusedUnpaidWithAppliedCredits_NoDoubleRelief(t *testing.
 	voider := &fakeInvoiceVoider{}
 	e.SetInvoiceVoider(voider)
 
-	r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
+	r, err := e.WriteCancelReliefTx(context.Background(), nil, sub)
 	if err != nil {
 		t.Fatalf("BillOnCancelDraftsTx: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestReliefTx_DraftFundingInvoice(t *testing.T) {
 	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{draft(domain.InvoiceTaxOK)}, []domain.InvoiceLineItem{baseLine})
 	adjuster := &fakeCreditNoteAdjuster{}
 	e := wireCancelEngine(inv, pricing, adjuster)
-	r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
+	r, err := e.WriteCancelReliefTx(context.Background(), nil, sub)
 	if err != nil {
 		t.Fatalf("draft with settled tax: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestReliefTx_DraftFundingInvoice(t *testing.T) {
 
 	sub, inv, pricing = canceledInAdvanceSub([]domain.Invoice{draft(domain.InvoiceTaxPending)}, []domain.InvoiceLineItem{baseLine})
 	e = wireCancelEngine(inv, pricing, &fakeCreditNoteAdjuster{})
-	if _, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub); errs.Code(err) != "funding_invoice_tax_pending" {
+	if _, err := e.WriteCancelReliefTx(context.Background(), nil, sub); errs.Code(err) != "funding_invoice_tax_pending" {
 		t.Fatalf("draft with pending tax: err = %v, want funding_invoice_tax_pending", err)
 	}
 }
@@ -325,12 +325,12 @@ func TestReliefTx_AllocationErrors(t *testing.T) {
 	adjuster := &fakeCreditNoteAdjuster{}
 	e := wireCancelEngine(inv, pricing, adjuster)
 	e.SetCreditHeadroomReader(&fakeCreditHeadroom{credited: map[string]int64{"inv_base": 15000}})
-	if r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub); err != nil || len(r.DraftIDs) != 0 {
+	if r, err := e.WriteCancelReliefTx(context.Background(), nil, sub); err != nil || len(r.DraftIDs) != 0 {
 		t.Fatalf("already fully credited: relief %+v err %v, want no relief and no error", r, err)
 	}
 
 	e.SetCreditHeadroomReader(erroringHeadroom{})
-	if _, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub); err == nil {
+	if _, err := e.WriteCancelReliefTx(context.Background(), nil, sub); err == nil {
 		t.Fatal("a headroom read error must fail the relief, not read as already credited")
 	}
 }
@@ -351,7 +351,7 @@ func TestReliefTx_PartialHeadroom_PlacesWhatFits(t *testing.T) {
 	e := wireCancelEngine(inv, pricing, adjuster)
 	e.SetCreditHeadroomReader(&fakeCreditHeadroom{credited: map[string]int64{"inv_base": 15000 - 2000}})
 
-	r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
+	r, err := e.WriteCancelReliefTx(context.Background(), nil, sub)
 	if err != nil {
 		t.Fatalf("BillOnCancelDraftsTx: %v", err)
 	}

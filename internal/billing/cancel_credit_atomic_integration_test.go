@@ -238,7 +238,7 @@ func TestCancelCredit_PaidInAdvance_DraftAtomicAndReconcilerRecovers(t *testing.
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	r, err := e.BillOnCancelDraftsTx(ctx, tx, sub)
+	r, err := e.WriteCancelReliefTx(ctx, tx, sub)
 	if err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("BillOnCancelDraftsTx: %v", err)
