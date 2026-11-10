@@ -1328,10 +1328,15 @@ type fakeBiller struct {
 	draftIDs     []string
 	draftCredit  int64
 	draftTxErr   error
-	// planAts is the instant of each PlanCancelBill call; writeMoved is how
-	// many writer calls answer ErrWatermarkMoved first.
-	planAts    []time.Time
-	writeMoved int
+	// planAts is the instant of each PlanCancelBill call and plannedFrom the
+	// row it priced; writeMoved is how many writer calls answer
+	// ErrWatermarkMoved first. onPlan, when set, runs inside each
+	// PlanCancelBill call, as a change that commits while the cancel is
+	// priced.
+	planAts     []time.Time
+	plannedFrom []domain.Subscription
+	writeMoved  int
+	onPlan      func()
 	// Plan-swap relief (BillOnPlanSwapDraftsTx).
 	swapDraftTxCalls int
 	swapDraftIDs     []string
@@ -1360,14 +1365,19 @@ func (f *fakeBiller) BillOnCreate(_ context.Context, _ domain.Subscription) (dom
 	return domain.Invoice{}, f.err
 }
 
-// PlanCancelBill counts the plan in finalCalls and records its instant in
-// planAts; it fails with finalCancelErr. Its writer counts the relief write in
-// draftTxCalls and fails with draftTxErr. While writeMoved is above zero, the
-// writer answers ErrWatermarkMoved instead, once per call, as a change that
-// committed while the cancel was priced would.
-func (f *fakeBiller) PlanCancelBill(_ context.Context, _ domain.Subscription, at time.Time) (BillWriter, error) {
+// PlanCancelBill counts the plan in finalCalls, records its instant in
+// planAts and its row in plannedFrom, and runs onPlan; it fails with
+// finalCancelErr. Its writer counts the relief write in draftTxCalls and fails
+// with draftTxErr. While writeMoved is above zero, the writer answers
+// ErrWatermarkMoved instead, once per call, as a change that committed while
+// the cancel was priced would.
+func (f *fakeBiller) PlanCancelBill(_ context.Context, sub domain.Subscription, at time.Time) (BillWriter, error) {
 	f.finalCalls++
 	f.planAts = append(f.planAts, at)
+	f.plannedFrom = append(f.plannedFrom, sub)
+	if f.onPlan != nil {
+		f.onPlan()
+	}
 	if f.finalCancelErr != nil {
 		return nil, f.finalCancelErr
 	}

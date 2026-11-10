@@ -60,6 +60,50 @@ func TestCancel_SnapshotMovedTwice_ReturnsErrWatermarkMoved(t *testing.T) {
 	}
 }
 
+// A trial that the activation scan converts while the cancel is priced: the
+// row the first plan priced is trialing and never activated, so it bills
+// nothing (a trial is free, ADR-069). The conversion changes only the status
+// and activated_at, and the compare-and-set's status no longer matches, so
+// the cancel plans again from the active row. The memory store keeps no
+// billing intervals, so here the status is the only proof. The real-Postgres
+// case is "trial activated while planned" in
+// internal/billing/cancel_plans_before_tx_integration_test.go.
+//
+// Mutation (drop the status from the memory store's snapshotMatches, the
+// mirror of `AND status = $3`) → one plan, from the trialing row.
+func TestCancel_TrialActivatedWhilePriced_PlansAgainFromTheActiveRow(t *testing.T) {
+	store := newMemStore()
+	svc := NewService(store, nil)
+	fb := &fakeBiller{}
+	svc.SetBiller(fb)
+	id := seedActiveSub(t, svc, fb)
+	s := store.subs[id]
+	trialEnd := *s.CurrentBillingPeriodStart
+	s.Status, s.TrialEndAt, s.ActivatedAt = domain.SubscriptionTrialing, &trialEnd, nil
+	store.subs[id] = s
+	fb.onPlan = func() {
+		fb.onPlan = nil
+		if _, err := store.ActivateAfterTrialWithBill(context.Background(), "t1", id, trialEnd, nil); err != nil {
+			t.Errorf("activate the trial while the cancel was priced: %v", err)
+		}
+	}
+
+	canceled, _, err := svc.Cancel(context.Background(), "t1", id)
+	if err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if canceled.Status != domain.SubscriptionCanceled || canceled.ActivatedAt == nil {
+		t.Fatalf("status=%s activated_at=%v, want canceled after the activation", canceled.Status, canceled.ActivatedAt)
+	}
+	if len(fb.plannedFrom) != 2 || fb.draftTxCalls != 1 {
+		t.Fatalf("plans=%d writes=%d, want 2 plans and 1 write", len(fb.plannedFrom), fb.draftTxCalls)
+	}
+	if first, second := fb.plannedFrom[0], fb.plannedFrom[1]; first.Status != domain.SubscriptionTrialing ||
+		second.Status != domain.SubscriptionActive || second.ActivatedAt == nil {
+		t.Errorf("planned from %s then %s (activated_at %v), want trialing, then active and activated", first.Status, second.Status, second.ActivatedAt)
+	}
+}
+
 // steppingResolver resolves a wall-clock subscription as the engine does
 // (Engine.SimForSubscription): on a context with no bound instant, to the
 // clock's now, here a new instant on each call, as a later moment; on a bound
@@ -187,5 +231,10 @@ func TestSameIntervals(t *testing.T) {
 		if got := sameIntervals(base, c.other); got != c.same {
 			t.Errorf("%s: sameIntervals = %v, want %v", c.name, got, c.same)
 		}
+	}
+	// A trialing subscription has no interval; its conversion opens one per
+	// item. A plan that read the rows before the conversion sees it here.
+	if sameIntervals(nil, base) {
+		t.Error("opened by a trial's conversion: sameIntervals = true, want false")
 	}
 }

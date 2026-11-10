@@ -35,12 +35,6 @@ type CustomerReader interface {
 	Get(ctx context.Context, tenantID, customerID string) (domain.Customer, error)
 }
 
-// Biller is the narrow shape used after Create + Cancel to handle
-// the in_advance bill_timing artifacts (ADR-031): day-1 invoice on
-// create, cancel proration credit on mid-period cancel. Optional —
-// nil-safe; without it, in_advance subs silently behave like
-// in_arrears (no day-1 invoice, no cancel proration). Implemented
-// by *billing.Engine.
 // BillWriter writes, on the caller's transaction, a bill planned before that
 // transaction opened (ADR-139). locked is the row the transaction's
 // compare-and-set returned. inv is empty when there is nothing to bill.
@@ -52,6 +46,12 @@ type CustomerReader interface {
 // FinishRelief, then FinalizeOnCreateInvoice.
 type BillWriter func(ctx context.Context, tx *sql.Tx, locked domain.Subscription) (inv domain.Invoice, r domain.Relief, afterCommit func(), err error)
 
+// Biller is the narrow shape used after Create + Cancel to handle
+// the in_advance bill_timing artifacts (ADR-031): day-1 invoice on
+// create, cancel proration credit on mid-period cancel. Optional —
+// nil-safe; without it, in_advance subs silently behave like
+// in_arrears (no day-1 invoice, no cancel proration). Implemented
+// by *billing.Engine.
 type Biller interface {
 	BillOnCreate(ctx context.Context, sub domain.Subscription) (domain.Invoice, error)
 	// PlanCancelBill prices a cancel's final invoice and plans its relief

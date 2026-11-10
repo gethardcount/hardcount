@@ -21,7 +21,7 @@ An immediate cancel, a scheduled mid-period cancel and dunning's cancel now pric
 
    | Read before the transaction | Proof inside it |
    |---|---|
-   | Status, period start, `next_billing_at` (and `cancel_at` for the scheduled cancel) | The first statement is the compare-and-set: `UPDATE … WHERE status … AND current_billing_period_start IS NOT DISTINCT FROM … AND next_billing_at IS NOT DISTINCT FROM …`. Zero rows resolve to not found, already terminated, superseded (scheduled), or `ErrWatermarkMoved` |
+   | Status, period start, `next_billing_at` (and `cancel_at` for the scheduled cancel) | The first statement is the compare-and-set: `UPDATE … WHERE status … AND current_billing_period_start IS NOT DISTINCT FROM … AND next_billing_at IS NOT DISTINCT FROM …`. Zero rows resolve to not found, already terminated, superseded (scheduled), or `ErrWatermarkMoved`. The status alone catches a trial the activation scan converted after the cancel read the row and before it read the billing intervals: the conversion moves no period column and no item |
    | Items (id, plan, quantity) | `sameItems` on the items read on the transaction. Every item writer locks the row first |
    | Billing intervals | `ListItemIntervalsTx` on the transaction must give the same rows on item, plan, quantity and start (`sameIntervals`). It catches an item added then removed, and a change made and undone, which `sameItems` misses. `ends_at` is left out: the cancel's own seal writes it |
    | Threshold watermark | Read again on the transaction `FOR KEY SHARE` and compared with the planned instant (`writePlanned`), as the cycle close does |

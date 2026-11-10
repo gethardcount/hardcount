@@ -146,7 +146,9 @@ rather than a default the platform invented.
 Splitting one terminal action into two created a convergence problem that
 did not exist before, because a failed exhaustion is re-attempted 24h later
 and **both** subscription movers refuse an already-terminal subscription
-(`cancelSpec()` allows only draft/trialing/active; `SetPauseCollection`
+(the cancel's compare-and-set in `CancelAtomicWithBill` matches only draft,
+trialing or active, as `cancelSpec()` did before 2026-11-10
+([ADR-139](139-cancel-prices-before-its-transaction.md)); `SetPauseCollection`
 rejects canceled/archived), while `MarkUncollectible` returns *"invoice is
 already uncollectible"* rather than a no-op.
 

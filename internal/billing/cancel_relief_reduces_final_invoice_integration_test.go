@@ -117,11 +117,19 @@ type reliefRigOpts struct {
 	// invoice, and the void hands back any day1Credit applied to it. It needs
 	// card=false, and day1Credit below the base fee so nothing is paid.
 	sameDay bool
+	// trial makes the subscription a trial that ended at the period start and
+	// that the activation scan has not converted yet: trialing, never
+	// activated, with no billing interval and no day-1 invoice (day1ID is
+	// empty). It needs sameDay, so the cancel lands an hour after the trial
+	// ended.
+	trial bool
+	// taxRate, when set, is the tenant's manual tax rate, in percent.
+	taxRate float64
 }
 
 // newReliefCancelRig seeds one tenant: the plan, an active subscription in
-// its 2026-06 period with its day-1 invoice, and the usage on 2026-06-03
-// (00:30 on 2026-06-01 with sameDay).
+// its 2026-06 period with its day-1 invoice (with trial, a trialing one with
+// no day-1 invoice), and the usage on 2026-06-03 (00:30 on 2026-06-01 with sameDay).
 func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigOpts) *reliefCancelRig {
 	t.Helper()
 	if o.day1Credit > 0 && o.card {
@@ -129,6 +137,9 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 	}
 	if o.sameDay && (o.card || o.day1Credit >= reliefBaseCents) {
 		t.Fatal("rig: sameDay leaves the day-1 invoice unpaid, which needs card=false and a day1Credit below the base fee")
+	}
+	if o.trial && !o.sameDay {
+		t.Fatal("rig: a trial needs sameDay")
 	}
 	cancelAt, usageAt := reliefCancelAt, reliefPeriodStart.AddDate(0, 0, 2)
 	if o.sameDay {
@@ -146,6 +157,16 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 	creditSvc := credit.NewService(credit.NewPostgresStore(db))
 	cnSvc := creditnote.NewService(creditnote.NewPostgresStore(db), invStore, nil, &cnGrantAdapter{creditSvc})
 	cnSvc.SetNumberGenerator(settings)
+	if o.taxRate > 0 {
+		ts, err := settings.Get(ctx, tenantID)
+		if err != nil {
+			t.Fatalf("get settings: %v", err)
+		}
+		ts.TaxProvider, ts.TaxRate, ts.TaxName = "manual", o.taxRate, "Sales Tax"
+		if _, err := settings.Upsert(ctx, ts); err != nil {
+			t.Fatalf("upsert settings: %v", err)
+		}
+	}
 
 	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{
 		ExternalID: "cus_relief", DisplayName: "Relief", Email: "relief@example.test",
@@ -190,11 +211,18 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 	e.SetCreditHeadroomReader(cnSvc)
 
 	periodStart, periodEnd := reliefPeriodStart, reliefPeriodEnd
+	status, startedAt := domain.SubscriptionActive, periodStart
+	var trialStart, trialEnd *time.Time
+	if o.trial {
+		ts := periodStart.AddDate(0, 0, -14)
+		status, startedAt = domain.SubscriptionTrialing, ts
+		trialStart, trialEnd = &ts, &periodStart
+	}
 	sub, err := subStore.Create(ctx, tenantID, domain.Subscription{
 		Code: "sub-relief", DisplayName: "Relief", CustomerID: cust.ID,
 		Items:  []domain.SubscriptionItem{{PlanID: plan.ID, Quantity: 1}},
-		Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeCalendar,
-		StartedAt:                 &periodStart,
+		Status: status, BillingTime: domain.BillingTimeCalendar,
+		StartedAt: &startedAt, TrialStartAt: trialStart, TrialEndAt: trialEnd,
 		CurrentBillingPeriodStart: &periodStart, CurrentBillingPeriodEnd: &periodEnd,
 	})
 	if err != nil {
@@ -217,12 +245,16 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 	if o.sameDay {
 		wantCredited = 0
 	}
-	day1, err := e.BillOnCreate(ctx, sub)
-	if err != nil || day1.SubtotalCents != reliefBaseCents {
-		t.Fatalf("day-1 invoice: %v subtotal=%dc, want %dc", err, day1.SubtotalCents, reliefBaseCents)
+	var day1ID string
+	if !o.trial {
+		day1, err := e.BillOnCreate(ctx, sub)
+		if err != nil || day1.SubtotalCents != reliefBaseCents {
+			t.Fatalf("day-1 invoice: %v subtotal=%dc, want %dc", err, day1.SubtotalCents, reliefBaseCents)
+		}
+		day1ID = day1.ID
 	}
 	if o.day1Credit == 0 && !o.sameDay {
-		if _, err := invStore.MarkPaid(ctx, tenantID, day1.ID, "pi_day1", periodStart); err != nil {
+		if _, err := invStore.MarkPaid(ctx, tenantID, day1ID, "pi_day1", periodStart); err != nil {
 			t.Fatalf("pay day-1 invoice: %v", err)
 		}
 	}
@@ -236,7 +268,7 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 	subSvc := subscription.NewService(subStore, clock.NewFake(cancelAt))
 	subSvc.SetBiller(e)
 	return &reliefCancelRig{
-		ctx: ctx, db: db, tenantID: tenantID, customerID: cust.ID, subID: sub.ID, day1ID: day1.ID,
+		ctx: ctx, db: db, tenantID: tenantID, customerID: cust.ID, subID: sub.ID, day1ID: day1ID,
 		invStore: invStore, credit: creditSvc, cn: cnSvc, engine: e, subSvc: subSvc, charger: charger, noPM: noPM,
 		cancelAt: cancelAt, wantCredited: wantCredited,
 	}

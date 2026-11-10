@@ -569,7 +569,9 @@ func TestCancel_25ConcurrentAgainstPoolOf20_AllFinish(t *testing.T) {
 
 // A change that commits while the cancel is priced is seen on the cancel's
 // transaction, and the cancel plans once more from the new row. Each case
-// changes the subscription inside the first tax call. On main each change
+// changes the subscription inside the first tax call, except the trial case,
+// whose first plan makes none: it changes it at the plan's read of the
+// billing intervals. On main each change
 // waited for the cancel's own row lock, which the cancel held across that
 // call: it timed out (raceTimeout) and the cancel committed what it had
 // priced.
@@ -703,6 +705,78 @@ func TestCancel_SnapshotMoved_ReplansOnce(t *testing.T) {
 		if ev, au := cancelEvidence(t, r.ctx, r.db, r.tenantID, r.subID); ev != 0 || au != 0 {
 			t.Errorf("subscription.canceled events = %d, cancel audit rows = %d; want none", ev, au)
 		}
+	})
+
+	// The activation scan converts a trial while the cancel is planned. The
+	// cancel lands an hour after the trial ended, before the scan ran, and
+	// reads the row trialing and never activated, so its plan bills no final
+	// invoice (a trial is free, ADR-069). The scan then flips the row to
+	// active and bills the first period in advance. The conversion moves
+	// neither the period nor the items. It opens the items' billing
+	// intervals, but here it commits before the plan reads them, so the plan
+	// and the transaction read the same rows. Only the status in the
+	// compare-and-set shows the change. The cancel plans again from the
+	// active row: it bills the hour of usage since the trial ended, and voids
+	// the unused, unpaid first-period invoice. Mutation M18 (drop
+	// `AND status = $3` from the cancel's compare-and-set) → the cancel
+	// commits the trial's plan, with no final invoice: the usage is never
+	// billed.
+	t.Run("trial activated while planned", func(t *testing.T) {
+		r := newReliefCancelRig(t, db, "P1-23 trial activated during the plan", reliefRigOpts{usageUnits: 3000, sameDay: true, trial: true})
+		store := subscription.NewPostgresStore(r.db)
+		store.SetOutboxEnqueuer(webhook.NewOutboxStore(r.db))
+		scan := subscription.NewService(store, clock.NewFake(r.cancelAt))
+		scan.SetBiller(r.engine)
+		hooked := &readHookStore{PostgresStore: store}
+		svc := subscription.NewService(hooked, clock.NewFake(r.cancelAt))
+		svc.SetBiller(r.engine)
+		svc.SetAuditLogger(audit.NewLogger(r.db))
+		r.subSvc = svc
+
+		// The probe counts the tax calls after the conversion: the cancel's.
+		p := newCalcProbe(nil)
+		var pe probeErrs
+		var once sync.Once
+		hooked.onListIntervals = func(ctx context.Context) {
+			once.Do(func() {
+				sctx, cancel := context.WithTimeout(clock.WithEffectiveNow(context.WithoutCancel(ctx), r.cancelAt), raceTimeout)
+				defer cancel()
+				if n, errs := scan.ProcessExpiredTrials(sctx, 50); n != 1 || len(errs) != 0 {
+					pe.add("trial activation while the cancel was planned: activated %d, errors %v", n, errs)
+				}
+				r.engine.SetTaxProviderResolver(p)
+			})
+		}
+
+		r.cancelImmediately(t)
+		pe.check(t)
+		if n := p.count(); n != 1 {
+			t.Errorf("tax calculations by the cancel = %d, want 1: the plan from the trialing row prices nothing, the plan from the active row prices the final invoice", n)
+		}
+		sub, err := store.Get(r.ctx, r.tenantID, r.subID)
+		if err != nil {
+			t.Fatalf("read subscription: %v", err)
+		}
+		if sub.ActivatedAt == nil {
+			t.Fatalf("activated_at is not set: the trial was not converted while the cancel was planned")
+		}
+		if final := r.finalInvoice(t); final.TotalAmountCents != 3000 {
+			t.Errorf("final invoice = %dc, want the 3000c of usage since the trial ended", final.TotalAmountCents)
+		}
+		invs, _, err := r.invStore.List(r.ctx, invoice.ListFilter{TenantID: r.tenantID, Limit: 50})
+		if err != nil {
+			t.Fatalf("list invoices: %v", err)
+		}
+		var first []domain.Invoice
+		for _, inv := range invs {
+			if inv.BillingReason == domain.BillingReasonSubscriptionCreate {
+				first = append(first, inv)
+			}
+		}
+		if len(first) != 1 || first[0].Status != domain.InvoiceVoided {
+			t.Errorf("first-period invoices = %+v, want one, voided by the cancel's relief (unpaid, and none of it used)", first)
+		}
+		requireOneCancel(t, r.ctx, r.db, r.tenantID, r.subID)
 	})
 
 	// (d) A collection pause: it moves nothing the plan priced, so there is no
@@ -1123,18 +1197,49 @@ func TestCancel_InArrearsWithTax_FinalInvoiceTotalIncludesTax(t *testing.T) {
 	}
 }
 
-// getHookStore is the subscription store with onGet, when set, run before
-// each read of a subscription.
-type getHookStore struct {
-	*subscription.PostgresStore
-	onGet func(ctx context.Context)
+// The same check for the day-1 in-advance invoice, on a tenant with a 10% tax
+// rate: its total and amount due include the tax. buildOnCreateInvoice builds
+// it for a create, a trial's conversion and a cross-interval swap, so this
+// covers the swap's invoice total too.
+//
+// Mutation: drop `+ taxApp.TaxAmountCents` from totalWithTax in
+// buildOnCreateInvoice → the total and amount due are the subtotal.
+func TestBillOnCreate_WithTax_InvoiceTotalIncludesTax(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	// sameDay leaves the day-1 invoice unpaid, so its amount due is its total.
+	r := newReliefCancelRig(t, db, "P1-23 day-1 total includes tax", reliefRigOpts{sameDay: true, taxRate: 10})
+	day1 := r.invoice(t, r.day1ID)
+	const wantTax = reliefBaseCents / 10
+	if day1.SubtotalCents != reliefBaseCents || day1.TaxAmountCents != wantTax {
+		t.Fatalf("day-1 invoice subtotal=%dc tax=%dc, want %dc and %dc (10%%)", day1.SubtotalCents, day1.TaxAmountCents, reliefBaseCents, wantTax)
+	}
+	if day1.TotalAmountCents != reliefBaseCents+wantTax || day1.AmountDueCents != reliefBaseCents+wantTax {
+		t.Errorf("day-1 invoice total=%dc amount_due=%dc, want both %dc: the subtotal plus its tax",
+			day1.TotalAmountCents, day1.AmountDueCents, reliefBaseCents+wantTax)
+	}
 }
 
-func (s *getHookStore) Get(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
+// readHookStore is the subscription store with onGet, when set, run before
+// each read of a subscription, and onListIntervals, when set, before each
+// read of its billing intervals off a transaction.
+type readHookStore struct {
+	*subscription.PostgresStore
+	onGet           func(ctx context.Context)
+	onListIntervals func(ctx context.Context)
+}
+
+func (s *readHookStore) Get(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	if s.onGet != nil {
 		s.onGet(ctx)
 	}
 	return s.PostgresStore.Get(ctx, tenantID, id)
+}
+
+func (s *readHookStore) ListItemIntervals(ctx context.Context, tenantID, subscriptionID string) ([]domain.ItemInterval, error) {
+	if s.onListIntervals != nil {
+		s.onListIntervals(ctx)
+	}
+	return s.PostgresStore.ListItemIntervals(ctx, tenantID, subscriptionID)
 }
 
 // cancelAtTheEnd is a dunning policy whose one retry is exhausted at once and
@@ -1202,7 +1307,7 @@ func TestDunningFinalCancel_SnapshotMoved(t *testing.T) {
 	t.Run("period re-anchored past dunning's instant", func(t *testing.T) {
 		r := newPrebillVoidRig(t, "P1-23 dunning cancel: period moved", cancelAtTheEnd())
 		r.subStore.SetOutboxEnqueuer(webhook.NewOutboxStore(r.db))
-		store := &getHookStore{PostgresStore: r.subStore}
+		store := &readHookStore{PostgresStore: r.subStore}
 		svc := subscription.NewService(store, clock.Real())
 		svc.SetBiller(r.engine)
 		r.dsvc.SetSubscriptionCanceler(finalActionMovers{svc: svc})
