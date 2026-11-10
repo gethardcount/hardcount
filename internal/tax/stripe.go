@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -57,8 +59,9 @@ type StripeClientResolver interface {
 // StripeTaxProvider calls the Stripe Tax API. Calculate creates a
 // tax_calculation; Commit creates a tax_transaction from the earlier
 // calculation reference at invoice-finalize time. The transaction is what
-// makes the tax decision durable upstream (calculations expire in 24 hours,
-// transactions are permanent and show up in Stripe's tax reporting).
+// makes the tax decision durable upstream (a calculation expires at its
+// expires_at, 90 days after it is made; transactions are permanent and show
+// up in Stripe's tax reporting).
 //
 // On any Stripe API error Calculate returns the error so the engine can
 // defer the invoice to tax_status=pending; the TaxRetrier reconciler picks
@@ -146,7 +149,8 @@ func (p *StripeTaxProvider) Calculate(ctx context.Context, req Request) (*Result
 	// failed step that sends the same lines reuses the first calculation
 	// instead of paying for another, while any change — new usage, a new
 	// address — is a different key and a fresh calculation. Stripe replays a
-	// key for 24h; the calculation itself expires after 24h too.
+	// key for 24 hours. That is the key's life, not the calculation's: Stripe
+	// keeps a calculation until its expires_at, 90 days after it is made.
 	if scope := calculationScope(ctx); scope != "" {
 		sum := sha256.Sum256(append([]byte(scope+"\x00"), reqRaw...))
 		params.IdempotencyKey = stripe.String("hardcount_tax_calc_" + hex.EncodeToString(sum[:20]))
@@ -206,15 +210,31 @@ func (p *StripeTaxProvider) handleFailure(ctx context.Context, live bool, reason
 // Two dedup layers, both keyed on the invoice:
 //   - Reference uniqueness (invoice id): Stripe rejects a second transaction
 //     with the same reference, so a duplicate can never be created.
-//   - Idempotency-Key (invoice id): on a retry WITHIN Stripe's 24h window,
-//     Stripe returns the CACHED response — i.e. the ORIGINAL transaction's id —
-//     instead of the reference-already-used error. This is what lets the
-//     reconciler RECOVER the transaction id of a commit that succeeded upstream
-//     but whose local SetTaxTransaction write failed. (Beyond 24h the
-//     calculation itself has expired and the engine's expiry guard blocks the
-//     re-commit before it reaches Stripe — so there is never a late duplicate;
-//     the invoice just stays uncommitted for manual re-calc.) Same pattern as
-//     payment.StripeRefunder and the Reverse path below.
+//   - Idempotency-Key (invoice id): on a retry within the 24 hours Stripe
+//     keeps an idempotency key, Stripe returns the CACHED response — i.e. the
+//     ORIGINAL transaction's id — instead of the reference-already-used
+//     error. This is what lets the reconciler RECOVER the transaction id of a
+//     commit that succeeded upstream but whose local SetTaxTransaction write
+//     failed. Same pattern as payment.StripeRefunder and the Reverse path
+//     below.
+//
+// The 24 hours is the life of the idempotency key, not of the calculation. A
+// calculation can be committed until its expires_at, 90 days after it is made
+// (the engine's expiry guard refuses it from 1 hour before that). So a
+// re-commit after the key has lapsed reaches Stripe as a new request:
+//   - No transaction exists yet: Stripe creates it. This is how a commit that
+//     failed for days is recorded once its cause is fixed.
+//   - A transaction exists: Stripe refuses with invalid_request_error on
+//     param calculation, "You already created tax transaction tax_… from tax
+//     calculation taxcalc_…" (verified in test mode, 2026-11-10). There is
+//     never a late duplicate. Commit reads the transaction that message
+//     names and, if it carries this invoice as its reference, returns its
+//     id: the commit was made, and only its id was lost (existingTransaction).
+//     The message is only where the id is looked for; the read decides.
+//
+// The commit sweep waits at most 12 hours between tries, under the key's 24,
+// so a commit whose answer was lost is normally retried while Stripe still
+// replays it, and the read above covers a retry that comes later.
 func (p *StripeTaxProvider) Commit(ctx context.Context, calcRef, invoiceID string) (string, error) {
 	if calcRef == "" {
 		return "", nil
@@ -238,9 +258,46 @@ func (p *StripeTaxProvider) Commit(ctx context.Context, calcRef, invoiceID strin
 	params.IdempotencyKey = stripe.String("hardcount_tax_commit_" + invoiceID)
 	txn, err := client.V1TaxTransactions.CreateFromCalculation(ctx, params)
 	if err != nil {
+		if id := existingTransaction(ctx, client, err, invoiceID); id != "" {
+			return id, nil
+		}
 		return "", fmt.Errorf("stripe tax: commit calculation %s for invoice %s: %w", calcRef, invoiceID, err)
 	}
 	return txn.ID, nil
+}
+
+// alreadyCommitted finds the transaction id in Stripe's refusal of a second
+// transaction for one calculation.
+var alreadyCommitted = regexp.MustCompile(`already created tax transaction (tax_[A-Za-z0-9]+)`)
+
+// existingTransaction returns the id of the tax transaction a refused commit
+// says already exists, when Stripe confirms on a read that it is this
+// invoice's. It answers "" for any other error, when the message names no
+// transaction, when the read fails, or when the transaction's reference is
+// not the invoice: the commit then fails as before and is retried.
+//
+// This is the commit whose answer was lost and whose retry came after Stripe
+// dropped the idempotency key: the transaction exists, Stripe will never make
+// a second one, and without its id Hardcount could not reverse the tax on a
+// later void or credit note.
+func existingTransaction(ctx context.Context, client *stripe.Client, createErr error, invoiceID string) string {
+	var se *stripe.Error
+	if !errors.As(createErr, &se) || se.Type != stripe.ErrorTypeInvalidRequest {
+		return ""
+	}
+	m := alreadyCommitted.FindStringSubmatch(se.Msg)
+	if m == nil {
+		return ""
+	}
+	txn, err := client.V1TaxTransactions.Retrieve(ctx, m[1], nil)
+	if err != nil || txn == nil || txn.Reference != invoiceID {
+		slog.WarnContext(ctx, "stripe tax: a refused commit named an existing transaction that could not be confirmed as this invoice's",
+			"invoice_id", invoiceID, "named_transaction", m[1], "error", err)
+		return ""
+	}
+	slog.InfoContext(ctx, "stripe tax: adopted the tax transaction an earlier commit made",
+		"invoice_id", invoiceID, "tax_transaction_id", txn.ID)
+	return txn.ID
 }
 
 // Reverse issues a reversal against a previously committed tax

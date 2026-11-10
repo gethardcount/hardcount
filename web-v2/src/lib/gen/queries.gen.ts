@@ -10940,9 +10940,9 @@ export const getRetryInvoiceTaxUrl = (id: string,) => {
 /**
  * Calculates tax again on a draft invoice whose `tax_status` is
  * `pending`, after you fixed the cause (for example the customer's
- * address). It also refreshes a draft whose Stripe Tax calculation is
- * more than 23 hours old and was never recorded, which finalize
- * refuses. The route takes no body.
+ * address). It also refreshes a draft whose Stripe Tax calculation
+ * expires within 1 hour or has expired, and was never recorded, which
+ * finalize refuses. The route takes no body.
  *
  * Each call rewrites the tax on the lines and the invoice. A retry of
  * pending tax adds one to `tax_retry_count`; refreshing an expired

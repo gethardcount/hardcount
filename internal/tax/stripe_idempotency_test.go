@@ -206,3 +206,72 @@ func idemKey(p stripe.ParamsContainer) string {
 }
 
 var _ stripe.Backend = (*capturingBackend)(nil)
+
+// scriptedBackend answers the commit with Stripe's refusal of a second
+// transaction for one calculation, and a read of the transaction it names
+// with that transaction.
+type scriptedBackend struct {
+	capturingBackend
+	refusal   string // the commit's error message
+	reference string // the reference of the transaction a read returns
+	readErr   error
+	reads     []string
+}
+
+func (b *scriptedBackend) Call(method, path, _ string, _ stripe.ParamsContainer, v stripe.LastResponseSetter) error {
+	if method == "POST" {
+		return &stripe.Error{Type: stripe.ErrorTypeInvalidRequest, Param: "calculation", Msg: b.refusal, HTTPStatusCode: 400}
+	}
+	b.reads = append(b.reads, path)
+	if b.readErr != nil {
+		return b.readErr
+	}
+	if txn, ok := v.(*stripe.TaxTransaction); ok {
+		txn.ID = "tax_first"
+		txn.Reference = b.reference
+	}
+	return nil
+}
+
+func newScriptedProvider(be *scriptedBackend) *StripeTaxProvider {
+	client := stripe.NewClient("sk_test_fake", stripe.WithBackends(&stripe.Backends{API: be, Connect: be, Uploads: be, MeterEvents: be}))
+	return NewStripeTaxProvider(staticClientResolver{c: client})
+}
+
+// A commit whose answer was lost is retried. Once Stripe has dropped the
+// idempotency key (24 hours), the retry is refused: the transaction exists and
+// Stripe never makes a second one for a calculation. The refusal names it
+// (message verified in Stripe test mode, 2026-11-10). Commit reads it and
+// returns its id when it is this invoice's. Before, the invoice failed in the
+// commit sweep until its calculation expired and never got its transaction
+// id, so a later void or credit note could not reverse the tax.
+func TestCommit_AdoptsTheTransactionAnEarlierCommitMade(t *testing.T) {
+	const refusal = "You already created tax transaction tax_first from tax calculation taxcalc_ref."
+	for _, tc := range []struct {
+		name      string
+		refusal   string
+		reference string
+		readErr   error
+		wantID    string
+		wantReads int
+	}{
+		{"the named transaction is this invoice's: adopted", refusal, "hc_inv_123", nil, "tax_first", 1},
+		{"it belongs to another reference: not adopted", refusal, "hc_inv_other", nil, "", 1},
+		{"the read fails: not adopted", refusal, "hc_inv_123", &stripe.Error{Type: stripe.ErrorTypeAPI, HTTPStatusCode: 500}, "", 1},
+		{"another invalid request: no read", "No such tax calculation: taxcalc_ref", "hc_inv_123", nil, "", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			be := &scriptedBackend{refusal: tc.refusal, reference: tc.reference, readErr: tc.readErr}
+			id, err := newScriptedProvider(be).Commit(context.Background(), "taxcalc_ref", "hc_inv_123")
+			if id != tc.wantID || (tc.wantID == "") != (err != nil) {
+				t.Fatalf("Commit = (%q, %v), want id %q", id, err, tc.wantID)
+			}
+			if len(be.reads) != tc.wantReads {
+				t.Fatalf("reads = %v, want %d", be.reads, tc.wantReads)
+			}
+			if tc.wantReads == 1 && be.reads[0] != "/v1/tax/transactions/tax_first" {
+				t.Errorf("read path = %q, want the transaction the refusal names", be.reads[0])
+			}
+		})
+	}
+}

@@ -88,7 +88,12 @@ Notes on three rows:
   `SET app.bypass_rls = 'on'; SELECT tenant_id, id, issued_at FROM credit_notes WHERE tax_reversal_pending AND status = 'issued' ORDER BY issued_at LIMIT 5;`.
   One more than a day old: handle as SEV-2 (see [Escalation](escalation.md)).
 - **Pending tax reversals (invoices).** The invoice tax-reversal sweep
-  tries each one again. The oldest:
+  tries each one again. Unlike the credit-note sweep, it waits after a
+  failed try: an eighth of the time since the invoice was last written, at
+  least 1 hour and at most 12 hours. The invoice's `tax_next_retry_at` is
+  the next try. The reversal goes to Stripe Tax even after the account
+  switched to another tax provider, so it fails while Stripe is
+  disconnected. The oldest:
   `SET app.bypass_rls = 'on'; SELECT tenant_id, id, voided_at FROM invoices WHERE status = 'voided' AND tax_provider = 'stripe_tax' AND COALESCE(tax_transaction_id, '') <> '' AND tax_reversed_at IS NULL ORDER BY voided_at LIMIT 5;`.
   As for credit notes: one more than a day old is SEV-2.
 

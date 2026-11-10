@@ -1908,7 +1908,9 @@ func (s *Service) reverseInvoiceTax(ctx context.Context, tenantID string, inv do
 	if err != nil {
 		// Leave tax_reversed_at NULL: RetryPendingTaxReversal (the scheduler
 		// sweep, symmetric sibling of #267's RetryPendingTaxCommit) re-drives
-		// this on the next tick. The re-drive converges via the request's
+		// this: on the next tick after a failure at status change, and after
+		// the wait deferTaxWork sets when the failure is in the sweep itself.
+		// The re-drive converges via the request's
 		// Idempotency-Key (hardcount_tax_rev_<ref>): within Stripe's cache window a
 		// retry returns the original reversal (a true no-op), and the stable
 		// `inv_taxrev_<id>` Reference prevents a duplicate reversal from ever
@@ -2694,7 +2696,7 @@ func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (dom
 		if perr != nil {
 			// Unknown is not "not paused": leave the draft (tax is already
 			// persisted), and return the error like a failed auto-finalize below.
-			return s.attachAttention(ctx, inv), fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it, or Retry tax after 24h", perr)
+			return s.attachAttention(ctx, inv), fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it", perr)
 		}
 		if paused {
 			slog.Info("invoice: tax resolved but collection is paused on the subscription; leaving the invoice as a draft",
@@ -2716,7 +2718,7 @@ func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (dom
 			// does not unwind the recompute. No sweep lists a draft whose
 			// tax is ok, so return the error: the sweep counts it, and
 			// the operator's click fails.
-			return s.attachAttention(ctx, inv), fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it, or Retry tax after 24h", ferr)
+			return s.attachAttention(ctx, inv), fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it", ferr)
 		}
 		// Nothing owed after finalize (a $0 invoice): settle it now so the
 		// operator who clicked Retry tax sees it paid. The auto-charge sweep
@@ -2931,10 +2933,16 @@ func (s *Service) RetryPendingTax(ctx context.Context, batch int) (int, []error)
 // finalized + tax_status=ok with a calculation id but no transaction id — tax
 // was charged and reported upstream, but Hardcount can't reverse it on a later void
 // (the reversal guard keys on tax_transaction_id). Re-committing is safe:
-// CommitTax's idempotency key makes Stripe return the ORIGINAL transaction
-// (never a duplicate), and CommitTax persists it. Self-healing — a re-commit
-// whose persist fails again is simply picked up on the next tick until it
-// sticks; once persisted the invoice falls out of the scan.
+// while Stripe holds CommitTax's idempotency key (24 hours) it returns the
+// ORIGINAL transaction (never a duplicate), and CommitTax persists it.
+// Self-healing — a re-commit whose persist fails again is simply picked up on
+// the next tick until it sticks; once persisted the invoice falls out of the
+// scan.
+//
+// It also commits an invoice whose commit never reached Stripe (a key that
+// cannot write tax transactions, a Stripe Tax incident), any time until the
+// calculation expires (ListPendingTaxCommit). A commit that fails here waits
+// before its next try (deferTaxWork), so it is not retried on every tick.
 //
 // Runs on the wall-clock scheduler tick (clock-pinned invoices are excluded by
 // the store query). Per-row errors collected, not aborted-on.
@@ -2958,11 +2966,47 @@ func (s *Service) RetryPendingTaxCommit(ctx context.Context, batch int) (int, []
 		}
 		if err := s.taxCommitter.CommitTax(ctx, inv.TenantID, inv.ID, inv.TaxCalculationID); err != nil {
 			errsOut = append(errsOut, fmt.Errorf("re-commit tax for invoice %s: %w", inv.ID, err))
+			s.deferTaxWork(ctx, inv)
 			continue
 		}
 		recovered++
 	}
 	return recovered, errsOut
+}
+
+// Bounds of the wait after a tax commit or reversal fails in its sweep. The
+// longest wait stays under the 24 hours Stripe keeps an idempotency key: a
+// commit whose answer was lost (it was recorded at Stripe, Hardcount saw a
+// timeout) is then normally retried while Stripe still replays the original
+// transaction. A retry that comes later is refused by Stripe, which names
+// the existing transaction; the provider reads it and adopts its id
+// (tax.StripeTaxProvider.Commit).
+const (
+	taxWorkMinWait = time.Hour
+	taxWorkMaxWait = 12 * time.Hour
+)
+
+// nextTaxWorkAttempt is when a tax commit or reversal that just failed is
+// tried again: after an eighth of the time since the invoice's last write, no
+// less than an hour and no more than twelve. A fault a few hours old is
+// retried about hourly; one that has lasted four days or more, twice a day.
+// The pending lists hold invoices of every tenant and take a fixed number per
+// run, so a failing invoice has to give way to the others.
+func nextTaxWorkAttempt(now, lastWrite time.Time) time.Time {
+	wait := now.Sub(lastWrite) / 8
+	wait = max(taxWorkMinWait, min(wait, taxWorkMaxWait))
+	return now.Add(wait)
+}
+
+// deferTaxWork records the wait after a failed commit or reversal. On the
+// real clock: the sweeps run on it, and the lists compare with now(). A failed
+// write is only logged; the invoice is then retried on the next run.
+func (s *Service) deferTaxWork(ctx context.Context, inv domain.Invoice) {
+	now := time.Now().UTC() //nolint:forbidigo // wall-clock: the tax sweeps exclude clock-pinned invoices and their lists compare with now()
+	if err := s.store.DeferTaxWork(ctx, inv.TenantID, inv.ID, nextTaxWorkAttempt(now, inv.UpdatedAt)); err != nil {
+		slog.WarnContext(ctx, "could not record the wait before the next tax commit or reversal attempt; it is retried on the next run",
+			"invoice_id", inv.ID, "error", err)
+	}
 }
 
 // RetryPendingTaxReversal recovers voided/uncollectible stripe_tax invoices
@@ -2972,7 +3016,8 @@ func (s *Service) RetryPendingTaxCommit(ctx context.Context, batch int) (int, []
 // reverseInvoiceTax — idempotent at Stripe (the invoice-stable inv_taxrev_<id>
 // reference dedups), and it stamps tax_reversed_at on success so the row falls
 // out of the next scan. Self-healing: a re-reversal whose stamp fails again is
-// picked up next tick.
+// picked up next tick. A reversal that fails here waits before its next try
+// (deferTaxWork), so it is not retried on every tick.
 //
 // Runs on the wall-clock scheduler tick (clock-pinned invoices excluded by the
 // store query). Per-row errors collected, not aborted-on.
@@ -2995,9 +3040,11 @@ func (s *Service) RetryPendingTaxReversal(ctx context.Context, batch int) (int, 
 			return recovered, errsOut // see processTaxRetryBatch
 		}
 		// reverseInvoiceTax already logs an ERROR + leaves tax_reversed_at NULL
-		// on failure (re-scanned next tick); aggregate the error for the return.
+		// on failure (re-scanned once its wait is over); aggregate the error
+		// for the return.
 		if rerr := s.reverseInvoiceTax(ctx, inv.TenantID, inv, "inv_taxrev_"+inv.ID); rerr != nil {
 			errsOut = append(errsOut, fmt.Errorf("re-reverse tax for invoice %s: %w", inv.ID, rerr))
+			s.deferTaxWork(ctx, inv)
 			continue
 		}
 		recovered++

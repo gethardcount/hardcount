@@ -118,20 +118,26 @@ type Store interface {
 	// tax_calculation_id set) but no persisted tax_transaction_id — the orphan
 	// state from a commit that succeeded at Stripe but failed to persist
 	// locally (incl. the case where finalize+auto-charge flipped the invoice
-	// to 'paid' before the reconciler's first scan). Powers the commit
-	// reconciler.
+	// to 'paid' before the reconciler's first scan), or from a commit that
+	// never reached Stripe. Listed until the Stripe Tax calculation expires
+	// (90 days after it is made), not while a failed commit waits for its
+	// next try (DeferTaxWork). Powers the commit reconciler.
 	ListPendingTaxCommit(ctx context.Context, batch int, livemode bool) ([]domain.Invoice, error)
 	// ListPendingTaxReversal finds voided/uncollectible stripe_tax invoices that
 	// still carry a tax_transaction_id but have tax_reversed_at NULL — a tax
 	// reversal that failed (or never completed) at Stripe, leaving the tenant
 	// over-remitting. Powers the reversal recovery sweep (symmetric sibling of
-	// the #267 commit reconciler). Bounded to a freshness window so it doesn't
-	// re-scan ancient voids forever.
+	// the #267 commit reconciler). Not time-bounded (ADR-111): a reversal
+	// stays possible for good. An invoice whose failed reversal waits for its
+	// next try (DeferTaxWork) is not listed.
 	ListPendingTaxReversal(ctx context.Context, batch int, livemode bool) ([]domain.Invoice, error)
 	// MarkTaxReversed stamps tax_reversed_at=now() once the upstream reversal is
 	// confirmed (or there was nothing to reverse), dropping the row from the
 	// reversal sweep.
 	MarkTaxReversed(ctx context.Context, tenantID, id string) error
+	// DeferTaxWork sets tax_next_retry_at after a tax commit or reversal
+	// failed in a sweep; the pending lists skip the invoice until then.
+	DeferTaxWork(ctx context.Context, tenantID, id string, next time.Time) error
 
 	// ListPendingTaxRetryForClock is the catchup-path counterpart to
 	// ListPendingTaxRetry — returns clock-pinned draft invoices stuck

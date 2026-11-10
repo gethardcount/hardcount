@@ -298,3 +298,11 @@ the window (no terminal stamp exists on the CN side, so the structural
 scan would churn every pre-feature CN forever). The invoice-side half was
 already unbounded per ADR-111.
 
+## Note 2026-11-10 — the tax-commit window was not a provider TTL
+
+"Status: build deferred" says `tax_commit` and `tax_reversal` have
+"TTL-encoding windows no queue can delete". The 24-hour tax-commit window
+encoded no provider TTL: 24 hours is the life of a Stripe idempotency key. A
+Stripe Tax calculation is usable until its own `expires_at`, 90 days after it
+is made, and the tax-commit sweep now stops at that expiry (see the
+2026-11-10 amendment of [ADR-111](111-a-write-off-has-no-tax-leg.md)).

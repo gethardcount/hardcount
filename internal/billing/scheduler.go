@@ -36,8 +36,9 @@ type CreditExpirer interface {
 type TaxRetrier interface {
 	RetryPendingTax(ctx context.Context, batch int) (int, []error)
 	// RetryPendingTaxCommit re-commits finalized stripe_tax invoices whose
-	// Stripe tax_transaction was created but whose id never persisted locally
-	// (so a later void couldn't reverse it). Idempotent — Stripe returns the
+	// tax commit failed, or whose Stripe tax_transaction was created but whose
+	// id never persisted locally (so a later void couldn't reverse it), for
+	// as long as the calculation is usable. Idempotent — Stripe returns the
 	// original transaction, never a duplicate.
 	RetryPendingTaxCommit(ctx context.Context, batch int) (int, []error)
 	// RetryPendingTaxReversal re-reverses voided/uncollectible stripe_tax

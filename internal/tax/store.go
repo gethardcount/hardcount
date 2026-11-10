@@ -14,8 +14,10 @@ import (
 
 // CalculationRecord is the durable audit row written after every provider
 // Calculate. Stored separately from invoices because Stripe tax_calculations
-// expire in 24 hours upstream — without this snapshot we can't answer audit
-// questions about how an invoice's tax was derived after the expiry window.
+// expire upstream (90 days after they are made) — without this snapshot we
+// can't answer audit questions about how an invoice's tax was derived after
+// that. The stored response also carries the calculation's expires_at, which
+// the commit guard and the pending-commit list read.
 type CalculationRecord struct {
 	ID          string
 	TenantID    string
@@ -143,21 +145,43 @@ func (s *PostgresStore) LinkInvoice(ctx context.Context, tenantID, invoiceID, pr
 	return nil
 }
 
-// LookupCalculationCreatedAt returns the created_at of the OLDEST
-// tax_calculations row that matches (tenant, invoice, provider_ref). One
+// CalculationFallbackLifetime is how long a recorded calculation is taken to
+// be usable when its stored response names no expiry.
+const CalculationFallbackLifetime = 24 * time.Hour
+
+// CalculationUsableUntilSQL is the instant a tax_calculations row (aliased c)
+// stops being usable for a commit: the provider's own expires_at from the
+// stored response, or, when the response names none, CalculationFallbackLifetime
+// after the row was written. Stripe Tax keeps a calculation for 90 days and
+// says so in expires_at (verified in test mode, 2026-11-10); the 24 hours
+// assumed before was the lifetime of an idempotency key. Shared by the commit
+// guard's lookup and the pending-commit list, so the two cannot disagree.
+//
+// Only a positive number of at most 12 digits counts as an expiry. The Stripe
+// provider stores the calculation as the SDK marshals it, where a missing or
+// null expires_at is written as 0: read as a time, that is 1970, and every
+// commit and finalize would be refused. A longer digit string cannot be cast
+// and would fail the whole cross-tenant list.
+const CalculationUsableUntilSQL = `COALESCE(
+	CASE WHEN c.response->>'expires_at' ~ '^[1-9][0-9]{0,11}$'
+	     THEN to_timestamp((c.response->>'expires_at')::bigint) END,
+	c.created_at + interval '24 hours')`
+
+// LookupCalculationUsableUntil returns the instant the calculation recorded
+// for (tenant, invoice, provider_ref) stops being usable for a commit
+// (CalculationUsableUntilSQL), read from the OLDEST matching row. One
 // upstream calculation can be recorded more than once — a retried billing
-// step reuses it through its idempotency key (WithCalculationScope) — and its
-// real age runs from the first record: reading the newest would make an
-// expired calculation look fresh to the finalize expiry guard.
-// When the same invoice has been retried (RetryTaxForInvoice writes a
-// new row with a fresh provider_ref), the lookup still uniquely
-// resolves because each retry uses a different upstream calc id —
-// the provider_ref filter pins to the calc whose age is being checked.
+// step reuses it through its idempotency key (WithCalculationScope) — and a
+// row with no expiry in its response ages from the first record: reading the
+// newest would make an expired calculation look fresh to the finalize expiry
+// guard. When the same invoice has been retried (RetryTaxForInvoice writes a
+// new row with a fresh provider_ref), the lookup still uniquely resolves
+// because each retry uses a different upstream calc id.
 // Returns errs.ErrNotFound when no row matches; CommitTax interprets
 // that as "no audit row, skip the guard" (manual/none provider rows
 // can have empty provider_ref, in which case the guard is meaningless
 // anyway since manual/none Commits are no-ops).
-func (s *PostgresStore) LookupCalculationCreatedAt(ctx context.Context, tenantID, invoiceID, providerRef string) (time.Time, error) {
+func (s *PostgresStore) LookupCalculationUsableUntil(ctx context.Context, tenantID, invoiceID, providerRef string) (time.Time, error) {
 	if providerRef == "" {
 		return time.Time{}, errs.ErrNotFound
 	}
@@ -167,20 +191,20 @@ func (s *PostgresStore) LookupCalculationCreatedAt(ctx context.Context, tenantID
 	}
 	defer postgres.Rollback(tx)
 
-	var createdAt time.Time
+	var usableUntil time.Time
 	err = tx.QueryRowContext(ctx, `
-		SELECT created_at FROM tax_calculations
-		WHERE tenant_id = $1 AND invoice_id = $2 AND provider_ref = $3
-		ORDER BY created_at ASC
+		SELECT `+CalculationUsableUntilSQL+` FROM tax_calculations c
+		WHERE c.tenant_id = $1 AND c.invoice_id = $2 AND c.provider_ref = $3
+		ORDER BY c.created_at ASC
 		LIMIT 1
-	`, tenantID, invoiceID, providerRef).Scan(&createdAt)
+	`, tenantID, invoiceID, providerRef).Scan(&usableUntil)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, errs.ErrNotFound
 	}
 	if err != nil {
-		return time.Time{}, fmt.Errorf("tax: lookup calc created_at: %w", err)
+		return time.Time{}, fmt.Errorf("tax: lookup calculation expiry: %w", err)
 	}
-	return createdAt, nil
+	return usableUntil, nil
 }
 
 // RecordFromResult is a convenience that derives the CalculationRecord from a

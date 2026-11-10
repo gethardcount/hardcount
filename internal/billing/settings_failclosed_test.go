@@ -42,7 +42,7 @@ func (r *recordingTaxCalcs) Record(context.Context, string, string, tax.Request,
 	r.records++
 	return "taxcalc_test", nil
 }
-func (r *recordingTaxCalcs) LookupCalculationCreatedAt(context.Context, string, string, string) (time.Time, error) {
+func (r *recordingTaxCalcs) LookupCalculationUsableUntil(context.Context, string, string, string) (time.Time, error) {
 	return time.Time{}, nil
 }
 func (r *recordingTaxCalcs) LinkInvoice(context.Context, string, string, string) error { return nil }
