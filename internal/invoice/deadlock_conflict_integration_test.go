@@ -36,7 +36,7 @@ import (
 // the subscription; the cancel holds the subscription and waits for the
 // invoice).
 //
-// Mutation-verify: drop respond.DeadlockAsConflict from recordOfflinePayment
+// Mutation-verify: drop respond.ConcurrentChangeAsConflict from recordOfflinePayment
 // (record_payment), from collectPayment's credit-covered branch
 // (collect_zero_due) or from its settle of an invoice open with nothing due
 // (collect_open_at_zero): the first answer is a 500, and the same key replays
