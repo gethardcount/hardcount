@@ -144,11 +144,13 @@ const refundOutcomeWriteTimeout = 10 * time.Second
 
 // afterRefundCall is the context for recording what a Stripe refund call
 // did. It keeps ctx's values (tenant, livemode, test clock, actor) and drops
-// its cancellation. A refund asked for through the API runs on the request
+// its cancellation. Issue and Retry refund asked for through the API
+// (POST /v1/credit-notes/{id}/issue, /retry-refund) run on the request
 // context, which the route's Timeout middleware ends after 30 seconds
-// (internal/api/router.go). The Stripe client also allows 30 seconds, but its
-// clock starts later, so when Stripe hangs, the request context ends during
-// the call. Stripe may have made the refund by then, and a write on the
+// (internal/api/router.go); a refund (CreateRefund) runs on its stepsBudget
+// ctx, whose deadline can end the same way. The Stripe client also allows 30
+// seconds, but its clock starts later, so when Stripe hangs, the ctx can end
+// during the call. Stripe may have made the refund by then, and a write on the
 // ended context is refused: the note would keep a status that says less, or
 // something false. The card settle detaches for the same reason
 // (payment/settlement.go).
@@ -1502,15 +1504,15 @@ func (s *Service) CreateRefund(ctx context.Context, tenantID string, input Refun
 		description = "Refund: " + strings.TrimSpace(input.Reason)
 	}
 
-	// The note is created, then issued, then voided if the issue fails: three
-	// transactions, with Stripe's refund call inside the issue. They run on a
-	// ctx the caller cannot cancel, taken before Create, so a client that
+	// The note is created, then issued (Stripe's refund call is inside the
+	// issue), then voided if the issue fails. Create and Issue run on a ctx
+	// the caller cannot cancel, taken before Create, so a client that
 	// disconnects (or the route timeout) cannot leave a draft half-way: a
 	// draft still counts toward the invoice's refunded total, and the next
-	// full refund would be refused. Still possible: a server stop between
-	// Create's commit and Issue, or a database wait past stepsBudget, leaves
-	// a draft; the ERROR line below names it, and the remedy is to void it
-	// from the credit notes list.
+	// full refund would be refused. The void takes its own ctx
+	// (settleFailedIssue). Still possible: a server stop between Create's
+	// commit and Issue leaves a draft and logs nothing; it shows as a draft
+	// in the credit notes list and holds the refund until voided.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stepsBudget)
 	defer cancel()
 	cn, err := s.Create(ctx, tenantID, CreateInput{
@@ -1529,27 +1531,76 @@ func (s *Service) CreateRefund(ctx context.Context, tenantID string, input Refun
 
 	issued, err := s.Issue(ctx, tenantID, cn.ID)
 	if err != nil {
-		// Issue failed after Create succeeded: void the draft so it does not
-		// count toward the refunded total. Void refuses (invalid state) when
-		// the note was issued after all or its Stripe refund leg ran, and that
-		// cash must stay counted. Any other void failure leaves the draft, so
-		// it is logged. Either way, return the issue error.
-		if _, verr := s.Void(ctx, tenantID, cn.ID); verr != nil && !errors.Is(verr, errs.ErrInvalidState) {
-			slog.ErrorContext(ctx, "refund: credit note created but its issue failed, and voiding the draft failed too; the draft stays: void it from the credit notes list",
-				"tenant_id", tenantID, "credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "issue_error", err, "void_error", verr)
+		if note, out := s.settleFailedIssue(ctx, tenantID, cn, err); out == noteIssued {
+			return note, nil
 		}
 		return domain.CreditNote{}, err
 	}
 	return issued, nil
 }
 
-// stepsBudget bounds a group of steps that run on a ctx their caller cannot
-// cancel: a refund's create, issue (with its Stripe call) and compensating
-// void, from the service (CreateRefund) or the create endpoint with
-// auto_issue. It is the same rule and value as the invoice package's
-// (docs/dev/code-standard.md): 5 minutes is above three Stripe calls at their
-// limit, so a call that can still succeed is not cut.
-const stepsBudget = 5 * time.Minute
+// failedIssueOutcome is what settleFailedIssue found after an Issue error.
+type failedIssueOutcome int
+
+const (
+	// draftVoided: the draft is voided; a resend makes and issues a new note.
+	draftVoided failedIssueOutcome = iota
+	// noteIssued: Issue committed and then failed (on its read after the
+	// commit, for example); the note is issued and its refund recorded.
+	noteIssued
+	// draftStays: the void failed; the draft stays (logged at ERROR).
+	draftStays
+)
+
+// settleFailedIssue is what a create-then-issue does when Issue returned an
+// error (CreateRefund, and the create endpoint with auto_issue): void the
+// draft so it stops counting toward the invoice's refunded total. The void
+// runs on its own commitBudget ctx: the issue may have used up the steps
+// budget, and a void on that ctx would fail for certain.
+//
+// Void refuses (invalid state) when the note is issued after all: Issue
+// committed, and its refund leg ran. Then the note is read again and, if it
+// is issued, returned as it is (with its real refund status): answering an
+// error would tell the caller the refund failed, and a new refund would pay
+// twice. A note found voided meanwhile counts as voided. Any other failure
+// leaves the draft, and the ERROR line names it.
+func (s *Service) settleFailedIssue(ctx context.Context, tenantID string, cn domain.CreditNote, issueErr error) (domain.CreditNote, failedIssueOutcome) {
+	vctx, vcancel := context.WithTimeout(context.WithoutCancel(ctx), commitBudget)
+	defer vcancel()
+	_, verr := s.Void(vctx, tenantID, cn.ID)
+	if verr == nil {
+		return domain.CreditNote{}, draftVoided
+	}
+	if errors.Is(verr, errs.ErrInvalidState) {
+		if cur, gerr := s.store.Get(vctx, tenantID, cn.ID); gerr == nil {
+			switch cur.Status {
+			case domain.CreditNoteIssued:
+				slog.WarnContext(ctx, "credit note: its issue returned an error after it committed; answering with the issued note",
+					"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "refund_status", cur.RefundStatus, "issue_error", issueErr)
+				return cur, noteIssued
+			case domain.CreditNoteVoided:
+				return domain.CreditNote{}, draftVoided
+			}
+		}
+	}
+	slog.ErrorContext(ctx, "credit note created but its issue failed, and voiding the draft failed too; the draft stays: void it from the credit notes list",
+		"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "issue_error", issueErr, "void_error", verr)
+	return domain.CreditNote{}, draftStays
+}
+
+// stepsBudget bounds a refund's create and issue (with its Stripe call), run
+// on a ctx their caller cannot cancel and taken before the create: a unit
+// that calls Stripe between its transactions takes one steps budget before
+// its first transaction (docs/dev/code-standard.md). 5 minutes is the
+// invoice package's value, above three Stripe calls at their limit, so a call
+// that can still succeed is not cut. Unexported, one per package; a var so
+// a test can shorten it.
+var stepsBudget = 5 * time.Minute
+
+// commitBudget bounds a transaction that records a failure after another
+// step ran out of time: a refund's compensating void (settleFailedIssue).
+// 30s, the billing package's value (docs/dev/code-standard.md).
+const commitBudget = 30 * time.Second
 
 func (s *Service) Get(ctx context.Context, tenantID, id string) (domain.CreditNote, error) {
 	return s.store.Get(ctx, tenantID, id)

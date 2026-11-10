@@ -3,11 +3,14 @@ package creditnote_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/creditnote"
@@ -82,34 +85,145 @@ func liveRefunds(t *testing.T, ctx context.Context, db *postgres.DB, tenantID, i
 	return sum, drafts
 }
 
+// refundThroughEndpoint posts a full refund of the invoice to the create
+// endpoint with auto_issue, on reqCtx.
+func refundThroughEndpoint(t *testing.T, svc *creditnote.Service, reqCtx context.Context, tenantID string, inv domain.Invoice) *httptest.ResponseRecorder {
+	t.Helper()
+	body := fmt.Sprintf(`{"invoice_id":%q,"reason":"requested_by_customer","refund_amount_cents":%d,"auto_issue":true,`+
+		`"lines":[{"description":"Refund","quantity":1,"unit_amount_cents":%d}]}`, inv.ID, inv.TotalAmountCents, inv.TotalAmountCents)
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	creditnote.NewHandler(svc, creditnote.HandlerDeps{}).Routes().ServeHTTP(rr, req.WithContext(auth.WithTenantID(reqCtx, tenantID)))
+	return rr
+}
+
+// issuedNoteFrom reads the note an endpoint answered 201 with.
+func issuedNoteFrom(t *testing.T, rr *httptest.ResponseRecorder) domain.CreditNote {
+	t.Helper()
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 with the issued note. body=%s", rr.Code, rr.Body.String())
+	}
+	var cn domain.CreditNote
+	if err := json.Unmarshal(rr.Body.Bytes(), &cn); err != nil {
+		t.Fatalf("decode the note: %v", err)
+	}
+	return cn
+}
+
 // TestCreateRefund_ClientGoneDuringCreateCommit_NoteIsIssued: the request ends
-// while the note's create commits. The create runs on a ctx the request
-// cannot cancel, so it stands, and the refund goes on to issue the note.
-// When it ran on the request's ctx, the create could commit and still return
-// context canceled: the refund answered an error and left the draft.
+// while the note's create commits. The create and the issue run on a ctx the
+// request cannot cancel, so the create stands and the note is issued. When
+// they ran on the request's ctx, the create could commit and still return
+// context canceled: the refund answered an error and left the draft. Through
+// CreateRefund and through the create endpoint with auto_issue.
 //
-// Mutation: take the refund's ctx after Create, and CreateRefund returns
-// context canceled with a draft left.
+// Mutations: take the refund's ctx after Create, or run the endpoint's create
+// or issue on the request's ctx, and an error comes back with a draft left.
 func TestCreateRefund_ClientGoneDuringCreateCommit_NoteIsIssued(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "CN refund client gone at create")
-	_, inv := seedInvoiceForCN(t, db, tenantID, "gone-create", domain.InvoicePaid, domain.PaymentSucceeded, "pi_gone_create")
-	reqCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	store := &cutCommitStore{PostgresStore: creditnote.NewPostgresStore(db), cancelRequest: cancel}
-	svc := creditnote.NewService(store, invoice.NewPostgresStore(db), &keyRecordingRefunder{refundID: "re_gone_create"})
-	svc.SetNumberGenerator(&seqNumbers{prefix: "GONECREATE"})
+	cases := []struct {
+		name   string
+		refund func(t *testing.T, svc *creditnote.Service, reqCtx context.Context, inv domain.Invoice) domain.CreditNote
+	}{
+		{"CreateRefund", func(t *testing.T, svc *creditnote.Service, reqCtx context.Context, inv domain.Invoice) domain.CreditNote {
+			cn, err := svc.CreateRefund(reqCtx, tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"})
+			if err != nil {
+				t.Fatalf("CreateRefund: %v; want the issued note, the create committed", err)
+			}
+			return cn
+		}},
+		{"create endpoint with auto_issue", func(t *testing.T, svc *creditnote.Service, reqCtx context.Context, inv domain.Invoice) domain.CreditNote {
+			return issuedNoteFrom(t, refundThroughEndpoint(t, svc, reqCtx, tenantID, inv))
+		}},
+	}
+	for i, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			suffix := []string{"gone-create-svc", "gone-create-api"}[i]
+			_, inv := seedInvoiceForCN(t, db, tenantID, suffix, domain.InvoicePaid, domain.PaymentSucceeded, "pi_"+suffix)
+			reqCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			store := &cutCommitStore{PostgresStore: creditnote.NewPostgresStore(db), cancelRequest: cancel}
+			svc := creditnote.NewService(store, invoice.NewPostgresStore(db), &keyRecordingRefunder{refundID: "re_" + suffix})
+			svc.SetNumberGenerator(&seqNumbers{prefix: strings.ToUpper(strings.ReplaceAll(suffix, "-", ""))})
 
-	cn, err := svc.CreateRefund(reqCtx, tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"})
-	if err != nil {
-		t.Fatalf("CreateRefund: %v; want the issued note, the create committed", err)
+			cn := c.refund(t, svc, reqCtx, inv)
+			if cn.Status != domain.CreditNoteIssued {
+				t.Errorf("status = %s, want issued", cn.Status)
+			}
+			if sum, drafts := liveRefunds(t, ctx, db, tenantID, inv.ID); drafts != 0 || sum != inv.TotalAmountCents {
+				t.Errorf("drafts = %d, refunded = %dc; want 0 and %dc", drafts, sum, inv.TotalAmountCents)
+			}
+		})
 	}
-	if cn.Status != domain.CreditNoteIssued {
-		t.Errorf("status = %s, want issued", cn.Status)
+}
+
+// failFirstIssuedGet fails the first read of a note that is already issued:
+// Issue's read after its commit and its refund leg, so Issue returns an error
+// for a note that is issued and refunded.
+type failFirstIssuedGet struct {
+	*creditnote.PostgresStore
+	failed bool
+}
+
+func (s *failFirstIssuedGet) Get(ctx context.Context, tenantID, id string) (domain.CreditNote, error) {
+	cn, err := s.PostgresStore.Get(ctx, tenantID, id)
+	if err == nil && cn.Status == domain.CreditNoteIssued && !s.failed {
+		s.failed = true
+		return domain.CreditNote{}, errors.New("connection reset by peer")
 	}
-	if sum, drafts := liveRefunds(t, ctx, db, tenantID, inv.ID); drafts != 0 || sum != inv.TotalAmountCents {
-		t.Errorf("drafts = %d, refunded = %dc; want 0 and %dc", drafts, sum, inv.TotalAmountCents)
+	return cn, err
+}
+
+// TestCreateRefund_IssueCommitsThenFails_AnswersTheIssuedNote: Issue commits
+// and its refund runs, then Issue returns an error (its read after the commit
+// fails). The void refuses an issued note, so the caller gets the issued note
+// with its refund status, not an error: told the refund failed, a client could
+// send a new partial refund under a new key and pay twice. Through
+// CreateRefund and through the create endpoint with auto_issue.
+//
+// Mutation: answer the issue error after the void refuses, and the caller is
+// told the refund failed.
+func TestCreateRefund_IssueCommitsThenFails_AnswersTheIssuedNote(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "CN refund issue commits then fails")
+	cases := []struct {
+		name   string
+		refund func(t *testing.T, svc *creditnote.Service, inv domain.Invoice) domain.CreditNote
+	}{
+		{"CreateRefund", func(t *testing.T, svc *creditnote.Service, inv domain.Invoice) domain.CreditNote {
+			cn, err := svc.CreateRefund(ctx, tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"})
+			if err != nil {
+				t.Fatalf("CreateRefund: %v; want the issued note, the refund was made", err)
+			}
+			return cn
+		}},
+		{"create endpoint with auto_issue", func(t *testing.T, svc *creditnote.Service, inv domain.Invoice) domain.CreditNote {
+			return issuedNoteFrom(t, refundThroughEndpoint(t, svc, ctx, tenantID, inv))
+		}},
+	}
+	for i, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			suffix := []string{"commit-fail-svc", "commit-fail-api"}[i]
+			_, inv := seedInvoiceForCN(t, db, tenantID, suffix, domain.InvoicePaid, domain.PaymentSucceeded, "pi_"+suffix)
+			store := &failFirstIssuedGet{PostgresStore: creditnote.NewPostgresStore(db)}
+			svc := creditnote.NewService(store, invoice.NewPostgresStore(db), &keyRecordingRefunder{refundID: "re_" + suffix})
+			svc.SetNumberGenerator(&seqNumbers{prefix: strings.ToUpper(strings.ReplaceAll(suffix, "-", ""))})
+
+			cn := c.refund(t, svc, inv)
+			if !store.failed {
+				t.Fatal("the seam never failed a read: Issue did not reach its read after the commit")
+			}
+			if cn.Status != domain.CreditNoteIssued || cn.RefundStatus != domain.RefundSucceeded {
+				t.Errorf("note = (%s, %s), want issued with the refund succeeded", cn.Status, cn.RefundStatus)
+			}
+			if sum, drafts := liveRefunds(t, ctx, db, tenantID, inv.ID); drafts != 0 || sum != inv.TotalAmountCents {
+				t.Errorf("drafts = %d, refunded = %dc; want 0 and %dc", drafts, sum, inv.TotalAmountCents)
+			}
+		})
 	}
 }
 
@@ -117,8 +231,9 @@ func TestCreateRefund_ClientGoneDuringCreateCommit_NoteIsIssued(t *testing.T) {
 // request ends inside the issue, which fails. The compensating void runs on
 // the refund's own ctx, so it voids the draft; the invoice's refunded total is
 // back to 0 and a second full refund succeeds. When the void ran on the dead
-// request's ctx it failed silently, the draft stayed, and the second full
-// refund was refused. The same through the create endpoint with auto_issue.
+// request's ctx it failed (silently on the refund path; the endpoint logged
+// it), the draft stayed, and the second full refund was refused. The same
+// through the create endpoint with auto_issue.
 //
 // Mutation: the void back on the request's ctx, and the draft stays.
 func TestCreateRefund_IssueFailsOnDeadRequest_NoDraftAndFullRefundWorks(t *testing.T) {
@@ -136,12 +251,7 @@ func TestCreateRefund_IssueFailsOnDeadRequest_NoDraftAndFullRefundWorks(t *testi
 			}
 		}},
 		{"create endpoint with auto_issue", func(t *testing.T, svc *creditnote.Service, reqCtx context.Context, inv domain.Invoice) {
-			body := `{"invoice_id":"` + inv.ID + `","reason":"requested_by_customer","refund_amount_cents":10000,"auto_issue":true,` +
-				`"lines":[{"description":"Refund","quantity":1,"unit_amount_cents":10000}]}`
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
-			rr := httptest.NewRecorder()
-			creditnote.NewHandler(svc, creditnote.HandlerDeps{}).Routes().ServeHTTP(rr, req.WithContext(auth.WithTenantID(reqCtx, tenantID)))
+			rr := refundThroughEndpoint(t, svc, reqCtx, tenantID, inv)
 			if rr.Code < 400 {
 				t.Fatalf("create with auto_issue = %d, want an error (the issue failed). body=%s", rr.Code, rr.Body.String())
 			}
@@ -171,5 +281,40 @@ func TestCreateRefund_IssueFailsOnDeadRequest_NoDraftAndFullRefundWorks(t *testi
 				t.Errorf("second refund: status %s, %dc; want issued, %dc", again.Status, again.RefundAmountCents, inv.TotalAmountCents)
 			}
 		})
+	}
+}
+
+// stalledIssueInvoices is the invoice store whose read on the issue's
+// transaction waits until that transaction's ctx is done: a lock wait or a
+// slow database that outlasts the refund's steps budget.
+type stalledIssueInvoices struct {
+	*invoice.PostgresStore
+}
+
+func (s *stalledIssueInvoices) LockForCreditNoteTx(ctx context.Context, _ *sql.Tx, _, _ string) (domain.Invoice, error) {
+	<-ctx.Done()
+	return domain.Invoice{}, ctx.Err()
+}
+
+// TestCreateRefund_IssueOutlastsTheBudget_TheDraftIsStillVoided: the issue
+// waits until the refund's steps budget runs out and fails on its deadline.
+// The compensating void takes its own ctx, so it still voids the draft:
+// nothing is refunded, and nothing holds the invoice's refund headroom.
+//
+// Mutation: run the void on the spent steps ctx, and the draft stays.
+func TestCreateRefund_IssueOutlastsTheBudget_TheDraftIsStillVoided(t *testing.T) {
+	creditnote.ShortenStepsBudget(t, 300*time.Millisecond)
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "CN refund past its budget")
+	_, inv := seedInvoiceForCN(t, db, tenantID, "budget-spent", domain.InvoicePaid, domain.PaymentSucceeded, "pi_budget_spent")
+	svc := creditnote.NewService(creditnote.NewPostgresStore(db), &stalledIssueInvoices{PostgresStore: invoice.NewPostgresStore(db)}, &keyRecordingRefunder{refundID: "re_budget_spent"})
+	svc.SetNumberGenerator(&seqNumbers{prefix: "BUDGETSPENT"})
+
+	if _, err := svc.CreateRefund(ctx, tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"}); err == nil {
+		t.Fatal("CreateRefund = nil with an issue past its budget, want the error")
+	}
+	if sum, drafts := liveRefunds(t, ctx, db, tenantID, inv.ID); drafts != 0 || sum != 0 {
+		t.Errorf("drafts = %d, refunded = %dc; want 0 and 0: the void runs on its own ctx", drafts, sum)
 	}
 }

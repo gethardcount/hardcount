@@ -136,6 +136,10 @@ Each domain package in `internal/` has a **handler** (HTTP), a **service**
     taken after the commit.
   - Each transaction takes its own `commitBudget` ctx, including one that
     records a failure after another ran out of time.
+  - A unit that calls Stripe between its transactions (a refund: create,
+    then issue with the Stripe call) takes one `stepsBudget` ctx before its
+    first transaction. A compensating step after a failure (the refund's
+    void) still takes its own `commitBudget` ctx.
   - Each budget is unexported in the package that uses it.
 - **Every goroutine has an owner that waits for it at shutdown,** such as the
   `sync.WaitGroup` in `cmd/hardcount/main.go`. If nothing waits, a comment

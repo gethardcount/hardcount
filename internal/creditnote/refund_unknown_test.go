@@ -327,8 +327,11 @@ func safeMessage(err error) string {
 	return ""
 }
 
-// A refund asked for through the API runs on the request's context, which
-// chi's middleware.Timeout ends after 30 seconds (internal/api/router.go).
+// Issue and Retry refund asked for through the API (POST
+// /v1/credit-notes/{id}/issue, /retry-refund) run on the request's context,
+// which the route's Timeout middleware ends after 30 seconds
+// (internal/api/router.go). (A refund, CreateRefund, runs on its own steps
+// budget; its last subtest below.)
 // The Stripe client also allows 30 seconds, but its clock starts later, so
 // when Stripe hangs, the request context ends first, during the Stripe call.
 // The write that records the unclear result must still land. A database write

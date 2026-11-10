@@ -251,10 +251,11 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		return cn
 	}
 
-	// A refund asked for through the API runs on the request's context, which
-	// chi's middleware.Timeout ends after 30 seconds. When Stripe hangs, that
-	// context ends during the Stripe call, and Postgres refuses a transaction
-	// begun on it. The write that records the unclear result must still land.
+	// The issue endpoint (POST /v1/credit-notes/{id}/issue) runs Issue on the
+	// request's context, which the route's Timeout middleware ends after 30
+	// seconds. When Stripe hangs, that context ends during the Stripe call,
+	// and Postgres refuses a transaction begun on it. The write that records
+	// the unclear result must still land.
 	t.Run("a request that ends during the Stripe call still stores unknown at issue", func(t *testing.T) {
 		_, inv := seedInvoiceForCN(t, db, tenantID, "unk-deadline-issue", domain.InvoicePaid, domain.PaymentSucceeded, "pi_unk_deadline_issue")
 		refunder := &keyRecordingRefunder{}
