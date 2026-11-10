@@ -556,11 +556,19 @@ func (m *memStore) CreateWithLineItems(_ context.Context, tenantID string, inv d
 	return inv, nil
 }
 
-// CreateWithLineItemsAudited mirrors the store contract (ADR-090): emit runs
-// after the rows exist and before "commit"; an emit error rolls the write back
-// and surfaces. The fake has no tx, so the closure gets a nil *sql.Tx — enough
-// to prove the service passes an emission and propagates its error.
-func (m *memStore) CreateWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error) {
+// CreateNumberedAudited mirrors the store contract (ADR-090): number runs
+// first and names the invoice, emit runs after the rows exist and before
+// "commit"; an emit error rolls the write back and surfaces. The fake has no
+// tx, so both closures get a nil *sql.Tx — enough to prove the service passes
+// them and propagates their errors.
+func (m *memStore) CreateNumberedAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, number func(tx *sql.Tx) (string, error), emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error) {
+	if number != nil {
+		num, err := number(nil)
+		if err != nil {
+			return domain.Invoice{}, fmt.Errorf("allocate invoice number: %w", err)
+		}
+		inv.InvoiceNumber = num
+	}
 	out, err := m.CreateWithLineItems(ctx, tenantID, inv, items)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -650,13 +658,7 @@ type memNumberer struct {
 
 func newMemNumberer() *memNumberer { return &memNumberer{} }
 
-func (m *memNumberer) NextInvoiceNumber(_ context.Context, _ string) (string, error) {
-	m.next++
-	return fmt.Sprintf("HC-%06d", m.next), nil
-}
-
-// NextInvoiceNumberTx mirrors NextInvoiceNumber for tx-aware callers.
-// The fake ignores the tx since it's in-memory.
+// NextInvoiceNumberTx ignores the tx: the fake keeps its count in memory.
 func (m *memNumberer) NextInvoiceNumberTx(_ context.Context, _ *sql.Tx, _ string) (string, error) {
 	m.next++
 	return fmt.Sprintf("HC-%06d", m.next), nil

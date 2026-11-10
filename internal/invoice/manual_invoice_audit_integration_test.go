@@ -40,12 +40,6 @@ func (f *failingEmitter) LogInTx(context.Context, *sql.Tx, audit.Entry) error {
 // rolled-back create can be proven absent by number lookup.
 type fixedNumberer struct{ number string }
 
-func (n *fixedNumberer) NextInvoiceNumber(context.Context, string) (string, error) {
-	return n.number, nil
-}
-
-// NextInvoiceNumberTx exists only to satisfy InvoiceNumberer — the manual
-// create path allocates through NextInvoiceNumber.
 func (n *fixedNumberer) NextInvoiceNumberTx(context.Context, *sql.Tx, string) (string, error) {
 	return n.number, nil
 }
@@ -95,7 +89,7 @@ func wantNum(t *testing.T, meta map[string]any, key string, want int64) {
 
 // B2 — POST /v1/invoices. The route takes two request shapes: a bare header
 // when the request carries no lines, and a create with lines when it does.
-// Both go through one store method, CreateWithLineItemsAudited. Each shape must
+// Both go through one store method, CreateNumberedAudited. Each shape must
 // audit, and each must share fate with the emission.
 func TestInvoiceCreate_AuditsBothCreateShapesAndSharesFate(t *testing.T) {
 	db := testutil.SetupTestDB(t)

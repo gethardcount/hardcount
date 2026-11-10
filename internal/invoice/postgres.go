@@ -2240,9 +2240,28 @@ func (s *PostgresStore) CreateWithLineItems(ctx context.Context, tenantID string
 // the whole composed invoice back. Both manual-create shapes (a bare header,
 // with no items, and create-with-lines) come through here, so a draft created
 // either way leaves exactly one 'create' row. nil emit = unaudited write
-// (engine cycle/threshold invoices).
+// (engine cycle/threshold invoices). inv carries its invoice number.
 func (s *PostgresStore) CreateWithLineItemsAudited(
 	ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem,
+	emit func(tx *sql.Tx, out domain.Invoice) error,
+) (domain.Invoice, error) {
+	return s.CreateNumberedAudited(ctx, tenantID, inv, items, nil, emit)
+}
+
+// CreateNumberedAudited is CreateWithLineItemsAudited that also numbers the
+// invoice on its create transaction. number runs first, on that transaction,
+// and its result becomes inv.InvoiceNumber. A failure later in the
+// transaction (the insert, a line, emit, the commit) rolls the number back
+// with the invoice, so the tenant's numbers keep no gap. nil number keeps
+// the number inv carries.
+//
+// number locks the tenant's number row until the commit, and every writer
+// that numbers an invoice or a credit note for the tenant waits for that
+// row. So the caller does its reads and checks before this call, and the
+// transaction runs only the writes.
+func (s *PostgresStore) CreateNumberedAudited(
+	ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem,
+	number func(tx *sql.Tx) (string, error),
 	emit func(tx *sql.Tx, out domain.Invoice) error,
 ) (domain.Invoice, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -2250,6 +2269,13 @@ func (s *PostgresStore) CreateWithLineItemsAudited(
 		return domain.Invoice{}, err
 	}
 	defer postgres.Rollback(tx)
+	if number != nil {
+		num, err := number(tx)
+		if err != nil {
+			return domain.Invoice{}, fmt.Errorf("allocate invoice number: %w", err)
+		}
+		inv.InvoiceNumber = num
+	}
 	out, err := s.createWithLineItemsInTx(ctx, tx, tenantID, inv, items)
 	if err != nil {
 		return domain.Invoice{}, err

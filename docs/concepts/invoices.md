@@ -131,6 +131,8 @@ and `amount_due_cents` is 0. The total stays $28.84.
   that one invoice.
 - **Number.** Each invoice gets the next number in its mode, such as
   `HC-000001`. Test and live mode count apart. The prefix is a setting.
+  The number is taken in the same write that saves the invoice, so a create
+  that fails uses no number and leaves no gap.
 
 ## PDF and the hosted invoice page
 
