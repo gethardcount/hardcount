@@ -96,10 +96,34 @@ func stamp(status domain.InvoicePaymentStatus, pi, lastErr string) func(*testing
 	}
 }
 
+// park leaves the invoice as a parked charge an earlier version wrote: unknown
+// with no PaymentIntent. No writer of this version produces one (a charge puts
+// its PaymentIntent on the invoice before it confirms, and the store refuses
+// the shape; ADR-137), so the row is written directly.
+func park(lastErr string) func(*testing.T, context.Context, *exhaustFixture) {
+	return func(t *testing.T, ctx context.Context, f *exhaustFixture) {
+		t.Helper()
+		tx, err := f.db.BeginTx(ctx, postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE invoices SET payment_status = 'unknown', stripe_payment_intent_id = NULL,
+			       last_payment_error = $2, charge_attempt_seq = charge_attempt_seq + 1
+			 WHERE id = $1`, f.invoiceID, lastErr); err != nil {
+			t.Fatalf("park: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+	}
+}
+
 var paymentShapes = []paymentShape{
 	{name: "processing", inFlight: true, apply: stamp(domain.PaymentProcessing, "pi_racing", "")},
 	{name: "unknown with a PaymentIntent", inFlight: true, apply: stamp(domain.PaymentUnknown, "pi_racing", "stripe: 500")},
-	{name: "parked", inFlight: true, apply: stamp(domain.PaymentUnknown, "", "stripe: request timed out")},
+	{name: "parked", inFlight: true, apply: park("stripe: request timed out")},
 	// The control: the payment definitely failed, so the final action fires.
 	{name: "failed (control)", inFlight: false, apply: func(*testing.T, context.Context, *exhaustFixture) {}},
 }
@@ -559,7 +583,7 @@ func TestExhaust_HeldRun_ReachesAnEnd(t *testing.T) {
 	})
 
 	t.Run("parked, written off by an operator, the run closes without the subscription action", func(t *testing.T) {
-		f, _ := hold(t, "Held then written off", stamp(domain.PaymentUnknown, "", "stripe: request timed out"))
+		f, _ := hold(t, "Held then written off", park("stripe: request timed out"))
 		if _, err := f.invSvc.MarkUncollectible(f.ctx, f.tenantID, f.invoiceID); err != nil {
 			t.Fatalf("operator write-off of a parked invoice: %v", err)
 		}

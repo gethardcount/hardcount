@@ -69,18 +69,35 @@ func TestPaymentBlocksAction_Matrix(t *testing.T) {
 			if strings.Contains(msg, "wait for") || strings.Contains(msg, "cancel it") {
 				t.Errorf("%s refusal tells the operator to wait or cancel — neither is possible for a parked invoice: %q", a, msg)
 			}
-			// What happens next without anyone (REC-5): a payment Stripe
-			// shows is recorded, and with none after 24 hours the invoice is
-			// charged again. "Will not resolve on its own" is no longer true.
-			if strings.Contains(msg, "will not resolve on its own") || !strings.Contains(msg, "24 hours") {
-				t.Errorf("%s refusal does not say what Hardcount does next (records a payment that appears, charges again after 24 hours): %q", a, msg)
+			// Only an earlier version parked an invoice, and this version
+			// cannot look its charge up (ADR-137): the refusal sends the
+			// operator to Stripe and promises no automatic re-charge.
+			if !strings.Contains(msg, "check the customer's payments in Stripe") || strings.Contains(msg, "24 hours") || strings.Contains(msg, "charged again") {
+				t.Errorf("%s refusal must send the operator to Stripe and promise no re-charge: %q", a, msg)
 			}
+		}
+	})
+
+	// An unclear charge that names its PaymentIntent allows write-off and
+	// nothing else (ADR-137): the exit when Stripe can never be asked (the key
+	// revoked, the PaymentIntent gone from the account). It moves no money, and
+	// a payment Stripe completes later still settles the invoice. A processing
+	// charge allows nothing.
+	t.Run("an unclear charge with its PaymentIntent allows only write-off", func(t *testing.T) {
+		if got := PaymentBlocksAction(unknownWithPI, ActionMarkUncollectible); got.Blocked {
+			t.Fatalf("write-off refused on an unclear charge: no exit when Stripe cannot be asked: %s", got.Message)
+		}
+		if got := PaymentBlocksAction(resolving, ActionMarkUncollectible); !got.Blocked {
+			t.Error("write-off allowed while a charge is processing")
 		}
 	})
 
 	t.Run("a genuinely resolving charge says wait, not write off", func(t *testing.T) {
 		for _, inv := range []Invoice{resolving, unknownWithPI} {
 			for _, a := range every {
+				if inv.PaymentStatus == PaymentUnknown && a == ActionMarkUncollectible {
+					continue // the exit, above
+				}
 				got := PaymentBlocksAction(inv, a)
 				if !got.Blocked {
 					t.Errorf("%s allowed while a charge is being confirmed", a)

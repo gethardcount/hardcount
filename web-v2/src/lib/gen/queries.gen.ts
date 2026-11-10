@@ -9224,10 +9224,12 @@ export const getMarkInvoiceUncollectibleUrl = (id: string,) => {
  * tied to a subscription's period, does not affect subscription
  * changes.
  *
- * An invoice whose last charge got an unclear answer from Stripe with
- * no payment named (payment status `unknown`, no
- * `stripe_payment_intent_id`) can be written off; if the charge did
- * succeed, the invoice is still marked paid when Stripe shows it.
+ * An invoice whose payment is `unknown` (a charge whose answer from
+ * Stripe was unclear) can be written off once that charge is no longer
+ * being sent, a few minutes after it started; until then the call
+ * answers `409 payment_in_flight`. If the charge did succeed, the
+ * invoice is still marked paid when Hardcount reads the payment from
+ * Stripe or its event arrives.
  * @summary Write off an invoice as uncollectible
  */
 export const markInvoiceUncollectible = async (id: string, options?: RequestInit): Promise<Invoice> => {
@@ -9476,7 +9478,10 @@ export const getCollectInvoicePaymentUrl = (id: string,) => {
  *
  * A paid invoice sends the `invoice.paid` webhook event (and
  * `payment.succeeded` for a card payment), and any active dunning run
- * is resolved with `payment_recovered`. A declined card answers 502;
+ * is resolved with `payment_recovered`. A payment Stripe is still
+ * processing answers 200 with `payment_status: processing`, and the
+ * dunning run stays open until the payment settles. A declined card
+ * answers 502;
  * the invoice's `payment_status` becomes `failed`, and dunning starts
  * when the customer's policy is enabled. Check
  * `payment_status` on the returned invoice.

@@ -174,7 +174,9 @@ Ordered by leverage. A "no" blocks the PR.
      dunning suffix), and it must not dedup two genuinely different charges.
      **The varying part must be the event you mean, never a proxy for it.**
      The key answers "same attempt or new attempt?", so it may move only when
-     an attempt outcome is recorded.
+     an attempt's PaymentIntent goes onto the invoice (before the confirm, or
+     with an outcome), or when the reconciler clears the hold of a charge
+     that confirmed nothing (ADR-137).
    - **Proxy test.** When a seed is a proxy, ask what writes it that you did
      not intend. If the answer is "a whole table's worth of writers",
      introduce the explicit counter instead.

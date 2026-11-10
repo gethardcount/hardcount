@@ -15,18 +15,18 @@ import (
 // relies on, because a test means nothing against a fake that does not behave
 // like Stripe:
 //
+//   - a charge is two calls (two_step_fake_test.go): a create, which moves no
+//     money, and a confirm on the id Hardcount saved;
 //   - an idempotency key (with the card appended, as LiveStripeClient sends
 //     it) returns its saved answer for the same parameters, and answers 409
 //     "same key, different parameters" for other parameters;
 //   - an answer is saved once the request starts executing, a 500 included;
 //     a 429 is not saved (Stripe refuses it before executing);
 //   - prune forgets every key, as Stripe may once a key is 24 hours old;
-//   - a request can outlive the caller's context and still create its
-//     PaymentIntent;
-//   - List is consistent (every PaymentIntent created is listed at once), is
-//     per customer, can fail part-way, can refuse for good (customer
-//     missing, key rejected, Stripe not connected), and can hang as a
-//     network partition does until the caller's context ends;
+//   - a request can outlive the caller's context and still do its work;
+//   - a read by id can fail (key rejected, Stripe not connected, a 500), can
+//     hang as a network partition does until the caller's context ends, and
+//     sees every PaymentIntent at once;
 //   - a PaymentIntent can be refunded in full.
 //
 // Every scenario counts the PaymentIntents here, not only the invoice's state.
@@ -36,44 +36,52 @@ type fakeStripe struct {
 	pis  []*fakePI
 	keys map[string]*fakeKey
 	// next decides how the next creates go, in order; when empty, a create
-	// succeeds.
+	// succeeds (unconfirmed).
 	next []fakeMode
-	// customers overrides a Stripe customer's list: "missing" (not in this
-	// account), "auth" (the key is rejected), "fail" (a page fails part-way
-	// with a 500), "unreachable" (no answer: a network error), "panic" (the
-	// check panics, standing in for a nil dereference on one row).
+	// customers overrides how reads of a Stripe customer's PaymentIntents
+	// answer: "auth" (the key is rejected), "fail" (a 500), "unreachable" (no
+	// answer: a network error), "panic" (the check panics, standing in for a
+	// nil dereference on one row).
 	customers map[string]string
 	// panicOn makes a read panic, standing in for a nil dereference on one
 	// row: GetPaymentIntent for a PaymentIntent id here.
 	panicOn       map[string]bool
 	notConfigured bool
-	// hang, when set, makes every list wait as a network partition does:
+	// hang, when set, makes every read wait as a network partition does:
 	// until the caller's context ends, or hang passes, then fail.
 	hang    time.Duration
 	creates int
-	lists   int
+	reads   int
 	cancels []string
-	// beforeList, when set, runs at the start of each list (outside the lock).
-	beforeList func()
-	// afterList, when set, runs once a list has been read and before it is
+	// beforeRead, when set, runs at the start of each read (outside the lock).
+	beforeRead func()
+	// afterRead, when set, runs once a read has answered and before it is
 	// returned (outside the lock): something that happens at Stripe, or a
 	// webhook that lands, between the sweep's read and its write.
-	afterList func()
+	afterRead func()
 	// beforeCreate, when set, runs at the start of each create (outside the
 	// lock): a charger stalling just before Stripe receives its request.
 	beforeCreate func()
+	// How the next confirms go, in order (empty: the confirm succeeds), how
+	// many were sent, and a hook run at the start of each confirm (outside
+	// the lock).
+	confirmNext   []fakeMode
+	confirms      int
+	beforeConfirm func()
 }
 
 type fakeModeKind int
 
+// The create's modes (queue) and the confirm's (queueConfirm); see each call
+// for what a mode means there.
 const (
-	fakeCreate           fakeModeKind = iota // create the PaymentIntent and answer
-	fakeDecline                              // create it declined; answer 402
-	fakeSave500                              // save a 500 under the key; create nothing
-	fakeRateLimit                            // 429: nothing saved, nothing created
-	fakeOutliveCtx                           // wait for the caller's context to end, then create it
-	fakeHang                                 // wait for the caller's context to end; create nothing (yet)
-	fakeCrashAfterCreate                     // create it, then the process dies
+	fakeCreate           fakeModeKind = iota // do the call and answer
+	fakeDecline                              // confirm: decline; answer 402
+	fakeSave500                              // create: save a 500 under the key, create nothing; confirm: charge, answer 500
+	fakeRateLimit                            // create: 429, nothing saved, nothing created
+	fakeOutliveCtx                           // wait for the caller's context to end, then do the call
+	fakeHang                                 // create: no answer until the caller's context ends; nothing created
+	fakeCrashAfterCreate                     // do the call, then the process dies
 	fakeCrashBeforeSend                      // the process dies before the request leaves
 )
 
@@ -141,89 +149,6 @@ func declineError(pi *fakePI) error {
 	return &PaymentError{Message: pi.failureMsg, DeclineCode: pi.declineCode, PaymentIntentID: pi.id}
 }
 
-func (f *fakeStripe) CreatePaymentIntent(ctx context.Context, p PaymentIntentParams) (PaymentIntentResult, error) {
-	f.mu.Lock()
-	hook := f.beforeCreate
-	f.mu.Unlock()
-	if hook != nil {
-		hook()
-	}
-	f.mu.Lock()
-	f.creates++
-	if f.notConfigured {
-		f.mu.Unlock()
-		return PaymentIntentResult{}, ErrStripeNotConfigured
-	}
-	mode := fakeMode{kind: fakeCreate}
-	if len(f.next) > 0 {
-		mode, f.next = f.next[0], f.next[1:]
-	}
-	if mode.status == "" {
-		mode.status = "succeeded"
-		if mode.kind == fakeDecline {
-			mode.status = "requires_payment_method"
-		}
-	}
-	switch mode.kind {
-	case fakeCrashBeforeSend:
-		f.mu.Unlock()
-		panic(fakeCrash{})
-	case fakeRateLimit:
-		f.mu.Unlock()
-		return PaymentIntentResult{}, fmt.Errorf("%w: stripe rate limit: Request rate limit exceeded", ErrPaymentTransient)
-	}
-
-	key, sig := stripeKey(p), paramsSig(p)
-	if k, ok := f.keys[key]; ok {
-		defer f.mu.Unlock()
-		switch {
-		case k.sig != sig:
-			return PaymentIntentResult{}, &PaymentError{Message: "Keys for idempotent requests can only be used with the same parameters they were first used with.", Unknown: true}
-		case k.err != nil:
-			return PaymentIntentResult{}, k.err
-		default:
-			return PaymentIntentResult{ID: k.pi.id, Status: k.pi.status}, nil
-		}
-	}
-
-	switch mode.kind {
-	case fakeSave500:
-		err := &PaymentError{Message: "An unknown error occurred", Unknown: true}
-		f.keys[key] = &fakeKey{sig: sig, err: err}
-		f.mu.Unlock()
-		return PaymentIntentResult{}, err
-	case fakeOutliveCtx:
-		f.mu.Unlock()
-		<-ctx.Done()
-		f.mu.Lock()
-		pi := f.newPI(p, mode.status)
-		f.pis = append(f.pis, pi)
-		f.keys[key] = &fakeKey{sig: sig, pi: pi}
-		f.mu.Unlock()
-		return PaymentIntentResult{}, fmt.Errorf("Post \"https://api.stripe.com/v1/payment_intents\": %w", ctx.Err())
-	case fakeHang:
-		f.mu.Unlock()
-		<-ctx.Done()
-		return PaymentIntentResult{}, fmt.Errorf("Post \"https://api.stripe.com/v1/payment_intents\": %w", ctx.Err())
-	}
-
-	pi := f.newPI(p, mode.status)
-	f.pis = append(f.pis, pi)
-	k := &fakeKey{sig: sig, pi: pi}
-	if mode.status == "requires_payment_method" {
-		k.err = declineError(pi)
-	}
-	f.keys[key] = k
-	f.mu.Unlock()
-	if mode.kind == fakeCrashAfterCreate {
-		panic(fakeCrash{})
-	}
-	if k.err != nil {
-		return PaymentIntentResult{}, k.err
-	}
-	return PaymentIntentResult{ID: pi.id, Status: pi.status}, nil
-}
-
 // prune forgets every idempotency key, as Stripe may once a key is 24 hours
 // old ("We generate a new request if a key is reused after the original is
 // pruned").
@@ -268,27 +193,16 @@ func (f *fakeStripe) setStatus(id, status string) {
 	}
 }
 
-// setCreated dates a PaymentIntent's creation at Stripe.
-func (f *fakeStripe) setCreated(id string, at time.Time) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, pi := range f.pis {
-		if pi.id == id {
-			pi.created = at.Unix()
-		}
-	}
-}
-
 func (f *fakeStripe) countPIs() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.pis)
 }
 
-func (f *fakeStripe) listCount() int {
+func (f *fakeStripe) readCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.lists
+	return f.reads
 }
 
 func (f *fakeStripe) pi(id string) fakePI {
@@ -297,6 +211,18 @@ func (f *fakeStripe) pi(id string) fakePI {
 	for _, pi := range f.pis {
 		if pi.id == id {
 			return *pi
+		}
+	}
+	return fakePI{}
+}
+
+// piFor is the newest PaymentIntent for invoiceID.
+func (f *fakeStripe) piFor(invoiceID string) fakePI {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.pis) - 1; i >= 0; i-- {
+		if f.pis[i].invoiceID == invoiceID {
+			return *f.pis[i]
 		}
 	}
 	return fakePI{}
@@ -339,73 +265,6 @@ func (f *fakeStripe) result(pi *fakePI) PaymentIntentResult {
 	return res
 }
 
-// ListPaymentIntentsForCustomer answers as LiveStripeClient does: every
-// PaymentIntent of the customer created at or after createdGTE, or an error
-// for the whole read.
-func (f *fakeStripe) ListPaymentIntentsForCustomer(ctx context.Context, stripeCustomerID string, createdGTE time.Time) ([]PaymentIntentResult, error) {
-	f.mu.Lock()
-	hook, hang := f.beforeList, f.hang
-	f.mu.Unlock()
-	if hook != nil {
-		hook()
-	}
-	if hang > 0 {
-		select {
-		case <-ctx.Done():
-		case <-time.After(hang):
-		}
-		f.mu.Lock()
-		f.lists++
-		f.mu.Unlock()
-		// What LiveStripeClient returns when its request is cut off: no
-		// answer from Stripe.
-		return nil, fakeUnreachableErr(`Get "https://api.stripe.com/v1/payment_intents": net/http: request canceled`)
-	}
-	out, err := f.listLocked(stripeCustomerID, createdGTE)
-	f.mu.Lock()
-	after := f.afterList
-	f.mu.Unlock()
-	if after != nil && err == nil {
-		after()
-	}
-	return out, err
-}
-
-func (f *fakeStripe) listLocked(stripeCustomerID string, createdGTE time.Time) ([]PaymentIntentResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.lists++
-	if f.notConfigured {
-		return nil, ErrStripeNotConfigured
-	}
-	switch f.customers[stripeCustomerID] {
-	case "missing":
-		return nil, fakeCustomerMissingErr(stripeCustomerID)
-	case "auth":
-		return nil, fakeAuthFailedErr()
-	case "fail":
-		// The first page came back and a later one failed: LiveStripeClient
-		// returns the error alone, never the partial list.
-		return nil, &PaymentError{Message: "An unknown error occurred", Unknown: true}
-	case "unreachable":
-		// Stripe never answered (a network error).
-		return nil, fakeUnreachableErr(`Get "https://api.stripe.com/v1/payment_intents": dial tcp: i/o timeout`)
-	case "panic":
-		// Not Stripe: a check that panics on one unusual row.
-		panic("stale charge check: nil dereference on " + stripeCustomerID)
-	}
-	var out []PaymentIntentResult
-	for _, pi := range f.pis {
-		if pi.customer != stripeCustomerID || pi.created < createdGTE.Unix() {
-			continue
-		}
-		out = append(out, f.result(pi))
-	}
-	// Newest first, as Stripe lists.
-	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
-	return out, nil
-}
-
 func (f *fakeStripe) CancelPaymentIntent(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -422,16 +281,63 @@ func (f *fakeStripe) CancelPaymentIntent(_ context.Context, id string) error {
 	return errors.New("stripe cancel: No such payment_intent: " + id)
 }
 
-func (f *fakeStripe) GetPaymentIntent(_ context.Context, id string) (PaymentIntentResult, error) {
+// GetPaymentIntent answers as LiveStripeClient does: the PaymentIntent, or an
+// error as LiveStripeClient returns it.
+func (f *fakeStripe) GetPaymentIntent(ctx context.Context, id string) (PaymentIntentResult, error) {
+	f.mu.Lock()
+	hook, hang := f.beforeRead, f.hang
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	if hang > 0 {
+		select {
+		case <-ctx.Done():
+		case <-time.After(hang):
+		}
+		f.mu.Lock()
+		f.reads++
+		f.mu.Unlock()
+		// What LiveStripeClient returns when its request is cut off: no
+		// answer from Stripe.
+		return PaymentIntentResult{}, fakeUnreachableErr(`Get "https://api.stripe.com/v1/payment_intents/` + id + `": net/http: request canceled`)
+	}
+	res, err := f.readLocked(id)
+	f.mu.Lock()
+	after := f.afterRead
+	f.mu.Unlock()
+	if after != nil && err == nil {
+		after()
+	}
+	return res, err
+}
+
+func (f *fakeStripe) readLocked(id string) (PaymentIntentResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.reads++
 	if f.panicOn[id] {
 		panic("reconcile: nil dereference on " + id)
 	}
-	for _, pi := range f.pis {
-		if pi.id == id {
-			return f.result(pi), nil
-		}
+	if f.notConfigured {
+		return PaymentIntentResult{}, ErrStripeNotConfigured
 	}
+	for _, pi := range f.pis {
+		if pi.id != id {
+			continue
+		}
+		switch f.customers[pi.customer] {
+		case "auth":
+			return PaymentIntentResult{}, fakeAuthFailedErr()
+		case "fail":
+			return PaymentIntentResult{}, &PaymentError{Message: "An unknown error occurred", Unknown: true}
+		case "unreachable":
+			return PaymentIntentResult{}, fakeUnreachableErr(`Get "https://api.stripe.com/v1/payment_intents/` + id + `": dial tcp: i/o timeout`)
+		case "panic":
+			panic("stale charge check: nil dereference on " + pi.customer)
+		}
+		return f.result(pi), nil
+	}
+	// LiveStripeClient's read of a PaymentIntent this account does not have.
 	return PaymentIntentResult{}, &PaymentError{Message: "No such payment_intent: '" + id + "'"}
 }

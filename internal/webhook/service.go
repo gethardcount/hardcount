@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -55,7 +56,8 @@ const maxRetries = 5
 //     is the 10s HTTP timeout plus three per-row DB round-trips
 //     (~13s budgeted), times the batch, plus margin. Derived from the
 //     batch size, never hand-tuned — an undersized lease re-claims rows
-//     under a live worker and double-POSTs.
+//     under a live worker and double-POSTs. A row's mark runs after its
+//     budget, on its own deliveryMarkTimeout, and the margin covers it.
 //
 // A marked outcome always overwrites next_retry_at, so neither lease
 // ever delays a legitimately-scheduled retry; they only bound crash
@@ -63,6 +65,11 @@ const maxRetries = 5
 const (
 	birthLeaseWindow  = 120 * time.Second
 	perRetryRowBudget = 13 * time.Second
+
+	// deliveryMarkTimeout bounds one delivery mark. A mark runs on a context
+	// detached from its attempt (see markDelivery), so it needs a limit of
+	// its own.
+	deliveryMarkTimeout = 5 * time.Second
 
 	// retryConcurrency bounds how many claimed deliveries are attempted at
 	// once. Four keeps a background worker to a small share of the shared DB
@@ -87,6 +94,55 @@ var retryBackoffs = [maxRetries]time.Duration{
 	2 * time.Hour,
 	24 * time.Hour,
 }
+
+// deliveryGiveUpMargin is how long after the end of the retry ladder a
+// delivery may still be pending before the retry worker gives it up (see
+// deliveryGiveUpAfter).
+//
+// The margin keeps the bound off a delivery that is still on its ladder.
+// Such a delivery makes its last attempt one ladder after its first, plus
+// what each attempt adds: up to 30 seconds of jitter, the wait for a tick
+// and a claim slot, and any time the worker was not running. In normal
+// running that is minutes. A day also covers a worker that was stopped or
+// backlogged for a day. A wide margin costs little: a row that never records
+// an outcome takes one claim slot each claim lease until the bound.
+const deliveryGiveUpMargin = 24 * time.Hour
+
+// deliveryGiveUpAfter returns the age at which the retry worker gives up a
+// delivery that is still pending: the whole retry ladder plus
+// deliveryGiveUpMargin. A delivery older than that is marked failed at its
+// next claim, without a POST (see giveUpDelivery).
+//
+// Only a mark moves attempt_count. A delivery that never reaches a mark
+// would be claimed again at the end of every lease, for good: its endpoint
+// or event read keeps failing, or its mark does. The age bounds that with
+// state the row already has, and attempt_count keeps its meaning on the API,
+// the attempts made.
+//
+// The ladder's length is summed from retryBackoffs, so a change to the
+// schedule moves the bound with it. The doctor check
+// webhook_delivery_pending_past_give_up states the same age in SQL, and
+// TestDoctorCheck_StatesTheDeliveryGiveUpAge fails when the two differ.
+func deliveryGiveUpAfter() time.Duration {
+	total := deliveryGiveUpMargin
+	for _, wait := range retryBackoffs {
+		total += wait
+	}
+	return total
+}
+
+// Error texts the worker stores on a delivery, which the API and the
+// dashboard show as the delivery's error.
+const (
+	// deliveryPanicMessage is stored for an attempt that panicked. The panic
+	// value and its stack go to the log, not to the row.
+	deliveryPanicMessage = "internal error during the delivery attempt"
+	// deliveryGaveUpMessage is stored when the worker gives a delivery up at
+	// deliveryGiveUpAfter. "No final outcome" is true for both rows that
+	// reach the bound: one that never recorded an attempt, and one that
+	// recorded failures and was then delayed past its last retry.
+	deliveryGaveUpMessage = "gave up: still pending past the whole retry schedule, with no final outcome recorded"
+)
 
 type Service struct {
 	store       Store
@@ -140,12 +196,48 @@ func NewService(store Store, client HTTPClient, appEnv string) *Service {
 // The transport keeps the default proxy setting. With HTTPS_PROXY set the
 // socket goes to the proxy, so the address checked is the proxy's and the
 // webhook target is resolved by the proxy, outside this guard.
+//
+// Both dial hooks defer recoverDialHook, because neither runs on the
+// goroutine that sends the delivery.
 func ssrfHardenedTransport(allowLoopback bool) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+	t.DialContext = func(ctx context.Context, network, addr string) (_ net.Conn, err error) {
+		defer recoverDialHook(ctx, addr, &err)
 		return ssrfSafeDialContext(ctx, network, addr, allowLoopback)
 	}
 	return t
+}
+
+// errDialHookPanicked is the error a dial hook returns in place of a panic
+// (see recoverDialHook). It says no more than deliveryPanicMessage, because
+// a delivery's error is shown to the tenant.
+var errDialHookPanicked = errors.New(deliveryPanicMessage)
+
+// recoverDialHook is deferred by the delivery client's two dial hooks, with
+// err pointing at the hook's error result. It turns a panic in the hook into
+// errDialHookPanicked. The POST then fails, and attemptDelivery counts it as
+// one failed attempt.
+//
+// guardAttempt cannot recover these panics. net/http calls the transport's
+// DialContext on a goroutine of its own. net.Dialer calls Control on a
+// further one when the host has both IPv4 and IPv6 addresses. A panic on
+// either would end the process.
+//
+// The hook logs the panic and also returns an error. The stack exists only
+// here, and the dialer drops one address's error when another address
+// connects. An error from a hook also refuses the connection, so a hook that
+// panicked lets no address through.
+func recoverDialHook(ctx context.Context, address string, err *error) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	slog.ErrorContext(ctx, "webhook delivery attempt panicked in a dial hook; the connection is refused",
+		"address", address,
+		"panic", r,
+		"stack", string(debug.Stack()),
+	)
+	*err = errDialHookPanicked
 }
 
 // ssrfSafeDialContext is the dial function wired into the delivery client.
@@ -173,7 +265,9 @@ func ssrfSafeDialContext(ctx context.Context, network, addr string, allowLoopbac
 // that does not parse is refused. allowLoopback is the same development
 // exception assertDialAddrAllowed applies.
 func dialControl(allowLoopback bool) func(network, address string, _ syscall.RawConn) error {
-	return func(_, address string, _ syscall.RawConn) error {
+	return func(_, address string, _ syscall.RawConn) (err error) {
+		// Control is given no context.
+		defer recoverDialHook(context.Background(), address, &err)
 		ap, err := netip.ParseAddrPort(address)
 		if err != nil {
 			return fmt.Errorf("refusing to dial unparseable address %q: %w", address, err)
@@ -601,7 +695,9 @@ func (s *Service) dispatchFromOutbox(ctx context.Context, outboxRowID, tenantID,
 // spawnAttempts fires the first-attempt goroutines for freshly created
 // (born-leased) delivery rows. Goroutines run on a fresh ctx pinned to
 // the event's livemode (the producing request may return first); the
-// sync path (tests) re-pins the caller ctx for the same reason.
+// sync path (tests) re-pins the caller ctx for the same reason. Nothing
+// waits for a goroutine: after a crash the retry worker takes the row when
+// its birth lease ends.
 func (s *Service) spawnAttempts(ctx context.Context, event domain.WebhookEvent, matched []domain.WebhookEndpoint, deliveries []domain.WebhookDelivery) {
 	for i := range matched {
 		ep, d := matched[i], deliveries[i]
@@ -610,8 +706,75 @@ func (s *Service) spawnAttempts(ctx context.Context, event domain.WebhookEvent, 
 			continue
 		}
 		dCtx := postgres.WithLivemode(context.Background(), event.Livemode)
-		go s.attemptDelivery(dCtx, d, ep, event)
+		go s.guardAttempt(dCtx, d, func() { s.attemptDelivery(dCtx, d, ep, event) })
 	}
+}
+
+// guardAttempt runs attempt, the work on one delivery, and turns a panic in
+// it into one failed attempt. Both goroutines that send deliveries run under
+// it: an event's first attempt, and each row of the retry worker. No caller
+// can recover for them, so a panic there would end the process, and with it
+// the API and every background job on this replica. The client's dial hooks
+// run on goroutines that net/http and net start, outside this guard, and
+// recover for themselves (see recoverDialHook).
+//
+// The panic is counted through scheduleRetryOrFail, like any failed attempt,
+// so the delivery waits out the ladder and ends failed after the last one.
+// Left uncounted, the row would be claimed at the end of its lease and panic
+// again, every lease.
+//
+// ctx is the attempt's own context, in the row's mode: the mark needs the
+// mode. d is the row as it was claimed. An attempt that marked the row and
+// then panicked is not counted twice: the count check in the mark drops the
+// second mark.
+func (s *Service) guardAttempt(ctx context.Context, d domain.WebhookDelivery, attempt func()) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		// The stack is taken here, while the panicking frames are still on it.
+		slog.ErrorContext(ctx, "webhook delivery attempt panicked; counting a failed attempt",
+			"delivery_id", d.ID,
+			"endpoint_id", d.WebhookEndpointID,
+			"tenant_id", d.TenantID,
+			"panic", r,
+			"stack", string(debug.Stack()),
+		)
+		// Counting the attempt can panic too, when the panic came from the
+		// mark itself. The row then keeps its count and its lease. If the
+		// mark panics every time, the row stays pending, and the doctor
+		// check webhook_delivery_pending_past_give_up reports it.
+		defer func() {
+			if again := recover(); again != nil {
+				slog.ErrorContext(ctx, "webhook delivery: counting the panicked attempt panicked too; the row keeps its lease",
+					"delivery_id", d.ID,
+					"tenant_id", d.TenantID,
+					"panic", again,
+					"stack", string(debug.Stack()),
+				)
+			}
+		}()
+		s.scheduleRetryOrFail(ctx, d.TenantID, d, deliveryPanicMessage)
+	}()
+	attempt()
+}
+
+// markDelivery writes one delivery's outcome. Every delivery mark goes
+// through it. expectedAttempts is the attempt_count the caller read (see
+// Store.UpdateDelivery).
+//
+// The mark runs on a context detached from ctx, under deliveryMarkTimeout.
+// A retry's ctx ends with its tick: at shutdown, when the leader lease is
+// lost, or when the row's budget runs out. The work is done by then, and a
+// 2xx left unrecorded is sent again at the end of the lease. The detached
+// context keeps ctx's values, so the mark still runs in the row's mode.
+// (See ADR-072, decision 3.)
+func (s *Service) markDelivery(ctx context.Context, d domain.WebhookDelivery, expectedAttempts int) error {
+	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryMarkTimeout)
+	defer cancel()
+	_, err := s.store.UpdateDelivery(markCtx, d.TenantID, d, expectedAttempts)
+	return err
 }
 
 // scheduleRetryOrFail increments the attempt count and either schedules a retry
@@ -659,9 +822,43 @@ func (s *Service) scheduleRetryOrFail(ctx context.Context, tenantID string, d do
 	}
 
 	// expected = the count this attempt READ; the ++ above is ours to prove.
-	if _, err := s.store.UpdateDelivery(ctx, tenantID, d, d.AttemptCount-1); err != nil {
+	if err := s.markDelivery(ctx, d, d.AttemptCount-1); err != nil {
 		slog.Warn("webhook: retry/fail mark not applied", "delivery_id", d.ID, "error", err)
 	}
+}
+
+// giveUpDelivery marks failed a delivery that is still pending past
+// deliveryGiveUpAfter, without sending it. attempt_count is left as it is:
+// it counts the attempts made, and giving up is not one. The stored error
+// keeps the last attempt's error, when there was one.
+//
+// The metric, the dashboard frame and the log line follow the mark, so a
+// mark that another worker beat counts nothing.
+func (s *Service) giveUpDelivery(ctx context.Context, d domain.WebhookDelivery, age time.Duration) {
+	now := time.Now().UTC()
+	lastError := d.ErrorMessage
+	d.Status = domain.DeliveryFailed
+	d.ErrorMessage = deliveryGaveUpMessage
+	if lastError != "" {
+		d.ErrorMessage = errs.Clip(deliveryGaveUpMessage+" (last error: "+lastError+")", 500)
+	}
+	d.CompletedAt = &now
+	d.NextRetryAt = nil
+	if err := s.markDelivery(ctx, d, d.AttemptCount); err != nil {
+		slog.WarnContext(ctx, "webhook: give-up mark not applied", "delivery_id", d.ID, "error", err)
+		return
+	}
+	mw.RecordWebhookDelivery("failed")
+	s.publishFrameForEventID(ctx, d.TenantID, d.WebhookEventID, "failed", &now)
+	slog.ErrorContext(ctx, "webhook delivery given up: still pending past the whole retry schedule, with no final outcome recorded",
+		"delivery_id", d.ID,
+		"endpoint_id", d.WebhookEndpointID,
+		"tenant_id", d.TenantID,
+		"attempts", d.AttemptCount,
+		"age", age.Round(time.Minute).String(),
+		"give_up_after", deliveryGiveUpAfter().String(),
+		"last_error", lastError,
+	)
 }
 
 func matchesEvent(subscribed []string, eventType string) bool {
@@ -981,7 +1178,18 @@ func (s *Service) RetryPendingDeliveries(ctx context.Context) error {
 		go func(d domain.WebhookDelivery) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			s.retryOne(ctx, d)
+			// ListPendingDeliveries runs in TxBypass (cross-tenant), so we tag
+			// the per-delivery ctx with the row's livemode. Every downstream
+			// store call opens its own TxTenant and needs this to route the
+			// delivery back to the same mode partition. The per-row budget is
+			// ENFORCED, not estimated (verifier catch): the retryClaimLease
+			// arithmetic assumes ≤perRetryRowBudget per row, and the DB reads
+			// in retryOne were otherwise unbounded — a degraded DB would break
+			// the lease math and double-POST under a live worker.
+			rowCtx, rowCancel := context.WithTimeout(ctx, perRetryRowBudget)
+			defer rowCancel()
+			dCtx := postgres.WithLivemode(rowCtx, d.Livemode)
+			s.guardAttempt(dCtx, d, func() { s.retryOne(dCtx, d) })
 		}(d)
 	}
 	wg.Wait()
@@ -990,20 +1198,21 @@ func (s *Service) RetryPendingDeliveries(ctx context.Context) error {
 
 // retryOne runs one claimed delivery: resolve its endpoint and event, then
 // attempt it. Every early return either resolves the row or deliberately
-// leaves it for a later tick (see each branch). Bounded by perRetryRowBudget,
-// so no single endpoint can hold a concurrency slot longer than the lease
-// arithmetic assumes.
-func (s *Service) retryOne(ctx context.Context, d domain.WebhookDelivery) {
-	// ListPendingDeliveries runs in TxBypass (cross-tenant), so we tag
-	// the per-delivery ctx with the row's livemode. Every downstream
-	// store call opens its own TxTenant and needs this to route the
-	// delivery back to the same mode partition. The per-row budget is
-	// ENFORCED, not estimated (verifier catch): the retryClaimLease
-	// arithmetic assumes ≤perRetryRowBudget per row, and the DB reads
-	// here were otherwise unbounded — a degraded DB would break the
-	// lease math and double-POST under a live worker.
-	rowCtx, rowCancel := context.WithTimeout(ctx, perRetryRowBudget)
-	dCtx := postgres.WithLivemode(rowCtx, d.Livemode)
+// leaves it for a later tick (see each branch). A row left for a later tick
+// counts no attempt, and deliveryGiveUpAfter is what ends its claims.
+//
+// dCtx is the row's own context: the row's mode, under perRetryRowBudget.
+// The budget keeps one endpoint from holding a concurrency slot longer than
+// the lease arithmetic assumes.
+func (s *Service) retryOne(dCtx context.Context, d domain.WebhookDelivery) {
+	// Give up a delivery that is still pending past the whole ladder and its
+	// margin. The check comes before the reads below, because a read that
+	// keeps failing is one way a row gets this old. Both sides of the compare
+	// are this process's clock: created_at is written from it.
+	if age := time.Since(d.CreatedAt); age > deliveryGiveUpAfter() {
+		s.giveUpDelivery(dCtx, d, age)
+		return
+	}
 
 	ep, err := s.store.GetEndpoint(dCtx, d.TenantID, d.WebhookEndpointID)
 	if err != nil {
@@ -1020,15 +1229,13 @@ func (s *Service) retryOne(ctx context.Context, d domain.WebhookDelivery) {
 			d.ErrorMessage = "endpoint deleted"
 			d.CompletedAt = &now
 			d.NextRetryAt = nil
-			if _, err := s.store.UpdateDelivery(dCtx, d.TenantID, d, d.AttemptCount); err != nil {
+			if err := s.markDelivery(dCtx, d, d.AttemptCount); err != nil {
 				slog.Warn("webhook: endpoint-deleted mark not applied", "delivery_id", d.ID, "error", err)
 			}
 			slog.Error("endpoint not found for retry — delivery resolved failed", "delivery_id", d.ID, "endpoint_id", d.WebhookEndpointID)
-			rowCancel()
 			return
 		}
 		slog.Error("get endpoint for retry", "delivery_id", d.ID, "error", err)
-		rowCancel()
 		return
 	}
 	if !ep.Active {
@@ -1038,10 +1245,9 @@ func (s *Service) retryOne(ctx context.Context, d domain.WebhookDelivery) {
 		d.ErrorMessage = "endpoint disabled"
 		d.CompletedAt = &now
 		d.NextRetryAt = nil
-		if _, err := s.store.UpdateDelivery(dCtx, d.TenantID, d, d.AttemptCount); err != nil {
+		if err := s.markDelivery(dCtx, d, d.AttemptCount); err != nil {
 			slog.Warn("webhook: endpoint-disabled mark not applied", "delivery_id", d.ID, "error", err)
 		}
-		rowCancel()
 		return
 	}
 
@@ -1058,20 +1264,17 @@ func (s *Service) retryOne(ctx context.Context, d domain.WebhookDelivery) {
 			d.ErrorMessage = "event not found"
 			d.CompletedAt = &now
 			d.NextRetryAt = nil
-			if _, err := s.store.UpdateDelivery(dCtx, d.TenantID, d, d.AttemptCount); err != nil {
+			if err := s.markDelivery(dCtx, d, d.AttemptCount); err != nil {
 				slog.Warn("webhook: event-missing mark not applied", "delivery_id", d.ID, "error", err)
 			}
 			slog.Error("event not found for retry", "delivery_id", d.ID, "event_id", d.WebhookEventID)
-			rowCancel()
 			return
 		}
 		slog.Error("get event for retry", "delivery_id", d.ID, "event_id", d.WebhookEventID, "error", err)
-		rowCancel()
 		return
 	}
 
 	s.attemptDelivery(dCtx, d, ep, event)
-	rowCancel()
 }
 
 // maxStoredResponseBytes is how much of a receiver's answer a delivery keeps
@@ -1115,7 +1318,24 @@ func (s *Service) attemptDelivery(ctx context.Context, d domain.WebhookDelivery,
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		s.scheduleRetryOrFail(ctx, d.TenantID, d, err.Error())
+		if errors.Is(ctx.Err(), context.Canceled) {
+			// The retry tick ended under the POST: a shutdown, or a lost
+			// leader lease. That is not the receiver's failure, so no
+			// attempt is counted. The row keeps its claim lease, and a retry
+			// pass after the lease sends the event again. A row budget that
+			// ran out is a deadline, not a cancel, and is counted below.
+			slog.WarnContext(ctx, "webhook delivery attempt cut short by the end of its tick; not counted",
+				"delivery_id", d.ID, "endpoint_id", ep.ID, "error", err)
+			return
+		}
+		errMsg := err.Error()
+		if errors.Is(err, errDialHookPanicked) {
+			// A dial hook panicked and logged it (see recoverDialHook). Store
+			// the text of a panicked attempt alone, as guardAttempt does:
+			// err wraps it in the URL and the address.
+			errMsg = deliveryPanicMessage
+		}
+		s.scheduleRetryOrFail(ctx, d.TenantID, d, errMsg)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -1137,7 +1357,7 @@ func (s *Service) attemptDelivery(ctx context.Context, d domain.WebhookDelivery,
 		d.CompletedAt = &now
 		d.NextRetryAt = nil
 		// expected = the count this attempt READ; the ++ above is ours to prove.
-		if _, err := s.store.UpdateDelivery(ctx, d.TenantID, d, d.AttemptCount-1); err != nil {
+		if err := s.markDelivery(ctx, d, d.AttemptCount-1); err != nil {
 			// A stale mark (lease expired, a sibling already resolved the
 			// row) is dropped by the CAS — logged, never applied. Any
 			// other error is a real mark loss: the POST landed but the

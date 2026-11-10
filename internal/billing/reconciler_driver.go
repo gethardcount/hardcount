@@ -46,10 +46,10 @@ import (
 // branch carries a 24h freshness window (anti-churn, #310); cn_tax_reversal
 // has none, an owed reversal stays listed until it is made. payment_unknown's state sync
 // covers a charge whose result was lost too, by a CO-TRANSACTIONAL marker: the
-// charge hold (auto_charge_claimed_until) is written by the claim, in its own
-// commit, before the Stripe call, and outlives a crash or a dead context. The
-// stale-hold sweep asks Stripe about every hold that ended without a saved
-// result (ADR-127); before it, this comment pointed at the auto-charge retry's
+// charge puts its PaymentIntent on the invoice as an unknown outcome, in its
+// own commit, before the confirm that moves money (ADR-137), and that outlives
+// a crash or a dead context. The unknown sweep reads every such PaymentIntent
+// by id; before it, this comment pointed at the auto-charge retry's
 // idempotency key, which another charge kind, a changed card or a pruned key
 // went around (#976).
 //

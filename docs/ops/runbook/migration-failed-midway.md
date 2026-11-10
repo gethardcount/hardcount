@@ -235,6 +235,30 @@ DELETE FROM api_keys WHERE key_type = 'platform';
 COMMIT;
 ```
 
+## 00225 found charges in progress
+
+**Symptom:**
+
+```
+migration 00225_charge_hold_token.sql failed: ERROR: Hardcount upgrade stopped: 1 open or written-off invoice(s) have a charge in progress or a parked charge from the previous version. ...
+```
+
+**Why:** from this release a charge puts its Stripe payment on the invoice
+before any money moves
+([ADR-137](../../adr/137-charge-stamps-invoice-before-confirming.md)). The
+previous version did not, so the new one cannot settle a charge that the
+previous version left in progress. The migration counted such invoices and
+changed nothing.
+
+**Fix:**
+
+- **During an upgrade:** run the previous version until it has finished
+  them, then upgrade again
+  ([Migration 00225: finish charges first](../../upgrades.md#migration-00225-finish-charges-first)).
+- **On a database restored from a backup:** do not start the previous
+  version. Follow
+  [A backup with a charge in progress](../restore.md#a-backup-with-a-charge-in-progress).
+
 ## It waited 5s for a table lock
 
 First stop the API: see [Before anything else](#before-anything-else).

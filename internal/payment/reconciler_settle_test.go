@@ -48,7 +48,7 @@ func TestReconciler_RecoveredFailureRoutesThroughSettler(t *testing.T) {
 		StripePaymentIntentID: "pi_1",
 	})
 	client := &mockStripeClient{piStates: map[string]PaymentIntentResult{
-		"pi_1": {ID: "pi_1", Status: "canceled"},
+		"pi_1": {ID: "pi_1", Status: "canceled", Charged: true},
 	}}
 	rec := &recordingSettler{}
 	r := NewReconciler(client, store, time.Second)
@@ -158,7 +158,7 @@ func TestReconciler_RaceGuardSkipsWebhookWinner(t *testing.T) {
 			PaymentStatus: domain.PaymentSucceeded, PaidAt: &paidAt, StripePaymentIntentID: "pi_1"},
 	}
 	client := &mockStripeClient{piStates: map[string]PaymentIntentResult{
-		"pi_1": {ID: "pi_1", Status: "canceled"}, // Stripe says failed, but the webhook already settled it paid
+		"pi_1": {ID: "pi_1", Status: "canceled", Charged: true}, // Stripe says failed, but the webhook already settled it paid
 	}}
 	rec := &recordingSettler{}
 	r := NewReconciler(client, store, time.Second)

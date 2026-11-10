@@ -179,6 +179,21 @@ failed.
 Hardcount does not follow redirects, so a `3xx` answer is retried like any
 other failure: register the URL that answers with the `2xx` itself.
 
+Two failures are Hardcount's own, not your endpoint's. The delivery's
+`error` says which:
+
+- `internal error during the delivery attempt`: Hardcount failed while it
+  was sending. This counts as one failed attempt, and the delivery is
+  retried on the schedule above.
+- `gave up: still pending past the whole retry schedule, with no final
+  outcome recorded`, followed by the last attempt's error when there was
+  one: the delivery was still waiting 50 hours 36 minutes after it was
+  created. That is the whole schedule plus a day. Hardcount marks it failed
+  without another attempt. It happens when the server was stopped or far
+  behind for more than a day, or could not read or save the delivery.
+
+A delivery that ends failed for either reason can be sent again, as below.
+
 ### Send a delivery again
 
 Failed deliveries stay visible in the dashboard, with each endpoint's

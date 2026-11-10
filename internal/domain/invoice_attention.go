@@ -1281,25 +1281,23 @@ func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 	// "Check provider" button was non-functional (no endpoint); an on-demand
 	// re-check is deferred until real stuck-payment pressure (ADR-049), so the
 	// dead button is removed rather than shipped greyed-out.
-	// PARKED (ADR-107): Stripe's answer was unclear and named no payment, so
-	// there is no PaymentIntent for the reconciler to re-query. Since REC-5
-	// (ADR-127 amendment 2026-10-20) the stale-hold sweep finishes it from
-	// Stripe's list of the customer's payments: a payment that appears is
-	// recorded, and with none 24 hours after the attempt the invoice goes back
-	// to being charged as usual. So the banner says that, as a Warning, in the
-	// words approved on 2026-10-19. Write-off stays as a secondary action for
-	// a customer who paid another way; the dashboard renders it as a secondary
-	// button, because waiting is the usual next step.
+	// PARKED (ADR-107): Stripe's answer was unclear and named no payment. Only
+	// an earlier version parked an invoice, and the upgrade to ADR-137 refuses
+	// to run while any exists, so a park here got past that check. This
+	// version saved no payment to look up and does not resolve it on its own,
+	// so the banner is Critical and sends the operator to Stripe. (The copy
+	// approved on 2026-10-19 promised a re-charge after 24 hours, which this
+	// version never makes.)
 	if inv.Parked() {
 		return &Attention{
-			Severity: AttentionSeverityWarning,
+			Severity: AttentionSeverityCritical,
 			Reason:   AttentionReasonPaymentUnconfirmed,
 			Code:     "payment.unidentifiable",
-			Message: "Stripe didn't confirm this charge and may still complete it.\n" +
-				"Hardcount checks Stripe every hour and records the payment if it appears.\n" +
-				"If none appears within 24 hours, the invoice is charged again as usual.",
-			Detail: "No new charge is made before then. " +
-				"If the customer paid another way, mark the invoice uncollectible so it is not charged again. " +
+			Message: "An earlier Hardcount version couldn't confirm this charge with Stripe, and Hardcount can't look it up.\n" +
+				"Check the customer's payments in Stripe.",
+			Detail: "No new charge is made while it is unresolved. " +
+				"If Stripe shows the payment, the unclear-charge runbook says how to record it. " +
+				"If the customer paid another way, mark the invoice uncollectible. " +
 				"To find the attempt in Stripe, search by customer and amount.",
 			DocURL: docURL("payment-unconfirmed"),
 			Since:  &since,

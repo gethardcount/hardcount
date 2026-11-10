@@ -49,7 +49,7 @@ alerting tier: what should page someone, and what is only informational.
 | `hardcount_billing_oldest_due_age_seconds{mode}` | > 2× billing interval | A subscription has been due that long, and it is not counted in `hardcount_billing_failing_subscriptions`. See [A subscription is due but not billed](background-job-stuck.md#a-subscription-is-due-but-not-billed) |
 | `hardcount_billing_failing_subscriptions{state="parked",mode="live"}` | > 0 | A subscription has not been invoiced and nothing will retry it. Eight billing attempts failed. See [Billing failing](billing-failing.md) |
 | `hardcount_dunning_runs_processed_total{outcome="failed"}` | rate > 0.5/s | Dunning (the automatic retries of failed payments) is struggling |
-| `hardcount_webhook_deliveries_total{status="failed"}` | sustained failure | Customer's webhook endpoint down, redirecting, or signature wrong. See [A webhook endpoint keeps failing](webhook-endpoint-failing.md) |
+| `hardcount_webhook_deliveries_total{status="failed"}` | sustained failure | Customer's webhook endpoint down, redirecting, or signature wrong. Or Hardcount gave up a delivery it could not finish. See [A webhook endpoint keeps failing](webhook-endpoint-failing.md) |
 | `hardcount_stripe_breaker_state` | == 2 (open; 0=closed, 1=half_open) | Stripe API circuit breaker tripped |
 | `hardcount_email_outbox_pending` | > 1000 | Email dispatcher stuck or SMTP provider issue (−1 = the metric query itself failed) |
 | `hardcount_webhook_outbox_pending` | > 1000 | Webhook dispatcher stuck (−1 = metric query failed) |
@@ -58,9 +58,11 @@ alerting tier: what should page someone, and what is only informational.
 | `min_over_time(hardcount_creditnote_pending_tax_reversals[24h])` | > 0 | The count of issued credit notes whose tax reversal at the provider is still owed has not been zero for a day. The gauge is a count, not an age. See the note below the table |
 | `min_over_time(hardcount_invoice_pending_tax_reversals[24h])` | > 0 | The count of voided invoices taxed by Stripe Tax (`stripe_tax`) whose committed tax transaction has no confirmed reversal has not been zero for a day. See the note below the table |
 | `hardcount_creditnote_pending_issue_drafts` | sustained growth over days | Clawback drafts are not issuing. A clawback is a credit note Hardcount issues when a paid, in-advance period is cut short. Alert on growth or age, not presence. See [Clawback drafts waiting](unclear-charge.md#clawback-drafts-waiting) |
-| `hardcount_parked_invoices{disposition="open"}` | > 0 | A parked invoice that Hardcount has not finished on schedule. A parked invoice is one whose charge got an unclear answer from Stripe that named no payment. The gauge leaves out a parked invoice until 26 hours past its charge hold (the 5-minute claim a charge puts on the invoice), because Hardcount normally finishes one by about 25 hours. See [Parked invoices](unclear-charge.md#parked-no-paymentintent) |
+| `hardcount_parked_invoices{disposition="open"}` | > 0 | An invoice that an earlier version parked got past the upgrade check. A parked invoice is one whose charge got an unclear answer from Stripe that named no payment. This version parks no invoice, and the upgrade refuses to run over one, so the gauge stays 0 unless a copy of an earlier version kept running against the upgraded database. A later release removes it. See [Left by an earlier version](unclear-charge.md#left-by-an-earlier-version) |
+| `hardcount_stale_charge_hold_resolutions_total{result="earlier"}` | increase > 0 | A charge hold (the 5-minute claim a charge puts on an invoice) or a parked charge that an earlier version left got past the upgrade check. Hardcount keeps it and charges nothing on that invoice until a person settles it. See [Left by an earlier version](unclear-charge.md#left-by-an-earlier-version) |
 | `hardcount_stripe_key_unusable_total{reason}` | increase > 0 | Charges are paused (not failed) until the key is fixed in Settings → Payments. `rejected`: Stripe refused the account's key (rolled, or a restricted key without a permission; adding the permission in Stripe also fixes it, and the next charge that goes through clears the Settings notice). `not_configured`: no key for that mode. The ERROR line "Stripe refused this tenant's API key" names the account and mode. Each tick tries again |
-| `hardcount_stale_charge_hold_resolutions_total{result="cannot_ask"}` | increase > 0 | A lost result (a charge Hardcount sent but whose answer it never saved) that Hardcount cannot confirm with Stripe (disconnected, key rejected, customer gone). The invoice cannot be charged until it is fixed or written off. See [Lost results Hardcount cannot ask Stripe about](unclear-charge.md#interrupted-hardcount-cannot-ask-stripe) |
+| `hardcount_stale_charge_hold_resolutions_total{result="failed"}` | increase on several billing ticks in a row | Hardcount could not clear a charge hold that a stopped charge left: the database write failed, or the check panicked. The invoice cannot be charged until the hold clears. See [A charge hold that does not clear](unclear-charge.md#a-charge-hold-that-does-not-clear) |
+| `hardcount_reconciler_sweeps_total{reconciler="payment_unknown",outcome="error"}` | increase on every billing tick | A check of the payment reconciler fails for the same invoice on each tick. One cause is an `unknown` payment that Hardcount cannot read at Stripe (disconnected, key rejected, or the payment not in the connected Stripe account). That invoice is not charged until Stripe can be read or the invoice is written off. The `reconciler error` log line names it. See [Unconfirmed, with a PaymentIntent](unclear-charge.md#unconfirmed-with-a-paymentintent) |
 | `hardcount_http_requests_total{method="POST",path="/v1/integrations/litellm/spend",status="503"}` | any increase | LiteLLM spend batches were refused for retry (usage store unreachable). See [LiteLLM spend gap](litellm-spend-gap.md) |
 | `hardcount_litellm_skipped_with_tokens_total{call_type}` | any increase | LiteLLM sent a call Hardcount does not bill (images, audio, batch results, ...) that carries tokens. The WARN "skipped a record that carries tokens" names the call type. Expected for `gpt-image-*` traffic; a new call type means LiteLLM sends usage Hardcount does not bill. See [Which LiteLLM calls bill](../../integrations/litellm.md#which-litellm-calls-bill) |
 | `hardcount_litellm_cache_write_unsplit_total{reason}` | any increase | Claude cache writes billed as `input`, below the provider's cache-write price. `no_split` is expected for streamed calls; `no_count` means a `/v1/responses` call whose record has no cache-write count. See [LiteLLM: what lands in Hardcount](../../integrations/litellm.md#4-what-lands-in-hardcount) |
@@ -90,7 +92,10 @@ Notes on three rows:
 - **Pending tax reversals (invoices).** The invoice tax-reversal sweep
   tries each one again. The oldest:
   `SET app.bypass_rls = 'on'; SELECT tenant_id, id, voided_at FROM invoices WHERE status = 'voided' AND tax_provider = 'stripe_tax' AND COALESCE(tax_transaction_id, '') <> '' AND tax_reversed_at IS NULL ORDER BY voided_at LIMIT 5;`.
-  As for credit notes: one more than a day old is SEV-2.
+  As for credit notes: one more than a day old is SEV-2. A common cause
+  after a switch away from Stripe Tax: Stripe was disconnected while
+  invoices it taxed were still open. Their reversals go to Stripe and fail
+  until it is connected again.
 
 ### Info (dashboards, no alert)
 
@@ -127,6 +132,11 @@ grep "auto-charge retry error" log
 # Webhook deliveries that gave up, and ones that will retry
 grep "webhook delivery permanently failed" log
 grep "webhook delivery scheduled for retry" log
+
+# Webhook deliveries that failed inside Hardcount: an attempt that panicked
+# (with its stack), and one given up while still pending after 50h36m
+grep "webhook delivery attempt panicked" log
+grep "webhook delivery given up" log
 
 # Tax provider failures (the invoice waits for its tax retry)
 grep "stripe tax failed, deferring invoice for retry" log

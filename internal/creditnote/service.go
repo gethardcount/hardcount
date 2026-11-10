@@ -175,10 +175,10 @@ type CreditGranter interface {
 
 // TaxReverser issues a reversal of the invoice's committed tax transaction.
 // Called from Issue when the invoice has a non-empty TaxTransactionID. The
-// implementation (billing.Engine.ReverseTax) resolves the tenant's tax
-// provider and forwards the ReversalRequest. Optional — when nil, Issue
-// proceeds without reversing upstream tax (suitable for tenants on
-// none/manual providers, or for tests).
+// implementation (billing.Engine.ReverseTax) sends the reversal to the
+// provider that made the transaction, Stripe Tax, whatever provider the
+// tenant has selected since. Optional — when nil, Issue proceeds without
+// reversing upstream tax (for tests; production always wires it).
 type TaxReverser interface {
 	ReverseTax(ctx context.Context, tenantID string, req tax.ReversalRequest) (*tax.ReversalResult, error)
 }
@@ -880,8 +880,8 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 		if res == nil || res.TransactionID == "" {
 			// A tax-bearing invoice (the gate above already excluded the
 			// no-transaction and zero-tax shapes) whose provider returned no
-			// reversal transaction has NOT been reversed — typically the
-			// engine resolving no provider for the tenant. Treat it as a
+			// reversal transaction has NOT been reversed — it comes only
+			// from a reverser that is not wired to a provider. Treat it as a
 			// failure: the marker stays, and the note is not counted (HA-13,
 			// 2026-08-30).
 			errsOut = append(errsOut, fmt.Errorf("re-drive tax reversal for credit note %s: provider returned no reversal transaction", cn.ID))
