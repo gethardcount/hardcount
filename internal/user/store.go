@@ -36,10 +36,6 @@ const (
 )
 
 type Store interface {
-	// Create inserts a user. Returns ErrEmailTaken if the email is
-	// already in the table (citext unique violation).
-	Create(ctx context.Context, email, passwordHash string) (domain.User, error)
-
 	// GetByEmail loads the user with the given email (case-insensitive
 	// via citext). Returns errs.ErrNotFound when no row matches.
 	GetByEmail(ctx context.Context, email string) (domain.User, error)
@@ -52,10 +48,6 @@ type Store interface {
 
 	// SetPassword updates the password_hash. Used by the reset flow.
 	SetPassword(ctx context.Context, id, passwordHash string) error
-
-	// AttachTenant adds (user_id, tenant_id, role) to user_tenants.
-	// Idempotent on (user_id, tenant_id) primary key conflict.
-	AttachTenant(ctx context.Context, userID, tenantID, role string) error
 
 	// TenantsForUser returns the tenant memberships for a user. v1 has
 	// 1:1 user:tenant; the shape supports growth.

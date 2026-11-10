@@ -1,6 +1,6 @@
 # ADR-040: Outbox is the only path (webhook + email)
 
-**Status:** Accepted (amended 2026-08-30, 2026-11-09)
+**Status:** Accepted (amended 2026-08-30, 2026-11-09, 2026-11-10)
 **Date:** 2026-05-30
 **Supersedes:** the boot-time fallback contract introduced when
 the webhook/email outboxes shipped (the `HARDCOUNT_WEBHOOK_OUTBOX_ENABLED`
@@ -8,7 +8,7 @@ and `HARDCOUNT_EMAIL_OUTBOX_ENABLED` env flags).
 
 ## Summary
 
-Webhooks and emails always go through their outbox tables, and a background dispatcher delivers each row with retries and a dead-letter queue. The `HARDCOUNT_WEBHOOK_OUTBOX_ENABLED` and `HARDCOUNT_EMAIL_OUTBOX_ENABLED` flags were removed, because the direct-send path they enabled lost messages on any transient failure. Amended 2026-08-30 and 2026-11-09: every webhook event and the four money emails (payment receipt, payment failed, dunning warning, dunning escalation) are queued in their state change's transaction. Operator, marker-re-driven and account-plane emails are queued after it. Only the drain, `Dispatcher.handle`, calls `dispatchFromOutbox`, which turns a queued webhook row into an event and its deliveries. To pause a dispatcher, run `SELECT leader_pause('email_outbox', who, why)` or the `webhook_outbox` equivalent ([runbook](../ops/runbook/background-job-stuck.md)); the advisory locks named below were retired by [ADR-114](114-leader-leases-tick-scoped-fencing.md). Status: active, amended.
+Webhooks and emails always go through their outbox tables, and a background dispatcher delivers each row with retries and a dead-letter queue. The `HARDCOUNT_WEBHOOK_OUTBOX_ENABLED` and `HARDCOUNT_EMAIL_OUTBOX_ENABLED` flags were removed, because the direct-send path they enabled lost messages on any transient failure. Amended 2026-08-30 and 2026-11-09: every webhook event and the four money emails (payment receipt, payment failed, dunning warning, dunning escalation) are queued in their state change's transaction. Amended 2026-11-10: the team invite is queued in its invitation's transaction too. Operator, marker-re-driven and password-reset emails are queued after it. Only the drain, `Dispatcher.handle`, calls `dispatchFromOutbox`, which turns a queued webhook row into an event and its deliveries. To pause a dispatcher, run `SELECT leader_pause('email_outbox', who, why)` or the `webhook_outbox` equivalent ([runbook](../ops/runbook/background-job-stuck.md)); the advisory locks named below were retired by [ADR-114](114-leader-leases-tick-scoped-fencing.md). Status: active, amended.
 
 ## Context
 
@@ -117,9 +117,10 @@ DLQ.
 > - an engine email that its own marker column sends again until the send
 >   is recorded: the collector's invoice email (`invoice_emailed_at`) and
 >   the no-payment-method notice (`no_pm_notified_at`);
-> - account-plane sends: a password reset, which the requester asks for
->   again, and a team invite, which the Team page lists and the operator can
->   revoke and send again.
+> - an account-plane send: a password reset, which the requester asks for
+>   again. (Narrowed 2026-11-10: a team invite is now queued on its
+>   invitation's transaction, and a failed queue writes no invitation. See
+>   the [ADR-081 amendment](081-minimal-team-invites.md#amendment-2026-11-10-each-membership-change-is-one-transaction).)
 >
 > `internal/arch/email_outbox_standalone_test.go` lists them with their
 > reasons, and CI fails on any other call.

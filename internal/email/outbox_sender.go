@@ -255,11 +255,13 @@ func (s *OutboxSender) enqueue(ctx context.Context, tenantID, emailType string, 
 	return err
 }
 
-// enqueueTx is enqueue on the caller's transaction (ADR-040 amendment): a
-// money email rides the state-transition tx, so a process death or failover
-// between "state committed" and "email row committed" cannot lose the email
-// with the state standing. The caller wraps this in a SAVEPOINT — an email
-// failure must never veto the money write.
+// enqueueTx is enqueue on the caller's transaction (ADR-040 amendment): the
+// email rides the state-change tx, so a process death or failover between
+// "state committed" and "email row committed" cannot lose the email with the
+// state standing. A money email's caller wraps this in a SAVEPOINT, because
+// an email failure must never veto the money write. The team invite does
+// not: an invitation without its email is a dead end, so its failure rolls
+// the invitation back.
 func (s *OutboxSender) enqueueTx(ctx context.Context, tx *sql.Tx, tenantID, emailType string, msg outboxMessage) error {
 	payload, err := s.preparePayload(ctx, tenantID, emailType, msg)
 	if err != nil {
@@ -423,14 +425,16 @@ func (s *OutboxSender) SendPasswordReset(ctx context.Context, tenantID, to, disp
 	})
 }
 
-// SendMemberInvite enqueues a team-invite email. The URL carries the
-// raw invite token. Unlike the other flows this is tenant-initiated
-// (inviter sits inside tenantID) rather than system-initiated.
-func (s *OutboxSender) SendMemberInvite(ctx context.Context, tenantID, to, inviterEmail, tenantName, acceptURL string) error {
+// SendMemberInviteTx enqueues a team-invite email on the caller's
+// transaction, so the invitation and its email commit together. The URL
+// carries the raw invite token. Unlike the other flows this is
+// tenant-initiated (inviter sits inside tenantID) rather than
+// system-initiated. Satisfies dashmembers.InviteEmailSender.
+func (s *OutboxSender) SendMemberInviteTx(ctx context.Context, tx *sql.Tx, tenantID, to, inviterEmail, tenantName, acceptURL string) error {
 	if acceptURL == "" {
 		return fmt.Errorf("accept_url required: refusing to enqueue member-invite email with no link")
 	}
-	return s.enqueue(ctx, tenantID, TypeMemberInvite, outboxMessage{
+	return s.enqueueTx(ctx, tx, tenantID, TypeMemberInvite, outboxMessage{
 		To:           to,
 		InviterEmail: inviterEmail,
 		TenantName:   tenantName,
