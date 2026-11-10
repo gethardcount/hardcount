@@ -5944,7 +5944,7 @@ components:
           description: True on a draft that Hardcount will issue automatically, such as the credit for unused time after a plan downgrade.
         tax_reversal_pending:
           type: boolean
-          description: True when the tax reversal failed and will be retried.
+          description: True while the credit note's tax reversal at Stripe Tax is still owed. Set when a note with an amount is issued on an invoice Stripe Tax taxed, and cleared when the reversal is recorded, normally within the same request. It stays true while a failed reversal is retried, and while the invoice's own tax is not yet recorded at Stripe. If the invoice's tax is never recorded at Stripe, the flag stays true and no reversal is made.
         metadata:
           type: object
           additionalProperties: true
@@ -20354,7 +20354,10 @@ paths:
 
         A paid invoice sends the `invoice.paid` webhook event (and
         `payment.succeeded` for a card payment), and any active dunning run
-        is resolved with `payment_recovered`. A declined card answers 502;
+        is resolved with `payment_recovered`. A payment Stripe is still
+        processing answers 200 with `payment_status: processing`, and the
+        dunning run stays open until the payment settles. A declined card
+        answers 502;
         the invoice's `payment_status` becomes `failed`, and dunning starts
         when the customer's policy is enabled. Check
         `payment_status` on the returned invoice.
