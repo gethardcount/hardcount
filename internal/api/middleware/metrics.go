@@ -756,8 +756,8 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 		"Clawback credit-note drafts awaiting issue (issue_pending, status='draft') — includes drafts legitimately deferred behind an in-flight source payment (ADR-059); alert on sustained growth/age, not presence. -1 = metric query failed.",
 		`SELECT COUNT(*) FROM credit_notes WHERE issue_pending AND status = 'draft'`)
 	gauge("hardcount_creditnote_pending_tax_reversals",
-		"Issued credit notes whose upstream tax reversal is still owed and being retried (tax_reversal_pending). Presence is normal for a tick or two; a row here for >24h means the provider keeps rejecting it — runbook tier-2. -1 = metric query failed.",
-		`SELECT COUNT(*) FROM credit_notes WHERE tax_reversal_pending AND status = 'issued'`)
+		"Issued credit notes whose upstream tax reversal is owed and can be made now (tax_reversal_pending, and the invoice's tax transaction is recorded). Presence is normal for a tick or two; a row here for >24h means the provider keeps rejecting it — runbook tier-2. A marked note whose invoice has no tax transaction yet waits on the invoice's tax commit and is not counted, nor is a test-clock note, which the sweep does not retry. -1 = metric query failed.",
+		`SELECT COUNT(*) FROM credit_notes cn WHERE cn.tax_reversal_pending AND cn.status = 'issued' AND cn.is_simulated = false AND EXISTS (SELECT 1 FROM invoices i WHERE i.id = cn.invoice_id AND i.tenant_id = cn.tenant_id AND COALESCE(i.tax_transaction_id, '') <> '')`)
 	gauge("hardcount_invoice_pending_tax_reversals",
 		"Voided stripe_tax invoices with a committed upstream tax transaction and no confirmed reversal (tax_reversed_at IS NULL) — the invoice-side owed reversals the #310 sweep re-drives. Alert on age, not presence. -1 = metric query failed.",
 		`SELECT COUNT(*) FROM invoices WHERE status = 'voided' AND tax_provider = 'stripe_tax' AND COALESCE(tax_transaction_id,'') <> '' AND tax_reversed_at IS NULL`)

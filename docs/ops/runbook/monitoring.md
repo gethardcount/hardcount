@@ -87,7 +87,7 @@ Notes on three rows:
   day can be one reversal the provider keeps rejecting, or a steady stream
   of new ones. The oldest tells which (in `psql`, see
   [Before you start](index.md#before-you-start)):
-  `SET app.bypass_rls = 'on'; SELECT tenant_id, id, issued_at FROM credit_notes WHERE tax_reversal_pending AND status = 'issued' ORDER BY issued_at LIMIT 5;`.
+  `SET app.bypass_rls = 'on'; SELECT cn.tenant_id, cn.id, cn.issued_at FROM credit_notes cn WHERE cn.tax_reversal_pending AND cn.status = 'issued' AND cn.is_simulated = false AND EXISTS (SELECT 1 FROM invoices i WHERE i.id = cn.invoice_id AND i.tenant_id = cn.tenant_id AND COALESCE(i.tax_transaction_id, '') <> '') ORDER BY cn.issued_at LIMIT 5;`.
   One more than a day old: handle as SEV-2 (see [Escalation](escalation.md)).
 - **Pending tax reversals (invoices).** The invoice tax-reversal sweep
   tries each one again. The oldest:
