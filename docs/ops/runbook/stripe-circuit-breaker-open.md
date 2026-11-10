@@ -11,7 +11,9 @@ retries skipped for another reason. Back to the [runbook index](index.md).
 - Dunning retries (the automatic retries of failed payments) are skipped.
   A skipped retry does not use up an attempt, adds no row to the invoice
   timeline and sends no email. This is the correct behavior while the cause
-  lasts.
+  lasts. The one exception: if Hardcount could not take the attempt back
+  (the database was still failing), the retry is counted and is not run
+  again. See Check.
 - Customers report they expected a retry but no email arrived.
 
 ## Why
@@ -35,6 +37,12 @@ Search the logs for `skipping this attempt`. Each `WARN` line names the
 invoice and the error. A Stripe error or `payment attempt skipped` points to
 Stripe; a connection or `SQLSTATE` error points to the database.
 
+Search also for `failed to rewind the attempt recorded before the charge`.
+Each `ERROR` line names a retry that was counted although it was skipped.
+That run does not retry on the next pass: it waits for its next scheduled
+retry, or, when the line says `final_attempt=true`, goes to the policy's
+final action without that charge.
+
 ## Fix
 
 1. Check Stripe's status page (`status.stripe.com`).
@@ -43,7 +51,10 @@ Stripe; a connection or `SQLSTATE` error points to the database.
 3. For database errors, restore the database connection first.
 4. The breaker closes on its own: after a 30-second cool-off it lets one
    call through, and a success closes it. Skipped retries run on the next
-   dunning pass. Normally no manual action is needed.
+   dunning pass, except one the logs name as counted (see Check). Normally
+   no manual action is needed. For a counted last retry, use **Collect
+   payment** on the invoice before the final action runs, about 15 minutes
+   after the log line, if you want that charge made.
 
 ## Verify
 
