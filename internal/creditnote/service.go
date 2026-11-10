@@ -747,8 +747,9 @@ func (s *Service) LockInvoicesForDraftsTx(ctx context.Context, tx *sql.Tx, tenan
 // tx — the draft→issued CAS AND the internal effect (balance credit / amount_due
 // reduction) commit together, so a failed internal effect rolls the flip back and
 // the note stays status='draft' for this scan to re-issue. The only post-commit
-// leg is the EXTERNAL tax reversal, which on failure sets tax_reversal_pending and
-// self-heals via RetryPendingCreditNoteTaxReversal — not something this sweep
+// leg is the EXTERNAL tax reversal. The note carries tax_reversal_pending from
+// the issue statement until that reversal is stored, and
+// RetryPendingCreditNoteTaxReversal makes it — not something this sweep
 // chases. Per-row errors are collected, not aborted-on.
 func (s *Service) RetryPendingClawbackIssue(ctx context.Context, batch int) (int, []error) {
 	livemode, err := postgres.Livemode(ctx)
@@ -806,9 +807,11 @@ func (s *Service) RetryPendingClawbackIssueForClock(ctx context.Context, tenantI
 	return issued, errsOut
 }
 
-// RetryPendingCreditNoteTaxReversal re-drives the POST-COMMIT upstream tax
-// reversal for issued credit notes whose inline attempt failed
-// (tax_reversal_pending). It is the CN-path counterpart to the invoice #310
+// RetryPendingCreditNoteTaxReversal makes the upstream tax reversal for issued
+// credit notes that still owe one (tax_reversal_pending, set when the note is
+// issued and cleared when its reversal is stored): the inline attempt failed,
+// never ran because the process stopped after the issue commit, or had to
+// wait for the invoice's own tax transaction. It is the CN-path counterpart to the invoice #310
 // RetryPendingTaxReversal: #310 scans voided/uncollectible invoices and keys off
 // invoices.tax_reversed_at, so a CN reversal on a FINALIZED/PAID invoice (which
 // stamps credit_notes.tax_transaction_id instead) is structurally invisible to
@@ -831,8 +834,10 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 	var errsOut []error
 	reversed := 0
 	for _, cn := range pending {
-		// Already reversed upstream (a prior sweep stamped the tx id but failed
-		// to clear the marker): just clear it so it leaves the scan.
+		// Marked, with its reversal already stored: a row an earlier version
+		// left (it stored the id and cleared the marker in two writes). One
+		// write does both now, so this version does not produce the state.
+		// Clear the marker so the note leaves the scan.
 		if cn.TaxTransactionID != "" {
 			if err := s.store.SetTaxReversalPending(ctx, cn.TenantID, cn.ID, false); err != nil {
 				errsOut = append(errsOut, fmt.Errorf("clear tax_reversal_pending for %s: %w", cn.ID, err))
@@ -846,19 +851,13 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 			errsOut = append(errsOut, fmt.Errorf("get invoice for pending tax reversal %s: %w", cn.ID, err))
 			continue
 		}
-		// Nothing to reverse, in either of its two shapes: no upstream
-		// transaction at all (provider changed / legacy), or a transaction
-		// that carried ZERO tax — reversing it is a no-op that returns no
-		// transaction id, so tax_transaction_id stays empty and the row
-		// re-qualifies through the scan's structural arm on the very next
-		// tick. Without the zero-tax half this re-drove a pointless Stripe
-		// call every tick until the 24h window aged it out (~288 calls per
-		// affected credit note) and reported advanced=1 the whole time.
+		// Nothing to reverse: the invoice has no upstream transaction, or one
+		// that carried zero tax (reversing that returns no transaction id, so
+		// the note would be re-driven on every tick). The issue statement marks
+		// neither shape; a marker an earlier version left on one is cleared.
 		if inv.TaxTransactionID == "" || inv.TaxAmountCents == 0 {
-			if cn.TaxReversalPending {
-				if err := s.store.SetTaxReversalPending(ctx, cn.TenantID, cn.ID, false); err != nil {
-					errsOut = append(errsOut, fmt.Errorf("clear stale tax_reversal_pending for %s: %w", cn.ID, err))
-				}
+			if err := s.store.SetTaxReversalPending(ctx, cn.TenantID, cn.ID, false); err != nil {
+				errsOut = append(errsOut, fmt.Errorf("clear stale tax_reversal_pending for %s: %w", cn.ID, err))
 			}
 			continue
 		}
@@ -870,8 +869,12 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 			GrossAmountCents:      cn.TotalCents,
 		})
 		if err != nil {
+			// A failed re-drive writes nothing. The marker is already set, and
+			// any write to the note stamps updated_at, which the refunds-
+			// needing-attention rule reads as the note's age
+			// (domain.CreditNoteRefundNeedsAttentionSQL): a note re-driven
+			// every hour would never grow old enough to be listed there.
 			errsOut = append(errsOut, fmt.Errorf("re-drive tax reversal for credit note %s: %w", cn.ID, err))
-			s.promoteOrphan(ctx, cn, &errsOut)
 			continue
 		}
 		if res == nil || res.TransactionID == "" {
@@ -879,55 +882,19 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 			// no-transaction and zero-tax shapes) whose provider returned no
 			// reversal transaction has NOT been reversed — it comes only
 			// from a reverser that is not wired to a provider. Treat it as a
-			// failure: never clear the marker, never count it, promote it so
-			// it survives the 24h detection window (HA-13, 2026-08-30).
+			// failure: the marker stays, and the note is not counted (HA-13,
+			// 2026-08-30).
 			errsOut = append(errsOut, fmt.Errorf("re-drive tax reversal for credit note %s: provider returned no reversal transaction", cn.ID))
-			s.promoteOrphan(ctx, cn, &errsOut)
 			continue
 		}
+		// One write stores the reversal and clears the marker.
 		if err := s.store.SetTaxTransaction(ctx, cn.TenantID, cn.ID, res.TransactionID); err != nil {
 			errsOut = append(errsOut, fmt.Errorf("persist reversal tx for %s: %w", cn.ID, err))
 			continue
 		}
-		// Only write when the marker is actually set. This used to run
-		// unconditionally, and rows reached here via the SECOND arm of
-		// ListPendingCreditNoteTaxReversal's predicate — tax_transaction_id
-		// empty, marker already false — which made it a no-op UPDATE that
-		// still bumped updated_at. That defeated the 24h window the scan
-		// relies on to age a row out: a zero-tax reversal returns no
-		// transaction id, so tax_transaction_id stayed empty, the row
-		// requalified next tick, and the sweep refreshed its own
-		// eligibility. Observed live as advanced=1 on every tick forever
-		// with zero rows actually pending, re-filing a reversal at Stripe
-		// every 5 minutes (deduped there by the per-CN reference, so no
-		// money moved) and leaving the metric unable to ever read healthy.
-		if cn.TaxReversalPending {
-			if err := s.store.SetTaxReversalPending(ctx, cn.TenantID, cn.ID, false); err != nil {
-				errsOut = append(errsOut, fmt.Errorf("clear tax_reversal_pending for %s: %w", cn.ID, err))
-				continue
-			}
-		}
 		reversed++
 	}
 	return reversed, errsOut
-}
-
-// promoteOrphan moves a marker-less orphan (issued CN, no reversal stamped,
-// marker false — the compound-failure shape where both the inline reversal
-// and its marker write failed) onto the UNBOUNDED marker branch on its first
-// failed re-drive. Without this, the structural branch's 24h freshness
-// window bounded the OBLIGATION, not just detection: a >24h provider outage
-// coinciding with the compound failure aged the row out and the tenant
-// over-remitted forever (ADR-062 amendment 2026-07-06; the $46.69 class).
-// Never rewrites a true marker — the real store bumps updated_at on every
-// write, and a needless write would refresh the row's own window.
-func (s *Service) promoteOrphan(ctx context.Context, cn domain.CreditNote, errsOut *[]error) {
-	if cn.TaxReversalPending {
-		return
-	}
-	if err := s.store.SetTaxReversalPending(ctx, cn.TenantID, cn.ID, true); err != nil {
-		*errsOut = append(*errsOut, fmt.Errorf("promote marker-less orphan %s to tax_reversal_pending: %w", cn.ID, err))
-	}
 }
 
 // buildCreditNote runs the tax-breakout, three-channel allocation, refund cap,
@@ -2181,9 +2148,11 @@ func (s *Service) runPostIssueExternalLegs(ctx context.Context, tenantID, id str
 	// reversed. Partial mode with the CN's gross total so multi-CN invoices each
 	// reverse only their slice.
 	//
-	// On failure this is NO LONGER fire-and-forget: set tax_reversal_pending so
-	// RetryPendingCreditNoteTaxReversal re-drives with the same per-CN key, and
-	// raise the log to ERROR (the #310 void-path sibling's alertable signal).
+	// The note already carries tax_reversal_pending: the issue statement set
+	// it in the issue transaction. So a failure here, or a stop before this
+	// call, needs no write: RetryPendingCreditNoteTaxReversal re-drives with
+	// the same per-CN key until the reversal is stored, which clears the
+	// marker. The ERROR is the alertable signal (as on the #310 void path).
 	// #310 itself cannot recover this — it scans voided/uncollectible invoices,
 	// while a CN reversal lands on a finalized/paid invoice and stamps
 	// credit_notes.tax_transaction_id, structurally invisible to that sweep.
@@ -2196,22 +2165,11 @@ func (s *Service) runPostIssueExternalLegs(ctx context.Context, tenantID, id str
 			GrossAmountCents:      cn.TotalCents,
 		})
 		if err != nil {
-			slog.ErrorContext(ctx, "tax reversal failed; marked pending for sweep recovery",
+			slog.ErrorContext(ctx, "tax reversal failed; the sweep retries it while the credit note is marked tax_reversal_pending",
 				"credit_note_id", cn.ID,
 				"invoice_id", cn.InvoiceID,
 				"tax_transaction_id", inv.TaxTransactionID,
 				"error", err)
-			if merr := s.store.SetTaxReversalPending(ctx, tenantID, id, true); merr != nil {
-				// Even if this fast-path marker write fails, the sweep still
-				// recovers the reversal: RetryPendingCreditNoteTaxReversal also
-				// derives eligibility structurally (issued CN, no reversal stamped,
-				// tax-bearing source) and PROMOTES the row onto the unbounded
-				// marker branch on its first failed re-drive — so the 24h window
-				// bounds detection latency (one healthy leader tick), never the
-				// obligation.
-				slog.ErrorContext(ctx, "failed to set tax_reversal_pending marker; sweep recovers structurally regardless",
-					"credit_note_id", cn.ID, "error", merr)
-			}
 		} else if res != nil && res.TransactionID != "" {
 			if err := s.store.SetTaxTransaction(ctx, tenantID, id, res.TransactionID); err != nil {
 				slog.Warn("tax reversal succeeded upstream but local persist failed",

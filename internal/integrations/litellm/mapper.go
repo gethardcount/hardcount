@@ -152,16 +152,25 @@ const (
 type Mapping struct {
 	// Events are the call's usage events, one per present token role.
 	Events []ExternalIngest
-	// Legacy is how the mapper before the cache-write split (2026-10-22)
-	// recorded the same call: input = prompt − cache_read with the writes
-	// inside it, no write events, and that input's pre-split cost. Set only
-	// when the call has cache writes that Events splits off. A resend of a
-	// call first stored that way must be stored that way again, or the
-	// writes bill twice; the store decides which applies from the row
-	// already under LegacyKey (usage.PostgresStore.IngestCallResolvingHeld).
-	// An install upgraded from a main build from #1198 up to #1349 has
-	// such calls (CHANGELOG "Before upgrading"), so this stays while that
-	// upgrade is supported.
+	// Legacy is the same call with its cache writes left inside the input
+	// event: input = prompt − cache_read, no write events, and that input's
+	// cost. Set only when the call has cache writes that Events splits off.
+	// A resend of a call first stored that way must be stored that way
+	// again, or the writes bill twice; the store decides which applies from
+	// the row already under LegacyKey
+	// (usage.PostgresStore.IngestCallResolvingHeld).
+	//
+	// This is not only the shape the mapper wrote before the cache-write
+	// split (2026-10-22). MapPayload still writes it today for any record
+	// whose cache writes it cannot split into 5m and 1h (the w5m+w1h == 0
+	// return below: Events is then this same mapping). One call can arrive
+	// both ways: a record with flat cache counts, such as one rebuilt by
+	// hand for a replay, and the full record with the split. So the pair
+	// must stay even though no supported database predates the split.
+	// Removing it bills the writes twice on such a resend (checked
+	// 2026-11-10: the hand-built record maps to [input, output], the full
+	// one to [input, cache_write_5m, cache_write_1h, output], and Legacy of
+	// the second equals the first).
 	Legacy []ExternalIngest
 	// LegacyKey is the call's input key, which Events and Legacy both
 	// carry with different quantities. Set with Legacy.
