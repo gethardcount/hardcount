@@ -41,8 +41,9 @@ type Store interface {
 	// ListPendingClawbackDraftsForClock is the catchup counterpart, scoped to one
 	// test clock's simulated customers (ADR-029 disjoint flows).
 	ListPendingClawbackDraftsForClock(ctx context.Context, tenantID, clockID string, batch int) ([]domain.CreditNote, error)
-	// ListPendingCreditNoteTaxReversal returns issued credit notes whose
-	// post-commit upstream tax reversal failed (tax_reversal_pending),
+	// ListPendingCreditNoteTaxReversal returns issued credit notes that still
+	// owe their upstream tax reversal (tax_reversal_pending) and whose invoice
+	// has a tax transaction to reverse against,
 	// cross-tenant + scoped by livemode, for RetryPendingCreditNoteTaxReversal.
 	ListPendingCreditNoteTaxReversal(ctx context.Context, batch int, livemode bool) ([]domain.CreditNote, error)
 	// LockInvoicesTx takes the per-invoice credit-note lock for each invoice,
@@ -112,8 +113,10 @@ type Store interface {
 	// SetTaxTransaction persists the reversal transaction id returned by
 	// the tax provider at Issue time.
 	SetTaxTransaction(ctx context.Context, tenantID, id string, taxTransactionID string) error
-	// SetTaxReversalPending flips the post-commit tax-reversal recovery marker
-	// (true on attempted-and-failed, false on success).
+	// SetTaxReversalPending writes the tax-reversal marker on its own. Issuing
+	// sets it and SetTaxTransaction clears it; this is for the sweep, to clear
+	// a marker on a note with nothing to reverse and to move a note whose
+	// re-drive failed behind the others (the write stamps updated_at).
 	SetTaxReversalPending(ctx context.Context, tenantID, id string, pending bool) error
 	ListLineItems(ctx context.Context, tenantID, creditNoteID string) ([]domain.CreditNoteLineItem, error)
 }

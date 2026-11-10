@@ -1772,8 +1772,9 @@ func (h *Handler) createClawbackDraftsTx(ctx context.Context, tx *sql.Tx, tenant
 // there is no "issued but un-credited" window. A failure before/during that commit
 // leaves status='draft' AND issue_pending=true, which RetryPendingClawbackIssue
 // re-issues on the next scheduler tick. The ONLY post-commit step is the EXTERNAL
-// Stripe Tax reversal, which self-heals via RetryPendingCreditNoteTaxReversal (it
-// sets tax_reversal_pending on failure); the ERROR below is the surfacing signal,
+// Stripe Tax reversal, which self-heals via RetryPendingCreditNoteTaxReversal (the
+// note carries tax_reversal_pending from the moment it is issued until the
+// reversal is stored); the ERROR below is the surfacing signal,
 // not a manual-reconciliation requirement.
 func (h *Handler) issueClawbackDrafts(ctx context.Context, tenantID string, detail *ProrationDetail) {
 	if h.creditNotes == nil || detail == nil {

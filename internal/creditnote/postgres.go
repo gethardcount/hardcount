@@ -783,13 +783,34 @@ func (s *PostgresStore) TransitionStatusTx(ctx context.Context, tx *sql.Tx, tena
 	// from draft, but nothing cleared it — every reader gates on
 	// status='draft' so behavior was unaffected, yet the API served
 	// issue_pending=true on issued CNs forever (FLOW B17 walk, 2026-07-21).
+	//
+	// Issuing also records that a tax reversal is owed, in this statement:
+	// a note with an amount, on an invoice Stripe Tax taxed (or one that
+	// carries a Stripe tax transaction), owes Stripe a reversal from the
+	// moment it is issued. The reversal itself is a Stripe
+	// call made after the commit; with the marker written only when that call
+	// failed, a stop between the commit and the call (or a failed marker
+	// write) left an issued note that nothing listed. The marker is cleared
+	// by the write that stores the reversal (SetTaxTransaction). It is set
+	// even when the invoice's own tax transaction has not been recorded yet:
+	// the sweep lists the note once it has.
 	var customerID string
 	err := tx.QueryRowContext(ctx, `
 		UPDATE credit_notes SET status=$1, issued_at=COALESCE($2, issued_at),
-			voided_at=COALESCE($3, voided_at), issue_pending=false, updated_at=$4
+			voided_at=COALESCE($3, voided_at), issue_pending=false, updated_at=$4,
+			tax_reversal_pending = CASE WHEN $7 THEN (
+				total_cents > 0 AND EXISTS (
+					SELECT 1 FROM invoices i
+					WHERE i.id = credit_notes.invoice_id
+					  AND i.tenant_id = credit_notes.tenant_id
+					  AND i.tax_amount_cents > 0
+					  AND (i.tax_provider = 'stripe_tax'
+					       OR COALESCE(i.tax_transaction_id, '') <> '')))
+				ELSE tax_reversal_pending END
 		WHERE id=$5 AND status=$6
 		RETURNING customer_id`,
-		to, postgres.NullableTime(issuedAt), postgres.NullableTime(voidedAt), now, id, from).Scan(&customerID)
+		to, postgres.NullableTime(issuedAt), postgres.NullableTime(voidedAt), now, id, from,
+		to == domain.CreditNoteIssued).Scan(&customerID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -854,7 +875,8 @@ func (s *PostgresStore) stampIssuedPartiesTx(ctx context.Context, tx *sql.Tx, id
 // class and the read-then-blind-write race Void carried (see Service.Void).
 
 // SetTaxTransaction persists the upstream reversal transaction id (Stripe:
-// tx_xxx) returned by the tax provider at Issue time. Idempotency guard:
+// tx_xxx) returned by the tax provider, and clears tax_reversal_pending in the
+// same write: the reversal is recorded and no longer owed. Idempotency guard:
 // the credit note service checks for a non-empty value before calling
 // Provider.Reverse so a retried Issue does not create duplicate reversals.
 func (s *PostgresStore) SetTaxTransaction(ctx context.Context, tenantID, id string, taxTransactionID string) error {
@@ -865,7 +887,7 @@ func (s *PostgresStore) SetTaxTransaction(ctx context.Context, tenantID, id stri
 	defer postgres.Rollback(tx)
 
 	_, err = tx.ExecContext(ctx, `
-		UPDATE credit_notes SET tax_transaction_id = $1, updated_at = $2 WHERE id = $3`,
+		UPDATE credit_notes SET tax_transaction_id = $1, tax_reversal_pending = false, updated_at = $2 WHERE id = $3`,
 		taxTransactionID, clock.Now(ctx), id)
 	if err != nil {
 		return err
@@ -1157,11 +1179,12 @@ func (s *PostgresStore) UpdateAllocationTx(ctx context.Context, tx *sql.Tx, tena
 	return err
 }
 
-// SetTaxReversalPending flips the recovery marker for a credit note's
-// POST-COMMIT upstream tax reversal: set true when the reversal is attempted and
-// fails (→ RetryPendingCreditNoteTaxReversal re-drives it with the per-CN key),
-// cleared on success. Runs in its own tx — the reversal is a post-commit
-// external effect, not part of the issue coordinator tx.
+// SetTaxReversalPending writes the marker for a credit note's upstream tax
+// reversal on its own. The two writes that normally move it are elsewhere:
+// TransitionStatusTx sets it when the note is issued, and SetTaxTransaction
+// clears it when the reversal is stored. This one is the sweep's: to clear a
+// marker on a note with nothing to reverse, and to stamp updated_at on a note
+// whose re-drive failed, which moves it behind the others in the list.
 func (s *PostgresStore) SetTaxReversalPending(ctx context.Context, tenantID, id string, pending bool) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1184,24 +1207,15 @@ func (s *PostgresStore) SetTaxReversalPending(ctx context.Context, tenantID, id 
 // RetryPendingTaxReversal, which scans only voided/uncollectible invoices and so
 // is structurally blind to a CN reversal stamped on a finalized/paid invoice.
 //
-// Eligibility is DERIVABLE FROM DURABLE STATE, not dependent on a marker write
-// landing (the #310 design): a row qualifies if EITHER
-//
-//	(a) tax_reversal_pending — the fast path: the inline attempt failed and set
-//	    the marker (cheap, partial-index-backed); recovered until success, or
-//	(b) the structural over-remit state — an issued CN with NO reversal stamped
-//	    (tax_transaction_id='') against a tax-bearing stripe_tax source invoice.
-//
-// (b) is the backstop for the compound failure where BOTH ReverseTax AND the
-// marker write fail in the same Issue(): the orphan (issued, no tx id, marker
-// false) would otherwise be invisible to every sweep — a permanent silent
-// over-remit. (b) is bounded to a 24h freshness window (anti-churn, matching
-// #310) and is DETECTION-ONLY: the sweep promotes any (b) row whose re-drive
-// fails onto the marker branch, which is unbounded (a known owed reversal is
-// never aged out) — so the window bounds how long an orphan can go unnoticed
-// (one healthy leader tick), not whether it is ever reversed. Re-reversal is
-// Stripe-idempotent via the per-CN hardcount_tax_rev_<cn.ID> reference, so any
-// overlap between (a) and (b), or with the inline attempt, dedups to one.
+// A note is listed when its marker is set and its invoice has a recorded tax
+// transaction to reverse against. The marker is written by the statement that
+// issues the note (TransitionStatusTx) and cleared by the write that stores
+// the reversal (SetTaxTransaction), so there is no issued note that owes a
+// reversal and carries no marker, and the list needs no second arm and no age
+// limit: an owed reversal stays listed until it is made. A marked note whose
+// invoice has no tax transaction yet waits, unlisted, for the invoice's own
+// tax commit. Re-reversal is Stripe-idempotent via the per-note
+// hardcount_tax_rev_<cn.ID> reference.
 func (s *PostgresStore) ListPendingCreditNoteTaxReversal(ctx context.Context, batch int, livemode bool) ([]domain.CreditNote, error) {
 	if batch <= 0 {
 		batch = 50
@@ -1217,21 +1231,13 @@ func (s *PostgresStore) ListPendingCreditNoteTaxReversal(ctx context.Context, ba
 		WHERE livemode = $1
 		  AND status = 'issued'
 		  AND is_simulated = false
-		  AND (
-		        tax_reversal_pending
-		     OR (
-		            COALESCE(tax_transaction_id, '') = ''
-		        AND total_cents > 0
-		        AND updated_at > now() - interval '24 hours'
-		        AND EXISTS (
-		              SELECT 1 FROM invoices i
-		              WHERE i.id = credit_notes.invoice_id
-		                AND i.tenant_id = credit_notes.tenant_id
-		                AND i.tax_provider = 'stripe_tax'
-		                AND COALESCE(i.tax_transaction_id, '') <> ''
-		            )
-		        )
-		  )
+		  AND tax_reversal_pending
+		  AND EXISTS (
+		        SELECT 1 FROM invoices i
+		        WHERE i.id = credit_notes.invoice_id
+		          AND i.tenant_id = credit_notes.tenant_id
+		          AND COALESCE(i.tax_transaction_id, '') <> ''
+		      )
 		ORDER BY updated_at ASC
 		LIMIT $2`, livemode, batch)
 	if err != nil {

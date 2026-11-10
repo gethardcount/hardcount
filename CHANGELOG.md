@@ -21,6 +21,9 @@ original text.
 
 **Before upgrading:**
 
+- `tax_reversal_pending` on a credit note is now true from the moment the note is issued until its tax reversal is recorded at Stripe Tax, which is normally within the same request. Before, it was true only after a failed attempt. The gauge `hardcount_creditnote_pending_tax_reversals` counts only notes whose invoice has a recorded tax transaction.
+- Credit notes issued by an earlier version are not marked. One that still owes its tax reversal, for example a note issued while its invoice's tax was not yet recorded at Stripe, is no longer found by the hourly run. Stop the earlier version before starting this one, then mark such notes once: `SET app.bypass_rls = 'on'; UPDATE credit_notes cn SET tax_reversal_pending = true WHERE cn.status = 'issued' AND cn.total_cents > 0 AND COALESCE(cn.tax_transaction_id, '') = '' AND NOT cn.tax_reversal_pending AND EXISTS (SELECT 1 FROM invoices i WHERE i.id = cn.invoice_id AND i.tenant_id = cn.tenant_id AND i.tax_provider = 'stripe_tax' AND i.tax_amount_cents > 0);`
+
 - `POST /v1/subscriptions/{id}/activate` answers `409 invalid_state` for a draft whose customer is archived. Unarchive the customer first, then activate.
 - `scripts/backup.sh` now writes each dump so that only the user who runs it can read it, and creates a missing backup folder that only that user can open. A job that copies the dumps as another user can no longer read them: run that job as the user that runs `backup.sh`.
 - A subscription whose cycle close kept failing on a long Stripe Tax error, until billing parked it, stays parked after the upgrade. Its log line `bill subscription failed` reads `invalid byte sequence for encoding "UTF8"` (SQLSTATE 22021). Call `POST /v1/subscriptions/{id}/retry-billing` for each one.
@@ -49,6 +52,7 @@ original text.
 
 ### Fixed
 
+- **A credit note issued just before Hardcount stopped no longer keeps its tax on the Stripe Tax report.** The note's tax reversal is a Stripe call made after the note is issued. A deploy or crash between the two left a note that was found again only for 24 hours, and a reversal that was still owed could age out for good. Issuing the note now records that the reversal is owed, in the same write, and the hourly run makes it however late.
 - **An archived customer's draft subscription can no longer be activated.** Activating it started billing a customer you had archived. `POST /v1/subscriptions/{id}/activate` now answers `409 invalid_state`. Unarchive the customer first. ([#1659](https://github.com/gethardcount/hardcount/pull/1659))
 - **Two edits to one customer at once no longer undo each other.** An edit wrote back every field as it had read them, so a rename could un-archive the customer or reset its dunning policy. The second edit now waits and applies to the saved customer. ([#1659](https://github.com/gethardcount/hardcount/pull/1659))
 - **Archiving a customer no longer leaves a subscription billing.** An archive that ran while a subscription was being created, or while a trial was ending, could miss that subscription and succeed. The archive now sees it and gets `409`. A create that waited for an archive gets `409` too. ([#1659](https://github.com/gethardcount/hardcount/pull/1659))

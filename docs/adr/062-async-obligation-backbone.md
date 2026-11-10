@@ -298,3 +298,45 @@ the window (no terminal stamp exists on the CN side, so the structural
 scan would churn every pre-feature CN forever). The invoice-side half was
 already unbounded per ADR-111.
 
+## Amendment 2026-11-10 — the marker is written by the issue statement
+
+The "one correctness exception" above, and the promote step shipped on
+2026-08-30, both came from one fact: `tax_reversal_pending` was written after
+the Stripe call, in a write of its own that could fail or never run. The
+comparisons made here were against an obligations queue and against
+promote-on-detect. A third option needed neither: set the boolean that already
+exists, in the statement that already issues the note.
+
+- `TransitionStatusTx` (the only writer of `status='issued'`) sets
+  `tax_reversal_pending` when the note has an amount and its invoice has tax and
+  was taxed by Stripe Tax (or carries a Stripe tax transaction).
+- `SetTaxTransaction` stores the reversal and clears the marker in one write.
+- `ListPendingCreditNoteTaxReversal` lists marked notes whose invoice has a tax
+  transaction. The structural branch, its 24-hour window and the promote step
+  are deleted, with the branches of the sweep that existed for them.
+
+So no issued note can owe a reversal and carry no marker: a process stopped
+between the issue commit and the reversal call leaves a listed note, and an
+owed reversal stays listed until it is made. A marked note whose invoice has
+no tax transaction yet waits, unlisted, for the invoice's tax commit; before,
+such a note was found only if the commit landed within 24 hours of the note's
+last write. All sweeps are now shape 1 or 2 of the eligibility rule in
+`internal/billing/reconciler_driver.go`.
+
+Behaviour to know: `tax_reversal_pending` on the API is true from the issue
+commit until the reversal is recorded (normally within the same request), not
+only after a failed attempt. The gauge
+`hardcount_creditnote_pending_tax_reversals` counts marked notes whose invoice
+has a tax transaction and that are not on a test clock. A failed re-drive
+stamps the note's `updated_at`, which moves it behind the others in the
+cross-tenant list.
+
+Notes issued by an earlier version are not re-marked. Two shapes are no longer
+found: a note that lost both its reversal and its marker, and a note issued
+while its invoice's tax was not yet recorded at Stripe (the old code made no
+call and set no marker; its second arm found the note only if the commit
+landed within 24 hours). An earlier version running beside this one during a
+rolling deploy issues such notes too. There is no migration for this (pre-1.0,
+no production data): the CHANGELOG gives the one UPDATE that marks them, to
+run once after the earlier version has stopped. This change ships before the
+tax-commit window is lengthened, which makes a late commit ordinary.

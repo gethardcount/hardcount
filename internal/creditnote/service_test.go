@@ -15,6 +15,9 @@ import (
 )
 
 type memStore struct {
+	// invoices, when set, lets issuing mark a note as owing its tax reversal
+	// the way the real issue statement does (it reads the note's invoice).
+	invoices  *memInvoiceReader
 	notes     map[string]domain.CreditNote
 	lineItems map[string][]domain.CreditNoteLineItem
 	// lastLockLines records the lines passed INTO CreateUnderInvoiceLock —
@@ -269,6 +272,15 @@ func (m *memStore) TransitionStatus(ctx context.Context, tenantID, id string, fr
 	now := clock.Now(ctx)
 	if to == domain.CreditNoteIssued {
 		cn.IssuedAt = &now
+		// As the real issue statement: a note with an amount, on an invoice
+		// Stripe Tax taxed, is marked as owing its tax reversal. Tests that
+		// depend on it hand the store their invoices (m.invoices).
+		cn.TaxReversalPending = false
+		if m.invoices != nil && cn.TotalCents > 0 {
+			if inv, ok := m.invoices.invoices[cn.InvoiceID]; ok {
+				cn.TaxReversalPending = inv.TaxAmountCents > 0 && (inv.TaxProvider == "stripe_tax" || inv.TaxTransactionID != "")
+			}
+		}
 	}
 	if to == domain.CreditNoteVoided {
 		cn.VoidedAt = &now
@@ -406,6 +418,7 @@ func (m *memStore) SetTaxTransaction(_ context.Context, tenantID, id, taxTransac
 		return errs.ErrNotFound
 	}
 	cn.TaxTransactionID = taxTransactionID
+	cn.TaxReversalPending = false // one write, as in the real store
 	m.notes[id] = cn
 	return nil
 }
@@ -463,12 +476,11 @@ func (m *memStore) ListPendingCreditNoteTaxReversal(_ context.Context, _ int, _ 
 		if cn.Status != domain.CreditNoteIssued {
 			continue
 		}
-		// Marker fast-path OR the structural over-remit state (issued CN with no
-		// reversal stamped) — mirrors the store's broadened eligibility. The store
-		// ANDs a tax-bearing-source JOIN; this double omits it (no invoices here)
-		// and the service re-checks the invoice per row, clearing stale non-tax
-		// rows. The JOIN itself is covered by the real-Postgres store test.
-		if cn.TaxReversalPending || (cn.TaxTransactionID == "" && cn.TotalCents > 0) {
+		// The marker alone, as in the real store. The store also requires the
+		// invoice to have a tax transaction; this double has no invoices, and
+		// the service re-checks the invoice per row. That join, and the issue
+		// statement setting the marker, are covered by the real-Postgres tests.
+		if cn.TaxReversalPending {
 			out = append(out, cn)
 		}
 	}
