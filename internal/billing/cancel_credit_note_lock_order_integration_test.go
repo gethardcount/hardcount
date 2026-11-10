@@ -103,8 +103,8 @@ func operatorCreditNote(ctx context.Context, cn *creditnote.Service, tenantID, i
 // numbers an invoice) and writes a 2450c relief draft on day-1 (it takes
 // day-1's credit-note lock and numbers a note).
 //
-// Mutations: in BillCancelTx, write the relief after the final invoice, or
-// number the final invoice while pricing it, before the relief → all four
+// Mutations: in writePlanned, write the relief after the final invoice, or
+// number the final invoice before the relief → all four
 // cases abort one writer with 40P01.
 func TestCancel_ConcurrentCreditNoteOnFundingInvoice_BothCommit(t *testing.T) {
 	db := testutil.SetupTestDB(t)
@@ -223,8 +223,8 @@ func (p probedProvider) Calculate(ctx context.Context, req tax.Request) (*tax.Re
 // runs before the cancel takes the number row or a credit-note lock, so no
 // invoice or credit note of the tenant waits on it.
 //
-// Mutation: in BillCancelTx, write the relief before pricing the final
-// invoice → the tax call runs holding both locks.
+// Mutation: price the final invoice in writePlanned, after writing the
+// relief → the tax call runs holding both locks.
 func TestCancel_TaxCallHoldsNoNumberRowOrCreditNoteLock(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	admin := testutil.AdminPool(t)

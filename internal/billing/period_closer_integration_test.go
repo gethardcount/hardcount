@@ -354,7 +354,7 @@ func TestThresholdFire_vs_Close_ResetFalse_CloseFirst(t *testing.T) {
 // T5 — S3: immediate cancel holds the row while the fire arrives.
 // ---------------------------------------------------------------------------
 
-// TestImmediateCancel_vs_ThresholdFire_Concurrent: the cancel's transitionInTx
+// TestImmediateCancel_vs_ThresholdFire_Concurrent: the cancel's compare-and-set
 // X-locks the row from its first statement; the fire's CAS blocks behind it,
 // then re-evaluates against the committed row (status=canceled) → 0 rows. The
 // final-on-cancel invoice F bills [P0, tc); no T; the canceled sub keeps its

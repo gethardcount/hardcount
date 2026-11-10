@@ -53,10 +53,10 @@ func wireCancelEngine(inv *mockInvoices, pricing *mockPricing, adjuster *fakeCre
 	return e
 }
 
-// TestBillOnCancelDraftsTx_AllPaid_CreatesDrafts: an all-paid funding set gets
+// TestWriteCancelReliefTx_AllPaid_CreatesDrafts: an all-paid funding set gets
 // issue_pending DRAFTS on the cancel tx, reports the gross owed, and
 // FinishRelief issues them post-commit.
-func TestBillOnCancelDraftsTx_AllPaid_CreatesDrafts(t *testing.T) {
+func TestWriteCancelReliefTx_AllPaid_CreatesDrafts(t *testing.T) {
 	baseInv, baseLine := paidBaseInvoice()
 	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv}, []domain.InvoiceLineItem{baseLine})
 	adjuster := &fakeCreditNoteAdjuster{}
@@ -64,7 +64,7 @@ func TestBillOnCancelDraftsTx_AllPaid_CreatesDrafts(t *testing.T) {
 
 	r, err := e.WriteCancelReliefTx(context.Background(), nil, sub)
 	if err != nil {
-		t.Fatalf("BillOnCancelDraftsTx: %v", err)
+		t.Fatalf("WriteCancelReliefTx: %v", err)
 	}
 	const want = 5000 // 15000 * 10/30
 	if r.CreditedCents != want {
@@ -84,12 +84,12 @@ func TestBillOnCancelDraftsTx_AllPaid_CreatesDrafts(t *testing.T) {
 	}
 }
 
-// TestBillOnCancelDraftsTx_MixedPaidUnpaid_AllInTx: a paid base plus an unpaid,
+// TestWriteCancelReliefTx_MixedPaidUnpaid_AllInTx: a paid base plus an unpaid,
 // partly-used upgrade invoice. Both shares are drafts on the cancel tx
 // (ADR-118). The newest charging invoice, the upgrade, is relieved first (its
 // 3000 due), and the rest of the 5000 unused goes to the paid base. Only the
 // paid share is customer-balance credit.
-func TestBillOnCancelDraftsTx_MixedPaidUnpaid_AllInTx(t *testing.T) {
+func TestWriteCancelReliefTx_MixedPaidUnpaid_AllInTx(t *testing.T) {
 	baseInv, baseLine := paidBaseInvoice()
 	baseInv.CreatedAt = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	changeAt := time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC)
@@ -107,7 +107,7 @@ func TestBillOnCancelDraftsTx_MixedPaidUnpaid_AllInTx(t *testing.T) {
 
 	r, err := e.WriteCancelReliefTx(context.Background(), nil, sub)
 	if err != nil {
-		t.Fatalf("BillOnCancelDraftsTx: %v", err)
+		t.Fatalf("WriteCancelReliefTx: %v", err)
 	}
 	drafted := map[string]int64{}
 	for _, c := range adjuster.draftCall {
@@ -124,10 +124,10 @@ func TestBillOnCancelDraftsTx_MixedPaidUnpaid_AllInTx(t *testing.T) {
 	}
 }
 
-// TestBillOnCancelDraftsTx_UnpaidFullyUnused_VoidsInTx: a single unpaid prebill
+// TestWriteCancelReliefTx_UnpaidFullyUnused_VoidsInTx: a single unpaid prebill
 // that the customer used none of is voided on the cancel tx, and its
 // post-commit legs (tax reversal, webhook) run in FinishRelief.
-func TestBillOnCancelDraftsTx_UnpaidFullyUnused_VoidsInTx(t *testing.T) {
+func TestWriteCancelReliefTx_UnpaidFullyUnused_VoidsInTx(t *testing.T) {
 	baseInv, baseLine := paidBaseInvoice()
 	baseInv.PaymentStatus, baseInv.AmountDueCents = domain.PaymentFailed, baseInv.TotalAmountCents
 	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv}, []domain.InvoiceLineItem{baseLine})
@@ -140,7 +140,7 @@ func TestBillOnCancelDraftsTx_UnpaidFullyUnused_VoidsInTx(t *testing.T) {
 
 	r, err := e.WriteCancelReliefTx(context.Background(), nil, sub)
 	if err != nil {
-		t.Fatalf("BillOnCancelDraftsTx: %v", err)
+		t.Fatalf("WriteCancelReliefTx: %v", err)
 	}
 	if len(voider.voided) != 1 || voider.voided[0] != "inv_base" || len(adjuster.draftCall) != 0 {
 		t.Fatalf("voided=%v drafts=%+v, want inv_base voided in-tx and no draft", voider.voided, adjuster.draftCall)
@@ -165,7 +165,7 @@ func (f failingFundingLookup) FindFundingInvoicesForPeriod(context.Context, stri
 
 // A funding lookup error fails the relief, so the cancel rolls back. It used
 // to decline to a post-commit path that, failing again, only logged.
-func TestBillOnCancelDraftsTx_LookupError_Fails(t *testing.T) {
+func TestWriteCancelReliefTx_LookupError_Fails(t *testing.T) {
 	baseInv, baseLine := paidBaseInvoice()
 	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv}, []domain.InvoiceLineItem{baseLine})
 	e := wireCancelEngine(inv, pricing, &fakeCreditNoteAdjuster{})
@@ -175,10 +175,10 @@ func TestBillOnCancelDraftsTx_LookupError_Fails(t *testing.T) {
 	}
 }
 
-// TestBillOnCancelDraftsTx_DraftError_PropagatesForRollback: a draft-create
+// TestWriteCancelReliefTx_DraftError_PropagatesForRollback: a draft-create
 // failure returns an error so the caller (CancelAtomicWithBill billFn) rolls the
 // cancel back — never a canceled sub with a silently-lost credit.
-func TestBillOnCancelDraftsTx_DraftError_PropagatesForRollback(t *testing.T) {
+func TestWriteCancelReliefTx_DraftError_PropagatesForRollback(t *testing.T) {
 	baseInv, baseLine := paidBaseInvoice()
 	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv}, []domain.InvoiceLineItem{baseLine})
 	adjuster := &fakeCreditNoteAdjuster{draftErr: errors.New("draft insert failed")}
@@ -189,10 +189,10 @@ func TestBillOnCancelDraftsTx_DraftError_PropagatesForRollback(t *testing.T) {
 	}
 }
 
-// TestBillOnCancelDraftsTx_MultiPaidSource_RespectsHeadroom pins the #276/#277/#278
+// TestWriteCancelReliefTx_MultiPaidSource_RespectsHeadroom pins the #276/#277/#278
 // invariant across the allocate→draft split: cumulative draft gross never exceeds
 // the funding sources' combined headroom.
-func TestBillOnCancelDraftsTx_MultiPaidSource_RespectsHeadroom(t *testing.T) {
+func TestWriteCancelReliefTx_MultiPaidSource_RespectsHeadroom(t *testing.T) {
 	baseInv, baseLine := paidBaseInvoice()
 	changeAt := time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC)
 	periodStart := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
@@ -212,7 +212,7 @@ func TestBillOnCancelDraftsTx_MultiPaidSource_RespectsHeadroom(t *testing.T) {
 
 	r, err := e.WriteCancelReliefTx(context.Background(), nil, sub)
 	if err != nil {
-		t.Fatalf("BillOnCancelDraftsTx: %v", err)
+		t.Fatalf("WriteCancelReliefTx: %v", err)
 	}
 	credited := r.CreditedCents
 	var sum int64
@@ -261,7 +261,7 @@ func TestReliefTx_FullyUnusedUnpaidWithAppliedCredits_NoDoubleRelief(t *testing.
 
 	r, err := e.WriteCancelReliefTx(context.Background(), nil, sub)
 	if err != nil {
-		t.Fatalf("BillOnCancelDraftsTx: %v", err)
+		t.Fatalf("WriteCancelReliefTx: %v", err)
 	}
 	if len(voider.voided) != 1 || voider.voided[0] != "inv_up" {
 		t.Fatalf("voided = %v, want [inv_up]", voider.voided)
@@ -353,7 +353,7 @@ func TestReliefTx_PartialHeadroom_PlacesWhatFits(t *testing.T) {
 
 	r, err := e.WriteCancelReliefTx(context.Background(), nil, sub)
 	if err != nil {
-		t.Fatalf("BillOnCancelDraftsTx: %v", err)
+		t.Fatalf("WriteCancelReliefTx: %v", err)
 	}
 	const want = 2000 // the room left; the unused part is 5000
 	if len(adjuster.draftCall) != 1 || adjuster.draftCall[0].gross != want {

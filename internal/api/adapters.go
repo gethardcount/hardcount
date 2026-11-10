@@ -780,8 +780,9 @@ func (a *subscriptionStateAdapter) GetTerminalState(ctx context.Context, tenantI
 		return dunning.SubscriptionTerminalState{}, err
 	}
 	// Terminated marks the state in which both actions, cancel and pause,
-	// refuse. cancelSpec() allows only draft, trialing and active, and
-	// SetPauseCollection rejects canceled outright.
+	// refuse. The cancel's compare-and-set (CancelAtomicWithBill) matches
+	// only a draft, trialing or active row, and SetPauseCollection rejects
+	// canceled outright.
 	st := dunning.SubscriptionTerminalState{
 		Terminated: sub.Status == domain.SubscriptionCanceled,
 	}

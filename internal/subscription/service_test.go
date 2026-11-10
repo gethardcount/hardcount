@@ -1151,7 +1151,7 @@ func TestCreate(t *testing.T) {
 		// Pre-fix: mid-period immediate cancel generated NO final
 		// invoice. Customer's partial-period usage went uncaptured
 		// (revenue leak). Fix: Service.Cancel now also calls
-		// BillCancelTx, which emits a usage + prorated
+		// PlanCancelBill, which prices a usage + prorated
 		// in_arrears base invoice for [period_start, canceled_at].
 		svcWithBiller := NewService(newMemStore(), nil)
 		fb := &fakeBiller{}

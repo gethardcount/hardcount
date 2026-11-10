@@ -764,10 +764,11 @@ func (s *PostgresStore) ClearScheduledCancellation(ctx context.Context, tenantID
 // FireScheduledCancellationTx is the terminal cycle close (ADR-115): it runs
 // on the engine's closer tx, as its FIRST statement, so the final invoice the
 // engine inserts afterwards shares fate with the flip. Differs from
-// CancelAtomic in that (a) it accepts the engine's effectiveNow as the
-// canceled_at timestamp so the audit trail stays consistent under test
-// clocks, and (b) it clears the schedule fields so a subsequent cycle tick is
-// a no-op rather than a confusing re-fire attempt.
+// CancelAtomicWithBill in that (a) it accepts the engine's effectiveNow as
+// the canceled_at timestamp so the audit trail stays consistent under test
+// clocks, (b) it clears the schedule fields so a subsequent cycle tick is a
+// no-op rather than a confusing re-fire attempt, and (c) it runs on the
+// caller's transaction.
 //
 // The CAS proves `expected` (period start + watermark) as well as
 // status='active': a closer that planned this terminal close from a period

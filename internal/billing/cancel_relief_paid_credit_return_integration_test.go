@@ -134,7 +134,7 @@ func TestCancelRelief_PaidPrebillWithCredit_GivesTheWholeRelief(t *testing.T) {
 			r, err := e.WriteCancelReliefTx(ctx, tx, sub)
 			if err != nil {
 				postgres.Rollback(tx)
-				t.Fatalf("BillOnCancelDraftsTx: %v", err)
+				t.Fatalf("WriteCancelReliefTx: %v", err)
 			}
 			if r.CreditedCents != wantCredit || len(r.DraftIDs) != 1 {
 				postgres.Rollback(tx)

@@ -604,7 +604,7 @@ func TestBillTiming_InAdvance_E2E(t *testing.T) {
 	relief, err := engine.WriteCancelReliefTx(ctx, reliefTx, subRefreshed)
 	if err != nil {
 		_ = reliefTx.Rollback()
-		t.Fatalf("BillOnCancelDraftsTx: %v", err)
+		t.Fatalf("WriteCancelReliefTx: %v", err)
 	}
 	if err := reliefTx.Commit(); err != nil {
 		t.Fatalf("commit relief: %v", err)
@@ -857,7 +857,7 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 		r, err := newEngine().WriteCancelReliefTx(ctx, tx, sub)
 		if err != nil {
 			_ = tx.Rollback()
-			t.Fatalf("BillOnCancelDraftsTx: %v", err)
+			t.Fatalf("WriteCancelReliefTx: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
 			t.Fatalf("commit: %v", err)
@@ -948,7 +948,7 @@ func cancelRelief(t *testing.T, ctx context.Context, db *postgres.DB, tenantID s
 	r, err := e.WriteCancelReliefTx(ctx, tx, sub)
 	if err != nil {
 		_ = tx.Rollback()
-		t.Fatalf("BillOnCancelDraftsTx: %v", err)
+		t.Fatalf("WriteCancelReliefTx: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit relief: %v", err)

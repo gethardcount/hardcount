@@ -380,7 +380,7 @@ func (b payingBiller) BillDue(ctx context.Context, tenantID, id string, grace ti
 // Unpaid is the row the relief used to get wrong: it voided the whole invoice
 // as a "fully unused prebill", usage lines included.
 //
-// Mutation seam: drop the onlyPrepaidBase check in reliefTx → the unpaid row
+// Mutation seam: drop the onlyPrepaidBase check in planRelief → the unpaid row
 // has no live invoice carrying the usage.
 func TestImmediateCancel_InAdvance_AfterPeriodEnd_KeepsEndedPeriodUsage(t *testing.T) {
 	for _, paid := range []bool{false, true} {
