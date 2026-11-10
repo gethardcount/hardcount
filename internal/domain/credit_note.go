@@ -109,16 +109,19 @@ type CreditNote struct {
 	// RetryPendingCreditNoteTaxReversal. The flag is always false on
 	// operator-created drafts.
 	IssuePending bool `json:"issue_pending"`
-	// TaxReversalPending marks an issued credit note whose upstream tax
-	// reversal, run after the commit, was attempted and failed (a transient
-	// Stripe error). RetryPendingCreditNoteTaxReversal retries marked rows
-	// with the per-note hardcount_tax_rev_<cn.ID> key, and clears the flag on
-	// success. The flag is a fast path backed by a partial index, not the
-	// only recovery key. The sweep also finds eligible notes from their
-	// state: an issued note with no reversal stamped against a source that
-	// bears tax. So a failed write of the flag does not lose the recovery
-	// (ADR-061). A NULL tax_transaction_id is ambiguous (not tried, or no
-	// provider). This flag says explicitly "tried, and failed".
+	// TaxReversalPending marks an issued credit note that still owes its
+	// upstream tax reversal. The statement that issues the note sets it, for
+	// a note with an amount on an invoice Stripe Tax taxed with tax; the write
+	// that stores the reversal's transaction clears it. The reversal is a Stripe
+	// call made after the issue commit, so the flag is true from the commit
+	// until that call succeeds: normally within the same request, longer if
+	// the call fails, the process stops first, or the invoice's own tax
+	// transaction is not recorded yet. RetryPendingCreditNoteTaxReversal
+	// makes the reversal for marked notes with the per-note
+	// hardcount_tax_rev_<cn.ID> key (ADR-061, ADR-062). A note whose invoice
+	// never gets a tax transaction (its tax commit never succeeds, or it is on
+	// a test clock) stays marked: nothing was reported, so nothing is
+	// reversed.
 	TaxReversalPending bool           `json:"tax_reversal_pending"`
 	Metadata           map[string]any `json:"metadata,omitempty"`
 	CreatedAt          time.Time      `json:"created_at"`
