@@ -19,13 +19,11 @@ import (
 	"github.com/gethardcount/hardcount/internal/tax"
 )
 
-// InvoiceNumberer allocates the next invoice number for a tenant.
-// Atomicity and uniqueness are the numberer's responsibility.
+// InvoiceNumberer allocates the next invoice number for a tenant, on the
+// caller's transaction. Uniqueness is the numberer's responsibility. Create
+// takes the number on the transaction that inserts the invoice, so a
+// rolled-back create frees it. Satisfied by *tenant.SettingsStore.
 type InvoiceNumberer interface {
-	NextInvoiceNumber(ctx context.Context, tenantID string) (string, error)
-	// NextInvoiceNumberTx is the in-transaction variant used by the
-	// atomic AddItem-with-proration flow — allocate the number and
-	// insert the invoice in one tx so a rollback frees the number.
 	NextInvoiceNumberTx(ctx context.Context, tx *sql.Tx, tenantID string) (string, error)
 }
 
@@ -827,8 +825,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		return domain.Invoice{}, errs.Required("customer_id")
 	}
 	// Both references are read in the caller's tenant and mode before
-	// anything is written, including the invoice number: a refused request
-	// must not use one up.
+	// anything is written.
 	onClock, err := s.customerOnTestClock(ctx, tenantID, input.CustomerID)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -861,9 +858,8 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 
 	// Read tenant settings once, for the default Net terms, the billing
 	// timezone and the workspace currency. A read failure fails the create
-	// rather than guessing Net 30 (P24), a zone or a currency, and happens
-	// before an invoice number is spent. No reader wired (tests) means Net 30,
-	// UTC and USD, as in the engine.
+	// rather than guessing Net 30 (P24), a zone or a currency. No reader
+	// wired (tests) means Net 30, UTC and USD, as in the engine.
 	ts := domain.TenantSettings{DefaultCurrency: "USD"}
 	if s.settings != nil {
 		ts, err = s.settings.Get(ctx, tenantID)
@@ -910,9 +906,10 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	ctx = s.bindForCreate(ctx, tenantID, input)
 	now := s.clock.Now(ctx)
 
-	// Validate and build every line before the invoice number is taken: a
-	// refused line must not use one up. The commit-expiry check reads the
-	// clock bound just above.
+	// Validate and build every line before the create transaction opens.
+	// That transaction holds the tenant's number row until it commits, so
+	// it runs only the writes. The commit-expiry check reads the clock bound
+	// just above.
 	items := make([]domain.InvoiceLineItem, 0, len(input.LineItems))
 	var subtotal int64
 	commitLines := 0
@@ -935,9 +932,9 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		items = append(items, li)
 	}
 	// One commit per invoice (ADR-078). The store enforces it too, on both
-	// create (createWithLineItemsInTx) and AddLineItem (under the row lock);
-	// checking here as well keeps a refused pair from using up a number,
-	// which the store's check runs too late to prevent.
+	// create (createWithLineItemsInTx) and AddLineItem (under the row lock).
+	// Checking here refuses the pair with the other line errors, before the
+	// create transaction opens.
 	if commitLines > 1 {
 		return domain.Invoice{}, errs.Invalid("commit_granted_cents", "invoice already has a commit line — one commit per invoice; use a separate invoice")
 	}
@@ -953,10 +950,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		periodEnd = now
 	}
 
-	invoiceNumber, err := s.numberer.NextInvoiceNumber(ctx, tenantID)
-	if err != nil {
-		return domain.Invoice{}, fmt.Errorf("allocate invoice number: %w", err)
-	}
 	issuedAt := now
 	// Net N runs on the tenant's civil calendar, so the due date stays the
 	// same wall-clock time across a DST change.
@@ -966,7 +959,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		CustomerID:         input.CustomerID,
 		SubscriptionID:     input.SubscriptionID,
 		BillingTimezone:    billingLoc.String(),
-		InvoiceNumber:      invoiceNumber,
 		Status:             domain.InvoiceDraft,
 		PaymentStatus:      domain.PaymentPending,
 		Currency:           currency,
@@ -992,9 +984,16 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		IsSimulated: onClock,
 	}
 
+	// Take the number on the transaction that inserts the invoice. Invoice
+	// numbers must run without a gap, and a create that fails then gives its
+	// number back.
+	number := func(tx *sql.Tx) (string, error) {
+		return s.numberer.NextInvoiceNumberTx(ctx, tx, tenantID)
+	}
+
 	// Bare-header create — caller adds line items incrementally afterwards.
 	if len(input.LineItems) == 0 {
-		return s.store.CreateWithLineItemsAudited(ctx, tenantID, inv, nil, s.createEmission(ctx, 0))
+		return s.store.CreateNumberedAudited(ctx, tenantID, inv, nil, number, s.createEmission(ctx, 0))
 	}
 
 	// Atomic create-with-lines: header + items persist in one transaction
@@ -1007,13 +1006,13 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	inv.SubtotalCents = subtotal
 	inv.TotalAmountCents = subtotal
 	inv.AmountDueCents = subtotal
-	return s.store.CreateWithLineItemsAudited(ctx, tenantID, inv, items, s.createEmission(ctx, len(items)))
+	return s.store.CreateNumberedAudited(ctx, tenantID, inv, items, number, s.createEmission(ctx, len(items)))
 }
 
 // createEmission builds the in-tx audit emission for an operator/API invoice
 // create (POST /v1/invoices). Both request shapes, a bare header with no
 // lines and a create with lines, go through one store method,
-// CreateWithLineItemsAudited, with this emission. So the audit row does not
+// CreateNumberedAudited, with this emission. So the audit row does not
 // depend on which shape the composer sent; lineItemCount is the only
 // difference in content. Engine/cycle invoices reach the store through the
 // un-audited variants: their canonical evidence is the finalize row, and
@@ -2615,7 +2614,7 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 	// invoice-level rules (manual invoices only, at most one commit line
 	// per invoice) are enforced in the store under the invoice row lock,
 	// covering both this path's consumers (AddLineItemAtomicAudited and
-	// CreateWithLineItemsAudited).
+	// CreateNumberedAudited).
 	if input.CommitGrantedCents != nil {
 		if *input.CommitGrantedCents <= 0 {
 			return domain.InvoiceLineItem{}, errs.Invalid("commit_granted_cents", "must be greater than 0")

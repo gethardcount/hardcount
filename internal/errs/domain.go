@@ -274,6 +274,17 @@ var (
 	ErrUnavailable = errors.New("unavailable")
 )
 
+// CodeInvoiceBillingPeriodTaken and CodeInvoiceThresholdCycleTaken name the
+// unique index an invoice insert hit (the invoice store's
+// mapInvoiceUniqueViolation): the subscription's period slot
+// (idx_invoices_billing_period_dedup) and its cycle's threshold slot
+// (idx_invoices_threshold_unique_per_cycle). Billing branches on them and
+// may not import the invoice package.
+const (
+	CodeInvoiceBillingPeriodTaken  = "invoice_billing_period_taken"
+	CodeInvoiceThresholdCycleTaken = "invoice_threshold_cycle_taken"
+)
+
 // Error code constants.
 const (
 	CodeBillingSetupIncomplete = "billing_setup_incomplete"
