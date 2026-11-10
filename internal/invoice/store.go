@@ -49,6 +49,12 @@ type Store interface {
 	// FinalizeDraft is the draft→finalized flip for a cycle invoice, with the
 	// same onFinalized hook.
 	FinalizeDraft(ctx context.Context, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error)
+	// FinalizeDraftTx is FinalizeDraft on the caller's transaction. A tax
+	// retry finalizes inside its tax write's transaction. (See ADR-017.)
+	FinalizeDraftTx(ctx context.Context, tx *sql.Tx, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error)
+	// CollectionPausedTx reports whether the invoice's subscription has
+	// pause_collection in force at `at`, read on the caller's transaction.
+	CollectionPausedTx(ctx context.Context, tx *sql.Tx, invoiceID string, at time.Time) (bool, error)
 	// MarkPaid flips status='paid', payment_status='succeeded',
 	// amount_paid=amount_due, amount_due=0 in one transaction. Service uses
 	// it to settle an invoice with nothing left due (SettleZeroDue, and

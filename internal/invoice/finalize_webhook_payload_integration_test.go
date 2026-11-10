@@ -73,21 +73,32 @@ func TestFinalize_UnderStripeTax_EventIsTheFinalizedRow(t *testing.T) {
 }
 
 // resolvingRetrier stands in for the billing engine's tax recompute: it
-// marks the draft's tax resolved on the real row, keeping its Stripe Tax
-// calculation, and returns the row.
+// writes the draft's tax as resolved through the real store's
+// UpdateTaxAtomic, keeping its Stripe Tax calculation, and runs RetryTax's
+// hook on that transaction, as the engine does.
 type resolvingRetrier struct {
 	db    *postgres.DB
 	store *invoice.PostgresStore
 }
 
-func (r resolvingRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
-	if err := r.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE invoices SET tax_status = 'ok', tax_error_code = NULL WHERE id = $1`, invoiceID)
-		return err
-	}); err != nil {
+func (r resolvingRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string,
+	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
+) (domain.Invoice, error) {
+	inv, err := r.store.Get(ctx, tenantID, invoiceID)
+	if err != nil {
 		return domain.Invoice{}, err
 	}
-	return r.store.Get(ctx, tenantID, invoiceID)
+	lines, err := r.store.ListLineItems(ctx, tenantID, invoiceID)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	facts := inv.TaxFacts
+	facts.TaxStatus, facts.TaxErrorCode, facts.TaxPendingReason, facts.TaxDeferredAt = domain.InvoiceTaxOK, "", "", nil
+	return r.store.UpdateTaxAtomic(ctx, tenantID, invoiceID, domain.InvoiceTaxRetryUpdate{
+		SubtotalCents: inv.SubtotalCents, DiscountCents: inv.DiscountCents,
+		TaxFacts: facts, TotalAmountCents: inv.TotalAmountCents,
+		BasisSubtotalCents: inv.SubtotalCents, BasisDiscountCents: inv.DiscountCents,
+	}, lines, then)
 }
 
 func (r resolvingRetrier) ComputeTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {

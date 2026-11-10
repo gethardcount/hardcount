@@ -209,7 +209,7 @@ func TestRetryTax_RefreshesOnlyAProvenExpiredCalculation(t *testing.T) {
 			TaxFacts: domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK, TaxCalculationID: "taxcalc_old"},
 		}}},
 	}
-	if _, err := e.RetryTaxForInvoice(context.Background(), "t1", "inv_1"); !errors.Is(err, errBlip) {
+	if _, err := e.RetryTaxForInvoice(context.Background(), "t1", "inv_1", nil); !errors.Is(err, errBlip) {
 		t.Fatalf("err = %v, want the guard's read error", err)
 	}
 	if prov.calls != 0 {

@@ -22100,12 +22100,15 @@ paths:
         invoice, so check its `attention`.
 
         When the tax resolves on an invoice the billing engine made, the
-        call also finalizes it, unless collection is paused on its
-        subscription. If nothing is then due, the invoice is marked paid at
-        once; otherwise the automatic charge collects it on its next run.
-        An invoice you created stays a draft for you to finalize. If the
-        finalize fails, the call returns 500 or 409 and the invoice stays a
-        draft with its tax saved: finalize it.
+        call also finalizes it, in the same transaction as the tax, unless
+        collection is paused on its subscription. If nothing is then due,
+        the invoice is marked paid at once; otherwise the automatic charge
+        collects it on its next run. An invoice you created stays a draft
+        for you to finalize. If the finalize fails, the call returns 500 or
+        409 and the tax is not saved: the invoice stays a draft with its tax
+        pending and keeps its notice. The try is counted (toward the
+        automatic retries, for an error Hardcount retries). A 409 names the
+        finalize failure; for a 500 the server log says why.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
@@ -22209,8 +22212,9 @@ paths:
           description: |
             Code `invalid_state`. The invoice is not a draft, or its tax is
             not pending and its calculation is not an expired one. Also
-            returned when the tax was saved but the invoice's state then
-            stopped the finalize. Code `invoice_lines_changed`: a line was
+            returned when the invoice was finalized while its tax was being
+            calculated, or when the invoice's state stopped the finalize;
+            the tax was not saved. Code `invoice_lines_changed`: a line was
             added to the invoice while its tax was being calculated, and
             nothing was saved; retry.
           content:

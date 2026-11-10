@@ -77,11 +77,23 @@ type CreditNoteTotaler interface {
 	UnreliefedClawbackCents(ctx context.Context, tenantID, invoiceID string) (int64, error)
 }
 
+// stepsBudget bounds one group of steps after a commit that run on a ctx their
+// caller cannot cancel: a tax retry's finalize steps and $0 settle
+// (RetryTax). It is taken after that commit. 5 minutes is above three Stripe
+// calls at their limit (3 × 92s), so a call that can still succeed is not
+// cut. docs/dev/code-standard.md names it.
+const stepsBudget = 5 * time.Minute
+
 // TaxRetrier is the narrow view into tax recompute + persistence the
 // retry-tax endpoint depends on. Satisfied by billing.Engine in
 // production — the contract lives next to the handler that calls it.
 type TaxRetrier interface {
-	RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error)
+	// RetryTaxForInvoice recomputes a draft's tax and writes it. then, when
+	// not nil, runs on the write's transaction before it commits, with the
+	// taxed row and the transaction's ctx: RetryTax finalizes there. A then
+	// error rolls the write back and is returned.
+	RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string,
+		then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error) (domain.Invoice, error)
 	// ComputeTaxForInvoice computes tax for a draft invoice regardless of
 	// tax_status. Finalize calls this for manual / operator-composed
 	// invoices, which accrue line items incrementally and have no tax until
@@ -499,22 +511,22 @@ func (s *Service) SetDunningRunReader(r DunningRunReader) {
 	s.dunningReader = r
 }
 
-// SubscriptionPauseReader is the narrow subscription lookup the tax-retry
-// auto-finalize gate uses to honour `pause_collection`, and that Create uses
-// to confirm an operator-supplied subscription id is the caller's. The read
-// is tenant- and mode-scoped. Satisfied by *subscription.PostgresStore.
-// PauseCollections reads the pause of many subscriptions at once (nil = no
-// pause; an id with no row is absent), so a list page's banners cost one read
-// (issue #1142).
+// SubscriptionPauseReader is the narrow subscription lookup Create uses to
+// confirm an operator-supplied subscription id is the caller's, and the
+// attention banners use to honour `pause_collection`. The read is tenant- and
+// mode-scoped. Satisfied by *subscription.PostgresStore. PauseCollections
+// reads the pause of many subscriptions at once (nil = no pause; an id with
+// no row is absent), so a list page's banners cost one read (issue #1142).
+// The tax-retry auto-finalize does not use it: it reads the pause on its own
+// transaction (Store.CollectionPausedTx).
 type SubscriptionPauseReader interface {
 	Get(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 	PauseCollections(ctx context.Context, tenantID string, ids []string) (map[string]*domain.PauseCollection, error)
 }
 
 // SetSubscriptionPauseReader wires the pause lookup (see
-// SubscriptionPauseReader). Optional: when nil, auto-finalize behaves as it
-// did before the gate existed — the conservative direction is to finalize,
-// since a stuck draft is the state operators complain about.
+// SubscriptionPauseReader). Optional: when nil, Create does not check the
+// subscription id and the banners assume no pause.
 func (s *Service) SetSubscriptionPauseReader(r SubscriptionPauseReader) {
 	s.subPauseReader = r
 }
@@ -695,22 +707,10 @@ func (s *Service) ListInvoiceDisputes(ctx context.Context, tenantID, invoiceID s
 	return s.ListDisputes(ctx, tenantID, invoiceID)
 }
 
-// collectionPaused reports whether the invoice's subscription has
-// pause_collection in force now. An unwired reader, no subscription id or a subscription
-// that no longer exists answers false (nothing to pause). Any other read error
-// is returned: the auto-finalize gate must not issue and charge an invoice on a
-// guess that collection is not paused.
-func (s *Service) collectionPaused(ctx context.Context, tenantID, subscriptionID string) (bool, error) {
-	if subscriptionID == "" {
-		return false, nil
-	}
-	paused, err := s.collectionPausedMany(ctx, tenantID, []string{subscriptionID})
-	return paused[subscriptionID], err
-}
-
-// collectionPausedMany is collectionPaused for several subscriptions in one
-// read, keyed by id. Unwired reader → empty map; an id with no row is absent
-// (false). On a read error the map is empty and the error returned.
+// collectionPausedMany reports, for several subscriptions in one read, whether
+// each has pause_collection in force now, keyed by id. Unwired reader → empty
+// map; an id with no row is absent (false). On a read error the map is empty
+// and the error returned.
 func (s *Service) collectionPausedMany(ctx context.Context, tenantID string, subscriptionIDs []string) (map[string]bool, error) {
 	out := make(map[string]bool, len(subscriptionIDs))
 	if s.subPauseReader == nil || len(subscriptionIDs) == 0 {
@@ -1629,16 +1629,10 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.Invoice
 	return s.attachAttentionAll(ctx, invs), total, nil
 }
 
+// Finalize is the operator's finalize of a draft (POST /v1/invoices/{id}/finalize).
+// A tax retry finalizes an engine draft through RetryTax instead, inside its
+// tax write's transaction; both use finalizeHook and afterFinalize.
 func (s *Service) Finalize(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	return s.finalize(ctx, tenantID, id, true)
-}
-
-// finalize is Finalize; checkTaxExpiry=false skips the tax-calculation expiry
-// guard, for the one caller whose calculation was created moments earlier in
-// the same call (the auto-finalize after a successful tax retry): it cannot
-// be 24h old, and since the guard fails closed on a read error, running it
-// there would only add ways to leave a freshly-taxed invoice a draft.
-func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExpiry bool) (domain.Invoice, error) {
 	ctx = s.bindForInvoice(ctx, tenantID, id)
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
@@ -1721,7 +1715,7 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	// double-reported tax. Only the shape where the build-time commit
 	// FAILED (calc present, transaction absent) both needs the commit and
 	// can never get it once expired.
-	if checkTaxExpiry && s.taxCommitter != nil && inv.TaxCalculationID != "" && inv.TaxTransactionID == "" {
+	if s.taxCommitter != nil && inv.TaxCalculationID != "" && inv.TaxTransactionID == "" {
 		if err := s.taxCommitter.CheckTaxCalculationUsable(ctx, tenantID, id, inv.TaxCalculationID); err != nil {
 			return domain.Invoice{}, err
 		}
@@ -1734,21 +1728,8 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	// clock.Now is simulated time for clock-pinned customers. Net term is the
 	// value the draft was created with. A cycle draft keeps the dates the
 	// engine built it with (the FinalizeDraft branch).
-	// Relief held on the draft is issued on the finalize tx, so the invoice
-	// is never chargeable at its full amount (row 13). A failure rolls the
-	// finalize back: the invoice stays a draft and nothing is charged.
 	var finishRelief func(context.Context)
-	onFinalized := func(tx *sql.Tx, flipped domain.Invoice) error {
-		if s.heldRelief == nil {
-			return nil
-		}
-		finish, err := s.heldRelief.IssueHeldReliefTx(ctx, tx, tenantID, flipped)
-		if err != nil {
-			return fmt.Errorf("issue the relief held on this draft: %w", err)
-		}
-		finishRelief = finish
-		return nil
-	}
+	onFinalized := s.finalizeHook(ctx, tenantID, &finishRelief)
 	var finalized domain.Invoice
 	if isOperatorComposed(inv) {
 		issuedAt := s.clock.Now(ctx)
@@ -1760,21 +1741,73 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	if err != nil {
 		return domain.Invoice{}, err
 	}
-	// The finalize transaction gave the invoice its hosted-page token and
-	// queued invoice.finalized with the row it committed (the store's
-	// finalizedTx), so a crash from here on loses neither. The steps below
-	// run after that commit. The event comes before the collector applies
-	// credit (ADR-116), so its amount_due_cents is before that credit, and
-	// before the tax commit, so it carries no tax_transaction_id recorded
-	// here.
-	//
-	// Commit Stripe Tax calculation to a tax_transaction at finalize. Missing
-	// calculation id = manual/none provider — skip silently. Commit failure
-	// does not unwind finalize: the invoice is already authoritative; we log
-	// and continue so the customer-facing state stays consistent.
-	// TaxTransactionID gate mirrors the pre-check above: an already-
-	// committed calc (build-time commit succeeded) has nothing left to
-	// commit, and re-committing an aged one only produces expiry noise.
+	return s.afterFinalize(ctx, tenantID, finalized, finishRelief), nil
+}
+
+// finalizeHook builds the hook a finalize transaction runs after the flip,
+// for an operator's Finalize and for a tax retry that finalizes (RetryTax).
+// On that transaction it:
+//   - issues the relief held on the draft, so the invoice is never chargeable
+//     at its full amount (release plan row 13); finish receives the relief's
+//     steps after the commit, which afterFinalize runs;
+//   - writes the finalize audit row (ADR-090), so every finalize through
+//     this service leaves exactly one row, and a finalize without its row
+//     does not commit. The actor comes from ctx: the operator on the HTTP
+//     path, system on a sweep.
+//
+// A failure rolls the finalize back: the invoice stays a draft and nothing is
+// charged. ctx is the transaction's.
+func (s *Service) finalizeHook(ctx context.Context, tenantID string, finish *func(context.Context)) func(tx *sql.Tx, inv domain.Invoice) error {
+	return func(tx *sql.Tx, flipped domain.Invoice) error {
+		if s.heldRelief != nil {
+			f, err := s.heldRelief.IssueHeldReliefTx(ctx, tx, tenantID, flipped)
+			if err != nil {
+				return fmt.Errorf("issue the relief held on this draft: %w", err)
+			}
+			*finish = f
+		}
+		if s.audit != nil {
+			if err := s.audit.LogInTx(ctx, tx, audit.Entry{
+				Action:        domain.AuditActionFinalize,
+				ResourceType:  "invoice",
+				ResourceID:    flipped.ID,
+				ResourceLabel: flipped.InvoiceNumber,
+				Metadata: map[string]any{
+					"invoice_number":     flipped.InvoiceNumber,
+					"customer_id":        flipped.CustomerID,
+					"total_amount_cents": flipped.TotalAmountCents,
+					"currency":           flipped.Currency,
+				},
+			}); err != nil {
+				return fmt.Errorf("write the finalize audit row: %w", err)
+			}
+		}
+		return nil
+	}
+}
+
+// afterFinalize runs a finalize's steps after its commit and returns the
+// invoice as it is now, as GET /v1/invoices/{id} shows it.
+//
+// The finalize transaction gave the invoice its hosted-page token and queued
+// invoice.finalized with the row it committed (the store's finalizedTx), so a
+// crash from here on loses neither. The event comes before the collector
+// applies credit (ADR-116), so its amount_due_cents is before that credit,
+// and before the tax commit, so it carries no tax_transaction_id recorded
+// here.
+//
+// The Stripe Tax calculation is committed to a tax transaction. A missing
+// calculation id is the manual or none provider, skipped. A commit failure
+// does not unwind the finalize: the invoice is already authoritative, and the
+// tax_commit sweep commits it later. An already-committed calculation (the
+// build-time commit succeeded) has nothing left to commit.
+//
+// Then the held relief's own steps: its tax reversal needs the invoice's tax
+// transaction, committed just above.
+//
+// If the final read fails, the row the finalize committed is returned: the
+// finalize stands.
+func (s *Service) afterFinalize(ctx context.Context, tenantID string, finalized domain.Invoice, finishRelief func(context.Context)) domain.Invoice {
 	if s.taxCommitter != nil && finalized.TaxCalculationID != "" && finalized.TaxTransactionID == "" {
 		if err := s.taxCommitter.CommitTax(ctx, tenantID, finalized.ID, finalized.TaxCalculationID); err != nil {
 			slog.Warn("invoice: tax commit failed at finalize",
@@ -1782,37 +1815,16 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 				"tax_provider", finalized.TaxProvider, "calculation_id", finalized.TaxCalculationID)
 		}
 	}
-	// The held relief's own steps after commit: its tax reversal needs the
-	// invoice's tax transaction, committed just above.
 	if finishRelief != nil {
 		finishRelief(ctx)
 	}
-	// Canonical finalize audit row — written HERE (not per entry point) so
-	// every path through Finalize gets exactly one row: the operator HTTP
-	// endpoint (actor = the operator, from ctx) AND the tax-retry
-	// auto-finalize chain (actor = system). The handler's own write was
-	// removed alongside this — two writers per action is the duplicate-row
-	// bug mark-uncollectible / record-payment had.
-	if s.audit != nil {
-		_ = s.audit.Log(ctx, tenantID, domain.AuditActionFinalize, "invoice", finalized.ID, finalized.InvoiceNumber, map[string]any{
-			"invoice_number":     finalized.InvoiceNumber,
-			"customer_id":        finalized.CustomerID,
-			"total_amount_cents": finalized.TotalAmountCents,
-			"currency":           finalized.Currency,
-		})
-	}
-	// Return the invoice as it is now, as GET /v1/invoices/{id} shows it. The
-	// tax commit and the held relief's steps above write the row after the
-	// finalize committed it, and the retry-tax endpoint responds with what
-	// this returns. If the read fails, return the row the finalize
-	// committed: the finalize stands.
-	current, err := s.store.Get(ctx, tenantID, id)
+	current, err := s.store.Get(ctx, tenantID, finalized.ID)
 	if err != nil {
 		slog.WarnContext(ctx, "invoice: read after finalize failed; returning the row the finalize committed",
 			"error", err, "tenant_id", tenantID, "invoice_id", finalized.ID)
-		return finalized, nil
+		return finalized
 	}
-	return current, nil
+	return current
 }
 
 // reverseInvoiceTax reverses the upstream tax transaction for an invoice being
@@ -2631,116 +2643,97 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 	}, nil
 }
 
-// RetryTax routes a "Retry tax" action through the billing engine.
-// Called from the operator-triggered HTTP handler, the background
-// reconciler (RetryPendingTax), the test-clock catch-up and the two
-// fan-outs (Stripe connect, billing-profile save). The engine owns the
-// recompute and atomic persist; this service method layers
-// auto-finalize on top: when the retry succeeds AND the invoice
-// is engine-generated (billing_reason != "manual"), finalize in
-// the same call. Manual invoices stay draft so the operator
-// retains the explicit finalize step.
+// RetryTax routes a "Retry tax" action through the billing engine: the
+// operator's button, the tax_retry sweep, the test-clock catch-up and the two
+// fan-outs (Stripe connect, billing-profile save). When the tax resolves on an
+// engine-generated draft (shouldAutoFinalizeAfterRetry), it finalizes the
+// draft inside the tax write's transaction (the engine's hook). The tax and
+// the finalize commit together or not at all, so no engine draft is left
+// with tax ok and no finalize. (See ADR-017.)
 //
-// Once the tax write commits, an engine draft with tax ok and no pause is
-// owed a finalize, and no sweep lists it again: every tax sweep lists only
-// pending tax. So everything after the tax write runs on a
-// detached ctx. A SIGTERM or a lost lease cancels the tax_retry tick's ctx
-// (main.go); a finalize on that ctx failed and left the period unissued for
-// good. After a lease loss the new leader's sweep does not list this row
-// (its tax is ok). A rival that finalizes first (an operator's Finalize, or
-// a second RetryTax on the same row) wins the draft→finalized CAS; nothing
-// is owed then, so that returns nil. For the same reason, a failed pause
-// read or finalize is returned as an error naming the remedy, so the sweep
-// counts it. A paused draft is legal and returns nil.
-//
-// Still uncovered: a hard process death in the few milliseconds between the
-// tax commit and the finalize commit. That includes the connect fan-out
-// goroutine, which shutdown does not wait for, so it is covered only for its
-// own 5-minute timeout. It also includes a SIGTERM during the tax write's
-// COMMIT round trip: pgx commits on the BeginTx ctx, so the commit can apply
-// and still return context canceled, and RetryTax returns before the detach.
-// The full fix finalizes inside UpdateTaxAtomic's tx.
-//
-// Returns the updated invoice with its Attention re-derived so the caller
-// renders the new state immediately. Once the tax write has committed, an
-// error comes back with the taxed draft, so the handler still audits the
-// click's tax change.
+// A subscription with pause_collection in force, read on that transaction at
+// the invoice's now, keeps the draft. A failed pause read or finalize leaves
+// the row as it was before the try and returns an error naming the finalize;
+// the engine counts the try when the tax was pending. A rival that finalized
+// during the calculation gets the store's 409. After the commit, the
+// finalize's steps and the $0 settle run on a stepsBudget ctx. Manual
+// invoices stay drafts. An error comes back with no invoice.
 func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
 	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
 	if s.taxRetrier == nil {
 		return domain.Invoice{}, errs.InvalidState("tax retry is not configured")
 	}
-	inv, err := s.taxRetrier.RetryTaxForInvoice(ctx, tenantID, invoiceID)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	// The tax write has committed: the pause read, finalize and its tail, and
-	// the $0 settle below must not stop on a cancelled ctx (see above).
-	ctx = context.WithoutCancel(ctx)
-	// A paused subscription keeps its invoices as drafts — that is the whole
-	// meaning of pause_collection's keep_as_draft, and the engine holds the
-	// same line at cycle close. Auto-finalize is the one path that ignored it,
-	// because a tax-deferred draft is draft for two independent reasons and
-	// resolving the tax only clears one of them. Issuing it here would hand
-	// the operator an invoice they asked us not to send, and its banner would
-	// promise an automatic charge that collection (correctly) refuses to make.
-	// The draft stays a draft until an operator finalizes it: resuming
-	// collection does not finalize it (Stripe: after a resume, "set
-	// auto_advance=true on each draft invoice").
-	if shouldAutoFinalizeAfterRetry(inv) {
-		paused, perr := s.collectionPaused(ctx, tenantID, inv.SubscriptionID)
-		if perr != nil {
-			// Unknown is not "not paused": leave the draft (tax is already
-			// persisted), and return the error like a failed auto-finalize below.
-			return s.attachAttention(ctx, inv), fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it", perr)
+	var (
+		finalized    bool
+		hookErr      error
+		finishRelief func(context.Context)
+	)
+	then := func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error {
+		if !shouldAutoFinalizeAfterRetry(taxed) {
+			return nil
+		}
+		// A paused subscription keeps its invoices as drafts: that is what
+		// pause_collection's keep_as_draft means, and the engine holds the
+		// same line at cycle close. A tax-deferred draft is a draft for two
+		// independent reasons, and resolving the tax clears only one.
+		// Issuing it would send an invoice the operator asked us not to
+		// send. It stays a draft until an operator finalizes it: resuming
+		// collection does not finalize it (Stripe: after a resume, "set
+		// auto_advance=true on each draft invoice"). The pause is read at
+		// the invoice's now (its test clock's on a simulated one).
+		paused, err := s.store.CollectionPausedTx(ctx, tx, taxed.ID, s.clock.Now(ctx))
+		if err != nil {
+			hookErr = fmt.Errorf("read whether collection is paused: %w", err)
+			return hookErr
 		}
 		if paused {
-			slog.Info("invoice: tax resolved but collection is paused on the subscription; leaving the invoice as a draft",
-				"tenant_id", tenantID, "invoice_id", invoiceID, "subscription_id", inv.SubscriptionID)
-			return s.attachAttention(ctx, inv), nil
+			slog.InfoContext(ctx, "invoice: tax resolved but collection is paused on the subscription; leaving the invoice as a draft",
+				"tenant_id", tenantID, "invoice_id", invoiceID, "subscription_id", taxed.SubscriptionID)
+			return nil
 		}
+		if _, err := s.store.FinalizeDraftTx(ctx, tx, tenantID, taxed.ID, s.finalizeHook(ctx, tenantID, &finishRelief)); err != nil {
+			hookErr = fmt.Errorf("finalize: %w", err)
+			return hookErr
+		}
+		finalized = true
+		return nil
 	}
-	if shouldAutoFinalizeAfterRetry(inv) {
-		final, ferr := s.finalize(ctx, tenantID, invoiceID, false) // the calc is seconds old
-		if ferr != nil {
-			// A rival finalized it first: the connect fan-out and the
-			// tax_retry sweep can retry the same provider_not_configured
-			// row at once, or an operator clicked Finalize. Nothing is
-			// owed, so that is not a failure.
-			if cur, gerr := s.store.Get(ctx, tenantID, invoiceID); gerr == nil && cur.Status != domain.InvoiceDraft {
-				return s.attachAttention(ctx, cur), nil
-			}
-			// Tax already updated and persisted; finalize-side failure
-			// does not unwind the recompute. No sweep lists a draft whose
-			// tax is ok, so return the error: the sweep counts it, and
-			// the operator's click fails.
-			return s.attachAttention(ctx, inv), fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it", ferr)
+	inv, err := s.taxRetrier.RetryTaxForInvoice(ctx, tenantID, invoiceID, then)
+	if err != nil {
+		if hookErr != nil {
+			slog.ErrorContext(ctx, "invoice: tax retry resolved the tax but did not finalize; the row is left as it was, and the try is counted when its tax was pending",
+				"tenant_id", tenantID, "invoice_id", invoiceID, "error", hookErr)
+			return domain.Invoice{}, fmt.Errorf("the tax was calculated but the invoice could not be finalized, so the tax was not saved: %w", err)
 		}
-		// Nothing owed after finalize (a $0 invoice): settle it now so the
-		// operator who clicked Retry tax sees it paid. The auto-charge sweep
-		// would settle it too (it is queued), just a tick later. Credits are
-		// not applied to drafts, so a credit-covered invoice is not $0 here;
-		// the collector applies the credits and settles it.
-		if final.AmountDueCents <= 0 {
-			now := s.clock.Now(ctx)
-			paid, perr := s.store.MarkPaid(ctx, tenantID, invoiceID, "", now)
-			if perr != nil {
-				slog.Warn("invoice: auto-pay after tax-retry finalize failed; invoice stays finalized with $0 due",
-					"error", perr, "tenant_id", tenantID, "invoice_id", invoiceID,
-					"amount_due_cents", final.AmountDueCents)
-				return s.attachAttention(ctx, final), nil
-			}
-			return s.attachAttention(ctx, paid), nil
-		}
-		// Still owed after finalize: nothing more to do here. The finalize
-		// write queued the invoice for collection (auto_charge_pending), and
-		// the auto-charge sweep is its collector: credits, the card, a
-		// decline into dunning, or the setup-link email. This runs inside a
-		// cron batch with no operator waiting, so there is no nudge; the
-		// catchup's Phase 2 → Phase 3 order collects it in the same Advance.
-		return s.attachAttention(ctx, final), nil
+		return domain.Invoice{}, err
 	}
-	return s.attachAttention(ctx, inv), nil
+	if !finalized {
+		return s.attachAttention(ctx, inv), nil
+	}
+	stepsCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stepsBudget)
+	defer cancel()
+	final := s.afterFinalize(stepsCtx, tenantID, inv, finishRelief)
+	// Nothing owed after finalize (a $0 invoice): settle it now so the
+	// operator who clicked Retry tax sees it paid. The auto-charge sweep
+	// would settle it too (it is queued), just a tick later. Credits are not
+	// applied to drafts, so a credit-covered invoice is not $0 here; the
+	// collector applies the credits and settles it.
+	if final.AmountDueCents <= 0 {
+		paid, perr := s.store.MarkPaid(stepsCtx, tenantID, invoiceID, "", s.clock.Now(stepsCtx))
+		if perr != nil {
+			slog.Warn("invoice: auto-pay after tax-retry finalize failed; invoice stays finalized with $0 due",
+				"error", perr, "tenant_id", tenantID, "invoice_id", invoiceID,
+				"amount_due_cents", final.AmountDueCents)
+			return s.attachAttention(stepsCtx, final), nil
+		}
+		return s.attachAttention(stepsCtx, paid), nil
+	}
+	// Still owed after finalize: nothing more to do here. The finalize
+	// queued the invoice for collection (auto_charge_pending), and the
+	// auto-charge sweep is its collector: credits, the card, a decline into
+	// dunning, or the setup-link email. The catchup's Phase 2 → Phase 3
+	// order collects it in the same Advance.
+	return s.attachAttention(stepsCtx, final), nil
 }
 
 // shouldAutoFinalizeAfterRetry encodes the gate for chaining a

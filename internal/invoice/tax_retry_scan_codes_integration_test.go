@@ -2,6 +2,7 @@ package invoice_test
 
 import (
 	"context"
+	"database/sql"
 	"sync"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ type recordingTaxRetrier struct {
 	ids []string
 }
 
-func (r *recordingTaxRetrier) RetryTaxForInvoice(_ context.Context, _, invoiceID string) (domain.Invoice, error) {
+func (r *recordingTaxRetrier) RetryTaxForInvoice(_ context.Context, _, invoiceID string, _ func(context.Context, *sql.Tx, domain.Invoice) error) (domain.Invoice, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.ids = append(r.ids, invoiceID)

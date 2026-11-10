@@ -96,6 +96,12 @@ The rest of the code rules are in the [code standard](dev/code-standard.md).
 - **Change environment variables only with `t.Setenv`,** and don't use
   `t.Parallel` in tests that use `SetupTestDB`, because it clears the tables.
   ([testing: T.Setenv](https://pkg.go.dev/testing#T.Setenv))
+- **Test a cut COMMIT with a store wrapper.** pgx commits on the
+  transaction's ctx, so a cancel during COMMIT can apply the commit and still
+  return `context.Canceled`. Wrap the store method that owns the transaction:
+  run the real call, then cancel the request's ctx, and return
+  `context.Canceled` if the ctx the call was given is now done (for example
+  `cutCommitInvoices` in `internal/billing/tax_retry_one_tx_integration_test.go`).
 - **Run a concurrency test under `-race`.** The race detector only sees code
   that runs, and CI's `-race` run covers only the `-short` unit tests, so run
   `go test -race -short=false` yourself on a Postgres-backed concurrency test.
