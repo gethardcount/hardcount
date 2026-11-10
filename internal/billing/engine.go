@@ -136,16 +136,17 @@ func (e *Engine) auditWriter() AuditWriter { return e.auditLogger }
 // created already-finalized (cycle close, subscription create, cancel-final,
 // threshold), or returns ok=false for a draft.
 //
-// Drafts (tax-pending / pause-collection) are skipped: they finalize later via
-// the tax-retry chain's service.Finalize, which writes the row there — auditing
-// here too would double-count. tenant_id, actor and the sim axis are derived
+// Drafts (tax-pending / pause-collection) are skipped: they finalize later,
+// and invoice.Service.finalizeHook writes the row on that finalize's
+// transaction (the operator's Finalize, or the tax retry's in-transaction
+// finalize) — auditing here too would double-count. tenant_id, actor and the sim axis are derived
 // from ctx + the tx GUC inside LogInTx, so the Entry carries only the row's own
 // facts (ADR-030: created_at stays wall-clock; the simulated instant is a
 // derived column, not metadata).
 //
-// The operator HTTP path and the tax-retry auto-finalize get their row from
-// invoice.Service.Finalize; engine invoices never pass through Finalize — they
-// are born finalized — so without this they leave no audit trace at all.
+// The finalize of a draft gets its row from invoice.Service.finalizeHook;
+// engine invoices never pass through it — they are born finalized — so
+// without this they leave no audit trace at all.
 //
 // born_finalized marks the row as one of those: the invoice was finalized in
 // the statement that created it, never a draft someone finalized. The
@@ -687,8 +688,14 @@ type InvoiceWriter interface {
 	// UpdateTaxAtomic re-stamps a draft's tax decision. Used by
 	// computeAndPersistInvoiceTax (retry and finalize-time tax) to persist
 	// the recomputed line amounts, per-line and invoice-level tax fields
-	// atomically.
-	UpdateTaxAtomic(ctx context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem) (domain.Invoice, error)
+	// atomically. then, when not nil, runs on the same transaction before it
+	// commits (a tax retry finalizes there); its error rolls the write back.
+	UpdateTaxAtomic(ctx context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem,
+		then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error) (domain.Invoice, error)
+	// RecordTaxRetryAttempt counts a tax retry whose write was rolled back
+	// by its hook (the finalize failed), and sets the next retry time. Only
+	// a draft with tax pending is changed.
+	RecordTaxRetryAttempt(ctx context.Context, tenantID, invoiceID string, nextRetryAt *time.Time) error
 }
 
 // MustValidate panics unless every collaborator field on the Engine is
@@ -776,6 +783,14 @@ type TaxCalculationWriter interface {
 // expires_at, 90 days after it was made (tax.CalculationUsableUntilSQL).
 // Operator guidance on expiry: "Retry tax to refresh, then finalize."
 const taxCalculationExpiryMargin = time.Hour
+
+// commitBudget bounds one transaction of local statements that runs on a ctx
+// its caller cannot cancel: a tax retry's write and the finalize that rides
+// on it, and the count of a failed try (computeAndPersistInvoiceTax). Each
+// transaction takes its own, just before it, and nothing else runs on it.
+// 30s is the limit the same transaction has on an API request.
+// docs/dev/code-standard.md names it. A var so a test can shorten it.
+var commitBudget = 30 * time.Second
 
 // SetTaxProviderResolver wires the per-tenant tax provider resolver. When
 // nil, the engine skips tax calculation entirely and invoices carry zero
@@ -5230,7 +5245,14 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 //   - subscription is loaded if present (so jurisdiction-by-plan-tax-
 //     code logic in ApplyTaxToLineItems sees the same inputs as the
 //     original cycle build)
-func (e *Engine) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
+//
+// then runs on the tax write's transaction (UpdateTaxAtomic): the invoice
+// service finalizes the draft there, so the tax and the finalize commit
+// together. (See ADR-017.) See computeAndPersistInvoiceTax for what a then error
+// does.
+func (e *Engine) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string,
+	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
+) (domain.Invoice, error) {
 	inv, err := e.invoices.GetInvoice(ctx, tenantID, invoiceID)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -5274,7 +5296,7 @@ func (e *Engine) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID str
 		return domain.Invoice{}, errs.InvalidState(fmt.Sprintf(
 			"tax retry only valid when tax_status is pending, or to refresh a draft's EXPIRED uncommitted calculation (current: %s)", inv.TaxStatus))
 	}
-	return e.computeAndPersistInvoiceTax(ctx, tenantID, invoiceID, inv)
+	return e.computeAndPersistInvoiceTax(ctx, tenantID, invoiceID, inv, then)
 }
 
 // ComputeTaxForInvoice computes (or recomputes) tax for a DRAFT invoice
@@ -5301,7 +5323,7 @@ func (e *Engine) ComputeTaxForInvoice(ctx context.Context, tenantID, invoiceID s
 		return domain.Invoice{}, errs.InvalidState(fmt.Sprintf(
 			"tax compute only valid on draft invoices (current: %s)", inv.Status))
 	}
-	return e.computeAndPersistInvoiceTax(ctx, tenantID, invoiceID, inv)
+	return e.computeAndPersistInvoiceTax(ctx, tenantID, invoiceID, inv, nil)
 }
 
 // computeAndPersistInvoiceTax is the shared core behind RetryTaxForInvoice
@@ -5314,7 +5336,22 @@ func (e *Engine) ComputeTaxForInvoice(ctx context.Context, tenantID, invoiceID s
 // The calculation taxes each line's price, not what the line stores
 // (storedTaxBasis): with tax-inclusive prices, a line taxed at build stores
 // its net, and taxing that net again carved the tax out twice.
-func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invoiceID string, inv domain.Invoice) (domain.Invoice, error) {
+//
+// The calculation runs on the caller's ctx. The write runs on a ctx the
+// caller cannot cancel, with a commitBudget deadline, taken just before it:
+// pgx commits on the transaction's ctx, so a cancel during the COMMIT round
+// trip could apply the commit and still return an error. A caller cancelled
+// during the calculation writes nothing (the ctx.Err check).
+//
+// When then fails, the write is rolled back and the error returned. The try
+// is counted on its own ctx (RecordTaxRetryAttempt) with the next retry time
+// the failed code would have had, so the retry cap and the backoff hold. The
+// store counts it only on a draft whose tax is still pending: the refresh of
+// an expired calculation (tax ok) counts nothing. The row's stored error code
+// stays the last tax error.
+func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invoiceID string, inv domain.Invoice,
+	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
+) (domain.Invoice, error) {
 	items, err := e.invoices.ListLineItems(ctx, tenantID, invoiceID)
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("list line items: %w", err)
@@ -5375,7 +5412,32 @@ func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invo
 		BasisDiscountCents: inv.DiscountCents,
 	}
 
-	return e.invoices.UpdateTaxAtomic(ctx, tenantID, invoiceID, update, basis)
+	if err := ctx.Err(); err != nil {
+		return domain.Invoice{}, fmt.Errorf("recompute tax: %w", err)
+	}
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), commitBudget)
+	defer cancel()
+	var hookErr error
+	var hook func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error
+	if then != nil {
+		hook = func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error {
+			hookErr = then(ctx, tx, taxed)
+			return hookErr
+		}
+	}
+	out, err := e.invoices.UpdateTaxAtomic(writeCtx, tenantID, invoiceID, update, basis, hook)
+	if err != nil && hookErr != nil {
+		// Its own budget: the write's may be what ran out (a lock wait in
+		// the finalize), and the try must still be counted.
+		countCtx, countCancel := context.WithTimeout(context.WithoutCancel(ctx), commitBudget)
+		defer countCancel()
+		next := nextTaxRetry(countCtx, domain.InvoiceTaxPending, inv.TaxErrorCode, inv.TaxRetryCount)
+		if rerr := e.invoices.RecordTaxRetryAttempt(countCtx, tenantID, invoiceID, next); rerr != nil {
+			slog.ErrorContext(ctx, "tax retry: could not count a try whose finalize failed",
+				"tenant_id", tenantID, "invoice_id", invoiceID, "error", rerr)
+		}
+	}
+	return out, err
 }
 
 // nextTaxRetry decides whether the reconciler should pick this row

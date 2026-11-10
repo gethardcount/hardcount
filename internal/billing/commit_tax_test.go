@@ -295,7 +295,7 @@ func TestRetryTax_CommitLineStaysOutOfTheRetriedRequest(t *testing.T) {
 		},
 	}
 
-	inv, err := e.RetryTaxForInvoice(context.Background(), "t1", "inv_1")
+	inv, err := e.RetryTaxForInvoice(context.Background(), "t1", "inv_1", nil)
 	if err != nil {
 		t.Fatalf("retry tax: %v", err)
 	}

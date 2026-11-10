@@ -191,8 +191,14 @@ func (a *invoiceStoreAdapter) ListLineItems(ctx context.Context, tenantID, invoi
 	return a.store.ListLineItems(ctx, tenantID, invoiceID)
 }
 
-func (a *invoiceStoreAdapter) UpdateTaxAtomic(ctx context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem) (domain.Invoice, error) {
-	return a.store.UpdateTaxAtomic(ctx, tenantID, invoiceID, update, lineItems)
+func (a *invoiceStoreAdapter) UpdateTaxAtomic(ctx context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem,
+	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
+) (domain.Invoice, error) {
+	return a.store.UpdateTaxAtomic(ctx, tenantID, invoiceID, update, lineItems, then)
+}
+
+func (a *invoiceStoreAdapter) RecordTaxRetryAttempt(ctx context.Context, tenantID, invoiceID string, nextRetryAt *time.Time) error {
+	return a.store.RecordTaxRetryAttempt(ctx, tenantID, invoiceID, nextRetryAt)
 }
 
 func (a *invoiceStoreAdapter) FindFundingInvoicesForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) ([]domain.Invoice, error) {
