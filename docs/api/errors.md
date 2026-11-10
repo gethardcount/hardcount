@@ -146,8 +146,8 @@ Postgres stopped it stays done:
 
 | `code` | When | What to do |
 |---|---|---|
-| `payment_in_flight` | A card charge for the invoice may be in progress. A void, write-off, offline payment, credit note, collection or email would run at the same time as that charge. | Wait a few minutes, then retry |
-| `payment_unidentifiable` | Stripe's answer for a charge was unclear. Hardcount checks with Stripe within a day. Only a write-off is allowed until then. | Wait, or mark the invoice uncollectible |
+| `payment_in_flight` | A card charge for the invoice is running, or its result is not known yet. Every charge takes a second or so. A void, write-off, offline payment, credit note, collection or email would run at the same time as that charge. | Wait a few minutes, then retry. After an unclear answer from Stripe, Hardcount can take about an hour to settle the charge. |
+| `payment_unidentifiable` | An earlier Hardcount version parked this invoice: Stripe's answer for its charge was unclear and named no payment. Only a write-off is allowed. Invoices this version charges never return it. | Mark the invoice uncollectible, or ask the person who runs your server to check it ([runbook](../ops/runbook/unclear-charge.md#parked-no-paymentintent)) |
 | `payment_in_progress` | A payment for this invoice is already in progress on the hosted page | Wait |
 | `not_payable` | The invoice cannot be paid now, for example it is paid or voided | Do not retry |
 | `amount_below_minimum` | The amount is below Stripe's smallest card charge | Void it, record an offline payment, or bill it later |
@@ -228,7 +228,7 @@ Each sends a `Retry-After` header with the seconds to wait.
 |---|---|---|
 | `provider_error` | Stripe refused the request, such as a declined card. The message says why. | Read the message; do not retry blindly |
 | `payment_outcome_unknown` | Stripe never answered. The charge or refund may have gone through. | Check the invoice before you retry |
-| `stripe_key_unusable` | Stripe refused the account's key, or no key is connected for this mode. Nothing was charged. | Fix the Stripe key under **Settings** |
+| `stripe_key_unusable` | Stripe refused the account's key, or no key is connected for this mode. Nothing was charged. If Stripe refused the key on the confirm, the invoice shows `unknown` until the first scheduled run after the key works again. | Fix the Stripe key under **Settings** |
 | `stripe_error` | The hosted page could not start a Stripe Checkout session | Try again later |
 | `smtp_error` | The email server refused the test email. The message says what it answered. | Fix the email settings |
 | `email_enqueue_failed` | An email could not be queued | Retry |

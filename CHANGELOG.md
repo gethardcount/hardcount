@@ -24,6 +24,7 @@ original text.
 - `POST /v1/subscriptions/{id}/activate` answers `409 invalid_state` for a draft whose customer is archived. Unarchive the customer first, then activate.
 - `scripts/backup.sh` now writes each dump so that only the user who runs it can read it, and creates a missing backup folder that only that user can open. A job that copies the dumps as another user can no longer read them: run that job as the user that runs `backup.sh`.
 - A subscription whose cycle close kept failing on a long Stripe Tax error, until billing parked it, stays parked after the upgrade. Its log line `bill subscription failed` reads `invalid byte sequence for encoding "UTF8"` (SQLSTATE 22021). Call `POST /v1/subscriptions/{id}/retry-billing` for each one.
+- One migration runs on start: `00224_charge_hold_token`. It refuses to run while an invoice has a charge in progress or a parked charge from the previous version. Keep the previous version running until none is left (about an hour; a parked charge up to 24 hours), then stop it and start the new one, one version at a time ([Upgrade Hardcount](docs/upgrades.md#migration-00224-finish-charges-first)).
 - Quick-start installs: the quick start now listens only on 127.0.0.1, and `./quickstart.sh destroy` asks you to type the project name first. Scripts pass `--yes`. It takes its settings only from its `.env`, not from your shell. It refuses to run while a quick start in another folder has its Compose project: run `./quickstart.sh destroy` in that folder first. An `.env` that an earlier `quickstart.sh` wrote still listens on every network interface: put `127.0.0.1:` before the port on its `NGINX_HTTP_PORT` line, as in `NGINX_HTTP_PORT=127.0.0.1:8080`, then run `./quickstart.sh`.
 - One migration runs on start: `00223_restore_catchup` adds the `restore_catchup` table, which marks a restored database.
 - Hardcount now refuses to start on a database `scripts/restore.sh` restored, or `hardcount restore begin` marked, and the restore pauses billing and dunning. A script that does this must change:
@@ -32,6 +33,10 @@ original text.
 - Compose installs: `deploy/compose/nginx.conf` now includes `nginx-log-redact.conf`, which `docker-compose.yml` mounts. Check out the release, as for any upgrade, so all three arrive together. If you run `nginx.conf` outside this Compose file, copy `nginx-log-redact.conf` too, or nginx will not start ([#1651](https://github.com/gethardcount/hardcount/pull/1651)).
 - The dashboard's pages, the hosted invoice page among them, now refuse to be shown in a frame, on any site. If your site frames one, link to it instead ([#1651](https://github.com/gethardcount/hardcount/pull/1651)).
 - If a webhook endpoint listens for only one of `payment_method.attached` and `payment_method.updated`, subscribe it to both. A Stripe event that changes nothing on a saved card now sends no webhook. One Stripe Checkout setup session sends two Stripe events for its card, so the card can arrive as either webhook ([Payment methods](docs/api/webhook-events.md#payment-methods-datapayment_method)).
+
+### Changed
+
+- **A charge saves its Stripe payment before any money can move.** Each charge creates the PaymentIntent unconfirmed, puts it on the invoice, then confirms it. While it runs, the invoice's payment is `unknown`. An unclear answer now names the payment and is settled within about an hour. No invoice is parked for 24 hours ([ADR-137](docs/adr/137-charge-stamps-invoice-before-confirming.md)).
 
 ### Added
 

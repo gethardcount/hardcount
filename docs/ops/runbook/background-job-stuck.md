@@ -129,9 +129,10 @@ The next tick starts one interval after it ends.
      not counted as an attempt, so the run never runs out of attempts. If
      the panic comes after a charge the card declined, the reconciler
      clears the invoice's charge hold within the hour. (The reconciler is
-     the check that asks Stripe what happened to a charge whose result
-     Hardcount did not save. The charge hold is the claim that lets only one
-     charge run on an invoice at a time.) The next tick
+     the check that asks Stripe what happened to a payment Hardcount has no
+     answer for. It also clears a charge hold that a stopped charge left
+     behind, without asking Stripe. The charge hold is the claim that lets
+     only one charge run on an invoice at a time.) The next tick
      then charges the card again: one real decline every hour or two,
      with no attempt counted and no email. Take `run_id` from the first
      `step panicked` line:

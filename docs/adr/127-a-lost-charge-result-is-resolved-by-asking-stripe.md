@@ -1,7 +1,7 @@
 # ADR-127: A lost charge result is resolved by asking Stripe before anything irreversible
 
 **Date:** 2026-10-19
-**Status:** Accepted (amended 2026-10-20; amended 2026-10-23: a written-off park keeps its hold when Stripe refuses; amended 2026-10-29: a park keeps one attempt row and its hold)
+**Status:** Accepted (amended 2026-10-20; amended 2026-10-23: a written-off park keeps its hold when Stripe refuses; amended 2026-10-29: a park keeps one attempt row and its hold; amended 2026-11-10: ADR-137)
 **Supersedes:** [ADR-106](106-charge-intent-ledger.md) (the charge-intent
 ledger, parked since 2026-07-31), and since the 2026-10-20 amendment
 [ADR-108](108-parked-invoices-search-and-adopt.md) (the Stripe Search sweep). PR #1291 drafted a second record-based
@@ -498,3 +498,7 @@ Tests: `TestParked_EndsWithAPayment_TheParkedAttemptRecordsIt`,
 `TestParkedHold_NeverClearedWhileParked`, and the parked rows of
 `TestPaymentBlocksActionHeld_Matrix`. Each guard was removed in turn and its
 test went red.
+
+## Amendment 2026-11-10
+
+The stale-hold sweep reads the attempt saved under a hold by id instead of listing the customer's PaymentIntents, and there is no 24-hour park, so R10 is gone ([ADR-137](137-charge-stamps-invoice-before-confirming.md)). The charge hold, its TTL and the 10-minute wait before the sweep are unchanged.

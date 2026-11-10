@@ -104,9 +104,9 @@ func TestChargeAttemptSeqBumpedByEveryPIStamp(t *testing.T) {
 		t.Errorf("expected at least 3 PI-stamping UPDATEs (StampChargeOutcome, MarkPaymentFailedReportingTransition, "+
 			"markPaidReportingTransition), found %d — did the scanner stop matching?", stamps)
 	}
-	if clears != 2 {
-		t.Errorf("found %d stale-hold clears that move the seq (an UPDATE that bumps it and clears the charge hold), want exactly 2: "+
-			"ClearStaleChargeHold and UnparkAfterNoPayment are the writes ADR-105's amendments let move the seq without a PaymentIntent", clears)
+	if clears != 1 {
+		t.Errorf("found %d stale-hold clears that move the seq (an UPDATE that bumps it and clears the charge hold), want exactly 1: "+
+			"ClearStaleChargeHold is the write ADR-105's amendments let move the seq without a PaymentIntent", clears)
 	}
 	if bumps != stamps+clears {
 		t.Errorf("seq bumps (%d) are not PI stamps (%d) plus the stale-hold clear (%d)", bumps, stamps, clears)

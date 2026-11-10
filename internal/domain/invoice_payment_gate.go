@@ -37,12 +37,11 @@ type PaymentBlock struct {
 //   - No payment in flight: nothing is blocked here. The caller's own status
 //     rules (paid, voided, draft) still apply. They stay out of this function
 //     on purpose, because they differ per action.
-//   - Parked (payment_status 'unknown' with no PaymentIntent ID): Stripe's
-//     answer was unclear and named no payment. Hardcount checks Stripe's list
-//     of the customer's payments within a day (ADR-127 amendment 2026-10-20).
-//     Only mark-uncollectible is allowed, for a customer who paid another way.
-//     Every other action is refused, and the message says what Hardcount does
-//     next.
+//   - Parked (payment_status 'unknown' with no PaymentIntent ID): an earlier
+//     version's charge got an unclear answer that named no payment (only an
+//     earlier version parks; ADR-137). Only mark-uncollectible is allowed,
+//     for a customer who paid another way. Every other action is refused, and
+//     the message sends the operator to the customer's payments in Stripe.
 //   - In flight with a known PaymentIntent: the charge is resolving, so every
 //     action is refused and the operator is told to wait.
 //
@@ -52,17 +51,20 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 		return PaymentBlock{}
 	}
 
-	// Parked: Stripe's answer was unclear and named no payment. Hardcount finds
-	// out from Stripe's list of the customer's payments, within a day.
+	// An unclear charge (unknown, with or without its PaymentIntent) can be
+	// written off: the deliberate carve-out, for a customer who paid another
+	// way. Writing it off moves no money, and a payment Stripe completes later
+	// still settles the invoice as paid. It is also the exit when Stripe cannot
+	// be asked at all (the key revoked, the PaymentIntent gone from the
+	// account). A charge request that may still reach Stripe is refused by
+	// PaymentBlocksActionHeld's live-hold rule.
+	if inv.PaymentStatus == PaymentUnknown && action == ActionMarkUncollectible {
+		return PaymentBlock{}
+	}
+
+	// Parked (left by an earlier version): Stripe's answer was unclear and
+	// named no payment.
 	if inv.Parked() {
-		if action == ActionMarkUncollectible {
-			// The deliberate carve-out, for a customer who paid another way.
-			// Writing it off moves no money, and a payment Stripe completes
-			// later still settles the invoice as paid. It is also the exit
-			// when Stripe cannot be asked at all (the key revoked, the
-			// customer deleted there).
-			return PaymentBlock{}
-		}
 		return PaymentBlock{
 			Blocked: true,
 			Code:    "payment_unidentifiable",
@@ -87,40 +89,34 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 // past. The card settlement path must never call this, because the charge
 // that holds the hold must be able to record its own success.
 //
-// The hold counts as in flight because every charge claim writes only the
-// hold. payment_status stays 'pending' or 'failed' until Stripe answers, so
-// PaymentBlocksAction alone sees nothing while Stripe may be taking the
-// money. A void then leaves a successful charge on a voided invoice, and an
-// offline payment makes the customer pay twice.
+// The hold counts as in flight because a charge claim writes only the hold.
+// payment_status stays 'pending' or 'failed' until the charge has created its
+// PaymentIntent and put it on the invoice as 'unknown' (ADR-137), so until
+// then PaymentBlocksAction alone sees nothing. A void or an offline payment
+// that landed in that gap would make the charge's stamp fail, and nothing
+// would be confirmed; refusing them here spares the charge.
 //
 // How the hold is read:
 //   - On a 'pending' or 'failed' invoice, a live hold refuses every action.
-//     A stale hold refuses too (ADR-127): its charge may have been sent and
-//     its result lost, so Stripe may hold a payment Hardcount has not
-//     recorded. It stays set until the stale-hold sweep has asked Stripe,
-//     within about an hour. Write-off is the one action a stale hold allows.
+//     A stale hold refuses too (ADR-127), until the stale-hold sweep clears
+//     it, within about an hour: its charger is gone, and the sweep moves the
+//     counter in the same write so the next charge sends a new key.
+//     Write-off is the one action a stale hold allows.
 //     It moves no money, a payment the sweep finds later still settles the
 //     invoice (uncollectible → paid), and it is the exit when Stripe can
 //     never answer (disconnected, the customer deleted). This is ADR-107's
 //     carve-out reasoning.
-//   - On a parked invoice, only a live hold counts. A park keeps its claim's
-//     hold, so a stale hold there is the normal wait. The stale-hold sweep
-//     asks Stripe about a parked invoice within a day. Write-off stays
-//     allowed during that wait: the exit for a customer who paid another way
-//     (ADR-107). A live hold on a park belongs to a charge request made for
-//     it. Today that is the charge that parked it, in its first five
-//     minutes. Once the stale-hold sweep resends a parked charge, it is that
-//     resend. A write-off must not land while such a request may still reach
-//     Stripe, or the request can charge an invoice written off because the
-//     customer paid another way. So write-off waits a few minutes there, like
-//     every other action (ADR-127 amendment 2026-10-29).
+//   - On an 'unknown' invoice, parked or naming its PaymentIntent, only a
+//     live hold counts: write-off waits while the charge that left the
+//     outcome unclear may still be resending to Stripe (ADR-127 amendment
+//     2026-10-29, ADR-137).
 //   - Any other invoice ignores the hold. PaymentBlocksAction already
 //     decides 'processing'.
 func PaymentBlocksActionHeld(inv Invoice, action InvoiceAction, hold ChargeHoldState) PaymentBlock {
 	if b := PaymentBlocksAction(inv, action); b.Blocked {
 		return b
 	}
-	if inv.Parked() && hold == ChargeHoldLive {
+	if inv.PaymentStatus == PaymentUnknown && hold == ChargeHoldLive {
 		return PaymentBlock{Blocked: true, Code: "payment_in_flight", Message: ChargeHoldRefusalMessage}
 	}
 	if inv.PaymentStatus != PaymentPending && inv.PaymentStatus != PaymentFailed {
@@ -144,23 +140,24 @@ func PaymentBlocksActionHeld(inv Invoice, action InvoiceAction, hold ChargeHoldS
 // ChargeHoldRefusalMessage is what an operator reads when an action is refused
 // because a charge holds the invoice. The hold is live, or stale and waiting
 // for the stale-hold sweep to confirm it with Stripe (ADR-127).
-const ChargeHoldRefusalMessage = "A charge on this invoice is being confirmed with Stripe. Try again in a few minutes; an interrupted charge is confirmed within about an hour."
+const ChargeHoldRefusalMessage = "A charge on this invoice is being confirmed with Stripe. Try again in a few minutes; an interrupted charge is cleared within about an hour."
 
-// parkedMessage says why the action is refused while Stripe may still
-// complete the charge, and what Hardcount does next on its own (ADR-127
-// amendment 2026-10-20). Hardcount records a payment that appears, and it
-// charges again as usual when none has appeared 24 hours after the attempt.
-// The message ends by naming mark-uncollectible, the one action allowed
-// meanwhile, for a customer who paid another way. alreadyWrittenOff swaps
+// parkedMessage says why the action is refused on a park and what to do. Only
+// an earlier Hardcount version parked an invoice, and the upgrade to ADR-137
+// refuses to run while any exists, so a park here got past that check: this
+// version saved no payment to look up and does not resolve it on its own. The
+// message sends the operator to the customer's payments in Stripe and ends by
+// naming mark-uncollectible, the one action allowed, for a customer who paid
+// another way. alreadyWrittenOff swaps
 // that ending, because the advice is impossible on an invoice that already
 // is uncollectible. Writing off a parked invoice is the carve-out in
 // PaymentBlocksAction.
 func parkedMessage(action InvoiceAction, alreadyWrittenOff bool) string {
-	const why = "Stripe didn't confirm this invoice's last charge and may still complete it"
+	const why = "An earlier Hardcount version couldn't confirm this invoice's last charge with Stripe"
 	if alreadyWrittenOff {
-		return why + ". The invoice is already written off, so Hardcount will not charge it again. If Stripe completes the charge, the payment is recorded here"
+		return why + ". The invoice is already written off, so nothing charges it again. Check the customer's payments in Stripe for that charge"
 	}
-	const next = ". Hardcount checks Stripe every hour and records the payment if it appears; if none appears within 24 hours, the invoice is charged again as usual. If the customer paid another way, mark the invoice uncollectible instead"
+	const next = ". Hardcount can't look that charge up, so check the customer's payments in Stripe. If the customer paid another way, mark the invoice uncollectible instead"
 	switch action {
 	case ActionVoid:
 		return why + ", and voiding it could annul an invoice that is in fact paid" + next

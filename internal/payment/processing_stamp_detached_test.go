@@ -9,11 +9,15 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// lateProcessingClient answers once the caller's context is done: Stripe's
-// "processing" reply arriving just as the caller's deadline ends.
+// lateProcessingClient answers the confirm once the caller's context is done:
+// Stripe's "processing" reply arriving just as the caller's deadline ends.
 type lateProcessingClient struct{ mockStripeClient }
 
-func (c *lateProcessingClient) CreatePaymentIntent(ctx context.Context, _ PaymentIntentParams) (PaymentIntentResult, error) {
+func (c *lateProcessingClient) CreateUnconfirmedPaymentIntent(context.Context, PaymentIntentParams) (PaymentIntentResult, error) {
+	return PaymentIntentResult{ID: "pi_late", Status: "requires_confirmation"}, nil
+}
+
+func (c *lateProcessingClient) ConfirmPaymentIntent(ctx context.Context, _ string, _ PaymentIntentParams) (PaymentIntentResult, error) {
 	<-ctx.Done()
 	return PaymentIntentResult{ID: "pi_late", Status: "processing"}, nil
 }
@@ -23,8 +27,9 @@ func (c *lateProcessingClient) CreatePaymentIntent(ctx context.Context, _ Paymen
 // seconds) ended while Stripe answered. Stripe has the PaymentIntent; before,
 // the stamp failed on the expired context, the invoice did not show the
 // payment, and the retry was skipped as if nothing had reached Stripe. A
-// caller that was cancelled (a shutdown) still saves nothing, as for an
-// unclear outcome.
+// caller that was cancelled (a shutdown) saves no answer, and needs none: the
+// invoice was stamped unknown on the PaymentIntent before the confirm, and
+// the unknown sweep reads it.
 func TestChargeInvoice_ProcessingStampSurvivesTheCallersDeadline(t *testing.T) {
 	t.Run("deadline: the stamp is saved", func(t *testing.T) {
 		invoices := &ctxCheckingUpdater{mockInvoiceUpdater: newMockInvoiceUpdater()}
@@ -45,7 +50,7 @@ func TestChargeInvoice_ProcessingStampSurvivesTheCallersDeadline(t *testing.T) {
 		}
 	})
 
-	t.Run("cancelled: nothing is saved", func(t *testing.T) {
+	t.Run("cancelled: the invoice already says unknown on the PaymentIntent", func(t *testing.T) {
 		invoices := &ctxCheckingUpdater{mockInvoiceUpdater: newMockInvoiceUpdater()}
 		invoices.invoices["inv_1"] = finalizedPendingInvoice()
 		s := NewStripe(&lateProcessingClient{}, invoices, newMockWebhookStore(), nil)
@@ -55,8 +60,8 @@ func TestChargeInvoice_ProcessingStampSurvivesTheCallersDeadline(t *testing.T) {
 		if _, err := s.ChargeInvoiceForDunningRetry(ctx, "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test"); err == nil {
 			t.Fatal("charge returned no error on a cancelled caller; want the stamp dropped")
 		}
-		if stored := invoices.invoices["inv_1"]; stored.PaymentStatus != domain.PaymentPending {
-			t.Errorf("stored %s, want pending: a cancelled caller saves nothing", stored.PaymentStatus)
+		if stored := invoices.invoices["inv_1"]; stored.PaymentStatus != domain.PaymentUnknown || stored.StripePaymentIntentID == "" {
+			t.Errorf("stored %s on %q, want unknown on the charge's PaymentIntent (stamped before the confirm)", stored.PaymentStatus, stored.StripePaymentIntentID)
 		}
 	})
 }

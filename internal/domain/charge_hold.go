@@ -11,16 +11,16 @@ import (
 //   - NULL: no charge is outstanding.
 //   - Set, in the future: its owner is working (a charge, or dunning's final
 //     action).
-//   - Set, in the past (stale): a charge may have been sent and its result
-//     was not saved. The cause can be a crash, a caller's deadline or a lost
-//     answer.
+//   - Set, in the past (stale): its charger is gone (a crash, a caller's
+//     deadline, a lost answer). On an invoice still pending or failed that
+//     charge never confirmed a payment: a charge puts its PaymentIntent on
+//     the invoice, as an unknown outcome, before it confirms (ADR-137).
 //
 // While the hold is set, nothing but its owner takes the hold, charges, or
 // does anything irreversible. Only the owner clears its own hold, by
 // comparing the value it wrote. Only the stale-hold sweep (payment.Reconciler)
-// clears a stale hold, after it asks Stripe what the lost charge did.
-// Write-off is the one action allowed on a stale hold: it moves no money, and
-// a payment found later still settles the invoice.
+// clears a stale hold; it needs no answer from Stripe to do so.
+// Write-off is the one action allowed on a stale hold: it moves no money.
 //
 // A stale hold does not count as free. If it did, an interrupted charge
 // would leave the invoice looking exactly like one never charged. The next
@@ -53,16 +53,18 @@ const (
 )
 
 // The hold's timing, checked by TestChargeHoldTiming. The three numbers
-// together make "Stripe has nothing for this attempt" a safe conclusion for
-// the stale-hold sweep:
+// together keep a sweep from acting on a charge that has yet to send:
 //
 //   - A claim writes now() + ChargeHoldTTL.
 //   - Right before it sends, the charge re-checks that its hold has at least
 //     ChargeSendMargin left, and it bounds the Stripe call by
 //     ChargeSendBudget. ChargeSendBudget <= ChargeSendMargin, so no request
 //     for an attempt can start after its hold ends.
-//   - The sweep looks only at holds that ended StaleChargeHoldWait ago, so
-//     Stripe has had that long to finish anything it received.
+//   - The stale-hold sweep looks only at holds that ended
+//     StaleChargeHoldWait ago, and the unknown sweep only at invoices whose
+//     hold has ended. Neither needs the wait for safety: the stamp and the
+//     clear are compare-and-sets on one row, and Stripe refuses a confirm on a
+//     canceled PaymentIntent (ADR-137).
 const (
 	ChargeHoldTTL       = 5 * time.Minute
 	ChargeSendMargin    = 2 * time.Minute
@@ -70,49 +72,17 @@ const (
 	StaleChargeHoldWait = 10 * time.Minute
 )
 
-// ParkedNothingWait is how long after its hold a parked charge must be before
-// "Stripe shows nothing" puts the invoice back where a charge picks it up. A
-// parked charge (Invoice.Parked) is one whose Stripe answer was unclear and
-// named no PaymentIntent. A payment that Stripe shows is acted on at the
-// first check. Only absence waits.
-//
-// A park follows a 500, a 409, a network error or a timed-out call. In each
-// case Stripe received the request, or may have. Stripe's page on
-// advanced error handling (docs.stripe.com/error-low-level) says: "During
-// incident recovery, Stripe attempts to reconcile failed operations and send
-// webhook events for any objects created during reconciliation". It also
-// says: "Limit retries of an unresolved operation to the first 24 hours after
-// the original request, using the same key and parameters. If the outcome is
-// still unknown after that window, don't retry with either the old key or a
-// new one. Retrieve the relevant object, inspect the request in the Dashboard
-// and use webhook events to reconcile the outcome. If you can't establish
-// what happened, contact Stripe support before repeating the operation."
-//
-// Hardcount retrieves: the stale-hold sweep lists the customer's
-// PaymentIntents. When that list still shows none for the invoice 24 hours
-// after the attempt, the invoice is charged again under a new key. This is a
-// deliberate departure from Stripe's last sentence. Its cost is that a
-// payment Stripe creates even later is flagged as payment.duplicate_charge
-// (ADR-127, R10).
-//
-// The hold is at most ChargeHoldTTL after the attempt began, and the attempt
-// ends before the hold does (ChargeSendBudget). So a hold older than this
-// wait means at least 24 hours have passed since the attempt.
-const ParkedNothingWait = 24 * time.Hour
-
 // StaleChargeHold is one row the stale-hold sweep checks. It carries the
 // invoice, and the hold value and charge counter the sweep read. When the
-// sweep clears the hold, it compares both. StripeCustomerID is the
-// customer's Stripe customer id. It is empty when the customer has none,
-// which means no charge can have been sent.
+// sweep clears the hold, it compares both.
 type StaleChargeHold struct {
-	Invoice          Invoice
-	Hold             time.Time
-	StripeCustomerID string
-	// PastParkedWait: the hold ended more than ParkedNothingWait ago, read on
-	// the database clock the hold was written with. It decides only what
-	// "Stripe shows nothing" does to a parked invoice.
-	PastParkedWait bool
+	Invoice Invoice
+	Hold    time.Time
+	// Tokened: the hold carries its token (charge_hold_token equal to it),
+	// so it was taken by a charger that puts its PaymentIntent on the
+	// invoice before confirming (ADR-137). A hold without it was taken by an
+	// earlier version, which charged in one call and saved nothing first.
+	Tokened bool
 }
 
 type chargeHoldOwnerKey struct{}

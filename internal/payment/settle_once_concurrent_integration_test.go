@@ -52,7 +52,7 @@ const (
 )
 
 // settleRaceStripe answers like Stripe for the one PaymentIntent of a round:
-// the create response and GetPaymentIntent both report it succeeded.
+// the confirm response and GetPaymentIntent both report it succeeded.
 type settleRaceStripe struct {
 	mu        sync.Mutex
 	createRes payment.PaymentIntentResult
@@ -60,7 +60,20 @@ type settleRaceStripe struct {
 	gets      map[string]int
 }
 
-func (f *settleRaceStripe) CreatePaymentIntent(context.Context, payment.PaymentIntentParams) (payment.PaymentIntentResult, error) {
+func (f *settleRaceStripe) CreateUnconfirmedPaymentIntent(context.Context, payment.PaymentIntentParams) (payment.PaymentIntentResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Stripe names what it creates: the round's PaymentIntent, from the
+	// scripted answer or the error that names it.
+	id := f.createRes.ID
+	var pe *payment.PaymentError
+	if id == "" && errors.As(f.createErr, &pe) {
+		id = pe.PaymentIntentID
+	}
+	return payment.PaymentIntentResult{ID: id, Status: "requires_confirmation"}, nil
+}
+
+func (f *settleRaceStripe) ConfirmPaymentIntent(context.Context, string, payment.PaymentIntentParams) (payment.PaymentIntentResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.createRes, f.createErr
@@ -73,10 +86,6 @@ func (f *settleRaceStripe) GetPaymentIntent(_ context.Context, piID string) (pay
 	defer f.mu.Unlock()
 	f.gets[piID]++
 	return payment.PaymentIntentResult{ID: piID, Status: "succeeded", AmountReceivedCents: settleDue}, nil
-}
-
-func (f *settleRaceStripe) ListPaymentIntentsForCustomer(context.Context, string, time.Time) ([]payment.PaymentIntentResult, error) {
-	return nil, nil
 }
 
 func (f *settleRaceStripe) getCount(piID string) int {
@@ -232,7 +241,7 @@ func (r *settleRaceRig) count(t *testing.T, q string, args ...any) int {
 // assertRecordedOnce checks everything one successful payment leaves behind.
 // seqBefore is the invoice's charge_attempt_seq before the race: the settle
 // UPDATE bumps it, so exactly one settle write leaves it at seqBefore+1.
-func (r *settleRaceRig) assertRecordedOnce(t *testing.T, round int, tenantID, invID, piID, evtID string, seqBefore int64) {
+func (r *settleRaceRig) assertRecordedOnce(t *testing.T, round int, tenantID, invID, piID, evtID string, seqBefore int64, stampMayPrecede bool) {
 	t.Helper()
 	got, err := r.invStore.Get(r.ctx, tenantID, invID)
 	if err != nil {
@@ -248,7 +257,10 @@ func (r *settleRaceRig) assertRecordedOnce(t *testing.T, round int, tenantID, in
 		t.Errorf("round %d: amount_paid=%d amount_due=%d, want %d/0 (a second settle UPDATE re-reads the zeroed due and books amount_paid=0)",
 			round, got.AmountPaidCents, got.AmountDueCents, settleDue)
 	}
-	if got.ChargeAttemptSeq != seqBefore+1 {
+	// One settle write moves the counter once. A charge that stamped the
+	// invoice before its confirm moved it once more, before the settle
+	// (stampFirst); a webhook that settled before the stamp did not.
+	if got.ChargeAttemptSeq != seqBefore+1 && (!stampMayPrecede || got.ChargeAttemptSeq != seqBefore+2) {
 		t.Errorf("round %d: charge_attempt_seq=%d, want %d (one settle write)", round, got.ChargeAttemptSeq, seqBefore+1)
 	}
 	if got.PaymentCardLast4 != "4242" {
@@ -333,7 +345,7 @@ func TestSettleSucceeded_ConcurrentSources_RecordsOnce(t *testing.T) {
 			if r.counting.reached.Load() > 1 {
 				contended++
 			}
-			r.assertRecordedOnce(t, round, tenantID, inv.ID, piID, evtID, inv.ChargeAttemptSeq)
+			r.assertRecordedOnce(t, round, tenantID, inv.ID, piID, evtID, inv.ChargeAttemptSeq, true)
 		}
 		if contended == 0 {
 			t.Fatalf("no round had two settles reach the locked transition — the snapshot guard serialized every round, so the row lock was never exercised")
@@ -348,8 +360,8 @@ func TestSettleSucceeded_ConcurrentSources_RecordsOnce(t *testing.T) {
 			piID := fmt.Sprintf("pi_recon_race_%d", round)
 			evtID := "evt_" + piID
 
-			// The real charge path parks the outcome: Stripe named the PI but
-			// the answer was ambiguous, so the row is `unknown` with the PI.
+			// The confirm's answer was ambiguous: the row is `unknown` with the
+			// PI, as the charge stamped it before confirming.
 			r.client.mu.Lock()
 			r.client.createRes = payment.PaymentIntentResult{}
 			r.client.createErr = &payment.PaymentError{Message: "stripe: timeout", PaymentIntentID: piID, Unknown: true}
@@ -368,6 +380,9 @@ func TestSettleSucceeded_ConcurrentSources_RecordsOnce(t *testing.T) {
 			if parked.PaymentStatus != domain.PaymentUnknown || parked.StripePaymentIntentID != piID {
 				t.Fatalf("round %d: setup: invoice %s with PI %q, want unknown with %q", round, parked.PaymentStatus, parked.StripePaymentIntentID, piID)
 			}
+			// The charger is gone and its hold has ended: the unknown sweep
+			// leaves an invoice alone while a charge still holds it.
+			release(t, r.db, r.ctx, tenantID, inv.ID)
 			time.Sleep(2 * time.Millisecond) // past the reconciler's 1ns cool-off on updated_at
 			r.counting.reached.Store(0)
 			getsBefore := r.client.getCount(piID)
@@ -393,7 +408,7 @@ func TestSettleSucceeded_ConcurrentSources_RecordsOnce(t *testing.T) {
 			if r.counting.reached.Load() > 1 {
 				contended++
 			}
-			r.assertRecordedOnce(t, round, tenantID, inv.ID, piID, evtID, parked.ChargeAttemptSeq)
+			r.assertRecordedOnce(t, round, tenantID, inv.ID, piID, evtID, parked.ChargeAttemptSeq, false)
 		}
 		if contended == 0 {
 			t.Fatalf("no round had two settles reach the locked transition — the snapshot guard serialized every round, so the row lock was never exercised")

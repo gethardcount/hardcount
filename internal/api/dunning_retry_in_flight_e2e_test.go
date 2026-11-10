@@ -41,12 +41,13 @@ type inFlightStripe struct {
 func installInFlightStripe(t *testing.T, script map[string][]string) *inFlightStripe {
 	t.Helper()
 	s := &inFlightStripe{script: script, lastPI: map[string]string{}}
+	charge := twoStepStripe(s.answer)
 	prev := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Host != "api.stripe.com" {
 			return prev.RoundTrip(req)
 		}
-		return s.answer(req), nil
+		return charge(req), nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = prev })
 	return s

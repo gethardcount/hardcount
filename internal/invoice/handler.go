@@ -990,8 +990,8 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !hold.Held() {
-		// A set hold is a charge running, or one whose result was lost and
-		// waits for the stale-hold sweep to confirm it with Stripe (ADR-127).
+		// A set hold is a charge running, or one that stopped and waits for
+		// the stale-hold sweep to clear it (ADR-127).
 		// Say so, with the same words void and offline payment use. The read
 		// only picks the words; the claim above was the gate.
 		if state, serr := h.svc.ChargeHoldState(r.Context(), tenantID, id); serr == nil && state != domain.ChargeHoldNone {

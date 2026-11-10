@@ -21,6 +21,16 @@ const (
 	ChargeAttemptBelowMinimum ChargeAttemptOutcome = "below_minimum"
 )
 
+// AttemptReasonNeverConfirmed is the reason an attempt's row records when its
+// PaymentIntent was created, no confirm reached Stripe, and it was canceled
+// there (ADR-137).
+const AttemptReasonNeverConfirmed = "The charge never reached Stripe; nothing was charged."
+
+// AttemptReasonRefundedAtStripe is the reason an attempt's row records when
+// its payment succeeded and was refunded in full at Stripe, outside Hardcount,
+// before Hardcount recorded it: it does not pay the invoice.
+const AttemptReasonRefundedAtStripe = "Charged, then refunded in full at Stripe; it does not pay the invoice."
+
 // ChargeAttemptOutcomes lists every outcome, so a test can hold the list and
 // invoice_charge_attempts' CHECK constraint equal: an outcome the CHECK does
 // not list fails the attempt's insert.

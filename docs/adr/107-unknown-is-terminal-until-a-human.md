@@ -1,6 +1,6 @@
 # ADR-107: An unnameable charge attempt parks the invoice; it is never settled failed
 
-**Status:** Accepted (amended 2026-08-01, 2026-08-02, 2026-10-18, 2026-10-19, 2026-10-20)
+**Status:** Accepted (amended 2026-08-01, 2026-08-02, 2026-10-18, 2026-10-19, 2026-10-20; amended 2026-11-10: ADR-137)
 **Date:** 2026-07-31
 **Supersedes:** [ADR-106](106-charge-intent-ledger.md) as the answer to this
 problem. ADR-106's charge-intent ledger is **parked, not deleted** — see
@@ -485,3 +485,6 @@ the customer ends at once and the customer is asked to confirm, rather than
 waiting or being cancelled later. Nothing cancels a PaymentIntent: Stripe never
 leaves one waiting. ADR-127's follow-up C is closed for Hardcount's own charges.
 
+## Amendment 2026-11-10
+
+Charges no longer park an invoice: each charge saves its PaymentIntent before confirming, so an unclear answer always names one ([ADR-137](137-charge-stamps-invoice-before-confirming.md)). The parked state below applies only to invoices an earlier version parked; the upgrade to ADR-137 refuses to run while any exists.

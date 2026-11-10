@@ -23,7 +23,7 @@ func TestPaymentFailedEmail_Reconciler_ShowsOnlyStripesCardMessage(t *testing.T)
 		name, pi, wantReason string
 	}{
 		{"declined, no last_payment_error", `{"id": "pi_rec", "object": "payment_intent", "status": "requires_payment_method", "last_payment_error": null}`, ""},
-		{"canceled", `{"id": "pi_rec", "object": "payment_intent", "status": "canceled", "last_payment_error": null}`, ""},
+		{"canceled after a charge", `{"id": "pi_rec", "object": "payment_intent", "status": "canceled", "last_payment_error": null, "latest_charge": {"id": "ch_rec", "object": "charge"}}`, ""},
 		{"card error", `{"id": "pi_rec", "object": "payment_intent", "status": "requires_payment_method",
 		  "last_payment_error": {"code": "card_declined", "decline_code": "insufficient_funds", "message": "Your card has insufficient funds.", "type": "card_error",
 		    "payment_method": {"id": "pm_on_file", "object": "payment_method"}}}`, "Your card has insufficient funds."},
@@ -50,6 +50,27 @@ func TestPaymentFailedEmail_Reconciler_ShowsOnlyStripesCardMessage(t *testing.T)
 				t.Errorf("customer email reasons %q, want [%q]", email.reasons, tc.wantReason)
 			}
 		})
+	}
+}
+
+// Canceled with no charge: no confirm ever reached a bank (a charge whose
+// confirm never arrived, canceled by the reconciler). Not a failed payment, so
+// no email.
+func TestPaymentFailedEmail_Reconciler_CanceledWithNoChargeSendsNone(t *testing.T) {
+	withCannedStripe(t, http.StatusOK, `{"id": "pi_rec", "object": "payment_intent", "status": "canceled", "last_payment_error": null, "latest_charge": null}`)
+	unknown := pendingSnapshot()
+	unknown.PaymentStatus = domain.PaymentUnknown
+	unknown.StripePaymentIntentID = "pi_rec"
+	invoices := newMockInvoiceUpdater()
+	invoices.invoices["inv_1"] = unknown
+	s, email, _ := newDeclineStripe(&mockStripeClient{}, invoices)
+	r := NewReconciler(NewLiveStripeClient(NewStripeClients(fixedCreds{})), newMockReconcileStore(unknown), time.Second)
+	r.SetSettler(s)
+	if _, errs := r.Run(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), 10); len(errs) != 0 {
+		t.Fatalf("reconciler errors: %v", errs)
+	}
+	if len(email.reasons) != 0 {
+		t.Errorf("customer emails %q, want none: no bank saw a charge", email.reasons)
 	}
 }
 
@@ -91,7 +112,7 @@ func TestPaymentFailedEmail_Charge_InvalidRequestShowsNoReason(t *testing.T) {
 	invoices := newMockInvoiceUpdater()
 	snapshot := pendingSnapshot()
 	invoices.invoices["inv_1"] = snapshot
-	withCannedStripe(t, http.StatusBadRequest, `{"error": {"code": "payment_intent_unexpected_state",
+	withCannedConfirm(t, http.StatusBadRequest, `{"error": {"code": "payment_intent_incompatible_payment_method",
 	  "message": "This PaymentIntent's payment_method could not be updated.",
 	  "payment_intent": {"id": "pi_bad", "object": "payment_intent", "status": "requires_payment_method"},
 	  "type": "invalid_request_error"}}`)

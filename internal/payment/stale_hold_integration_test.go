@@ -14,7 +14,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/email"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/invoice"
-	"github.com/gethardcount/hardcount/internal/payment/breaker"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenant"
@@ -260,10 +259,18 @@ func (r *shRig) hold(invoiceID string) *time.Time {
 }
 
 // ageHold moves a set hold into the past by age, past its end: what a
-// crashed or timed-out charger leaves once its five minutes are over. It also
-// forgets any earlier check of the row.
+// crashed or timed-out charger leaves once its five minutes are over. The
+// hold's token and the attempt saved under the hold move with it, as they
+// would with real time passing. It also forgets any earlier check of the row.
 func (r *shRig) ageHold(invoiceID string, age time.Duration) {
-	r.exec(`UPDATE invoices SET auto_charge_claimed_until = now() - make_interval(secs => $2), provider_synced_at = NULL
+	// The hold, its token, and the invoice's last write all move back: a hold
+	// that ended age ago belongs to a charge that began before that.
+	r.exec(`UPDATE invoices SET
+			charge_hold_token = CASE WHEN charge_hold_token = auto_charge_claimed_until
+				THEN now() - make_interval(secs => $2) ELSE charge_hold_token END,
+			auto_charge_claimed_until = now() - make_interval(secs => $2),
+			updated_at = LEAST(updated_at, now() - make_interval(secs => $2)),
+			provider_synced_at = NULL
 		WHERE id = $1 AND auto_charge_claimed_until IS NOT NULL`, invoiceID, age.Seconds())
 }
 
@@ -357,24 +364,26 @@ func (r *shRig) assertPaidOnce(invoiceID, piID string) {
 	}
 }
 
-// crashAfterCharge charges kind and dies after Stripe created the
-// PaymentIntent, before anything was saved. It returns that PaymentIntent.
+// crashAfterCharge charges kind and dies after Stripe confirmed the
+// PaymentIntent (leaving it in status, default succeeded), before its answer
+// was saved. The invoice already names it: the charge stamped it unknown on
+// the PaymentIntent before confirming. It returns that PaymentIntent.
 func (r *shRig) crashAfterCharge(inv domain.Invoice, kind chargeKind, status string) fakePI {
 	r.t.Helper()
-	r.fake.queue(fakeMode{kind: fakeCrashAfterCreate, status: status})
+	r.fake.queueConfirm(fakeMode{kind: fakeCrashAfterCreate, status: status})
 	if !crash(func() { _, _ = r.chargeAs(r.ctx, kind, inv.ID, "pm_card_1") }) {
 		r.t.Fatal("the charge did not reach the crash point")
 	}
+	pi := r.fake.piFor(inv.ID)
+	if pi.id == "" {
+		r.t.Fatalf("setup: Stripe should hold the invoice's PaymentIntent, has %d in all", r.fake.countPIs())
+	}
 	got := r.get(inv.ID)
-	if got.PaymentStatus != domain.PaymentPending || got.StripePaymentIntentID != "" {
-		r.t.Fatalf("after the crash: %s with PI %q, want pending with none (nothing saved)", got.PaymentStatus, got.StripePaymentIntentID)
+	if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != pi.id {
+		r.t.Fatalf("after the crash: %s with PI %q, want unknown on %s (stamped before the confirm)", got.PaymentStatus, got.StripePaymentIntentID, pi.id)
 	}
 	if r.hold(inv.ID) == nil {
-		r.t.Fatal("no charge hold after the crash: nothing says a charge was sent")
-	}
-	pi := r.fake.onlyPI()
-	if pi.id == "" {
-		r.t.Fatalf("setup: Stripe should hold exactly one PaymentIntent, has %d", r.fake.countPIs())
+		r.t.Fatal("no charge hold after the crash")
 	}
 	return pi
 }
@@ -407,14 +416,14 @@ func TestStaleHold_CrashAfterStripeCharged_NoSecondPayment(t *testing.T) {
 	}
 }
 
-// 2. The caller's deadline ends while Stripe is still working (a dunning
+// 2. The caller's deadline ends while Stripe is still confirming (a dunning
 // retry's 15 s, auto-charge's 30 s), or the caller is cancelled (a Collect
-// request whose browser went away). A deadline is a call that timed out:
-// Stripe was slow, as in an incident, so the attempt is saved as parked even
-// though the caller's context is over, and gets Stripe's 24 hours when Stripe
-// shows nothing (ADR-127 amendment 2026-10-20). A cancellation is Hardcount
-// interrupting itself: nothing is saved. Either way the hold stays, nothing
-// charges again, and the sweep records the payment.
+// request whose browser went away). Either way the invoice already says
+// unknown on the PaymentIntent, stamped before the confirm, so there is
+// nothing to save once the caller's context is over, and no difference between
+// a deadline and a cancellation: the hold stays, nothing charges again, and
+// the unknown sweep reads the PaymentIntent by id and records the payment
+// once.
 func TestStaleHold_CallerDeadlineEndsDuringTheCall(t *testing.T) {
 	for _, tc := range []struct {
 		kind   chargeKind
@@ -427,7 +436,7 @@ func TestStaleHold_CallerDeadlineEndsDuringTheCall(t *testing.T) {
 		t.Run(string(tc.kind), func(t *testing.T) {
 			r := newSHRig(t, "SH Timeout "+string(tc.kind))
 			inv := r.seed("INV-SH-TIMEOUT")
-			r.fake.queue(fakeMode{kind: fakeOutliveCtx})
+			r.fake.queueConfirm(fakeMode{kind: fakeOutliveCtx})
 
 			var ctx context.Context
 			var cancel context.CancelFunc
@@ -444,30 +453,24 @@ func TestStaleHold_CallerDeadlineEndsDuringTheCall(t *testing.T) {
 				t.Fatalf("err = %v, want an unclear outcome", err)
 			}
 
+			charged := r.fake.onlyPI()
+			if charged.id == "" || charged.status != "succeeded" {
+				t.Fatalf("setup: the confirm outliving its context should have charged one PaymentIntent, Stripe has %d", r.fake.countPIs())
+			}
 			got := r.get(inv.ID)
-			if tc.cancel {
-				if got.PaymentStatus != domain.PaymentPending || got.StripePaymentIntentID != "" || got.ChargeAttemptSeq != inv.ChargeAttemptSeq {
-					t.Errorf("after the cancellation: %s with PI %q seq %d, want pending, none, %d: nothing saved",
-						got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq, inv.ChargeAttemptSeq)
-				}
-			} else {
-				if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != "" || got.ChargeAttemptSeq != inv.ChargeAttemptSeq+1 {
-					t.Errorf("after the timeout: %s with PI %q seq %d, want parked: unknown, none, %d (saved after the caller's deadline)",
-						got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq, inv.ChargeAttemptSeq+1)
-				}
-				if n := r.attempts(inv.ID, domain.ChargeAttemptUnknown); n != 1 {
-					t.Errorf("attempt rows with an unknown outcome = %d, want 1", n)
-				}
+			if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != charged.id || got.ChargeAttemptSeq != inv.ChargeAttemptSeq+1 || got.Parked() {
+				t.Errorf("after the call: %s with PI %q seq %d, want unknown on %q, seq %d, not parked (stamped before the confirm)",
+					got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq, charged.id, inv.ChargeAttemptSeq+1)
+			}
+			if n := len(r.attemptsOf(inv.ID)); n != 1 {
+				t.Errorf("attempt rows = %d, want 1", n)
 			}
 			if r.hold(inv.ID) == nil {
 				t.Fatal("the unclear charge released its hold")
 			}
-			charged := r.fake.onlyPI()
-			if charged.id == "" {
-				t.Fatalf("setup: the request outliving its context should have created one PaymentIntent, Stripe has %d", r.fake.countPIs())
-			}
 
 			r.ageHold(inv.ID, staleSweepAge)
+			r.ageUpdated(inv.ID, 5*time.Minute)
 			r.assertNoSecondCharge(inv.ID)
 			r.runClean()
 			r.assertPaidOnce(inv.ID, charged.id)
@@ -513,9 +516,10 @@ func TestStaleHold_HostedPage(t *testing.T) {
 	}
 }
 
-// 5. The process died before the request left. The sweep finds nothing,
-// clears the hold and moves the counter, and the next charge goes out under
-// the next key: one payment in all.
+// 5. The process died before the create left. No pending attempt was saved,
+// so no confirm was sent: the sweep clears the hold and moves the counter
+// without asking Stripe, and the next charge goes out under the next key: one
+// payment in all.
 func TestStaleHold_NothingSent_ReleasedAndChargedOnceUnderTheNextKey(t *testing.T) {
 	r := newSHRig(t, "SH Crash Before Send")
 	inv := r.seed("INV-SH-C2")
@@ -529,7 +533,7 @@ func TestStaleHold_NothingSent_ReleasedAndChargedOnceUnderTheNextKey(t *testing.
 	r.runClean()
 	got := r.get(inv.ID)
 	if r.hold(inv.ID) != nil {
-		t.Fatal("hold kept after Stripe was shown to have nothing")
+		t.Fatal("hold kept although no confirm was sent")
 	}
 	if got.PaymentStatus != domain.PaymentPending || got.ChargeAttemptSeq != inv.ChargeAttemptSeq+1 {
 		t.Fatalf("after the sweep: %s seq %d, want pending seq %d (a fresh key for the next charge)", got.PaymentStatus, got.ChargeAttemptSeq, inv.ChargeAttemptSeq+1)
@@ -577,27 +581,37 @@ func TestStaleHold_Saved500_NextChargeUsesTheNextKey(t *testing.T) {
 	r.assertPaidOnce(inv.ID, r.fake.onlyPI().id)
 }
 
-// 7. What the sweep does with each kind of payment it finds.
+// 7. What the unknown sweep does with each state the charge's PaymentIntent
+// is in, after a crash that lost the confirm's answer. The stale-hold sweep
+// only clears the leftover hold: the invoice names the PaymentIntent.
 func TestStaleHold_WhatTheSweepFinds(t *testing.T) {
-	t.Run("processing: adopted onto the invoice", func(t *testing.T) {
+	t.Run("processing: followed until it ends", func(t *testing.T) {
 		r := newSHRig(t, "SH Found Processing")
 		inv := r.seed("INV-SH-PROC")
 		pi := r.crashAfterCharge(inv, autoCharge, "processing")
 		r.ageHold(inv.ID, staleSweepAge)
 		r.runClean()
 		got := r.get(inv.ID)
-		if got.PaymentStatus != domain.PaymentProcessing || got.StripePaymentIntentID != pi.id {
-			t.Fatalf("after the sweep: %s with PI %q, want processing with %q", got.PaymentStatus, got.StripePaymentIntentID, pi.id)
+		if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != pi.id || got.ProviderPaymentStatus != "processing" {
+			t.Fatalf("after the sweep: %s with PI %q, Stripe status %q; want still unknown on %q with processing observed",
+				got.PaymentStatus, got.StripePaymentIntentID, got.ProviderPaymentStatus, pi.id)
 		}
 		if r.hold(inv.ID) != nil {
-			t.Error("hold kept after the processing payment was put on the invoice")
+			t.Error("leftover hold kept on an invoice that follows its payment")
+		}
+		r.assertNoSecondCharge(inv.ID)
+		r.fake.setStatus(pi.id, "succeeded")
+		r.exec(`UPDATE invoices SET provider_synced_at = NULL WHERE id = $1`, inv.ID)
+		r.runClean()
+		if got := r.get(inv.ID); got.Status != domain.InvoicePaid || got.StripePaymentIntentID != pi.id {
+			t.Fatalf("once it succeeded: %s on %q, want paid on %q", got.Status, got.StripePaymentIntentID, pi.id)
 		}
 		if n := r.fake.countPIs(); n != 1 {
 			t.Errorf("PaymentIntents at Stripe = %d, want 1", n)
 		}
 	})
 
-	t.Run("requires_action: canceled at Stripe, then the next run clears", func(t *testing.T) {
+	t.Run("requires_action: canceled at Stripe and the hold cleared in one run", func(t *testing.T) {
 		r := newSHRig(t, "SH Found Requires Action")
 		inv := r.seed("INV-SH-RA")
 		pi := r.crashAfterCharge(inv, autoCharge, "requires_action")
@@ -606,40 +620,30 @@ func TestStaleHold_WhatTheSweepFinds(t *testing.T) {
 		if got := r.fake.pi(pi.id); got.status != "canceled" {
 			t.Fatalf("PaymentIntent is %q at Stripe, want canceled (an off-session one never ends on its own)", got.status)
 		}
-		if r.hold(inv.ID) == nil {
-			t.Fatal("hold cleared in the same run that canceled; the next run decides")
-		}
-		r.ageHold(inv.ID, staleSweepAge) // the next run, past the re-check wait
-		r.runClean()
 		got := r.get(inv.ID)
 		if r.hold(inv.ID) != nil || got.ChargeAttemptSeq != inv.ChargeAttemptSeq+1 || got.PaymentStatus != domain.PaymentPending {
-			t.Fatalf("after the next run: hold %v, %s seq %d; want cleared, pending, seq %d",
+			t.Fatalf("after the run: hold %v, %s seq %d; want cleared, pending, seq %d (canceled, it can take nothing)",
 				r.hold(inv.ID), got.PaymentStatus, got.ChargeAttemptSeq, inv.ChargeAttemptSeq+1)
 		}
 	})
 
-	t.Run("two succeeded: paid with the first, the second flagged as a duplicate", func(t *testing.T) {
-		r := newSHRig(t, "SH Found Two")
-		inv := r.seed("INV-SH-TWO")
-		first := r.crashAfterCharge(inv, autoCharge, "")
-		second := r.fake.addPI(stripeCustomerOf(inv), inv.ID, "", "succeeded", shDue)
+	t.Run("declined, its answer lost: recorded as the decline it was", func(t *testing.T) {
+		r := newSHRig(t, "SH Found Declined")
+		inv := r.seed("INV-SH-DECLINED")
+		pi := r.crashAfterCharge(inv, autoCharge, "requires_payment_method")
 		r.ageHold(inv.ID, staleSweepAge)
 		r.runClean()
+		// A bank said no, so it is a failed payment (dunning follows), as its
+		// lost webhook would have recorded: the stamp, then the decline.
 		got := r.get(inv.ID)
-		if got.Status != domain.InvoicePaid || got.StripePaymentIntentID != first.id {
-			t.Fatalf("after the sweep: %s with PI %q, want paid with the first, %q", got.Status, got.StripePaymentIntentID, first.id)
+		if r.hold(inv.ID) != nil || got.ChargeAttemptSeq != inv.ChargeAttemptSeq+2 || got.PaymentStatus != domain.PaymentFailed || got.StripePaymentIntentID != pi.id {
+			t.Fatalf("after the run: hold %v, %s on %q seq %d; want cleared, failed on %q, seq %d",
+				r.hold(inv.ID), got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq, pi.id, inv.ChargeAttemptSeq+2)
 		}
-		if n := r.events(domain.EventPaymentDuplicateCharge, inv.ID); n != 1 {
-			t.Errorf("payment.duplicate_charge rows = %d, want 1 (for %s)", n, second.id)
-		}
-		if n := r.events(domain.EventPaymentSucceeded, inv.ID); n != 1 {
-			t.Errorf("payment.succeeded rows = %d, want 1", n)
-		}
-		if n := r.receipts(); n != 1 {
-			t.Errorf("receipts = %d, want 1", n)
-		}
-		if r.hold(inv.ID) != nil {
-			t.Error("hold kept after the payments were recorded")
+		for _, a := range r.attemptsOf(inv.ID) {
+			if a.StripePaymentIntentID == pi.id && a.Outcome != domain.ChargeAttemptFailed {
+				t.Errorf("the attempt's row is %q, want failed", a.Outcome)
+			}
 		}
 	})
 
@@ -747,37 +751,38 @@ func TestStaleHold_LateRelease_KeepsTheOtherOwnersHold(t *testing.T) {
 	r.assertPaidOnce(inv.ID, bPI.id)
 }
 
-// 11. Stripe will not answer: not connected for this mode, the key rejected,
-// or the customer not in this account. The open invoice keeps its hold; void
-// and offline payment are refused; write-off is allowed (it moves no money).
-// After the write-off the sweep clears the hold with an ERROR. And a
-// write-off followed by a payment the sweep does find settles uncollectible →
-// paid.
+// 11. Stripe will not answer: not connected for this mode, or the key
+// rejected. The invoice stays unknown on its PaymentIntent, so nothing charges
+// it; void and offline payment are refused; write-off is allowed (it moves no
+// money). Once Stripe answers, the payment it took settles the invoice, a
+// written-off one included (uncollectible → paid).
 func TestStaleHold_StripeCannotAnswer(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		break_ func(f *fakeStripe, stripeCustomer string)
-	}{
-		{"Stripe not connected", func(f *fakeStripe, _ string) {
+	connected := func(on bool) func(f *fakeStripe, _ string) {
+		return func(f *fakeStripe, _ string) {
 			f.mu.Lock()
-			f.notConfigured = true
+			f.notConfigured = !on
 			f.mu.Unlock()
-		}},
-		{"customer not in this account", func(f *fakeStripe, c string) { f.setCustomer(c, "missing") }},
-		{"key rejected", func(f *fakeStripe, c string) { f.setCustomer(c, "auth") }},
+		}
+	}
+	for _, tc := range []struct {
+		name        string
+		break_, fix func(f *fakeStripe, stripeCustomer string)
+	}{
+		{"Stripe not connected", connected(false), connected(true)},
+		{"key rejected", func(f *fakeStripe, c string) { f.setCustomer(c, "auth") }, func(f *fakeStripe, c string) { f.setCustomer(c, "") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newSHRig(t, "SH Cannot Answer")
 			inv := r.seed("INV-SH-CANNOT")
-			r.crashAfterCharge(inv, autoCharge, "")
+			charged := r.crashAfterCharge(inv, autoCharge, "")
 			tc.break_(r.fake, stripeCustomerOf(inv))
 			r.ageHold(inv.ID, staleSweepAge)
 
 			_ = r.run()
 			got := r.get(inv.ID)
-			if r.hold(inv.ID) == nil || got.PaymentStatus != domain.PaymentPending || got.ChargeAttemptSeq != inv.ChargeAttemptSeq {
-				t.Fatalf("after a check Stripe would not answer: hold %v, %s seq %d; want the hold kept and the invoice unchanged",
-					r.hold(inv.ID), got.PaymentStatus, got.ChargeAttemptSeq)
+			if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != charged.id {
+				t.Fatalf("after a check Stripe would not answer: %s on %q; want still unknown on %q (a failed read is never 'nothing')",
+					got.PaymentStatus, got.StripePaymentIntentID, charged.id)
 			}
 			if got.ProviderSyncedAt == nil {
 				t.Error("the check was not stamped (provider_synced_at), so it rotates nowhere")
@@ -785,19 +790,22 @@ func TestStaleHold_StripeCannotAnswer(t *testing.T) {
 			r.assertNoSecondCharge(inv.ID)
 
 			if _, err := r.invSvc.Void(r.ctx, r.tenantID, inv.ID); !errors.Is(err, errs.ErrInvalidState) {
-				t.Errorf("void on a stale hold: err = %v, want refused (its charge may have taken the money)", err)
+				t.Errorf("void on an unclear charge: err = %v, want refused (its charge may have taken the money)", err)
 			}
 			if _, err := r.invSvc.RecordOfflinePayment(r.ctx, r.tenantID, inv.ID, "wire"); !errors.Is(err, errs.ErrInvalidState) {
-				t.Errorf("offline payment on a stale hold: err = %v, want refused (the customer could pay twice)", err)
+				t.Errorf("offline payment on an unclear charge: err = %v, want refused (the customer could pay twice)", err)
 			}
 			if _, err := r.invSvc.MarkUncollectible(r.ctx, r.tenantID, inv.ID); err != nil {
-				t.Fatalf("write-off on a stale hold: %v, want allowed (it moves no money; the exit when Stripe cannot answer)", err)
+				t.Fatalf("write-off on an unclear charge: %v, want allowed (it moves no money; the exit when Stripe cannot answer)", err)
 			}
 
-			r.ageHold(inv.ID, staleSweepAge) // past the re-check wait
-			_ = r.run()
-			if r.hold(inv.ID) != nil {
-				t.Error("hold kept on a written-off invoice Stripe cannot answer about: nothing can charge it, and the sweep would loop")
+			// Stripe answers again: the payment it took settles the write-off.
+			tc.fix(r.fake, stripeCustomerOf(inv))
+			r.ageUpdated(inv.ID, 5*time.Minute)
+			r.exec(`UPDATE invoices SET provider_synced_at = NULL WHERE id = $1`, inv.ID)
+			r.runClean()
+			if got := r.get(inv.ID); got.Status != domain.InvoicePaid || got.StripePaymentIntentID != charged.id {
+				t.Fatalf("once Stripe answered: %s on %q, want paid on %q (uncollectible → paid)", got.Status, got.StripePaymentIntentID, charged.id)
 			}
 		})
 	}
@@ -808,8 +816,9 @@ func TestStaleHold_StripeCannotAnswer(t *testing.T) {
 		charged := r.crashAfterCharge(inv, autoCharge, "")
 		r.ageHold(inv.ID, staleSweepAge)
 		if _, err := r.invSvc.MarkUncollectible(r.ctx, r.tenantID, inv.ID); err != nil {
-			t.Fatalf("write-off on a stale hold: %v", err)
+			t.Fatalf("write-off on an unclear charge: %v", err)
 		}
+		r.ageUpdated(inv.ID, 5*time.Minute)
 		r.runClean()
 		got := r.get(inv.ID)
 		if got.Status != domain.InvoicePaid || got.StripePaymentIntentID != charged.id {
@@ -822,108 +831,49 @@ func TestStaleHold_StripeCannotAnswer(t *testing.T) {
 	})
 }
 
-// 12. A list that fails part-way is a failed check, never "nothing at
-// Stripe": the hold stays and the row is stamped. And failing rows rotate: 25
-// failing plus one that resolves, at limit 20, resolve within two runs.
-func TestStaleHold_ListFailsPartWay_KeptAndRotates(t *testing.T) {
+// 12. A read that fails is a failed check, never "nothing at Stripe": the
+// invoice stays unknown on its PaymentIntent and the row is stamped. And
+// failing rows rotate: 25 failing plus one that resolves, at limit 20, resolve
+// within two runs.
+func TestStaleHold_ReadFails_KeptAndRotates(t *testing.T) {
 	r := newSHRig(t, "SH Page Error")
 	inv := r.seed("INV-SH-PAGE")
-	r.crashAfterCharge(inv, autoCharge, "")
+	charged := r.crashAfterCharge(inv, autoCharge, "")
 	r.fake.setCustomer(stripeCustomerOf(inv), "fail")
 	r.ageHold(inv.ID, staleSweepAge)
 	_ = r.run()
 	got := r.get(inv.ID)
-	if r.hold(inv.ID) == nil || got.PaymentStatus != domain.PaymentPending || got.ChargeAttemptSeq != inv.ChargeAttemptSeq {
-		t.Fatalf("after a failed list: hold %v, %s seq %d; want the hold kept and the invoice unchanged (a failed read is never 'nothing')",
-			r.hold(inv.ID), got.PaymentStatus, got.ChargeAttemptSeq)
+	if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != charged.id {
+		t.Fatalf("after a failed read: %s on %q; want still unknown on %q (a failed read is never 'nothing')",
+			got.PaymentStatus, got.StripePaymentIntentID, charged.id)
 	}
 	if got.ProviderSyncedAt == nil {
 		t.Error("the failed check was not stamped (provider_synced_at)")
 	}
+	r.assertNoSecondCharge(inv.ID)
 
 	rot := newSHRig(t, "SH Rotation")
 	for i := 0; i < 25; i++ {
 		failing := rot.seed(fmt.Sprintf("INV-SH-ROT-F%02d", i))
-		if c, err := rot.claim(autoCharge, failing.ID); err != nil || !c.ok() {
-			t.Fatalf("claim failing %d: %v", i, err)
-		}
+		rot.crashAfterCharge(failing, autoCharge, "")
 		rot.fake.setCustomer(stripeCustomerOf(failing), "fail")
-		rot.ageHold(failing.ID, 30*time.Minute) // older holds: ahead of the good row
+		rot.ageHold(failing.ID, 30*time.Minute) // older: ahead of the good row
 	}
 	good := rot.seed("INV-SH-ROT-GOOD")
-	if c, err := rot.claim(autoCharge, good.ID); err != nil || !c.ok() {
-		t.Fatalf("claim good: %v", err)
-	}
+	rot.crashAfterCharge(good, autoCharge, "")
 	rot.ageHold(good.ID, staleSweepAge)
-	for i := 0; i < 2 && rot.hold(good.ID) != nil; i++ {
+	for i := 0; i < 2 && rot.get(good.ID).Status != domain.InvoicePaid; i++ {
 		_, _ = rot.rec.Run(rot.ctx, 20)
 	}
-	if rot.hold(good.ID) != nil {
-		t.Fatal("a resolvable stale hold was not reached within two runs: failing rows pinned the head of the queue")
+	if rot.get(good.ID).Status != domain.InvoicePaid {
+		t.Fatal("a resolvable unclear charge was not reached within two runs: failing rows pinned the head of the queue")
 	}
 }
 
-// 13. Failing checks never open the breaker that guards customer charges:
-// the sweep calls Stripe directly, not through it.
-func TestStaleHold_FailingChecksLeaveTheChargeBreakerClosed(t *testing.T) {
-	r := newSHRig(t, "SH Breaker")
-	b := breaker.New(breaker.Config{Countable: IsUnknownPaymentFailure, FailureThreshold: 5})
-	r.stripe.SetBreaker(b)
-	r.rec.SetBreaker(b)
-	var held []string
-	for i := 0; i < 6; i++ {
-		inv := r.seed(fmt.Sprintf("INV-SH-BRK-%d", i))
-		if c, err := r.claim(autoCharge, inv.ID); err != nil || !c.ok() {
-			t.Fatalf("claim %d: %v", i, err)
-		}
-		r.fake.setCustomer(stripeCustomerOf(inv), "fail")
-		r.ageHold(inv.ID, staleSweepAge)
-		held = append(held, inv.ID)
-	}
-	_ = r.run()
-	if st := b.State(); st != breaker.StateClosed {
-		t.Fatalf("charge breaker is %s after failing stale-hold checks, want closed", st)
-	}
-	if n := r.fake.listCount(); n < 5 {
-		t.Fatalf("stale-hold lists = %d, want at least 5: the checks must have run", n)
-	}
-	for _, id := range held {
-		if r.get(id).ProviderSyncedAt == nil {
-			t.Errorf("invoice %s: the failed check was not stamped", id)
-		}
-	}
-	fresh := r.seed("INV-SH-BRK-FRESH")
-	if _, err := r.chargeAs(r.ctx, autoCharge, fresh.ID, "pm_card_1"); err != nil {
-		t.Fatalf("a normal charge after the failing checks: %v (the breaker must not have opened)", err)
-	}
-}
-
-// 14. A settle that needed no charge (a credit note took the invoice to zero,
-// and the zero-due heal marked it paid) while the hold's lost charge had in
-// fact succeeded: the sweep flags the second payment as a duplicate.
-func TestStaleHold_SettledWithoutACharge_FoundPaymentFlagged(t *testing.T) {
-	r := newSHRig(t, "SH Settled No Charge")
-	inv := r.seed("INV-SH-ZERO")
-	charged := r.crashAfterCharge(inv, autoCharge, "")
-	if _, err := r.invoices.MarkPaid(r.ctx, r.tenantID, inv.ID, "", time.Now().UTC()); err != nil {
-		t.Fatalf("settle without a charge: %v", err)
-	}
-	r.ageHold(inv.ID, staleSweepAge)
-	r.runClean()
-	if n := r.events(domain.EventPaymentDuplicateCharge, inv.ID); n != 1 {
-		t.Errorf("payment.duplicate_charge rows = %d, want 1 for the found payment %s", n, charged.id)
-	}
-	if got := r.get(inv.ID); got.PaymentAnomalyKind != domain.EventPaymentDuplicateCharge {
-		t.Errorf("anomaly marker = %q, want %q", got.PaymentAnomalyKind, domain.EventPaymentDuplicateCharge)
-	}
-	if r.hold(inv.ID) != nil {
-		t.Error("hold kept after the found payment was flagged")
-	}
-}
-
-// 15. No Stripe customer on file: no charge can have been sent, so the sweep
-// clears the hold without asking Stripe.
-func TestStaleHold_NoStripeCustomer_ClearedWithoutAStripeCall(t *testing.T) {
+// 15. A hold whose charge saved no pending attempt (here: no Stripe customer
+// on file, so no charge could be sent) sent no confirm, so the sweep clears it
+// without asking Stripe.
+func TestStaleHold_NoAttemptSaved_ClearedWithoutAStripeCall(t *testing.T) {
 	r := newSHRig(t, "SH No Stripe Customer")
 	inv := r.seedFor("INV-SH-NOCUS", false)
 	if c, err := r.claim(autoCharge, inv.ID); err != nil || !c.ok() {
@@ -935,8 +885,8 @@ func TestStaleHold_NoStripeCustomer_ClearedWithoutAStripeCall(t *testing.T) {
 	if r.hold(inv.ID) != nil || got.ChargeAttemptSeq != inv.ChargeAttemptSeq+1 {
 		t.Fatalf("after the sweep: hold %v seq %d, want cleared with seq %d", r.hold(inv.ID), got.ChargeAttemptSeq, inv.ChargeAttemptSeq+1)
 	}
-	if n := r.fake.listCount(); n != 0 {
-		t.Errorf("Stripe lists = %d, want 0: with no Stripe customer there is nothing to ask", n)
+	if n := r.fake.readCount(); n != 0 {
+		t.Errorf("Stripe reads = %d, want 0: with no pending attempt there is nothing to ask", n)
 	}
 }
 
@@ -1028,13 +978,13 @@ func TestStaleHold_Concurrency(t *testing.T) {
 		r.assertPaidOnce(inv.ID, pi.id)
 	})
 
-	t.Run("a webhook settles the payment during the sweep's list: one paid transition", func(t *testing.T) {
+	t.Run("a webhook settles the payment during the sweep's read: one paid transition", func(t *testing.T) {
 		r := newSHRig(t, "SH Race Webhook")
 		inv := r.seed("INV-SH-RACE-WEBHOOK")
 		charged := r.crashAfterCharge(inv, autoCharge, "")
 		var webhookErr error
 		var wg sync.WaitGroup
-		r.fake.beforeList = func() {
+		r.fake.beforeRead = func() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -1053,7 +1003,7 @@ func TestStaleHold_Concurrency(t *testing.T) {
 		if webhookErr != nil {
 			t.Fatalf("webhook: %v", webhookErr)
 		}
-		r.fake.beforeList = nil
+		r.fake.beforeRead = nil
 		if r.hold(inv.ID) != nil {
 			r.ageHold(inv.ID, staleSweepAge) // the sweep's clear lost to the webhook's stamp; the next run clears
 			r.runClean()
@@ -1091,15 +1041,17 @@ func TestStaleHold_Concurrency(t *testing.T) {
 }
 
 // staleHolds seeds n invoices, each with its own Stripe customer and a stale
-// hold whose charge never reached Stripe, the i-th one ages[i] old (or
-// staleSweepAge when ages is short).
+// hold whose charge died after saving its pending attempt and before its
+// confirm left (so each check reads one PaymentIntent and cancels it), the
+// i-th one ages[i] old (or staleSweepAge when ages is short).
 func (r *shRig) staleHolds(prefix string, n int, ages ...time.Duration) []string {
 	r.t.Helper()
 	var ids []string
 	for i := 0; i < n; i++ {
 		inv := r.seed(fmt.Sprintf("%s-%02d", prefix, i))
-		if c, err := r.claim(autoCharge, inv.ID); err != nil || !c.ok() {
-			r.t.Fatalf("claim %d: %v", i, err)
+		r.fake.queue(fakeMode{kind: fakeCrashAfterCreate})
+		if !crash(func() { _, _ = r.chargeAs(r.ctx, autoCharge, inv.ID, "pm_card_1") }) {
+			r.t.Fatalf("charge %d did not reach the crash point", i)
 		}
 		age := staleSweepAge
 		if i < len(ages) {
@@ -1135,113 +1087,34 @@ func TestStaleHold_OneRunDrainsEveryPage(t *testing.T) {
 	if left := r.holdsLeft(ids); left != 0 {
 		t.Fatalf("%d of %d stale holds left after one run at a page of 20: the rest would wait an hour a page", left, len(ids))
 	}
-	if n := r.fake.listCount(); n != len(ids) {
-		t.Errorf("Stripe lists = %d, want %d: one per hold, none checked twice", n, len(ids))
+	if n := r.fake.readCount(); n != 0 {
+		t.Errorf("Stripe reads = %d, want 0: the sweep clears a hold whose charge never stamped the invoice without asking Stripe", n)
 	}
 }
 
-// 17b. A run is bounded in time. Once its budget is spent the rest wait for
-// the next tick, and the next tick reaches them: the auto-charge sweep and the
-// billing cycle run after this sweep in the same tick.
-func TestStaleHold_RunStopsAtItsBudget_RestNextTick(t *testing.T) {
-	r := newSHRig(t, "SH Budget")
-	ids := r.staleHolds("INV-SH-BUDGET", 10)
-	r.fake.beforeList = func() { time.Sleep(150 * time.Millisecond) }
-	setStaleHoldBudget(r.rec, 400*time.Millisecond)
-	r.runClean()
-	cleared := len(ids) - r.holdsLeft(ids)
-	if cleared == 0 || cleared > 4 {
-		t.Fatalf("first run cleared %d of %d holds with a 400ms budget at 150ms a check, want 1 to 4", cleared, len(ids))
-	}
-	setStaleHoldBudget(r.rec, time.Minute)
-	r.runClean()
-	if left := r.holdsLeft(ids); left != 0 {
-		t.Fatalf("%d holds left after the next run: the ones the budget cut were not reached", left)
-	}
-}
-
-// 18. Stripe cannot be reached. Each check's Stripe read is cut at its time
-// limit, and after three checks in a row get no answer the sweep stops for
-// this mode until the next tick: it runs first in the billing tick, and
-// stripe-go alone could take about 90 s a page (30 s a request, two resends).
-// The holds it did not reach keep their place. An answer starts the count
-// again, and a 5xx is an answer: it comes back at once.
-func TestStaleHold_StripeUnreachable_ChecksBoundedAndSweepStops(t *testing.T) {
-	t.Run("a partition: three reads, each cut at its limit, then the sweep stops", func(t *testing.T) {
-		r := newSHRig(t, "SH Partition")
-		ids := r.staleHolds("INV-SH-PART", 5, 60*time.Minute, 55*time.Minute, 50*time.Minute, 45*time.Minute, 40*time.Minute)
-		r.fake.mu.Lock()
-		r.fake.hang = 3 * time.Second
-		r.fake.mu.Unlock()
-		setStaleHoldCheckTimeout(r.rec, 200*time.Millisecond)
-
-		start := time.Now()
-		_ = r.run()
-		elapsed := time.Since(start)
-
-		if n := r.fake.listCount(); n != 3 {
-			t.Errorf("Stripe lists = %d, want 3: the sweep stops after three failed reads in a row", n)
-		}
-		if elapsed > 2*time.Second {
-			t.Errorf("the run took %v: each read must be cut at its time limit", elapsed)
-		}
-		if left := r.holdsLeft(ids); left != len(ids) {
-			t.Fatalf("%d holds cleared while Stripe could not be read", len(ids)-left)
-		}
-		for i, id := range ids {
-			stamped := r.get(id).ProviderSyncedAt != nil
-			if want := i < 3; stamped != want {
-				t.Errorf("hold %d: checked-stamp %v, want %v (the holds not reached keep their place)", i, stamped, want)
-			}
-		}
-	})
-
-	t.Run("an answer starts the count again", func(t *testing.T) {
-		r := newSHRig(t, "SH Partition Reset")
-		ids := r.staleHolds("INV-SH-RESET", 8,
-			60*time.Minute, 55*time.Minute, 50*time.Minute, 45*time.Minute, 40*time.Minute, 35*time.Minute, 30*time.Minute, 25*time.Minute)
-		const good, page500 = 2, 3 // Stripe answers: nothing there; a 500
-		for i, id := range ids {
-			switch i {
-			case good:
-			case page500:
-				r.fake.setCustomer(stripeCustomerOf(r.get(id)), "fail")
-			default:
-				r.fake.setCustomer(stripeCustomerOf(r.get(id)), "unreachable")
-			}
-		}
-		_ = r.run()
-		if n := r.fake.listCount(); n != 7 {
-			t.Errorf("Stripe lists = %d, want 7: two without an answer, an answer, a 500, then three in a row without an answer stop the sweep", n)
-		}
-		if r.hold(ids[good]) != nil {
-			t.Error("the hold Stripe answered about was not cleared")
-		}
-		if r.get(ids[7]).ProviderSyncedAt != nil {
-			t.Error("the hold after the stop was checked")
-		}
-	})
-}
-
-// 19. A processing payment the invoice does not follow keeps the hold until it
-// ends. Clearing the hold dropped the only thing still watching that payment:
-// if it later succeeded and its webhook was lost, nothing recorded the money.
+// 19. The charge's payment still processing on a written-off invoice is
+// followed until it ends: the invoice stays unknown on it, the unknown sweep
+// keeps reading it, and when it succeeds (its webhook lost) the money is
+// recorded. The leftover hold is cleared meanwhile: it no longer watches
+// anything.
 func TestStaleHold_ProcessingTheInvoiceDoesNotFollow_KeptUntilItEnds(t *testing.T) {
-	t.Run("on a written-off invoice: kept, then recorded once it succeeds", func(t *testing.T) {
+	t.Run("on a written-off invoice: followed, then recorded once it succeeds", func(t *testing.T) {
 		r := newSHRig(t, "SH Processing Written Off")
 		inv := r.seed("INV-SH-PROC-WO")
 		pi := r.crashAfterCharge(inv, autoCharge, "processing")
 		r.ageHold(inv.ID, staleSweepAge)
 		if _, err := r.invSvc.MarkUncollectible(r.ctx, r.tenantID, inv.ID); err != nil {
-			t.Fatalf("write-off on a stale hold: %v", err)
+			t.Fatalf("write-off of an unclear charge: %v", err)
 		}
+		r.ageUpdated(inv.ID, 5*time.Minute)
 		r.runClean()
-		if r.hold(inv.ID) == nil {
-			t.Fatal("hold cleared while a payment the invoice does not follow is still processing at Stripe")
+		if got := r.get(inv.ID); got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != pi.id || got.ProviderPaymentStatus != "processing" {
+			t.Fatalf("while it processes: %s on %q, Stripe status %q; want still unknown on %q with processing observed",
+				got.PaymentStatus, got.StripePaymentIntentID, got.ProviderPaymentStatus, pi.id)
 		}
 
 		r.fake.setStatus(pi.id, "succeeded") // days later; its webhook is lost
-		r.ageHold(inv.ID, staleSweepAge)
+		r.exec(`UPDATE invoices SET provider_synced_at = NULL WHERE id = $1`, inv.ID)
 		r.runClean()
 		got := r.get(inv.ID)
 		if got.Status != domain.InvoicePaid || got.StripePaymentIntentID != pi.id {
@@ -1252,38 +1125,10 @@ func TestStaleHold_ProcessingTheInvoiceDoesNotFollow_KeptUntilItEnds(t *testing.
 		}
 	})
 
-	t.Run("next to a succeeded payment: flagged as a duplicate once it succeeds", func(t *testing.T) {
-		r := newSHRig(t, "SH Processing Next To Succeeded")
-		inv := r.seed("INV-SH-PROC-DUP")
-		first := r.crashAfterCharge(inv, autoCharge, "")
-		second := r.fake.addPI(stripeCustomerOf(inv), inv.ID, "", "processing", shDue)
-		r.ageHold(inv.ID, staleSweepAge)
-		r.runClean()
-		if got := r.get(inv.ID); got.Status != domain.InvoicePaid || got.StripePaymentIntentID != first.id {
-			t.Fatalf("after the sweep: %s with PI %q, want paid with %q", got.Status, got.StripePaymentIntentID, first.id)
-		}
-		if r.hold(inv.ID) == nil {
-			t.Fatal("hold cleared while a second payment is still processing at Stripe")
-		}
-
-		r.fake.setStatus(second.id, "succeeded")
-		r.ageHold(inv.ID, staleSweepAge)
-		r.runClean()
-		if n := r.events(domain.EventPaymentDuplicateCharge, inv.ID); n != 1 {
-			t.Errorf("payment.duplicate_charge rows = %d, want 1 for %s", n, second.id)
-		}
-		if n := r.events(domain.EventPaymentSucceeded, inv.ID); n != 1 {
-			t.Errorf("payment.succeeded rows = %d, want 1", n)
-		}
-		if r.hold(inv.ID) != nil {
-			t.Error("hold kept after both payments were recorded")
-		}
-	})
-
 	t.Run("the invoice's own processing payment: cleared (control)", func(t *testing.T) {
 		r := newSHRig(t, "SH Processing Own")
 		inv := r.seed("INV-SH-PROC-OWN")
-		r.fake.queue(fakeMode{kind: fakeCreate, status: "processing"})
+		r.fake.queueConfirm(fakeMode{kind: fakeCreate, status: "processing"})
 		if _, err := r.chargeAs(r.ctx, autoCharge, inv.ID, "pm_card_1"); err != nil {
 			t.Fatalf("charge: %v", err)
 		}

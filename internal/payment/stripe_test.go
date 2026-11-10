@@ -18,38 +18,76 @@ import (
 // Mocks
 // ---------------------------------------------------------------------------
 
+// mockStripeClient answers a charge's two calls as Stripe does. createCalls
+// counts charge attempts (one create each) and lastParams is the last
+// attempt's parameters. A failErr Stripe gives before any confirm (below its
+// minimum, a refused key, a 429, no Stripe connected) comes back from the
+// create; any other failure (a decline, an unclear answer) from the confirm,
+// naming the PaymentIntent as LiveStripeClient's confirm does.
 type mockStripeClient struct {
 	lastParams   PaymentIntentParams
 	createCalls  int
+	confirmCalls int
 	shouldFail   bool
 	failErr      error // when set, overrides the default card_declined failure
 	piID         string
-	chargeStatus string                         // CreatePaymentIntent result.Status; defaults to "requires_capture"
+	chargeStatus string                         // the confirm's result.Status; defaults to "requires_capture"
 	piStates     map[string]PaymentIntentResult // reconciler lookups by PI ID
 }
 
-func (m *mockStripeClient) CreatePaymentIntent(_ context.Context, params PaymentIntentParams) (PaymentIntentResult, error) {
+// failsBeforeConfirm reports whether err is one Stripe gives at the create:
+// below its minimum, a refused key, a 429, no Stripe connected, or a request
+// it refuses outright (a definite PaymentError with no decline code and no
+// PaymentIntent). A card's answer, and an unclear one, come from the confirm.
+func failsBeforeConfirm(err error) bool {
+	var bm *BelowMinimumError
+	var ke *StripeKeyError
+	var pe *PaymentError
+	if errors.As(err, &bm) || errors.As(err, &ke) || errors.Is(err, ErrPaymentTransient) || errors.Is(err, ErrStripeNotConfigured) {
+		return true
+	}
+	return errors.As(err, &pe) && !pe.Unknown && pe.DeclineCode == "" && pe.PaymentIntentID == ""
+}
+
+func (m *mockStripeClient) CreateUnconfirmedPaymentIntent(_ context.Context, params PaymentIntentParams) (PaymentIntentResult, error) {
 	m.createCalls++
 	m.lastParams = params
+	if m.shouldFail && m.failErr != nil && failsBeforeConfirm(m.failErr) {
+		return PaymentIntentResult{}, m.failErr
+	}
+	// Stripe always names the PaymentIntent it creates: the one a scripted
+	// failure names, else piID, else a fixed id.
+	id := m.piID
+	var pe *PaymentError
+	if id == "" && m.shouldFail && errors.As(m.failErr, &pe) {
+		id = pe.PaymentIntentID
+	}
+	if id == "" {
+		id = "pi_mock"
+	}
+	return PaymentIntentResult{ID: id, Status: "requires_confirmation", ClientSecret: "pi_secret_test"}, nil
+}
+
+func (m *mockStripeClient) ConfirmPaymentIntent(_ context.Context, id string, _ PaymentIntentParams) (PaymentIntentResult, error) {
+	m.confirmCalls++
 	if m.shouldFail {
-		if m.failErr != nil {
-			return PaymentIntentResult{}, m.failErr
+		err := m.failErr
+		if err == nil {
+			err = &PaymentError{Message: "card_declined", DeclineCode: "card_declined"}
 		}
-		return PaymentIntentResult{}, &PaymentError{Message: "card_declined", DeclineCode: "card_declined"}
+		var pe *PaymentError
+		if errors.As(err, &pe) && pe.PaymentIntentID == "" {
+			named := *pe
+			named.PaymentIntentID = id
+			return PaymentIntentResult{}, &named
+		}
+		return PaymentIntentResult{}, err
 	}
 	status := m.chargeStatus
 	if status == "" {
 		status = "requires_capture"
 	}
-	return PaymentIntentResult{
-		ID:           m.piID,
-		Status:       status,
-		ClientSecret: "pi_secret_test",
-	}, nil
-}
-
-func (m *mockStripeClient) ListPaymentIntentsForCustomer(_ context.Context, _ string, _ time.Time) ([]PaymentIntentResult, error) {
-	return nil, nil
+	return PaymentIntentResult{ID: id, Status: status, ClientSecret: "pi_secret_test"}, nil
 }
 
 func (m *mockStripeClient) CancelPaymentIntent(_ context.Context, _ string) error {
@@ -77,9 +115,12 @@ type mockInvoiceUpdater struct {
 	// answer "no longer yours" (ADR-127).
 	confirms       int
 	confirmRefused bool
-	invoices       map[string]domain.Invoice
-	byPI           map[string]string // PI ID -> invoice ID
-	failNotedPI    map[string]string // invoice ID -> PI whose failure notifications fired
+	// stampErr, when set, is what StampPendingConfirm returns (a database
+	// fault between the create and the confirm).
+	stampErr    error
+	invoices    map[string]domain.Invoice
+	byPI        map[string]string // PI ID -> invoice ID
+	failNotedPI map[string]string // invoice ID -> PI whose failure notifications fired
 	// cardEventEnqueues counts payment.succeeded enqueues — mirrors the real
 	// store enqueuing payment.succeeded IN-TX, gated on the transition (so a
 	// concurrent redelivery increments it once, not twice).
@@ -167,9 +208,37 @@ func (m *mockInvoiceUpdater) GetByStripePaymentIntentID(_ context.Context, _, pi
 	return m.invoices[id], nil
 }
 
+// RecordChargeAttempt mirrors the store: one row per PaymentIntent, upserted
+// in place (a charge writes its pending row before confirming and its outcome
+// after); 'succeeded' is final; a row with no PaymentIntent is insert-only.
 func (m *mockInvoiceUpdater) RecordChargeAttempt(_ context.Context, _ string, a domain.InvoiceChargeAttempt) error {
-	m.chargeAttempts = append(m.chargeAttempts, a)
 	m.noteAttemptTrigger(a.StripePaymentIntentID, a.Trigger)
+	if a.StripePaymentIntentID != "" {
+		for i := range m.chargeAttempts {
+			row := &m.chargeAttempts[i]
+			if row.StripePaymentIntentID != a.StripePaymentIntentID {
+				continue
+			}
+			// Mirror the store: success is kept, and a closed (failed) row
+			// is kept against a late pending or unknown note.
+			late := row.Outcome == domain.ChargeAttemptFailed &&
+				(a.Outcome == domain.ChargeAttemptPending || a.Outcome == domain.ChargeAttemptUnknown)
+			if row.Outcome != domain.ChargeAttemptSucceeded && !late {
+				row.Outcome = a.Outcome
+			}
+			if a.ProviderReason != "" {
+				row.ProviderReason = a.ProviderReason
+			}
+			if a.DeclineCode != "" {
+				row.DeclineCode = a.DeclineCode
+			}
+			if a.StripePaymentMethodID != "" {
+				row.StripePaymentMethodID = a.StripePaymentMethodID
+			}
+			return nil
+		}
+	}
+	m.chargeAttempts = append(m.chargeAttempts, a)
 	return nil
 }
 
@@ -225,6 +294,30 @@ func (m *mockInvoiceUpdater) ReleaseChargeHold(_ context.Context, _, id string, 
 func (m *mockInvoiceUpdater) ConfirmChargeHold(_ context.Context, _, _ string, hold domain.ChargeHold, _ int64) (bool, error) {
 	m.confirms++
 	return hold.Held() && !m.confirmRefused, nil
+}
+
+// StampPendingConfirm mirrors the store: it applies only while the hold is
+// the charger's (confirmRefused says it no longer is), the counter is the one
+// the charge read and the invoice is open for a charge; it puts the
+// PaymentIntent on the invoice as unknown, moves the counter and records the
+// attempt.
+func (m *mockInvoiceUpdater) StampPendingConfirm(ctx context.Context, tenantID string, a domain.InvoiceChargeAttempt, hold domain.ChargeHold, attemptSeq int64) (domain.Invoice, bool, error) {
+	if m.stampErr != nil {
+		return domain.Invoice{}, false, m.stampErr
+	}
+	inv, ok := m.invoices[a.InvoiceID]
+	if !ok || !hold.Held() || m.confirmRefused || inv.ChargeAttemptSeq != attemptSeq ||
+		inv.Status != domain.InvoiceFinalized ||
+		(inv.PaymentStatus != domain.PaymentPending && inv.PaymentStatus != domain.PaymentFailed && inv.PaymentStatus != "") { // "": a fixture that sets no status is pending
+		return domain.Invoice{}, false, nil
+	}
+	inv.PaymentStatus = domain.PaymentUnknown
+	inv.StripePaymentIntentID = a.StripePaymentIntentID
+	inv.LastPaymentError = ""
+	inv.ChargeAttemptSeq++
+	m.invoices[a.InvoiceID] = inv
+	m.byPI[a.StripePaymentIntentID] = a.InvoiceID
+	return inv, true, m.RecordChargeAttempt(ctx, tenantID, a)
 }
 
 func (m *mockInvoiceUpdater) Get(_ context.Context, _, id string) (domain.Invoice, error) {
@@ -639,8 +732,11 @@ func TestChargeInvoice_UnknownOutcome(t *testing.T) {
 	if updated.StripePaymentIntentID != "pi_partial_999" {
 		t.Errorf("stripe_pi: got %q, want pi_partial_999 (preserved from ambiguous error so reconciler can query Stripe)", updated.StripePaymentIntentID)
 	}
-	if updated.LastPaymentError == "" {
-		t.Error("last_payment_error should be recorded for operator visibility")
+	// What Stripe said goes on the attempt's row (the Activity timeline); the
+	// invoice was stamped before the confirm and needs no second write.
+	if n := len(invoices.chargeAttempts); n != 1 || invoices.chargeAttempts[0].Outcome != domain.ChargeAttemptUnknown ||
+		invoices.chargeAttempts[0].ProviderReason == "" {
+		t.Errorf("attempt rows = %+v, want one unknown row carrying Stripe's message", invoices.chargeAttempts)
 	}
 }
 

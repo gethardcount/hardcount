@@ -21,6 +21,54 @@ only way back.
    `no migration record`, stop: the upgrade will not run
    ([why](ops/runbook/migration-failed-midway.md#tables-but-no-migration-record)).
 
+### Migration 00224: finish charges first
+
+The release with migration `00224_charge_hold_token` changes how a charge
+reaches Stripe: each charge puts its Stripe payment on the invoice before
+any money moves ([ADR-137](adr/137-charge-stamps-invoice-before-confirming.md)). The
+migration refuses to run while any invoice has a charge in progress or a
+parked charge from the previous version. The new version cannot settle
+those, because the previous version put nothing on the invoice before its
+charge reached Stripe.
+
+1. With the previous version still running, count them in the database
+   shell (`docker compose exec postgres psql -U hardcount -d hardcount` on
+   one VM):
+
+   ```sql
+   SET app.bypass_rls = 'on';
+   SELECT count(*) FROM invoices
+   WHERE status = 'finalized'
+     AND (auto_charge_claimed_until IS NOT NULL
+          OR (payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = ''));
+   ```
+
+   **You see:** a `count` column with one number.
+2. Above 0: leave the previous version running and count again later. Its
+   billing run finishes a charge in progress within about an hour, and a
+   parked charge within 24 hours.
+3. At 0: upgrade as the rest of this page says. Run one version at a time
+   for this upgrade: stop every copy of the previous version before the new
+   one starts. A copy of the previous version that keeps running can leave
+   a charge that the new one will not settle on its own
+   ([Left by an earlier version](ops/runbook/unclear-charge.md#left-by-an-earlier-version)).
+
+Only open invoices count: on a paid, voided or written-off invoice nothing
+charges again, and the new version clears such a hold.
+
+If the count stays above 0 for more than a day, the previous version is
+keeping a hold it cannot clear. It cannot ask Stripe about that charge: the
+key was revoked, or the customer was deleted in Stripe. Fix the Stripe
+connection so its next billing run can ask, or check the customer's payments
+in Stripe yourself and write the invoice off, then count again.
+
+If the upgrade stops with `Hardcount upgrade stopped: … invoice(s) still open
+have a charge in progress or a parked charge from the previous version`, that
+migration changed nothing. Start the previous version again (on one VM, the
+steps in [Upgrade on one VM](#upgrade-on-one-vm) with its version number),
+then do steps 1 to 3. If the release's other migrations ran, the previous
+version logs that the database is newer than it; that is expected here.
+
 ### Coming from Velox
 
 Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it
