@@ -36,7 +36,7 @@ original text.
 
 ### Changed
 
-- **A charge saves its Stripe payment before any money can move.** Each charge creates the PaymentIntent unconfirmed, puts it on the invoice, then confirms it. While it runs, the invoice's payment is `unknown`. An unclear answer now names the payment and is settled within about an hour. No invoice is parked for 24 hours ([ADR-137](docs/adr/137-charge-stamps-invoice-before-confirming.md)).
+- **A charge saves its Stripe payment before any money can move.** Each charge creates the PaymentIntent unconfirmed, puts it on the invoice, then confirms it. While it runs, the invoice's payment is `unknown`. An unclear answer now names the payment and is settled within about an hour. No invoice is parked for 24 hours ([ADR-137](docs/adr/137-charge-stamps-invoice-before-confirming.md)). ([#1666](https://github.com/gethardcount/hardcount/pull/1666))
 
 ### Added
 
