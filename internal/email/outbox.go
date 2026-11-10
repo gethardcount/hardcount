@@ -360,8 +360,10 @@ type OutboxHandler func(ctx context.Context, row OutboxRow) error
 //  3. MARK (per row, short tx on a ctx DETACHED from the batch deadline):
 //     work already performed must always be recorded — a mark that dies
 //     with the tick deadline is exactly the delivered-email-re-sent bug
-//     this rewrite closes. Marks are CAS (WHERE status='pending') so a
-//     stale writer can never regress a terminal row.
+//     this rewrite closes. Each mark names the rows it may change (see
+//     attemptRow): a retry or give-up only a row still pending under this
+//     claim, a skip any pending row, and a send any row not yet marked
+//     sent.
 //
 // Returns the number of rows attempted.
 func (s *OutboxStore) ProcessBatch(ctx context.Context, limit int, handler OutboxHandler) (int, error) {
@@ -465,6 +467,25 @@ func (s *OutboxStore) claimBatch(ctx context.Context, limit int) ([]OutboxRow, e
 
 // attemptRow is phases 2+3 for one row: budget-bounded handler call
 // (panic-recovered) followed by a detached-ctx CAS mark.
+//
+// Another claim may have taken the row by the time this one marks it: this
+// claim's lease ran out while its handler was still at work. Each mark
+// therefore names the rows it may change:
+//   - Retry and give-up: a pending row whose attempts still equals
+//     row.Attempts. Only a claim adds to attempts, so a later claim carries
+//     a higher value. Without that check, a late retry mark would end the
+//     new claim's lease early, and a late give-up would mark failed an
+//     email the new claim sends.
+//   - Sent: any row not yet marked sent, whichever claim sent it, and over
+//     another claim's failed or skipped. The email reached the relay. Left
+//     failed, the row would be sent again by an operator's requeue, and
+//     left pending, by the next claim.
+//   - Skipped: any pending row. A skip does not go stale, because the
+//     invoice states it reads only move toward settled, so a later claim
+//     would skip too. If a later claim did send, its sent mark replaces
+//     the skip.
+//
+// See ADR-072, amendment 2026-11-10.
 func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler OutboxHandler) {
 	rowCtx, cancel := context.WithTimeout(ctx, PerRowBudget)
 	hErr := func() (err error) {
@@ -490,11 +511,16 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 	// UPDATE so no committed terminal row still holds them. A failed row
 	// keeps its payload: an operator can still re-send it.
 	if hErr == nil {
+		// Every status but dispatched, not a list of the statuses the row
+		// may come from: a send that happened is recorded over any other
+		// state, one added later included. skip_reason is cleared because
+		// only a skipped row has one.
 		s.markCAS(markCtx, row.ID, `
 			UPDATE email_outbox
 			SET status = 'dispatched', dispatched_at = now(), last_error = NULL,
+			    skip_reason = NULL,
 			    payload = `+scrubbedPayloadSQL+`
-			WHERE id = $1 AND status = 'pending'
+			WHERE id = $1 AND status <> 'dispatched'
 		`)
 		return
 	}
@@ -529,8 +555,8 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 		if !s.markCAS(markCtx, row.ID, `
 			UPDATE email_outbox
 			SET status = 'failed', last_error = `+"$2"+`
-			WHERE id = $1 AND status = 'pending'
-		`, errMsg) {
+			WHERE id = $1 AND status = 'pending' AND attempts = `+"$3"+`
+		`, errMsg, row.Attempts) {
 			return
 		}
 		cause := mw.DeadLetterMaxAttempts
@@ -553,15 +579,15 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 	s.markCAS(markCtx, row.ID, `
 		UPDATE email_outbox
 		SET next_attempt_at = $2, last_error = $3
-		WHERE id = $1 AND status = 'pending'
-	`, nextAt, errMsg)
+		WHERE id = $1 AND status = 'pending' AND attempts = $4
+	`, nextAt, errMsg, row.Attempts)
 }
 
 // markCAS executes a per-row mark in its own short tx and reports whether
-// it applied (one row moved, committed). The WHERE status='pending' guard
-// means a stale mark (lease expired, another worker already resolved the
-// row) matches zero rows and is dropped — logged, never silently absorbed
-// into a terminal-state regression.
+// it applied (one row moved, committed). The query's WHERE says which rows
+// the mark may change (see attemptRow). A mark that matches zero rows is
+// dropped and logged: the row changed after this claim took it, because
+// another worker resolved it or claimed it again.
 func (s *OutboxStore) markCAS(ctx context.Context, rowID, query string, args ...any) bool {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -580,7 +606,7 @@ func (s *OutboxStore) markCAS(ctx context.Context, rowID, query string, args ...
 		return false
 	}
 	if n == 0 {
-		slog.Warn("email outbox: stale mark dropped (row no longer pending)", "outbox_id", rowID)
+		slog.WarnContext(ctx, "email outbox: mark dropped: the row changed since this claim", "outbox_id", rowID)
 		return false
 	}
 	if err := tx.Commit(); err != nil {

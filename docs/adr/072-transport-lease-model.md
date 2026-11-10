@@ -1,11 +1,11 @@
 # ADR-072: Outbox transport — claim-lease with detached CAS marks, derived constants
 
 **Date:** 2026-07-03
-**Status:** Accepted (shipped in P5; designed by the P5 adversarial panel — 2 lenses, both SHIP-WITH-FIXES; consolidated protocol in the remediation plan §4.5) (amended 2026-08-30, 2026-10-13)
+**Status:** Accepted (shipped in P5; designed by the P5 adversarial panel — 2 lenses, both SHIP-WITH-FIXES; consolidated protocol in the remediation plan §4.5) (amended 2026-08-30, 2026-10-13, 2026-11-10)
 
 ## Summary
 
-The email and webhook outboxes (tables of messages waiting to be sent) claim a batch in one short transaction that stamps a time-limited lease, then send each row outside it. Each row's result is saved in its own small update that applies only to a row still `pending`, so a rollback never re-sends a delivered email. Delivery is at-least-once, with at most one duplicate per crash or expired lease, and a `failed` row waits for an operator to requeue it. Amended 2026-08-30 and 2026-10-13: no retention window exists, and a sent or skipped email row drops its links and PDF from the stored payload. Status: active, amended; each worker now runs on one replica under a leader lease ([ADR-114](114-leader-leases-tick-scoped-fencing.md)).
+The email and webhook outboxes (tables of messages waiting to be sent) claim a batch in one short transaction that stamps a time-limited lease, then send each row outside it. Each row's result is saved in its own small update, so a rollback never re-sends a delivered email. A retry or a give-up applies only to a row still `pending` under the claim that made the attempt. An email's sent mark applies to any row not already sent. A webhook event commits together with its row's sent mark, or not at all. Delivery is at-least-once, with at most one duplicate per crash or expired lease, and a `failed` row waits for an operator to requeue it. Amended 2026-08-30 and 2026-10-13: no retention window exists, and a sent or skipped email row drops its links and PDF from the stored payload. Amended 2026-11-10: each mark is tied to its claim, as above ([amendment](#amendment-2026-11-10--each-mark-is-tied-to-its-claim)). Status: active, amended; each worker now runs on one replica under a leader lease ([ADR-114](114-leader-leases-tick-scoped-fencing.md)).
 
 ## Context
 
@@ -172,3 +172,61 @@ A sent row can no longer be sent again by flipping it back to `pending`:
 its link and PDF are gone. Send a new email from the dashboard or the API
 instead. The residual's other proposal, encrypting the payload fields of
 unsent rows, is not done.
+
+## Amendment 2026-11-10 — each mark is tied to its claim
+
+Decision 3 guarded every mark with `status = 'pending'` alone. That is not
+enough when two claims of one row overlap.
+
+A claim outlives its lease when its process freezes, or when the database
+clock steps forward. A second claim then takes the row while the first
+handler is still at work. This needs two or more replicas. With
+`status = 'pending'` alone, the first claim's late mark changed the row
+under the second claim:
+
+- A late retry mark moved `next_attempt_at` from the end of the new claim's
+  lease to seconds away, so a third claim could take the row.
+- A late give-up marked `failed` a row that the new claim then sent. The
+  requeue of `failed` rows in decision 5 sent it again.
+- A late email send, after the new claim gave up or skipped, was dropped.
+  The row read `failed` or `skipped` for a delivered email.
+- The webhook handler's sent mark was not checked when it matched no row.
+  Both claims could commit an event for one row, each with its own id,
+  which a receiver cannot drop as a repeat.
+
+**The rule now:**
+
+| Mark | Applies to | Why |
+|---|---|---|
+| Retry and give-up, both outboxes | A row still `pending` whose `attempts` equals the value this claim returned | The claim is the only place that adds to `attempts`, so each claim holds a value no earlier claim holds. |
+| Email sent | Any row not already `dispatched`. It also clears `skip_reason`. | A send that happened is recorded, whichever claim made it. It outranks another claim's give-up or skip. Dropping it would leave the row to be sent again. |
+| Email skipped | Any `pending` row, as before | A skip does not go stale: the invoice states the check reads only move toward settled, so a later claim would skip too. If a later claim did send, its sent mark replaces the skip. |
+| Webhook sent, in the event transaction | A row still `pending`, and the row count is checked | On zero rows `CreateEventWithDeliveries` returns `ErrOutboxRowNotPending`, and the event and its deliveries roll back. The update locks the row, so the second of two transactions waits, then finds the row `dispatched`. One row makes one event. |
+
+The webhook outbox's own success mark after the handler, the backstop in
+decision 4, is unchanged.
+
+**What stays possible:**
+
+- Two overlapping claims can both send one email (decision 5, unchanged).
+  SMTP has no idempotency key, and no database check stops a send that
+  another process has already started.
+- A live claim's give-up still counts in
+  `hardcount_email_outbox_dead_lettered_total` and logs at ERROR, even when
+  a stalled claim's send later marks the row sent.
+- The requeue in decision 5 resets `attempts` to 0. A stalled claim's retry
+  or give-up can then match a later claim that reaches the same value. The
+  stall must last through a give-up, the requeue, and as many new claims
+  again.
+- Two event transactions for one row are rare. The required
+  `idle_in_transaction_session_timeout`
+  ([Postgres requirements](../ops/postgres-requirements.md)) ends a handler
+  frozen inside its event transaction before the lease ends. Without the
+  setting, or on a forward clock step, the row-count check still keeps the
+  two to one event.
+
+The overlaps are tested against real Postgres in
+`internal/webhook/outbox_claim_fence_integration_test.go` and
+`internal/email/outbox_claim_fence_integration_test.go`. Each test ends one
+claim's lease from inside its handler and runs a second `ProcessBatch` on
+the same row.

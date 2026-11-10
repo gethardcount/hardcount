@@ -548,6 +548,11 @@ func (s *Service) DeleteEndpoint(ctx context.Context, tenantID, id string) error
 // the two would re-run the row and send a second event with a new id, which a
 // receiver cannot drop as a repeat.
 //
+// A call whose row is no longer pending writes nothing, publishes nothing and
+// starts no attempt. It returns an error that wraps ErrOutboxRowNotPending.
+// That happens when a second claim of the row wrote its event first, or gave
+// the row up, while this call was still at work.
+//
 // The endpoints are read first, under the ctx's livemode, which RLS filters
 // on. The ep.Livemode check below backs that up, so a test-mode event never
 // reaches a live endpoint even on a path that skips RLS. Delivery rows are
