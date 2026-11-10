@@ -1617,7 +1617,9 @@ func TestRetryTax_AutoFinalize_QueuesForCollection(t *testing.T) {
 	}
 }
 
-// stubPauseReader answers the auto-finalize gate's pause lookup.
+// stubPauseReader answers the pause lookup the attention banners and Create
+// use. The tax retry's auto-finalize reads the pause on its transaction
+// (memStore.CollectionPausedTx).
 type stubPauseReader struct {
 	paused bool
 	err    error

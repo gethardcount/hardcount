@@ -2643,37 +2643,21 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 	}, nil
 }
 
-// RetryTax routes a "Retry tax" action through the billing engine. Called
-// from the operator-triggered HTTP handler, the background reconciler
-// (RetryPendingTax), the test-clock catch-up and the two fan-outs (Stripe
-// connect, billing-profile save). The engine owns the recompute and the
-// write. When the tax resolves on an engine-generated draft
-// (shouldAutoFinalizeAfterRetry), this method finalizes it inside the tax
-// write's own transaction, through the engine's hook (UpdateTaxAtomic's
-// then). Manual invoices stay drafts so the operator keeps the explicit
-// finalize step.
+// RetryTax routes a "Retry tax" action through the billing engine: the
+// operator's button, the tax_retry sweep, the test-clock catch-up and the two
+// fan-outs (Stripe connect, billing-profile save). When the tax resolves on an
+// engine-generated draft (shouldAutoFinalizeAfterRetry), it finalizes the
+// draft inside the tax write's transaction (the engine's hook). The tax and
+// the finalize commit together or not at all, so no engine draft is left
+// with tax ok and no finalize. (See ADR-017.)
 //
-// The tax and the finalize commit together or not at all (P1-29). When the
-// finalize was a second transaction, a stop between the two (a SIGTERM or a
-// lost lease on the tick's ctx, a COMMIT cut by a cancel, a crash) left an
-// engine draft with tax ok, which no sweep lists, so the period was never
-// issued. Now:
-//   - A subscription with pause_collection in force (read on the same
-//     transaction) keeps the draft, as cycle close does. The tax is written,
-//     and nil is returned.
-//   - A failed pause read or finalize rolls the tax write back: the row stays
-//     a draft with tax pending, the engine counts the try, and the error is
-//     returned and logged.
-//   - A rival that finalized the invoice during the calculation gets the
-//     store's refusal (409), the answer the engine's own draft check gives.
-//
-// After the commit, the finalize's steps (afterFinalize: the Stripe Tax
-// commit and the held relief's steps) and the $0 settle run on a ctx the
-// caller cannot cancel, with a stepsBudget deadline. Each has a sweep; the
-// operator who clicked sees them done.
-//
-// Returns the invoice with its Attention re-derived. An error comes back
-// with no invoice.
+// A subscription with pause_collection in force, read on that transaction at
+// the invoice's now, keeps the draft. A failed pause read or finalize leaves
+// the row as it was before the try and returns an error naming the finalize;
+// the engine counts the try when the tax was pending. A rival that finalized
+// during the calculation gets the store's 409. After the commit, the
+// finalize's steps and the $0 settle run on a stepsBudget ctx. Manual
+// invoices stay drafts. An error comes back with no invoice.
 func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
 	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
 	if s.taxRetrier == nil {
@@ -2717,8 +2701,9 @@ func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (dom
 	inv, err := s.taxRetrier.RetryTaxForInvoice(ctx, tenantID, invoiceID, then)
 	if err != nil {
 		if hookErr != nil {
-			slog.ErrorContext(ctx, "invoice: tax retry resolved the tax but did not finalize; the tax write was rolled back and the try counted",
+			slog.ErrorContext(ctx, "invoice: tax retry resolved the tax but did not finalize; the row is left as it was, and the try is counted when its tax was pending",
 				"tenant_id", tenantID, "invoice_id", invoiceID, "error", hookErr)
+			return domain.Invoice{}, fmt.Errorf("the tax was calculated but the invoice could not be finalized, so the tax was not saved: %w", err)
 		}
 		return domain.Invoice{}, err
 	}

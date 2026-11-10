@@ -14,6 +14,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tax"
 )
@@ -76,32 +77,56 @@ func TestRetryTax_FinalizeFailure_NothingIsSaved(t *testing.T) {
 	})
 }
 
+// finalizeRefusingStore refuses the draft→finalized write as a state
+// conflict.
+type finalizeRefusingStore struct {
+	*memStore
+}
+
+func (s finalizeRefusingStore) FinalizeDraftTx(context.Context, *sql.Tx, string, string, func(*sql.Tx, domain.Invoice) error) (domain.Invoice, error) {
+	return domain.Invoice{}, errs.InvalidState("invoice is not a draft")
+}
+
 // TestRetryTaxHandler_FinalizeFailure_NoAuditRow: a click whose finalize
-// failed saved nothing (the tax write rolled back with it), so it answers the
-// error and writes no retry_tax audit row.
+// failed saved no tax, so it answers the error and writes no retry_tax audit
+// row. A state conflict answers 409 with a message naming the finalize; a
+// database error answers 500 internal_error (its text stays in the log).
 func TestRetryTaxHandler_FinalizeFailure_NoAuditRow(t *testing.T) {
-	mem := newMemStore()
-	draft := taxPendingCycleDraft("inv_1")
-	draft.InvoiceNumber = "INV-001"
-	mem.invoices["inv_1"] = draft
-	svc := NewService(finalizeFailingStore{mem}, nil, nil)
-	svc.SetTaxRetrier(&stubTaxRetrier{store: mem})
-	aud := &capturingInvoiceAudit{}
-	h := &Handler{svc: svc, auditLogger: aud}
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/invoices/inv_1/retry-tax", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "inv_1")
-	reqCtx := auth.WithTenantID(req.Context(), "t1")
-	reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
-	rr := httptest.NewRecorder()
-	h.retryTax(rr, req.WithContext(reqCtx))
-
-	if rr.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500 (finalize failed on a database error). body=%s", rr.Code, rr.Body.String())
+	cases := []struct {
+		name     string
+		store    func(*memStore) Store
+		wantCode int
+		wantBody string
+	}{
+		{"database error", func(m *memStore) Store { return finalizeFailingStore{m} }, http.StatusInternalServerError, "internal_error"},
+		{"state conflict", func(m *memStore) Store { return finalizeRefusingStore{m} }, http.StatusConflict, "could not be finalized"},
 	}
-	if _, ok := aud.firstOf(domain.AuditActionRetryTax); ok {
-		t.Errorf("retry_tax audit row written for a click that saved nothing; actions=%v", aud.actions())
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mem := newMemStore()
+			draft := taxPendingCycleDraft("inv_1")
+			draft.InvoiceNumber = "INV-001"
+			mem.invoices["inv_1"] = draft
+			svc := NewService(c.store(mem), nil, nil)
+			svc.SetTaxRetrier(&stubTaxRetrier{store: mem})
+			aud := &capturingInvoiceAudit{}
+			h := &Handler{svc: svc, auditLogger: aud}
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/invoices/inv_1/retry-tax", nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", "inv_1")
+			reqCtx := auth.WithTenantID(req.Context(), "t1")
+			reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
+			rr := httptest.NewRecorder()
+			h.retryTax(rr, req.WithContext(reqCtx))
+
+			if rr.Code != c.wantCode || !strings.Contains(rr.Body.String(), c.wantBody) {
+				t.Errorf("status = %d, body %s; want %d containing %q", rr.Code, rr.Body.String(), c.wantCode, c.wantBody)
+			}
+			if _, ok := aud.firstOf(domain.AuditActionRetryTax); ok {
+				t.Errorf("retry_tax audit row written for a click that saved no tax; actions=%v", aud.actions())
+			}
+		})
 	}
 }
 

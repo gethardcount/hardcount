@@ -50,7 +50,7 @@ type Store interface {
 	// same onFinalized hook.
 	FinalizeDraft(ctx context.Context, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error)
 	// FinalizeDraftTx is FinalizeDraft on the caller's transaction. A tax
-	// retry finalizes inside its tax write's transaction (P1-29).
+	// retry finalizes inside its tax write's transaction. (See ADR-017.)
 	FinalizeDraftTx(ctx context.Context, tx *sql.Tx, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error)
 	// CollectionPausedTx reports whether the invoice's subscription has
 	// pause_collection in force at `at`, read on the caller's transaction.

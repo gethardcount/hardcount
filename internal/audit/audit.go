@@ -143,14 +143,13 @@ func (l *Logger) Log(ctx context.Context, tenantID, action, resourceType, resour
 
 	id := postgres.NewID("hc_aud")
 	// Same ctx-derived sim axis as LogInTx (ADR-090 §5). The residual own-tx
-	// callers are not a lesser class of evidence — the FINALIZE row of an
-	// invoice the engine creates already finalized (cycle close, subscription
-	// create, cancel-final, threshold — what a clock advance normally produces)
-	// is written through this path, by billing.Engine.auditInvoiceFinalized.
-	// The finalize of a draft writes its row through LogInTx instead, on the
-	// finalize's transaction (invoice.Service.finalizeHook): the operator HTTP
-	// path and the tax-retry chain (P1-29). Engine invoices NEVER pass through
-	// Finalize; they are born finalized.
+	// callers are not a lesser class of evidence: the engine's end-of-period
+	// cancel and its subscription updates write here (the residual writers in
+	// internal/arch/audit_background_writers_test.go). Every finalize row is
+	// written with LogInTx, in its transaction: billing.Engine's
+	// emitFinalizeAuditTx for an invoice the engine creates already
+	// finalized, and invoice.Service.finalizeHook for the finalize of a draft
+	// (the operator's Finalize and the tax retry).
 	simAt, clockID, metadata := simColumns(ctx, metadata)
 	metaJSON, err := json.Marshal(metadata)
 	if err != nil {

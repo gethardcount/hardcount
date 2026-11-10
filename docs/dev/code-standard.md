@@ -134,7 +134,9 @@ Each domain package in `internal/` has a **handler** (HTTP), a **service**
   - Each group of steps after that commit gets its own such ctx with
     `stepsBudget` (5 minutes, above three Stripe calls at their limit),
     taken after the commit.
-  - Each constant is unexported in the package that uses it.
+  - Each transaction takes its own `commitBudget` ctx, including one that
+    records a failure after another ran out of time.
+  - Each budget is unexported in the package that uses it.
 - **Every goroutine has an owner that waits for it at shutdown,** such as the
   `sync.WaitGroup` in `cmd/hardcount/main.go`. If nothing waits, a comment
   names the background job that retries the work.

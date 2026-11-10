@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -55,12 +57,19 @@ func (p *hookedTax) Calculate(ctx context.Context, req tax.Request) (*tax.Result
 	return res, nil
 }
 
-// recordingCommitter is the invoice service's Stripe Tax commit: it counts
-// the commits a finalize's steps make.
-type recordingCommitter struct{ commits []string }
+// recordingCommitter is the invoice service's Stripe Tax commit: it records
+// the commits a finalize's steps make, and the ctx each ran on.
+type recordingCommitter struct {
+	commits     []string
+	ctxErrs     []error
+	hasDeadline []bool
+}
 
-func (c *recordingCommitter) CommitTax(_ context.Context, _, invoiceID, _ string) error {
+func (c *recordingCommitter) CommitTax(ctx context.Context, _, invoiceID, _ string) error {
 	c.commits = append(c.commits, invoiceID)
+	c.ctxErrs = append(c.ctxErrs, ctx.Err())
+	_, ok := ctx.Deadline()
+	c.hasDeadline = append(c.hasDeadline, ok)
 	return nil
 }
 
@@ -98,6 +107,16 @@ type failingRelief struct{}
 
 func (failingRelief) IssueHeldReliefTx(context.Context, *sql.Tx, string, domain.Invoice) (func(context.Context), error) {
 	return nil, errors.New("relief credit note insert failed")
+}
+
+// stalledRelief waits in finalize's held-relief step until the transaction's
+// ctx is done: a lock wait or a slow database that outlasts the write's
+// budget.
+type stalledRelief struct{}
+
+func (stalledRelief) IssueHeldReliefTx(ctx context.Context, _ *sql.Tx, _ string, _ domain.Invoice) (func(context.Context), error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 type oneTxRig struct {
@@ -237,7 +256,10 @@ func TestRetryTax_CancelledDuringCommit_InvoiceIsFinalized(t *testing.T) {
 		t.Errorf("status = %s (returned %s), queued %v; want finalized and queued", got.Status, out.Status, got.AutoChargePending)
 	}
 	if len(r.committer.commits) != 1 {
-		t.Errorf("Stripe Tax commits = %d, want 1: the finalize's steps run after the commit", len(r.committer.commits))
+		t.Fatalf("Stripe Tax commits = %d, want 1: the finalize's steps run after the commit", len(r.committer.commits))
+	}
+	if r.committer.ctxErrs[0] != nil || !r.committer.hasDeadline[0] {
+		t.Errorf("the Stripe Tax commit ran on a ctx with error %v, deadline %v; want a live ctx with a deadline (stepsBudget), not the cancelled request's", r.committer.ctxErrs[0], r.committer.hasDeadline[0])
 	}
 }
 
@@ -255,8 +277,9 @@ func TestRetryTax_FinalizeFails_TaxStaysPendingAndTheTryIsCounted(t *testing.T) 
 	r.svc.SetHeldReliefIssuer(failingRelief{})
 	d := r.draft("P129-FAIL-1")
 
-	if _, err := r.svc.RetryTax(r.ctx, r.tenantID, d.ID); err == nil {
-		t.Fatal("RetryTax = nil with a failing finalize, want the error")
+	_, err := r.svc.RetryTax(r.ctx, r.tenantID, d.ID)
+	if err == nil || !strings.Contains(err.Error(), "could not be finalized") || !strings.Contains(err.Error(), "relief credit note insert failed") {
+		t.Fatalf("RetryTax error = %v, want one naming the failed finalize and its cause", err)
 	}
 	got := r.get(d.ID)
 	if got.Status != domain.InvoiceDraft || got.TaxStatus != domain.InvoiceTaxPending || got.TaxErrorCode != "provider_outage" {
@@ -421,4 +444,99 @@ func TestRetryTaxForInvoice_PassesTheHook(t *testing.T) {
 			t.Errorf("tax_status = %s, calculation %q, tries = %d; want pending, none, 1", got.TaxStatus, got.TaxCalculationID, got.TaxRetryCount)
 		}
 	})
+}
+
+// TestRetryTax_FinalizeOutlastsItsBudget_TheTryIsStillCounted: the finalize
+// stalls until the write's budget runs out, so the transaction fails on its
+// deadline. The try is counted on a ctx of its own, so the backoff and the
+// cap still hold; counted on the spent ctx, it would fail at once and the
+// sweep would list the row every tick with no cap.
+//
+// Mutation: count the try on the write's ctx, and the count stays 0.
+func TestRetryTax_FinalizeOutlastsItsBudget_TheTryIsStillCounted(t *testing.T) {
+	billing.ShortenCommitBudget(t, 300*time.Millisecond)
+	r := newOneTxRig(t, "P129 Budget Spent")
+	r.svc.SetHeldReliefIssuer(stalledRelief{})
+	d := r.draft("P129-BUDGET-1")
+
+	if _, err := r.svc.RetryTax(r.ctx, r.tenantID, d.ID); err == nil {
+		t.Fatal("RetryTax = nil with a finalize past its budget, want the error")
+	}
+	got := r.get(d.ID)
+	if got.Status != domain.InvoiceDraft || got.TaxStatus != domain.InvoiceTaxPending {
+		t.Fatalf("status = %s, tax_status = %s; want a draft with tax pending", got.Status, got.TaxStatus)
+	}
+	if got.TaxRetryCount != 1 || got.TaxNextRetryAt == nil || !got.TaxNextRetryAt.After(time.Now()) {
+		t.Errorf("tries = %d, next retry %v; want 1 and a time ahead: the try is counted on its own ctx", got.TaxRetryCount, got.TaxNextRetryAt)
+	}
+}
+
+// blockingFinalize lets the first FinalizeDraftTx run, then holds its
+// transaction open (the invoice row locked) until release is closed.
+type blockingFinalize struct {
+	*invoice.PostgresStore
+	once     sync.Once
+	finished chan struct{}
+	release  chan struct{}
+}
+
+func (s *blockingFinalize) FinalizeDraftTx(ctx context.Context, tx *sql.Tx, tenantID, id string, onFinalized func(*sql.Tx, domain.Invoice) error) (domain.Invoice, error) {
+	inv, err := s.PostgresStore.FinalizeDraftTx(ctx, tx, tenantID, id, onFinalized)
+	s.once.Do(func() {
+		close(s.finished)
+		<-s.release
+	})
+	return inv, err
+}
+
+// TestRetryTax_TwoRetriesContendOnTheRow_TheSecondAnswersConflict: two
+// retries of one row both get past the calculation. A writes its tax and
+// finalizes, and holds the row; B's write waits on the row lock. When A
+// commits, B finds the invoice finalized and answers 409, writing nothing:
+// the row keeps A's calculation, with one finalize audit row and one
+// invoice.finalized, and B counts no try. When the finalize was a second
+// transaction, B rewrote the tax after A's tax write and then lost the
+// finalize, answering nil.
+func TestRetryTax_TwoRetriesContendOnTheRow_TheSecondAnswersConflict(t *testing.T) {
+	r := newOneTxRig(t, "P129 Contention")
+	d := r.draft("P129-CONTEND-1")
+	blocking := &blockingFinalize{PostgresStore: r.store, finished: make(chan struct{}), release: make(chan struct{})}
+	svc := invoice.NewService(blocking, clock.Real(), tenant.NewSettingsStore(r.db))
+	svc.SetTaxRetrier(r.engine)
+	svc.SetTaxCommitter(r.committer)
+	svc.SetAuditLogger(audit.NewLogger(r.db))
+
+	aDone := make(chan error, 1)
+	go func() {
+		_, err := svc.RetryTax(r.ctx, r.tenantID, d.ID)
+		aDone <- err
+	}()
+	<-blocking.finished
+	bDone := make(chan error, 1)
+	go func() {
+		_, err := svc.RetryTax(r.ctx, r.tenantID, d.ID)
+		bDone <- err
+	}()
+	testutil.WaitForLockWaiter(t, r.ctx, testutil.AdminPool(t), "%FROM invoices WHERE id = $1 FOR UPDATE%")
+	close(blocking.release)
+
+	if err := <-aDone; err != nil {
+		t.Fatalf("A: RetryTax = %v, want nil", err)
+	}
+	if err := <-bDone; !errors.Is(err, errs.ErrInvalidState) {
+		t.Fatalf("B: RetryTax error = %v, want invalid_state (409): A finalized the invoice", err)
+	}
+	got := r.get(d.ID)
+	if got.Status != domain.InvoiceFinalized || got.TaxCalculationID != "taxcalc_p129_1" {
+		t.Errorf("status = %s, calculation %q; want finalized with A's calculation taxcalc_p129_1", got.Status, got.TaxCalculationID)
+	}
+	if a, e := r.finalizeTrail(d.ID); a != 1 || e != 1 {
+		t.Errorf("%d finalize audit rows, %d invoice.finalized; want 1 and 1", a, e)
+	}
+	if got.TaxRetryCount != 1 {
+		t.Errorf("tax_retry_count = %d, want 1 (A's try; B counts none)", got.TaxRetryCount)
+	}
+	if r.tax.calls != 2 {
+		t.Errorf("tax calculations = %d, want 2 (both retries got past the calculation)", r.tax.calls)
+	}
 }

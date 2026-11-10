@@ -754,7 +754,7 @@ func (s *PostgresStore) FinalizeDraft(ctx context.Context, tenantID, id string, 
 // FinalizeDraftTx is FinalizeDraft on the caller's transaction: the flip, the
 // hook, and the token and invoice.finalized (finalizedTx). A tax retry runs it
 // inside UpdateTaxAtomic's transaction, so the tax write and the finalize
-// commit together (P1-29). The caller commits.
+// commit together. (See ADR-017.) The caller commits.
 func (s *PostgresStore) FinalizeDraftTx(ctx context.Context, tx *sql.Tx, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
 	inv, err := s.updateStatusInTx(ctx, tx, id, domain.InvoiceFinalized)
 	if err != nil {
@@ -2087,7 +2087,7 @@ func errLinesChanged() error {
 // then, when not nil, runs on the same transaction after the tax is written
 // and before the commit, with the taxed row; it receives the transaction's
 // ctx. A tax retry finalizes the draft there, so the tax and the finalize
-// commit together or not at all (P1-29). A then error rolls the tax write
+// commit together or not at all. (See ADR-017.) A then error rolls the tax write
 // back and is returned. After a then, the row is read again on the
 // transaction and that is what is returned.
 func (s *PostgresStore) UpdateTaxAtomic(

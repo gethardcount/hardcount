@@ -518,9 +518,9 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// service.Finalize is the one finalize path, for this endpoint and the
-	// tax-retry auto-finalize alike. Its transaction queued invoice.finalized
-	// (the store), and it wrote the finalize audit row.
+	// service.Finalize's transaction queued invoice.finalized (the store) and
+	// wrote the finalize audit row (finalizeHook). The tax retry finalizes a
+	// draft through the same hook, inside its tax write's transaction.
 
 	// No automatic "here's your invoice" email on finalize while Stripe is
 	// connected. Hardcount auto-charges the saved card (Stripe
@@ -1311,10 +1311,13 @@ func (h *Handler) refund(w http.ResponseWriter, r *http.Request) {
 // the invoice was finalized while its tax was being calculated. 404 when the
 // invoice doesn't exist. When the tax resolves but the auto-finalize fails
 // (the pause state could not be read, or the finalize failed), the call
-// fails (500 for a database error, 409 for a state conflict) and nothing is
-// saved: the finalize rides on the tax write's transaction, so the invoice
-// stays a draft with its tax pending, and the try is counted. The retry_tax
-// audit row is written only on success.
+// fails and the tax is not saved: the finalize rides on the tax write's
+// transaction, so the invoice stays a draft with its tax pending. A state
+// conflict answers 409 with a message naming the finalize; a database error
+// answers 500 internal_error, and the server log names the cause. The
+// retry_tax audit row is written only on success. A failed click still
+// counts the try when the tax was pending (tax_retry_count and
+// tax_next_retry_at change), and that leaves no audit row.
 func (h *Handler) retryTax(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {
 		return

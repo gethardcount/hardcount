@@ -5,7 +5,7 @@
 
 ## Summary
 
-When tax calculation fails, the invoice stays a draft and a background job retries the tax. It waits 5 min, 15 min, 1 h, 4 h, 12 h, 1 day, 2 days and 4 days (±10% jitter), then stops after 8 attempts and leaves the error showing. Only `provider_outage`, `unknown` and, since 2026-07-29, `provider_not_configured` are retried; the other codes need an operator action. When a retry succeeds on an invoice the engine made (`billing_reason` is not `manual`), the invoice is finalized automatically, and manual drafts stay drafts. Status: active.
+When tax calculation fails, the invoice stays a draft and a background job retries the tax. It waits 5 min, 15 min, 1 h, 4 h, 12 h, 1 day, 2 days and 4 days (±10% jitter), then stops after 8 attempts and leaves the error showing. Only `provider_outage`, `unknown` and, since 2026-07-29, `provider_not_configured` are retried; the other codes need an operator action. When a retry succeeds on an invoice the engine made (`billing_reason` is not `manual`), the invoice is finalized automatically, and manual drafts stay drafts. Status: active. Amended 2026-11-10: the finalize commits in the tax write's transaction; a failed finalize leaves the tax pending and counts as a try.
 
 ## Context
 
@@ -105,7 +105,9 @@ even after the table grows.
 When `Service.RetryTax` (operator-driven OR scheduler-driven)
 sees a successful tax recompute (`tax_status='ok'`), it chains
 into the existing `Service.Finalize` path **iff** the invoice is
-engine-generated (`billing_reason != 'manual'`).
+engine-generated (`billing_reason != 'manual'`). (Since the
+2026-11-10 amendment it finalizes inside the tax write's
+transaction instead, through the same finalize hook.)
 
 The auto-finalize gate is simple but deliberate:
 
@@ -209,22 +211,34 @@ never issued or collected. Only an operator's Finalize moved it.
   taken just before it; a caller cancelled during the calculation writes
   nothing.
 - **A failed finalize leaves the tax pending and counts as a try.** The
-  hook's error rolls the tax write back, so the row is still a draft with
-  tax pending and its last tax error, which is true. The engine then adds
-  the try to `tax_retry_count` and sets `tax_next_retry_at` as the failed
-  code would (`RecordTaxRetryAttempt`), so the 8-try cap and the backoff
-  hold. The finalize error is in the server log at ERROR with the invoice
-  id. While it lasts, cancel, swap and decrease on that subscription are
-  refused (`funding_invoice_tax_pending`) and Finalize is blocked, as for any
-  pending tax. A row the sweep does not list (a code it does not retry, or
-  past 8 tries) is tried again only by Retry tax or a fan-out.
+  hook's error rolls the tax write back, so the row is left as it was
+  before the try: a draft with tax pending and its last tax error, which is
+  true. The engine then counts the try on its own ctx (`RecordTaxRetryAttempt`:
+  `tax_retry_count` plus one, `tax_next_retry_at` as the failed code would
+  set it), only on a draft whose tax is still pending, so the 8-try cap and
+  the backoff hold. The refresh of an expired calculation (tax ok) counts
+  nothing. The returned error names the finalize: a 409 shows it, a
+  database error answers 500 and the server log at ERROR names the cause
+  and the invoice.
+- **The hold this leaves has no automatic end.** While the draft's tax is
+  pending, cancel, swap and decrease on its subscription are refused
+  (`funding_invoice_tax_pending`, from `domain.TaxPendingShare`, which does
+  not read the try count) and Finalize is refused. After 8 counted tries the
+  sweep stops listing the row, but the hold stays. It ends when a retry
+  finalizes the invoice (Retry tax or a fan-out, once the cause is fixed) or
+  when an operator voids the draft and bills the period another way. The
+  owner accepted this on that wording (decision 3 of the P1-12/P1-29
+  design): the alternative on main was a draft with tax ok that no sweep
+  lists and a period never invoiced, while this is an existing, visible
+  state with operator exits.
 - **A rival gets a 409.** A retry that finalized the invoice while another
   was calculating wins; the other's write finds the invoice finalized and
   is refused (`invalid_state`), as the engine's draft check refuses it a
   moment earlier. It counts no try.
 - `POST /v1/invoices/{id}/retry-tax` no longer answers an error with the
-  tax saved: on an error nothing is saved, and the `retry_tax` audit row is
-  written only on success.
+  tax saved: on an error the tax is not saved, and the `retry_tax` audit row
+  is written only on success. A failed click that counted a try leaves no
+  audit row for that count.
 - No sweep for the old shape: a draft with tax ok and no pause cannot be
   told from one kept by a pause that has since ended. The upgrade note asks
   operators to review such drafts.

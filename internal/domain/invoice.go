@@ -525,7 +525,7 @@ type InvoiceTaxRetryUpdate struct {
 	// internal/billing/tax_retry.go while Status stays pending, and cleared
 	// (nil) when the status moves to ok or exempt. Auto-finalize on a clean
 	// tax outcome rides on this update's transaction (UpdateTaxAtomic's
-	// then, P1-29), through the same finalize hook and steps after the
+	// then; see ADR-017), through the same finalize hook and steps after the
 	// commit as a manual Finalize.
 	//
 	// This update writes the column only on a draft. On a finalized invoice

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
 )
@@ -31,6 +32,21 @@ const (
 // pause state.
 func (r *snapRig) subTaxPendingDraft(t *testing.T, num, pause string) string {
 	t.Helper()
+	switch pause {
+	case pauseNone:
+		return r.subTaxPendingDraftPaused(t, num, nil)
+	case pauseEnded:
+		ended := time.Now().UTC().Add(-time.Hour)
+		return r.subTaxPendingDraftPaused(t, num, &domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft, ResumesAt: &ended})
+	default:
+		return r.subTaxPendingDraftPaused(t, num, &domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft})
+	}
+}
+
+// subTaxPendingDraftPaused seeds the draft on a real subscription with pc
+// set as its pause_collection (nil: none).
+func (r *snapRig) subTaxPendingDraftPaused(t *testing.T, num string, pc *domain.PauseCollection) string {
+	t.Helper()
 	plan, err := pricing.NewPostgresStore(r.db).CreatePlan(r.ctx, r.tenantID, domain.Plan{
 		Code: "g7-plan-" + num, Name: "G7", Currency: "EUR",
 		BillingInterval: domain.BillingMonthly, Status: domain.PlanActive, BaseAmountCents: 5000,
@@ -50,13 +66,8 @@ func (r *snapRig) subTaxPendingDraft(t *testing.T, num, pause string) string {
 	if err != nil {
 		t.Fatalf("create subscription: %v", err)
 	}
-	if pause != pauseNone {
-		pc := domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}
-		if pause == pauseEnded {
-			ended := time.Now().UTC().Add(-time.Hour)
-			pc.ResumesAt = &ended
-		}
-		if _, err := subs.SetPauseCollection(r.ctx, r.tenantID, sub.ID, pc, nil); err != nil {
+	if pc != nil {
+		if _, err := subs.SetPauseCollection(r.ctx, r.tenantID, sub.ID, *pc, nil); err != nil {
 			t.Fatalf("pause collection: %v", err)
 		}
 	}
@@ -226,4 +237,86 @@ func TestFinalize_AuditFailureRollsTheFinalizeBack(t *testing.T) {
 			t.Errorf("status = %s, tax_status = %s; want draft with tax pending", got.Status, got.TaxStatus)
 		}
 	})
+}
+
+// TestRetryTax_PauseIsReadAtTheInvoicesNow: on a test clock the pause is read
+// at the clock's instant, not the wall clock's. The catch-up binds the
+// clock's frozen time on its ctx, and RetryTax reads the pause there. A timed
+// pause the clock has passed no longer holds the draft though the wall clock
+// has not reached its resumes_at; one the clock has not reached still holds
+// it though the wall clock has passed it.
+//
+// Mutation: read the pause at time.Now(), and both cases flip.
+func TestRetryTax_PauseIsReadAtTheInvoicesNow(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name          string
+		resumesAt     time.Time
+		clockAt       time.Time
+		wantFinalized bool
+	}{
+		{"clock past resumes_at, wall clock before it: finalized", now.AddDate(0, 0, 30), now.AddDate(0, 0, 60), true},
+		{"clock before resumes_at, wall clock past it: stays a draft", now.Add(-time.Hour), now.AddDate(0, 0, -30), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := newSnapRig(t, "P129 Clock Pause Corp")
+			resumes := c.resumesAt
+			id := r.subTaxPendingDraftPaused(t, "P129-CLOCK", &domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft, ResumesAt: &resumes})
+			r.svc.SetTaxRetrier(&resolvingTaxRetrier{db: r.db, store: r.store})
+
+			if _, err := r.svc.RetryTax(clock.WithEffectiveNow(r.ctx, c.clockAt), r.tenantID, id); err != nil {
+				t.Fatalf("RetryTax: %v", err)
+			}
+			got, err := r.store.Get(r.ctx, r.tenantID, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.wantFinalized != (got.Status == domain.InvoiceFinalized) {
+				t.Errorf("status = %s at clock %s (pause until %s), want finalized = %v", got.Status, c.clockAt.Format(time.DateOnly), c.resumesAt.Format(time.DateOnly), c.wantFinalized)
+			}
+		})
+	}
+}
+
+// TestRecordTaxRetryAttempt_CountsOnlyAPendingDraft: the try counter changes
+// a draft whose tax is pending and nothing else. After a failed finalize on
+// the refresh of an expired calculation the row is back to tax ok, and a
+// finalized row was finished by someone else; neither is touched.
+//
+// Mutation: drop the status and tax_status terms, and the other rows change.
+func TestRecordTaxRetryAttempt_CountsOnlyAPendingDraft(t *testing.T) {
+	r := newSnapRig(t, "P129 Count Guard Corp")
+	next := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
+	seed := func(num string, status domain.InvoiceStatus, taxStatus domain.InvoiceTaxStatus) string {
+		t.Helper()
+		p := r.protoInvoice(num, status, domain.BillingReasonSubscriptionCycle)
+		p.TaxStatus = taxStatus
+		d, err := r.store.CreateWithLineItems(r.ctx, r.tenantID, p, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d.ID
+	}
+	pending := seed("P129-CNT-1", domain.InvoiceDraft, domain.InvoiceTaxPending)
+	okDraft := seed("P129-CNT-2", domain.InvoiceDraft, domain.InvoiceTaxOK)
+	finalized := seed("P129-CNT-3", domain.InvoiceFinalized, domain.InvoiceTaxPending)
+	for _, id := range []string{pending, okDraft, finalized} {
+		if err := r.store.RecordTaxRetryAttempt(r.ctx, r.tenantID, id, &next); err != nil {
+			t.Fatalf("RecordTaxRetryAttempt(%s): %v", id, err)
+		}
+	}
+	for _, c := range []struct {
+		id        string
+		wantCount int
+		wantNext  bool
+	}{{pending, 1, true}, {okDraft, 0, false}, {finalized, 0, false}} {
+		got, err := r.store.Get(r.ctx, r.tenantID, c.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.TaxRetryCount != c.wantCount || (got.TaxNextRetryAt != nil) != c.wantNext {
+			t.Errorf("%s (status %s, tax %s): tries = %d, next = %v; want %d, set %v", got.InvoiceNumber, got.Status, got.TaxStatus, got.TaxRetryCount, got.TaxNextRetryAt, c.wantCount, c.wantNext)
+		}
+	}
 }
