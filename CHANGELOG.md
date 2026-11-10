@@ -49,6 +49,8 @@ original text.
 
 ### Fixed
 
+- **A dunning retry interrupted after the charge no longer charges the card again an hour later.** The retry counted its attempt before charging the card but saved the wait before the next retry only afterwards. A deploy, a lost leader lease or a failed write between the two left the run due, so the next hourly run charged the card again where the policy said to wait days, and the customer reached the final action early. The wait is now saved with the attempt, before the charge.
+- **A retry stopped by a shutdown no longer uses up one of the customer's attempts.** When Hardcount stopped while Stripe was being asked, the attempt it had counted was not taken back, because the write that takes it back ran on the request that was being cancelled.
 - **An archived customer's draft subscription can no longer be activated.** Activating it started billing a customer you had archived. `POST /v1/subscriptions/{id}/activate` now answers `409 invalid_state`. Unarchive the customer first. ([#1659](https://github.com/gethardcount/hardcount/pull/1659))
 - **Two edits to one customer at once no longer undo each other.** An edit wrote back every field as it had read them, so a rename could un-archive the customer or reset its dunning policy. The second edit now waits and applies to the saved customer. ([#1659](https://github.com/gethardcount/hardcount/pull/1659))
 - **Archiving a customer no longer leaves a subscription billing.** An archive that ran while a subscription was being created, or while a trial was ending, could miss that subscription and succeed. The archive now sees it and gets `409`. A create that waited for an archive gets `409` too. ([#1659](https://github.com/gethardcount/hardcount/pull/1659))

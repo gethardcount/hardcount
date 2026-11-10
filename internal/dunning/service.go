@@ -540,6 +540,10 @@ const maxDunningCatchupIters = 50
 // column's microsecond precision because ClaimExhaustion compares it exactly.
 const exhaustLease = 15 * time.Minute
 
+// rewindTimeout bounds the transient-skip rewind, which runs detached from
+// the tick's context so a shutdown cannot burn the attempt.
+const rewindTimeout = 10 * time.Second
+
 func leaseFrom(t time.Time) time.Time { return t.Add(exhaustLease).Truncate(time.Microsecond) }
 
 // anchorInstant is the one rule for "the instant this action was contracted
@@ -803,7 +807,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// Attempt retry
 	run.AttemptCount++
 	prevLastAttemptAt := run.LastAttemptAt // for the transient-skip rewind below
-	prevNextActionAt := run.NextActionAt   // ditto: the final attempt replaces it with the lease
+	prevNextActionAt := run.NextActionAt   // ditto: the pre-charge persist replaces it with the next wait
 	// Anchor this attempt's instant on the contracted one (see anchorInstant).
 	now := anchorInstant(s.clock.Now(ctx), run.NextActionAt, isCatchup || simulated)
 	run.LastAttemptAt = &now
@@ -833,18 +837,28 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// tick's read predates — charging on a stale read would burn budget
 	// dishonestly (ha-8).
 	//
-	// The FINAL attempt also records its exhaustion lease here, before the
-	// charge: on the wall clock the run stays hidden from ListDueRuns for the
-	// whole charge and inline-exhaust window (so no second processor exhausts
-	// it under the charge), and if this process dies anywhere in that window
-	// the run is due again when the lease expires and exhaust-on-entry
-	// finishes it. Under test-clock catchup the lease is in simulated time and
-	// an advance can pass it; there the clock's single-flight advance is the
-	// exclusion, and ClaimExhaustion guards any re-entry.
-	if run.AttemptCount >= retries {
-		l := leaseFrom(now)
-		run.NextActionAt = &l
+	// The schedule is recorded with the attempt, before the charge, for every
+	// attempt: the policy's wait before the next retry, or the exhaustion
+	// lease after the last (nextActionAfterRetry, the value retryFailed writes
+	// again with the warning email). Recorded only after the charge, a stop
+	// between the two (a deploy, a lost lease, a failed write) left the
+	// attempt counted and the run still due, so the next tick charged the card
+	// again an hour later where the policy said days, and the customer reached
+	// the final action early.
+	//
+	// For the final attempt this is the lease: on the wall clock the run stays
+	// hidden from ListDueRuns for the whole charge and inline-exhaust window
+	// (so no second processor exhausts it under the charge), and if this
+	// process dies anywhere in that window the run is due again when the lease
+	// expires and exhaust-on-entry finishes it. Under test-clock catchup the
+	// lease is in simulated time and an advance can pass it; there the clock's
+	// single-flight advance is the exclusion, and ClaimExhaustion guards any
+	// re-entry.
+	next, err := nextActionAfterRetry(policy, run.AttemptCount, now)
+	if err != nil {
+		return err
 	}
+	run.NextActionAt = &next
 	if applied, err := s.store.UpdateRunIfActive(ctx, tenantID, run, run.AttemptCount-1, nil); err != nil {
 		return fmt.Errorf("persist dunning attempt before retry: %w", err)
 	} else if !applied {
@@ -879,18 +893,26 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	if errors.Is(retryErr, ErrTransientSkip) {
 		run.AttemptCount--
 		run.LastAttemptAt = prevLastAttemptAt
-		run.NextActionAt = prevNextActionAt // undo the final attempt's lease too
+		run.NextActionAt = prevNextActionAt // undo the wait (or lease) recorded before the charge
 		// GUARDED rewind. ErrTransientSkip also covers the ambiguous
 		// PI-may-have-succeeded outcome (client saw a 5xx/timeout but the charge
 		// actually went through): its webhook may have resolved this run during the
 		// charge window. UpdateRunIfActive no-ops on a resolved run, so we never
 		// clobber that resolve back to active (which would re-fire dunning.resolved).
-		// A failed rewind on a still-active run leaves the count one high — the SAFE
-		// direction: the exhaustion gate uses `>=`, so an over-count can only end a
-		// retry cycle early, never over-retry.
-		if _, err := s.store.UpdateRunIfActive(ctx, tenantID, run, run.AttemptCount+1, nil); err != nil {
-			slog.Warn("dunning transient-skip: failed to rewind the pre-charge attempt persist",
-				"run_id", run.ID, "invoice_id", run.InvoiceID, "error", err)
+		// A failed rewind on a still-active run leaves the attempt counted and
+		// the run waiting for its next scheduled retry, with no charge made: one
+		// retry of the policy is skipped. That is the safe direction (the card
+		// is never charged more often than the policy says), and it is logged
+		// as an error because nothing else records it.
+		//
+		// On a context detached from the tick's: a skip caused by the tick
+		// itself stopping (a deploy, a lost lease) arrives with ctx already
+		// cancelled, and a rewind on it failed every time, burning the attempt.
+		rewindCtx, cancelRewind := context.WithTimeout(context.WithoutCancel(ctx), rewindTimeout)
+		defer cancelRewind()
+		if _, err := s.store.UpdateRunIfActive(rewindCtx, tenantID, run, run.AttemptCount+1, nil); err != nil {
+			slog.ErrorContext(ctx, "dunning transient-skip: failed to rewind the attempt recorded before the charge; this retry is skipped and the run waits for its next scheduled one",
+				"run_id", run.ID, "invoice_id", run.InvoiceID, "attempt", run.AttemptCount+1, "error", err)
 		}
 		retryPanic.Repanic()
 		slog.Info("dunning retry skipped — no definite answer",
@@ -918,8 +940,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 			slog.Warn("dunning: could not record the below-minimum retry on the timeline; the run still ends",
 				"run_id", run.ID, "invoice_id", run.InvoiceID, "error", eerr)
 		}
-		_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionAmountBelowMinimum, string(domain.ResolutionAmountBelowMinimum), &now)
-		return rerr
+		return s.resolveAfterRetry(ctx, tenantID, run, domain.ResolutionAmountBelowMinimum, string(domain.ResolutionAmountBelowMinimum), now)
 	}
 
 	// The retry's payment is still processing (#1289): Stripe was asked and a
@@ -1113,7 +1134,28 @@ func (s *Service) retrySucceeded(ctx context.Context, tenantID string, run domai
 	// advance-end frozen_time under catchup, which stamped a Mar 7
 	// recovery "resolved Apr 1" when the operator advanced a month in
 	// one click (the contracted-instant class, 4th sighting).
-	_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionPaymentRecovered, "payment_recovered", &now)
+	return s.resolveAfterRetry(ctx, tenantID, run, domain.ResolutionPaymentRecovered, "payment_recovered", now)
+}
+
+// resolveAfterRetry ends a run whose retry settled the matter: the invoice is
+// paid, or Stripe refused the amount as below its minimum. If the resolve
+// fails, the run is made due again. The wait before the next retry was
+// recorded before the charge, so left alone the run would stay active for
+// days on an invoice that needs nothing more; due again, the next tick ends it
+// (the paid pre-check) or asks again (below minimum), as it did when the
+// schedule was written after the charge.
+func (s *Service) resolveAfterRetry(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, resolution domain.DunningResolution, eventReason string, now time.Time) error {
+	_, rerr := s.resolveListedRun(ctx, tenantID, run, resolution, eventReason, &now)
+	if rerr == nil {
+		return nil
+	}
+	run.NextActionAt = &now
+	dueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rewindTimeout)
+	defer cancel()
+	if _, err := s.store.UpdateRunIfActive(dueCtx, tenantID, run, run.AttemptCount, nil); err != nil {
+		slog.ErrorContext(ctx, "dunning: the run could not be resolved after its retry, nor made due again; it stays active until its next scheduled retry, which then ends it",
+			"run_id", run.ID, "invoice_id", run.InvoiceID, "resolution", resolution, "error", err)
+	}
 	return rerr
 }
 
