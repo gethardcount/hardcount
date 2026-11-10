@@ -398,6 +398,10 @@ type CreditNoteAdjuster interface {
 	// Issue issues a previously-created draft credit note (the post-commit relay
 	// of CreateAdjustmentDraftTx). Both already exist on *creditnote.Service.
 	Issue(ctx context.Context, tenantID, id string) (domain.CreditNote, error)
+	// Get reads a credit note. FinishRelief reads a note whose Issue returned
+	// an error: the clawback sweep may have issued it first, or Issue's own
+	// read after its commit failed.
+	Get(ctx context.Context, tenantID, id string) (domain.CreditNote, error)
 }
 
 // CreditHeadroomReader reports how much of an invoice has already been credited
@@ -4689,26 +4693,29 @@ func (e *Engine) onlyPrepaidBase(ctx context.Context, tenantID string, src domai
 // amount_due reduction) and each void's AfterVoid, the same legs an operator
 // void runs (stop collection at Stripe, tax reversal, close the dunning run).
 // Each void's invoice.voided already committed with the relief's
-// transaction. Every leg is already durable and recovered by its own sweep,
-// and every leg runs whatever another one did.
+// transaction. Every leg runs whatever another one did.
 //
-// It returns the errors of the drafts' Issue calls, joined: a note that was
-// not issued has not reduced anything yet, so the caller must not collect
-// the change's invoice now, or the card is charged the whole of it (see
-// subscription's finishReliefThenCollect). The voids' legs return nothing.
+// It returns, joined, the error of each draft whose Issue call returned one
+// and that is not issued when read back: the clawback sweep may have issued
+// it first, or Issue's own read after its commit failed, and either is a
+// success. Issue returns an error only when the note was not issued; its
+// legs after the commit (the refund, the tax reversal) log and are recovered
+// by their own sweeps. A draft that Issue holds (its source invoice is a
+// draft, or its payment is in flight) is not an error and is not reported.
+// A note that was not issued has reduced nothing yet, so the caller must not
+// collect the change's invoice now (subscription's finishReliefThenCollect).
+// It does not log; the caller does, once. The voids' legs return nothing.
 func (e *Engine) FinishRelief(ctx context.Context, sub domain.Subscription, r domain.Relief) error {
 	var issueErrs []error
 	for _, id := range r.DraftIDs {
-		if _, err := e.creditNoteAdjuster.Issue(ctx, sub.TenantID, id); err != nil {
-			issueErrs = append(issueErrs, fmt.Errorf("issue relief credit note %s: %w", id, err))
-			// Issue() is atomic + recoverable (ADR-061): either the draft→issued
-			// CAS never committed (still draft + issue_pending →
-			// RetryPendingClawbackIssue re-drives) or a post-commit external leg
-			// failed (refund → RetryRefund; tax reversal →
-			// RetryPendingCreditNoteTaxReversal).
-			slog.ErrorContext(ctx, "relief credit-note issue failed post-commit; self-heals via reconciler",
-				"subscription_id", sub.ID, "credit_note_id", id, "error", err)
+		_, err := e.creditNoteAdjuster.Issue(ctx, sub.TenantID, id)
+		if err == nil {
+			continue
 		}
+		if cn, gerr := e.creditNoteAdjuster.Get(ctx, sub.TenantID, id); gerr == nil && cn.Status == domain.CreditNoteIssued {
+			continue
+		}
+		issueErrs = append(issueErrs, fmt.Errorf("issue relief credit note %s: %w", id, err))
 	}
 	for _, inv := range r.Voided {
 		e.invoiceVoider.AfterVoid(ctx, sub.TenantID, inv)

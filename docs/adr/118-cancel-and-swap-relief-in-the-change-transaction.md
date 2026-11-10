@@ -295,19 +295,42 @@ charge settles or the draft is finalized.
   all three callers, and that both legs still run on a live context when
   the caller's context ends right after the commit.
 
-**2026-11-10: no collect when a relief note was not issued.** The order alone
-did not cover a relief note whose `Issue` failed (a database error, a
-deadline): the collect ran anyway and charged the card the whole final
-invoice, and the credit landed on the balance later. `Engine.FinishRelief`
-now returns the drafts' `Issue` errors, and `finishReliefThenCollect` collects
-the change's invoice only when there were none. Otherwise the invoice, queued
-for collection when it was created, is left to the billing run, which issues
-the note (`clawback_issue`) before it collects queued invoices (the
-auto-charge step). Still possible, as before: a note that fails on every run
-is followed by a full charge on a later run. Tests:
+**2026-11-10: no collect in the call when a relief note was not issued.** The
+order alone did not cover a relief note whose `Issue` failed (a database
+error, a deadline): the collect ran anyway and charged the card the whole
+final invoice, and the credit landed on the balance later.
+
+- `Engine.FinishRelief` returns an error for each draft whose `Issue` call
+  returned one and that is not issued when read back (the clawback sweep may
+  have issued it first, or `Issue`'s own read after its commit failed).
+  `finishReliefThenCollect` then does not collect the change's invoice in the
+  call, and logs once.
+- The invoice was queued for collection when it was created. A billing run
+  issues relief drafts before it collects queued invoices (`clawback_issue`,
+  a reconciler, before the auto-charge step). A test-clock catch-up now does
+  the same: it issues the clock's pending clawback drafts before its charge
+  phase, and again after it (for a draft whose source the charge phase
+  settles).
+- Not covered, as before this change:
+  - a draft `Issue` holds (its source invoice is a draft, or its payment is in
+    flight) is not an error, so the invoice is collected in full in the call;
+  - a cancel or plan change from the API that commits while the billing run
+    is already inside its auto-charge step is charged there, before
+    `clawback_issue` runs (the queue has no check for pending relief);
+  - a note that keeps failing is followed by a full charge on the next run.
+- The guard also holds back the collect when the failed note is on an unpaid
+  source, where the note only lowers that invoice's own amount due. The
+  collect then happens on the next run, so a credit grant that expires within
+  that hour does not pay the change's invoice.
+
+The cure for the three residuals is state-based (the charge claim skips an
+invoice whose subscription still has relief drafts pending) and is left for
+the rest of the P1-12 design's PR 5. Tests:
 `TestCancel_ReliefNotIssued_FinalInvoiceWaitsForTheSweeps` (real Postgres,
-both cancels) and `TestReliefNotIssued_TheChangesInvoiceIsNotCollectedInTheCall`
-(all three callers).
+both cancels, recovered by one scheduler tick, which pins the order),
+`TestCancel_ReliefNotIssued_OnATestClock_TheAdvanceChargesNetOfTheRelief`
+(real Postgres, the catch-up), `TestReliefNotIssued_TheChangesInvoiceIsNotCollectedInTheCall`
+(all three callers), `TestFinishRelief_EveryLegRuns_OnlyAnUnissuedNoteIsReported`.
 
 ## Amendment 2026-10-22: one crediting rule, the invoice that charged it, newest first
 
