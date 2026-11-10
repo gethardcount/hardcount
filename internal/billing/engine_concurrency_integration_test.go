@@ -29,12 +29,13 @@ import (
 // subscription+period simultaneously (two scheduler instances / an overlapping
 // retry), yet exactly ONE cycle invoice is created.
 //
-// There is no application-level pre-SELECT — the only guard is the Postgres unique
-// index idx_invoices_billing_period_dedup. The losing goroutines collide on it
-// (SQLSTATE 23505), which the invoice store maps to errs.ErrAlreadyExists and
-// billOnePeriod catches as a graceful idempotent skip (returns invoiced=false,
-// err=nil). The two assertions that matter:
-//   - NO goroutine surfaces an error (the loser's 23505 is handled, not bubbled).
+// The guard is the period CAS that opens the closer's transaction (ADR-115):
+// the winner's close moves the period, so a loser misses its CAS before it
+// inserts and returns with nothing written. No loser reaches the invoice
+// index; one that did would now surface an error, since the cycle close no
+// longer reads a unique violation as "already invoiced". The two assertions
+// that matter:
+//   - NO goroutine surfaces an error.
 //   - Exactly ONE invoice exists (no double-billing).
 //
 // Run with -race to also catch any data race in the engine under concurrency.
@@ -107,8 +108,8 @@ func TestConcurrentBilling_ExactlyOneInvoice(t *testing.T) {
 	close(start)
 	wg.Wait()
 
-	// 1. The losing goroutines must NOT surface an error — the 23505 unique-index
-	//    collision is caught as errs.ErrAlreadyExists and handled as an idempotent skip.
+	// 1. The losing goroutines must NOT surface an error: each misses its period
+	//    CAS before it inserts.
 	if len(allErrs) > 0 {
 		t.Fatalf("concurrent billing surfaced %d error(s) — a loser's unique-violation was not handled gracefully: %v", len(allErrs), allErrs)
 	}

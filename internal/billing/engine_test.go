@@ -1228,24 +1228,6 @@ func (m *mockInvoices) latestThresholdInvoice(subscriptionID string, periodStart
 	return latest, nil
 }
 
-// GetInvoiceForPeriod mirrors the postgres semantics: the invoice holding
-// the period slot (not voided, not proration, not manual), keyed on
-// (subscription, period_start, period_end).
-func (m *mockInvoices) GetInvoiceForPeriod(_ context.Context, _, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
-	for i := len(m.invoices) - 1; i >= 0; i-- {
-		inv := m.invoices[i]
-		if inv.SubscriptionID != subscriptionID || inv.Status == domain.InvoiceVoided ||
-			inv.SourcePlanChangedAt != nil || inv.BillingReason == domain.BillingReasonManual {
-			continue
-		}
-		if !inv.BillingPeriodStart.Equal(periodStart) || !inv.BillingPeriodEnd.Equal(periodEnd) {
-			continue
-		}
-		return inv, nil
-	}
-	return domain.Invoice{}, errs.ErrNotFound
-}
-
 func (m *mockInvoices) ListAutoChargePending(_ context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
 	var result []domain.Invoice
 	for _, inv := range m.invoices {
@@ -1591,24 +1573,33 @@ func setupEngine() (*Engine, *mockSubs, *mockUsage, *mockPricing, *mockInvoices)
 	return engine, subs, usage, pricing, invoices
 }
 
-// TestBillOnePeriod_HealPathPropagatesAdvanceError pins ADR-056 P0.2: when the
-// cycle invoice already exists (a prior tick committed it but crashed before the
-// watermark advanced) billOnePeriod takes the idempotent-skip heal path and
-// re-attempts the advance. A failure there MUST surface — a swallowed heal
-// advance strands the watermark, so the sub re-hits the skip on every tick with
-// no alert. Mirrors the happy-path advance, which already fails loud.
-func TestBillOnePeriod_HealPathPropagatesAdvanceError(t *testing.T) {
-	engine, subs, _, _, invoices := setupEngine()
-	ctx := context.Background()
+// TestBillOnePeriod_UniqueViolationFailsAndDoesNotAdvance: the cycle close
+// reads no unique violation on its insert as "already invoiced". The period's
+// CAS, invoice and advance are one transaction, so a racing closer misses its
+// CAS before it inserts; a violation here means a number or a period set back
+// out of band, or a slot another writer holds. The bill fails with the cause,
+// and the period stays where it was: closing it with no invoice billed
+// nothing for it.
+//
+// Mutation: restore the catch (for any ErrAlreadyExists, or for the period
+// code only), and the close returns nil and advances.
+func TestBillOnePeriod_UniqueViolationFailsAndDoesNotAdvance(t *testing.T) {
+	for _, code := range []string{errs.CodeInvoiceBillingPeriodTaken, "invoice_number_taken"} {
+		t.Run(code, func(t *testing.T) {
+			engine, subs, _, _, invoices := setupEngine()
+			invoices.createErr = errs.AlreadyExists("invoice", "taken").WithCode(code)
 
-	invoices.createErr = errs.ErrAlreadyExists // invoice already exists → heal path
-	// The first ClosePeriodTx must pass (so the close reaches its insert and
-	// hits the pre-cutover row); only the heal re-drive's CAS fails.
-	subs.closePeriodErr = fmt.Errorf("watermark write failed")
-	subs.closePeriodErrOnCall = 2
-
-	if _, runErrs := engine.RunCycle(ctx, 50, nil); len(runErrs) == 0 {
-		t.Fatal("heal-path advance error must surface in RunCycle errors, not be swallowed")
+			_, runErrs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
+			if len(runErrs) != 1 || errs.Code(runErrs[0]) != code {
+				t.Fatalf("RunCycle errors = %v, want one with code %s", runErrs, code)
+			}
+			if subs.cycleUpdated["sub_1"] {
+				t.Error("the period advanced: a close whose invoice could not be written billed nothing for it")
+			}
+			if subs.closePeriodCalls != 1 {
+				t.Errorf("period closes attempted = %d, want 1 (no second close without an invoice)", subs.closePeriodCalls)
+			}
+		})
 	}
 }
 
