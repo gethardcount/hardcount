@@ -217,10 +217,6 @@ func (a *invoiceStoreAdapter) GetThresholdInvoiceForCycleAnyStatus(ctx context.C
 	return a.store.GetThresholdInvoiceForCycleAnyStatus(ctx, tenantID, subscriptionID, periodStart, periodEnd)
 }
 
-func (a *invoiceStoreAdapter) GetInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
-	return a.store.GetInvoiceForPeriod(ctx, tenantID, subscriptionID, periodStart, periodEnd)
-}
-
 // TestFullBillingCycle_E2E tests the complete flow against real Postgres:
 // tenant → customer → meter → plan with prices → subscription → usage → billing engine → invoice
 func TestFullBillingCycle_E2E(t *testing.T) {

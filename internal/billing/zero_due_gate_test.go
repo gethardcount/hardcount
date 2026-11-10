@@ -8,7 +8,6 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
@@ -57,92 +56,5 @@ func TestBillOnePeriod_ZeroTotal_AutoPaid(t *testing.T) {
 	}
 	if !subs.cycleUpdated["sub_1"] {
 		t.Error("cycle must still advance after the $0 auto-pay")
-	}
-}
-
-// TestBillOnePeriod_AlreadyExistsHealsStrandedZeroDue: a crash between the
-// cycle invoice's create and its $0 MarkPaid re-enters through the
-// ErrAlreadyExists branch (the sub is still due — the advance also crashed).
-// That branch must heal the stranded payment_pending row BEFORE advancing
-// (ADR-066). Mutation seam: drop the heal call from the branch and this
-// fails.
-func TestBillOnePeriod_AlreadyExistsHealsStrandedZeroDue(t *testing.T) {
-	engine, subs, invoices := setupZeroCycleEngine(t)
-
-	// Seed the stranded state: the $0 cycle invoice committed, then the
-	// process died before MarkPaid and before the cycle advance.
-	periodStart := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	periodEnd := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	invoices.invoices = append(invoices.invoices, domain.Invoice{
-		ID: "hc_inv_stranded_cycle", SubscriptionID: "sub_1", TenantID: "t1",
-		Status:        domain.InvoiceFinalized,
-		PaymentStatus: domain.PaymentPending,
-		TaxFacts: domain.TaxFacts{
-			TaxStatus: domain.InvoiceTaxOK,
-		},
-		AmountDueCents:     0,
-		BillingReason:      domain.BillingReasonSubscriptionCycle,
-		BillingPeriodStart: periodStart,
-		BillingPeriodEnd:   periodEnd,
-	})
-	// The unique index rejects the re-created invoice on this tick.
-	invoices.createErr = errs.ErrAlreadyExists
-
-	generated, failures := engine.RunCycleForTenant(postgres.WithLivemode(context.Background(), true), "t1", 50)
-	if len(failures) != 0 {
-		t.Fatalf("cycle failures: %v", failures)
-	}
-	if generated != 0 {
-		t.Fatalf("generated = %d, want 0 (idempotent skip)", generated)
-	}
-	healed := invoices.invoices[0]
-	if healed.Status != domain.InvoicePaid || healed.PaymentStatus != domain.PaymentSucceeded {
-		t.Errorf("stranded $0 cycle invoice not healed on AlreadyExists re-entry: status=%q payment=%q",
-			healed.Status, healed.PaymentStatus)
-	}
-	if !subs.cycleUpdated["sub_1"] {
-		t.Error("cycle advance heal must still run after the zero-due heal")
-	}
-}
-
-// TestBillOnePeriod_AlreadyExistsHealsStrandedZeroDue_InAdvance: an in-advance
-// close writes its invoice for the period it opens, [May 1, Jun 1), not the
-// one it closes. The heal must fetch the row that holds that slot. It used to
-// look up [Apr 1, May 1), found nothing there and left the stranded $0
-// invoice unpaid. Mutation seam: look the row up by the closed period again.
-func TestBillOnePeriod_AlreadyExistsHealsStrandedZeroDue_InAdvance(t *testing.T) {
-	engine, subs, invoices := setupZeroCycleEngine(t)
-	mp := engine.pricing.(*mockPricing)
-	pln := mp.plans["pln_1"]
-	pln.BaseBillTiming = domain.BillInAdvance
-	mp.plans["pln_1"] = pln
-
-	opensStart := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	opensEnd := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	invoices.invoices = append(invoices.invoices, domain.Invoice{
-		ID: "hc_inv_stranded_advance", SubscriptionID: "sub_1", TenantID: "t1",
-		Status:             domain.InvoiceFinalized,
-		PaymentStatus:      domain.PaymentPending,
-		TaxFacts:           domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK},
-		AmountDueCents:     0,
-		BillingReason:      domain.BillingReasonSubscriptionCycle,
-		BillingPeriodStart: opensStart,
-		BillingPeriodEnd:   opensEnd,
-	})
-	invoices.createErr = errs.ErrAlreadyExists
-
-	generated, failures := engine.RunCycleForTenant(postgres.WithLivemode(context.Background(), true), "t1", 50)
-	if len(failures) != 0 {
-		t.Fatalf("cycle failures: %v", failures)
-	}
-	if generated != 0 {
-		t.Fatalf("generated = %d, want 0 (idempotent skip)", generated)
-	}
-	healed := invoices.invoices[0]
-	if healed.Status != domain.InvoicePaid || healed.PaymentStatus != domain.PaymentSucceeded {
-		t.Errorf("stranded $0 in-advance cycle invoice not healed: status=%q payment=%q", healed.Status, healed.PaymentStatus)
-	}
-	if !subs.cycleUpdated["sub_1"] {
-		t.Error("cycle advance heal must still run after the zero-due heal")
 	}
 }

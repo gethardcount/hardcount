@@ -196,7 +196,7 @@ func mapInvoiceUniqueViolation(err error, inv domain.Invoice) error {
 		}
 		return errs.AlreadyExists("billing_period",
 			fmt.Sprintf("invoice already exists for subscription %q period %s",
-				inv.SubscriptionID, period)).WithCode("invoice_billing_period_taken")
+				inv.SubscriptionID, period)).WithCode(errs.CodeInvoiceBillingPeriodTaken)
 	case idxInvoicesProrationDedup:
 		return errs.AlreadyExists("proration_source",
 			"proration invoice already exists for this item change").WithCode("invoice_proration_source_taken")
@@ -211,7 +211,7 @@ func mapInvoiceUniqueViolation(err error, inv domain.Invoice) error {
 			"public token collision — regenerate").WithCode("invoice_public_token_collision")
 	case idxInvoicesThresholdPerCycle:
 		return errs.AlreadyExists("threshold_cycle",
-			"threshold invoice already exists for this subscription cycle").WithCode("invoice_threshold_cycle_taken")
+			"threshold invoice already exists for this subscription cycle").WithCode(errs.CodeInvoiceThresholdCycleTaken)
 	}
 	// Unknown constraint — surface the constraint name in the message
 	// so the operator + logs identify what fired, instead of squashing
@@ -4453,42 +4453,6 @@ func (s *PostgresStore) thresholdInvoiceForCycleTx(ctx context.Context, tx *sql.
 		ORDER BY i.billing_period_end DESC
 		LIMIT 1
 		`+lockClause+`
-	`, subscriptionID, periodStart, periodEnd).Scan(s.scanInvDest(&inv)...)
-	if err == sql.ErrNoRows {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	return inv, err
-}
-
-// GetInvoiceForPeriod returns the invoice that holds a subscription period's
-// slot: the rows idx_invoices_billing_period_dedup covers (not voided, not a
-// proration invoice, not a manual invoice), keyed on (subscription_id,
-// period_start, period_end). The index allows one such row, so the ORDER BY
-// only makes the read deterministic. billOnePeriod's ErrAlreadyExists
-// re-entry path fetches the blocking row through this to heal the
-// $0-MarkPaid crash window (ADR-066). A manual invoice for the same period
-// never blocks the close, so it is not that row (#1331).
-func (s *PostgresStore) GetInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
-	if subscriptionID == "" {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	var inv domain.Invoice
-	err = tx.QueryRowContext(ctx, `
-		SELECT `+invCols+` FROM invoices i
-		WHERE i.subscription_id = $1
-		  AND i.billing_period_start = $2
-		  AND i.billing_period_end = $3
-		  AND i.status <> 'voided'
-		  AND i.source_plan_changed_at IS NULL
-		  AND i.billing_reason IS DISTINCT FROM 'manual'
-		ORDER BY i.created_at DESC
-		LIMIT 1
 	`, subscriptionID, periodStart, periodEnd).Scan(s.scanInvDest(&inv)...)
 	if err == sql.ErrNoRows {
 		return domain.Invoice{}, errs.ErrNotFound
