@@ -2993,6 +2993,10 @@ const (
 // retried about hourly; one that has lasted four days or more, twice a day.
 // The pending lists hold invoices of every tenant and take a fixed number per
 // run, so a failing invoice has to give way to the others.
+//
+// The invoice's last write stands in for "how long this has been failing":
+// there is no attempt count for this work. Any other write to the invoice (a
+// payment, a credit) resets it, and the wait starts short again.
 func nextTaxWorkAttempt(now, lastWrite time.Time) time.Time {
 	wait := now.Sub(lastWrite) / 8
 	wait = max(taxWorkMinWait, min(wait, taxWorkMaxWait))

@@ -791,8 +791,8 @@ func (e *Engine) SetTaxCalculationStore(s TaxCalculationWriter) {
 // provider that made it: a calculation id is a Stripe Tax reference, so the
 // commit goes to Stripe Tax whatever provider the tenant has selected since
 // (settingsForTaxDocument). Used after invoice finalize to finalize Stripe Tax
-// reporting. Returns nil when no resolver is wired; an error when the
-// tenant's settings can't be loaded or the commit fails. The invoice still
+// reporting. Returns nil when no resolver or settings reader is wired; an
+// error when the tenant's settings can't be loaded or the commit fails. The invoice still
 // exists either way, so the caller logs and does not unwind.
 //
 // On success, the returned upstream transaction id (Stripe: tx_xxx) is

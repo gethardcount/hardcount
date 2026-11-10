@@ -154,7 +154,9 @@ export interface Invoice {
      * none is scheduled: an error code Hardcount does not retry, or the
      * automatic retries are used up. After the invoice is finalized, it
      * is the earliest time Hardcount retries a tax commit or tax
-     * reversal that failed.
+     * reversal that failed. It can hold a past time with nothing left
+     * to retry, when the Stripe Tax calculation expired while a commit
+     * was waiting.
      */
   tax_next_retry_at?: string;
   /**

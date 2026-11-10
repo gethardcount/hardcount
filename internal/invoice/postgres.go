@@ -3580,6 +3580,11 @@ func (s *PostgresStore) ListPendingTaxCommit(ctx context.Context, batch int, liv
 		  AND i.tax_provider = 'stripe_tax'
 		  AND COALESCE(i.tax_calculation_id, '') <> ''
 		  AND COALESCE(i.tax_transaction_id, '') = ''
+		  -- Issued invoices only. A draft can be voided, and it then has a
+		  -- calculation and no transaction; committing it would report tax
+		  -- for an invoice that was never issued, and the reversal sweep
+		  -- would then reverse it.
+		  AND i.issued_at IS NOT NULL
 		  AND COALESCE(
 		        (SELECT `+tax.CalculationUsableUntilSQL+`
 		           FROM tax_calculations c
@@ -3718,7 +3723,8 @@ func (s *PostgresStore) ListPendingTaxReversal(ctx context.Context, batch int, l
 
 // DeferTaxWork moves an invoice's tax_next_retry_at to next after its tax
 // commit or tax reversal failed in a sweep, so the pending lists skip it until
-// then and take other invoices first. It deliberately leaves updated_at alone:
+// then and take other invoices first. It writes nothing when that work is no
+// longer owed. It deliberately leaves updated_at alone:
 // the wait grows with the time since the invoice's last write (see
 // nextTaxWorkAttempt). The write that completes the work clears the column
 // (SetTaxTransaction, MarkTaxReversed).
@@ -3729,7 +3735,16 @@ func (s *PostgresStore) DeferTaxWork(ctx context.Context, tenantID, id string, n
 	}
 	defer postgres.Rollback(tx)
 
-	if _, err := tx.ExecContext(ctx, `UPDATE invoices SET tax_next_retry_at = $1 WHERE id = $2`, next, id); err != nil {
+	// Only while the work is still owed: a commit (no transaction recorded
+	// yet) or a voided invoice's reversal (not stamped yet). The work can
+	// finish between the sweep's read and this write (the finalize-time
+	// commit, or another replica at a handover); a wait written then would
+	// sit on a finished invoice, where nothing clears it.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE invoices SET tax_next_retry_at = $1
+		WHERE id = $2 AND status <> 'draft'
+		  AND (COALESCE(tax_transaction_id, '') = ''
+		       OR (status = 'voided' AND tax_reversed_at IS NULL))`, next, id); err != nil {
 		return err
 	}
 	return tx.Commit()

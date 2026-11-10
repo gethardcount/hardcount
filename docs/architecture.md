@@ -154,7 +154,7 @@ Tax is calculated by one of three providers in `internal/tax`: `none`, `manual` 
 | `Reverse` | credit-note issue | yes (`stripe_tax`) |
 
 - `Commit` makes the tax decision permanent at Stripe. A Stripe Tax calculation expires at its `expires_at`, 90 days after it is made; a `tax_transaction` does not expire, and it shows in Stripe's tax reports. Its ID is saved on `invoices.tax_transaction_id`. The invoice ID is the transaction's reference, and Stripe keeps references unique per account, so a retried finalize is idempotent.
-- A tax commit that fails is retried by a background sweep until the calculation expires. So a tax commit that failed for days, for example on a Stripe key that cannot write tax transactions, is recorded once the cause is fixed.
+- A tax commit that fails is retried by a background sweep until the calculation expires. So a tax commit that failed for days, for example on a Stripe key that cannot write tax transactions, is recorded within about a day of the fix (Stripe repeats a saved answer, an error included, for 24 hours).
 - `Reverse` reverses an existing `tax_transaction` when a credit note is issued. The credit-note ID is the reversal's reference, so a retried issue is idempotent too.
 - A tax commit that fails in its sweep waits before the next try, and so does the tax reversal of a voided invoice. The wait is an eighth of the time since the invoice's last write, at least 1 hour and at most 12 hours. It is saved in `invoices.tax_next_retry_at`. Each sweep lists invoices of all tenants and takes a fixed number per run, so without the wait one tenant's failing invoices held the head of the list.
 - `none` and `manual` return an empty `ReversalResult`, so the credit-note flow needs no branch per provider.

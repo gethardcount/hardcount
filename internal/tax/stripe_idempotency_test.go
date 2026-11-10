@@ -259,6 +259,7 @@ func TestCommit_AdoptsTheTransactionAnEarlierCommitMade(t *testing.T) {
 		{"it belongs to another reference: not adopted", refusal, "hc_inv_other", nil, "", 1},
 		{"the read fails: not adopted", refusal, "hc_inv_123", &stripe.Error{Type: stripe.ErrorTypeAPI, HTTPStatusCode: 500}, "", 1},
 		{"another invalid request: no read", "No such tax calculation: taxcalc_ref", "hc_inv_123", nil, "", 0},
+		{"the refusal names another calculation: no read", "You already created tax transaction tax_first from tax calculation taxcalc_other.", "hc_inv_123", nil, "", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			be := &scriptedBackend{refusal: tc.refusal, reference: tc.reference, readErr: tc.readErr}

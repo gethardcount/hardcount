@@ -146,7 +146,8 @@ func (s *PostgresStore) LinkInvoice(ctx context.Context, tenantID, invoiceID, pr
 }
 
 // CalculationFallbackLifetime is how long a recorded calculation is taken to
-// be usable when its stored response names no expiry.
+// be usable when its stored response names no expiry. It is expected only for
+// such a response: Stripe Tax returns expires_at with every calculation.
 const CalculationFallbackLifetime = 24 * time.Hour
 
 // CalculationUsableUntilSQL is the instant a tax_calculations row (aliased c)
@@ -154,18 +155,20 @@ const CalculationFallbackLifetime = 24 * time.Hour
 // stored response, or, when the response names none, CalculationFallbackLifetime
 // after the row was written. Stripe Tax keeps a calculation for 90 days and
 // says so in expires_at (verified in test mode, 2026-11-10); the 24 hours
-// assumed before was the lifetime of an idempotency key. Shared by the commit
-// guard's lookup and the pending-commit list, so the two cannot disagree.
+// assumed before was the lifetime of an idempotency key. The commit guard's
+// lookup and the pending-commit list share this instant, so they cannot
+// disagree; the guard stops one hour before it (the engine's
+// taxCalculationExpiryMargin), the list at it.
 //
 // Only a positive number of at most 12 digits counts as an expiry. The Stripe
 // provider stores the calculation as the SDK marshals it, where a missing or
 // null expires_at is written as 0: read as a time, that is 1970, and every
 // commit and finalize would be refused. A longer digit string cannot be cast
 // and would fail the whole cross-tenant list.
-const CalculationUsableUntilSQL = `COALESCE(
+var CalculationUsableUntilSQL = fmt.Sprintf(`COALESCE(
 	CASE WHEN c.response->>'expires_at' ~ '^[1-9][0-9]{0,11}$'
 	     THEN to_timestamp((c.response->>'expires_at')::bigint) END,
-	c.created_at + interval '24 hours')`
+	c.created_at + interval '%d seconds')`, int64(CalculationFallbackLifetime.Seconds()))
 
 // LookupCalculationUsableUntil returns the instant the calculation recorded
 // for (tenant, invoice, provider_ref) stops being usable for a commit

@@ -258,7 +258,7 @@ func (p *StripeTaxProvider) Commit(ctx context.Context, calcRef, invoiceID strin
 	params.IdempotencyKey = stripe.String("hardcount_tax_commit_" + invoiceID)
 	txn, err := client.V1TaxTransactions.CreateFromCalculation(ctx, params)
 	if err != nil {
-		if id := existingTransaction(ctx, client, err, invoiceID); id != "" {
+		if id := existingTransaction(ctx, client, err, calcRef, invoiceID); id != "" {
 			return id, nil
 		}
 		return "", fmt.Errorf("stripe tax: commit calculation %s for invoice %s: %w", calcRef, invoiceID, err)
@@ -271,22 +271,23 @@ func (p *StripeTaxProvider) Commit(ctx context.Context, calcRef, invoiceID strin
 var alreadyCommitted = regexp.MustCompile(`already created tax transaction (tax_[A-Za-z0-9]+)`)
 
 // existingTransaction returns the id of the tax transaction a refused commit
-// says already exists, when Stripe confirms on a read that it is this
-// invoice's. It answers "" for any other error, when the message names no
-// transaction, when the read fails, or when the transaction's reference is
-// not the invoice: the commit then fails as before and is retried.
+// says already exists for the calculation that was sent, when Stripe confirms
+// on a read that it is this invoice's. It answers "" for any other error, when
+// the message names no transaction or another calculation, when the read
+// fails, or when the transaction's reference is not the invoice: the commit
+// then fails as before and is retried.
 //
 // This is the commit whose answer was lost and whose retry came after Stripe
 // dropped the idempotency key: the transaction exists, Stripe will never make
 // a second one, and without its id Hardcount could not reverse the tax on a
 // later void or credit note.
-func existingTransaction(ctx context.Context, client *stripe.Client, createErr error, invoiceID string) string {
+func existingTransaction(ctx context.Context, client *stripe.Client, createErr error, calcRef, invoiceID string) string {
 	var se *stripe.Error
 	if !errors.As(createErr, &se) || se.Type != stripe.ErrorTypeInvalidRequest {
 		return ""
 	}
 	m := alreadyCommitted.FindStringSubmatch(se.Msg)
-	if m == nil {
+	if m == nil || !strings.Contains(se.Msg, "from tax calculation "+calcRef) {
 		return ""
 	}
 	txn, err := client.V1TaxTransactions.Retrieve(ctx, m[1], nil)
