@@ -95,7 +95,10 @@ Notes on three rows:
   switched to another tax provider, so it fails while Stripe is
   disconnected. The oldest:
   `SET app.bypass_rls = 'on'; SELECT tenant_id, id, voided_at FROM invoices WHERE status = 'voided' AND tax_provider = 'stripe_tax' AND COALESCE(tax_transaction_id, '') <> '' AND tax_reversed_at IS NULL ORDER BY voided_at LIMIT 5;`.
-  As for credit notes: one more than a day old is SEV-2.
+  As for credit notes: one more than a day old is SEV-2. A common cause
+  after a switch away from Stripe Tax: Stripe was disconnected while
+  invoices it taxed were still open. Their reversals go to Stripe and fail
+  until it is connected again.
 
 ### Info (dashboards, no alert)
 

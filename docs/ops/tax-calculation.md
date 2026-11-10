@@ -22,7 +22,7 @@ One line is never taxed under any provider: a prepaid-commit purchase, where the
 
 If Stripe Tax fails, the invoice waits; Hardcount never falls back to a guessed rate ([what to do](#when-tax-cannot-be-worked-out)).
 
-An invoice that Stripe Tax taxed stays with Stripe Tax after you switch to **Manual** or **None**. Stripe Tax made its calculation, so its tax is reported there. Hardcount still records the tax in Stripe's tax reports (a tax commit), and still reverses it there when you void or credit the invoice (a tax reversal). If Stripe is disconnected, the tax reversal fails, and Hardcount retries it until Stripe is connected again.
+**Switching away from Stripe Tax.** Invoices Stripe Tax already taxed stay Stripe's, whatever provider is selected now: Hardcount still records their tax in Stripe's tax reports (a tax commit), and reverses it there when you void or credit one (a tax reversal). So keep Stripe connected until those invoices are settled, voided or credited. With Stripe disconnected, the commit or reversal fails and is tried again, with a wait between tries, until Stripe is connected.
 
 ### Manual (flat rate)
 
