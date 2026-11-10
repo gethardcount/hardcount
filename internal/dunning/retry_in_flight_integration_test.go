@@ -49,12 +49,11 @@ func (r *processingRetry) RetryPayment(ctx context.Context, _, _, _ string) erro
 	if r.settle != nil {
 		r.settle(r.t, ctx, f, pi)
 	}
-	return &dunning.RetryError{PaymentIntentID: pi, Err: dunning.ErrPaymentInFlight, Hold: hold}
+	return &dunning.RetryError{PaymentIntentID: pi, Err: dunning.ErrPaymentInFlight}
 }
 
 // newInFlightFixture is the exhaust fixture with a fresh run (no retry used,
-// two to come), the email outbox and the hold release wired as router.go
-// wires them.
+// two to come) and the email outbox wired as router.go wires it.
 func newInFlightFixture(t *testing.T, db *postgres.DB, name string, retry *processingRetry) *exhaustFixture {
 	t.Helper()
 	var f *exhaustFixture
@@ -368,8 +367,8 @@ func TestRetryInFlight_PaymentSettledBeforeTheRunWrite(t *testing.T) {
 		if _, err := f.runs.GetRunAwaitingPayment(f.ctx, f.tenantID, f.invoiceID, "pi_slow_1"); !errors.Is(err, errs.ErrNotFound) {
 			t.Errorf("the run waits on a payment that already failed (err=%v)", err)
 		}
-		// The failure settle found no run waiting and released nothing; the
-		// retry releases its own hold (review finding F2).
+		// The failure settle freed the hold with the write that recorded the
+		// failure.
 		if f.held(t) {
 			t.Error("the retry's charge hold is still set: the next retry and the final action would wait for the stale-hold sweep")
 		}

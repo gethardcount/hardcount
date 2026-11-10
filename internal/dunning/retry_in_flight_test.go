@@ -30,36 +30,6 @@ func inFlight(pi string) error {
 	return &RetryError{PaymentIntentID: pi, Err: ErrPaymentInFlight}
 }
 
-// retryHold is the hold the retry's charge took and kept while its payment
-// was processing; the adapter hands it to dunning on the in-flight answer.
-var retryHold = domain.ChargeHold{Until: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)}
-
-func inFlightHeld(pi string) error {
-	return &RetryError{PaymentIntentID: pi, Err: ErrPaymentInFlight, Hold: retryHold}
-}
-
-// recordingChargeHolds is the invoice store's hold port: the final action's
-// claim always succeeds, and every release is recorded.
-type recordingChargeHolds struct{ released []domain.ChargeHold }
-
-func (r *recordingChargeHolds) ClaimChargeHoldForFinalAction(context.Context, string, string) (domain.ChargeHold, error) {
-	return domain.ChargeHold{Until: time.Date(2098, 1, 1, 0, 0, 0, 0, time.UTC)}, nil
-}
-
-func (r *recordingChargeHolds) ReleaseChargeHold(_ context.Context, _, _ string, h domain.ChargeHold) error {
-	r.released = append(r.released, h)
-	return nil
-}
-
-func (r *recordingChargeHolds) releasedRetryHold() bool {
-	for _, h := range r.released {
-		if h == retryHold {
-			return true
-		}
-	}
-	return false
-}
-
 // mutableInvGet serves the invoice as the test last set it.
 type mutableInvGet struct{ inv domain.Invoice }
 
@@ -209,7 +179,7 @@ func TestRetryInFlight_KeepsRunActiveWithNoEmail(t *testing.T) {
 }
 
 // The payment fails later: the hook records the failed attempt with its
-// PaymentIntent, releases the hold, sends the one warning email with the Ask
+// PaymentIntent, sends the one warning email with the Ask
 // the decline code gives, and moves the next retry so it does not follow the
 // failure at once. A second report of the same failure does nothing.
 func TestRetryInFlight_LaterFailureRecordedOnceWithWarning(t *testing.T) {
@@ -355,17 +325,12 @@ func TestRetryInFlight_SucceededBeforeTheWrite(t *testing.T) {
 		if err := h.svc.ResolveByInvoice(h.ctx, "t1", "inv_1", domain.ResolutionPaymentRecovered); err != nil {
 			t.Errorf("settle's resolve: %v", err)
 		}
-		return inFlightHeld(inFlightPI)
+		return inFlight(inFlightPI)
 	}})
-	holds := &recordingChargeHolds{}
-	h.svc.SetChargeHoldClaimer(holds)
 	h.tick()
 	run := h.run()
 	if run.State != domain.DunningResolved || run.Resolution != domain.ResolutionPaymentRecovered {
 		t.Fatalf("run: %s/%s, want resolved / payment_recovered", run.State, run.Resolution)
-	}
-	if !holds.releasedRetryHold() {
-		t.Errorf("hold releases %v, want the retry's own hold released", holds.released)
 	}
 	if n := h.events.countOf(domain.EventDunningResolved); n != 1 {
 		t.Errorf("dunning.resolved fired %d times, want 1", n)
@@ -386,19 +351,11 @@ func TestRetryInFlight_FailedBeforeTheWrite(t *testing.T) {
 		// run write, with no run waiting on it yet.
 		h.store.paymentMoved["inv_1"] = true
 		h.failSettle(inFlightPI, "authentication_required", "")
-		return inFlightHeld(inFlightPI)
+		return inFlight(inFlightPI)
 	}}}
 	h = newInFlightHarness(t, retrier)
-	holds := &recordingChargeHolds{}
-	h.svc.SetChargeHoldClaimer(holds)
 	retryAt := h.clk.Now(h.ctx)
 	h.tick()
-	// The retry releases its own hold by its token here (review finding F2).
-	// In production the failure settle's write has already freed it, and
-	// this release then finds nothing to do.
-	if !holds.releasedRetryHold() {
-		t.Errorf("hold releases %v, want the retry's own hold released", holds.released)
-	}
 
 	run := h.run()
 	if run.State != domain.DunningActive || run.AttemptCount != 1 {

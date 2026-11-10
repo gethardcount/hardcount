@@ -1029,17 +1029,13 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 			postgres.NullableString(report.Message), pi, now, id,
 		).Scan(s.scanInvDest(&inv)...)
 	} else {
-		// The write that ends an attempt frees that attempt's charge hold. If
-		// the invoice was in flight on this PaymentIntent (unknown or
-		// processing), any hold on it is that attempt's: no claim admits an
-		// in-flight invoice, so no other charger can have taken one since.
-		// Left set, the hold blocked the hosted page, Collect, void and
-		// offline payment until it ended and the stale-hold sweep cleared it,
-		// up to an hour after the customer was told the payment failed. In
-		// any other state the hold may be a charger's that has claimed and
-		// not yet put its PaymentIntent on the invoice, and stays. So does a
-		// hold without its token (an earlier version's): the stale-hold
-		// sweep keeps those for a person, and this must not undo that.
+		// A failure that ends the attempt the invoice was in flight on
+		// (unknown or processing on this PaymentIntent) frees that attempt's
+		// hold: no claim admits an in-flight invoice, so the hold is its
+		// own. In any other state the hold may be a charger's that has
+		// claimed and not yet stamped, and stays. So does a hold without its
+		// token (an earlier version's), which the stale-hold sweep keeps for
+		// a person. (See ADR-137.)
 		endsInFlightAttempt := holdsThisPI &&
 			(domain.InvoicePaymentStatus(paymentStatus) == domain.PaymentUnknown ||
 				domain.InvoicePaymentStatus(paymentStatus) == domain.PaymentProcessing)
@@ -2467,12 +2463,11 @@ func lockInvoiceForChargeClaim(ctx context.Context, tx *sql.Tx, id string) (bool
 }
 
 // chargeHoldFree is the claim predicate on the hold (ADR-127): only a NULL
-// hold is free. An expired hold is NOT free — it means a charge may have been
-// sent and its result was not saved, and only the stale-hold sweep, after
-// asking Stripe, may clear it. Before ADR-127 the claims took an expired hold
-// as free (`IS NULL OR < now()`), so an interrupted charge left the invoice
-// looking exactly like one never charged and the next initiator charged it
-// again (#976). Shared by every claim so they cannot drift apart.
+// hold is free. An expired hold is NOT free: a charge may have been sent and
+// its result not saved. The stale-hold sweep clears it, or the settle that
+// records the result (ADR-137). A claim that took an expired hold as free
+// would charge again an invoice whose charge was interrupted (#976). Shared
+// by every claim so they cannot drift apart.
 const chargeHoldFree = `auto_charge_claimed_until IS NULL`
 
 // chargeHoldReleaseTimeout bounds a release detached from its caller's

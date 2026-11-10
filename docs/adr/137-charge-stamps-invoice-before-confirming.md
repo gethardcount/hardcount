@@ -229,18 +229,35 @@ The hold outlived the answer that ended its attempt. A confirm with no answer
 keeps its hold; when the result then arrived by webhook, the invoice went to
 `failed` (or `paid`) and the hold stayed until it ended and the stale-hold
 sweep cleared it, which the sweep counted as "never confirmed a payment". For
-up to an hour the hosted page, Collect, void and offline payment were refused
-on an invoice whose customer had just been told the payment failed.
+about an hour (until the first scheduled run at least 15 minutes after the
+charge) the hosted page, Collect, void and offline payment were refused on an
+invoice whose customer had just been told the payment failed.
 
 The settle now clears `auto_charge_claimed_until` in the write that records
-the result: always when it marks the invoice paid, and when it marks it failed
-only if the invoice was in flight (`unknown` or `processing`) on that
-PaymentIntent. No claim admits an in-flight invoice, so a hold on one is that
-attempt's. A failure report in any other state leaves the hold, which may be a
-charger's that has claimed and not yet stamped. The owner's own release is a
-compare-and-set on its hold value and finds nothing to do. The release that
-existed only for a dunning retry whose payment came back processing
-(`ReleaseRetryChargeHoldTx`) is removed.
+the result.
+
+- **Paid:** it clears any hold, whoever took it. Nothing can charge a paid
+  invoice, and a charger that has claimed and not yet stamped finds its stamp
+  refused.
+- **Failed:** it clears the hold only if the invoice was in flight (`unknown`
+  or `processing`) on that PaymentIntent, and the hold carries its token. No
+  claim admits an in-flight invoice, so a hold on one is that attempt's. A
+  failure report in any other state leaves the hold, which may be a charger's
+  that has claimed and not yet stamped. A hold without its token is an
+  earlier version's, which the stale-hold sweep keeps for a person.
+
+The owner's own release is a compare-and-set on its hold value and finds
+nothing to do. The dunning-side releases are removed: the one in the failure
+settle's hook (`ReleaseRetryChargeHoldTx`) and the retry's own
+(`releaseRetryHold`, `RetryError.Hold`), which no reachable state needs.
+
+A charge whose processing stamp is refused, and which finds the invoice
+naming another attempt's PaymentIntent (in flight on it, or failed on it),
+returns an error, not that row. This window is new: the settle frees the hold
+while the first charger may still be inside its confirm. A dunning retry that
+gets the error is skipped uncounted and tries again on its schedule; its
+payment's failure was recorded by the settle that won, and its dunning warning
+is not sent.
 
 ## References
 

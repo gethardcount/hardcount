@@ -18,12 +18,15 @@ import (
 //
 // While the hold is set, nothing but its owner takes the hold, charges, or
 // does anything irreversible. The owner clears its own hold, by comparing
-// the value it wrote. The write that ends the attempt the hold belongs to
-// clears it too: a settle that marks the invoice paid, or one that marks it
-// failed while it was in flight (unknown or processing) on that attempt's
-// PaymentIntent. No claim admits an in-flight invoice, so a hold on one is
-// its attempt's. Otherwise only the stale-hold sweep (payment.Reconciler)
-// clears a stale hold; it needs no answer from Stripe to do so.
+// the value it wrote. A settle clears it too. One that marks the invoice paid
+// clears any hold: nothing can charge a paid invoice, and a charger that has
+// claimed and not yet stamped finds its stamp refused. One that marks it
+// failed clears the hold only when the invoice was in flight (unknown or
+// processing) on that PaymentIntent and the hold carries its token: no claim
+// admits an in-flight invoice, so that hold is the attempt's own, and a hold
+// without its token is an earlier version's, kept for a person. Otherwise
+// only the stale-hold sweep (payment.Reconciler) clears a stale hold; it
+// needs no answer from Stripe to do so.
 // Write-off is the one action allowed on a stale hold: it moves no money.
 //
 // A stale hold does not count as free. If it did, an interrupted charge
@@ -51,8 +54,8 @@ const (
 	ChargeHoldNone ChargeHoldState = iota
 	// ChargeHoldLive: the hold is in the future, and its owner is working.
 	ChargeHoldLive
-	// ChargeHoldStale: the hold has passed with no result saved. Only the
-	// stale-hold sweep may clear it.
+	// ChargeHoldStale: the hold has passed with no result saved. The
+	// stale-hold sweep clears it, or the settle that records the result.
 	ChargeHoldStale
 )
 

@@ -15,12 +15,10 @@ import (
 //
 // A charge whose confirm got no answer keeps its hold and leaves the invoice
 // in flight on its PaymentIntent. The answer then arrives by webhook or from
-// the reconciler. Left set, the hold blocked the hosted page, Collect, void
-// and offline payment until it ended and the stale-hold sweep cleared it: up
-// to an hour after the customer was emailed that the payment had failed, with
-// a link to a page that answered "payment in progress". Only a dunning retry
-// whose payment came back processing was released early, by a write of its
-// own.
+// the reconciler. The hold must go with it: while it is set, the hosted page
+// answers "payment in progress", and Collect, void and offline payment are
+// refused, on an invoice whose customer was just emailed that the payment
+// failed. A hold that is not the ended attempt's must stay.
 func TestSettle_FreesTheChargeHoldOfTheAttemptItEnds(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -151,12 +149,36 @@ func TestSettle_FreesTheChargeHoldOfTheAttemptItEnds(t *testing.T) {
 		if hold, err := store.ClaimChargeForDunningRetry(ctx, tenantID, inv.ID); err != nil || !hold.Held() {
 			t.Fatalf("claim: held=%v err=%v", hold.Held(), err)
 		}
-		res := fail(t, inv.ID, "pi_late")
-		if !res.Recorded {
-			t.Skip("this failure report does not move an invoice that is not in flight; the write under test is not reached")
+		if res := fail(t, inv.ID, "pi_late"); !res.Recorded {
+			t.Fatal("setup: the failure must be recorded on the invoice, or the write under test is not reached")
 		}
 		if !held(t, inv.ID) {
 			t.Error("a failure report on an invoice that was not in flight freed the hold of a charger that has claimed and not yet stamped")
+		}
+	})
+
+	// The invoice can name the reported PaymentIntent without being in flight
+	// on it: the unknown sweep ended that attempt with no payment
+	// (EndAttemptWithoutPayment leaves the PaymentIntent on the pending
+	// invoice), and a new charger has claimed. A failure report for the old
+	// PaymentIntent that arrives now must leave the new charger's hold. Only
+	// the payment-status half of the rule tells the two apart.
+	t.Run("a late failure for an attempt already ended leaves a new charger's hold", func(t *testing.T) {
+		inv := inFlight(t, "INV-SFH-ended", domain.PaymentUnknown, "5 minutes")
+		if status, ended, err := store.EndAttemptWithoutPayment(ctx, tenantID, inv.ID, "pi_slow", domain.AttemptReasonNeverConfirmed); err != nil || !ended || status != domain.PaymentPending {
+			t.Fatalf("setup: end the attempt: status %q ended %v err %v, want pending, ended", status, ended, err)
+		}
+		if got, err := store.Get(ctx, tenantID, inv.ID); err != nil || got.StripePaymentIntentID != "pi_slow" || held(t, inv.ID) {
+			t.Fatalf("setup: after the end the invoice names %q (err %v) and held=%v, want pi_slow and no hold", got.StripePaymentIntentID, err, held(t, inv.ID))
+		}
+		if hold, err := store.ClaimAutoCharge(ctx, tenantID, inv.ID); err != nil || !hold.Held() {
+			t.Fatalf("the next charger's claim: held=%v err=%v", hold.Held(), err)
+		}
+		if res := fail(t, inv.ID, "pi_slow"); !res.Recorded {
+			t.Fatal("setup: the late failure must be recorded on the invoice, or the write under test is not reached")
+		}
+		if !held(t, inv.ID) {
+			t.Error("a late failure for a PaymentIntent the invoice was no longer in flight on freed the hold of a charger that has claimed and not yet stamped")
 		}
 	})
 
@@ -183,4 +205,97 @@ func TestSettle_FreesTheChargeHoldOfTheAttemptItEnds(t *testing.T) {
 			t.Error("a failure for another PaymentIntent freed the in-flight attempt's hold")
 		}
 	})
+}
+
+// The window this change opens: charger A is still inside its confirm when
+// A's failure is settled by its webhook, which frees A's hold. Charger B then
+// claims and stamps its own PaymentIntent. When A's confirm returns, A runs
+// the tail of its charge: it reports its decline, or stamps "processing", and
+// releases its hold. Each of those writes is guarded by something A read (the
+// counter its stamp returned, the hold value its claim wrote), so none of
+// them may touch B's attempt: the invoice stays unknown on B's PaymentIntent,
+// under B's hold, with the counter where B's stamp left it.
+func TestSettle_FirstChargersTailLeavesTheNextAttemptAlone(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Settle Then Second Charger")
+	store := invoice.NewPostgresStore(db)
+	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-SFH-interleave")
+
+	stamp := func(hold domain.ChargeHold, seq int64, pi string) domain.Invoice {
+		t.Helper()
+		stamped, ok, err := store.StampPendingConfirm(ctx, tenantID, domain.InvoiceChargeAttempt{
+			InvoiceID: inv.ID, StripePaymentIntentID: pi, Trigger: domain.ChargeTriggerAutoCharge,
+			Outcome: domain.ChargeAttemptPending, AmountCents: inv.AmountDueCents, OccurredAt: time.Now().UTC(),
+		}, hold, seq)
+		if err != nil || !ok {
+			t.Fatalf("stamp %s: ok=%v err=%v", pi, ok, err)
+		}
+		return stamped
+	}
+	holdOf := func() *time.Time {
+		t.Helper()
+		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		var h *time.Time
+		if err := tx.QueryRowContext(ctx, `SELECT auto_charge_claimed_until FROM invoices WHERE id = $1`, inv.ID).Scan(&h); err != nil {
+			t.Fatalf("read hold: %v", err)
+		}
+		return h
+	}
+
+	// Charger A claims, stamps pi_A and is now inside its confirm.
+	h1, err := store.ClaimAutoCharge(ctx, tenantID, inv.ID)
+	if err != nil || !h1.Held() {
+		t.Fatalf("A's claim: held=%v err=%v", h1.Held(), err)
+	}
+	a := stamp(h1, inv.ChargeAttemptSeq, "pi_A")
+
+	// pi_A's failure arrives by webhook and is settled: A's hold is freed.
+	if _, res, err := store.MarkPaymentFailedReportingTransition(ctx, tenantID, inv.ID,
+		domain.PaymentFailureReport{PaymentIntentID: "pi_A", Message: "card declined", DeclineCode: "insufficient_funds"}, nil); err != nil || !res.Recorded {
+		t.Fatalf("webhook settle of pi_A: recorded=%v err=%v", res.Recorded, err)
+	}
+	if holdOf() != nil {
+		t.Fatal("setup: the settle of pi_A must free A's hold")
+	}
+
+	// Charger B claims the failed invoice and stamps pi_B.
+	h2, err := store.ClaimChargeForDunningRetry(ctx, tenantID, inv.ID)
+	if err != nil || !h2.Held() {
+		t.Fatalf("B's claim: held=%v err=%v", h2.Held(), err)
+	}
+	cur, err := store.Get(ctx, tenantID, inv.ID)
+	if err != nil {
+		t.Fatalf("read before B's stamp: %v", err)
+	}
+	b := stamp(h2, cur.ChargeAttemptSeq, "pi_B")
+
+	// A's confirm returns. Its tail, in each form it can take:
+	seqA := a.ChargeAttemptSeq
+	if _, res, err := store.MarkPaymentFailedReportingTransition(ctx, tenantID, inv.ID,
+		domain.PaymentFailureReport{PaymentIntentID: "pi_A", Message: "card declined", DeclineCode: "insufficient_funds", ChargedAtSeq: &seqA}, nil); err != nil || res.Recorded {
+		t.Fatalf("A's own decline report: recorded=%v err=%v, want it not recorded as the invoice's current attempt", res.Recorded, err)
+	}
+	if _, applied, err := store.StampChargeOutcome(ctx, tenantID, inv.ID, seqA, domain.PaymentProcessing, "pi_A", ""); err != nil || applied {
+		t.Fatalf("A's processing stamp: applied=%v err=%v, want it refused", applied, err)
+	}
+	if err := store.ReleaseChargeHold(ctx, tenantID, inv.ID, h1); err != nil {
+		t.Fatalf("A's release: %v", err)
+	}
+
+	got, err := store.Get(ctx, tenantID, inv.ID)
+	if err != nil {
+		t.Fatalf("read after A's tail: %v", err)
+	}
+	if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != "pi_B" || got.ChargeAttemptSeq != b.ChargeAttemptSeq {
+		t.Fatalf("after A's tail: %s on %q seq %d, want unknown on pi_B seq %d: A's late writes touched B's attempt",
+			got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq, b.ChargeAttemptSeq)
+	}
+	if h := holdOf(); h == nil || !h.Equal(h2.Until) {
+		t.Fatalf("after A's tail: hold %v, want B's %v", h, h2.Until)
+	}
 }

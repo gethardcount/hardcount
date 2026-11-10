@@ -34,11 +34,10 @@ func (r *shRig) ageUpdated(invoiceID string, age time.Duration) {
 		WHERE id = $1`, invoiceID, age.Seconds())
 }
 
-// assertPaidNowHoldClearedLater: the reconciler's settle pays the invoice at
-// once and frees the charge hold an unclear outcome kept, in the same write.
-// The stale-hold sweep that follows finds nothing to do. (The name is from
-// when the hold waited for that sweep.)
-func (r *shRig) assertPaidNowHoldClearedLater(invoiceID, piID string) {
+// assertPaidAndHoldFreed: the reconciler's settle pays the invoice at once
+// and frees the charge hold an unclear outcome kept, in the same write. The
+// stale-hold sweep that follows finds nothing to do.
+func (r *shRig) assertPaidAndHoldFreed(invoiceID, piID string) {
 	r.t.Helper()
 	got := r.get(invoiceID)
 	if got.Status != domain.InvoicePaid || got.PaymentStatus != domain.PaymentSucceeded || got.StripePaymentIntentID != piID {
@@ -118,7 +117,7 @@ func TestTwoStep_ConfirmAnswerLost_NamesThePayment_NotParked(t *testing.T) {
 	if n := r.fake.readCount() - reads; n != 1 {
 		t.Errorf("Stripe reads to resolve it = %d, want 1 (one read by id)", n)
 	}
-	r.assertPaidNowHoldClearedLater(inv.ID, pi.id)
+	r.assertPaidAndHoldFreed(inv.ID, pi.id)
 }
 
 // The caller's deadline ends while Stripe is still confirming (dunning 15 s,
@@ -141,7 +140,7 @@ func TestTwoStep_DeadlineEndsDuringConfirm_NotParked(t *testing.T) {
 	r.assertNoSecondCharge(inv.ID)
 	r.ageUpdated(inv.ID, 5*time.Minute)
 	r.runClean()
-	r.assertPaidNowHoldClearedLater(inv.ID, pi.id)
+	r.assertPaidAndHoldFreed(inv.ID, pi.id)
 }
 
 // Stripe charged and the process died before saving the result. The pending
