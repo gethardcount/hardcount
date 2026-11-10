@@ -298,3 +298,58 @@ the window (no terminal stamp exists on the CN side, so the structural
 scan would churn every pre-feature CN forever). The invoice-side half was
 already unbounded per ADR-111.
 
+## Amendment 2026-11-10 — the marker is written by the issue statement
+
+The "one correctness exception" above, and the promote step shipped on
+2026-08-30, both came from one fact: `tax_reversal_pending` was written after
+the Stripe call, in a write of its own that could fail or never run. The
+comparisons made here were against an obligations queue and against
+promote-on-detect. A third option needed neither: set the boolean that already
+exists, in the statement that already issues the note.
+
+- `TransitionStatusTx` (the only writer of `status='issued'`) sets
+  `tax_reversal_pending` when the note has an amount and its invoice was taxed
+  by Stripe Tax and carries tax.
+- `SetTaxTransaction` stores the reversal and clears the marker in one write.
+- `ListPendingCreditNoteTaxReversal` lists marked notes whose invoice has a tax
+  transaction. The structural branch, its 24-hour window and the promote step
+  are deleted, with the branches of the sweep that existed for them.
+
+So no issued note can owe a reversal and carry no marker: a process stopped
+between the issue commit and the reversal call leaves a listed note, and an
+owed reversal stays listed until it is made. A marked note whose invoice has
+no tax transaction yet waits, unlisted, for the invoice's tax commit; before,
+such a note was found only if the commit landed within 24 hours of the note's
+last write. All sweeps are now shape 1 or 2 of the eligibility rule in
+`internal/billing/reconciler_driver.go`.
+
+Behaviour to know:
+
+- `tax_reversal_pending` on the API is true from the issue commit until the
+  reversal is recorded (normally within the same request), not only after a
+  failed attempt. If the invoice's tax is never recorded at Stripe, the flag
+  stays true and no reversal is made.
+- The gauge `hardcount_creditnote_pending_tax_reversals` counts marked notes
+  whose invoice has a tax transaction and that are not on a test clock.
+- A re-drive that fails writes nothing to the note. Any write stamps
+  `updated_at`, which the refunds-needing-attention rule reads as the note's
+  age. So the list keeps its order (oldest write first), and failing notes
+  stay at its head, as on the earlier version. Rotating them needs a column
+  of its own and is not part of this change.
+- A re-drive is safe to repeat only within the 24 hours Stripe keeps an
+  idempotency key: it replays the first answer, so a reversal made at Stripe
+  whose id was not stored is recovered. Later, Stripe refuses a second
+  transaction with the same reference, and the note fails on every run until
+  the reversal's id is stored by hand.
+
+Upgrade. Migration 00224 marks the notes the deleted structural branch would
+still have listed when the upgrade runs (issued, an amount, no reversal
+stored, unmarked, written within 24 hours, on an invoice with a Stripe tax
+transaction), so the upgrade drops nothing the earlier version would have
+recovered. Two shapes it does not mark, because the earlier version would not
+have reversed them either: a note older than 24 hours that lost both its
+reversal and its marker, and a note issued while its invoice's tax was not
+yet recorded at Stripe. The CHANGELOG gives one UPDATE that marks those too.
+An earlier version running beside this one clears markers this version set:
+its sweep reads a marked note whose invoice has no tax transaction as stale.
+So that UPDATE is run after the last earlier replica has stopped.
