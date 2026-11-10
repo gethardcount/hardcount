@@ -1050,3 +1050,200 @@ func TestPlanSwap_vs_Close_SwapFirst_InAdvanceCalendar_StartOnly(t *testing.T) {
 	}
 	assertUsageBilledOnce(t, r.base)
 }
+
+// newInArrearsBaseSwapRig re-plans the fixture sub onto an in_arrears
+// monthly plan with a 3000c base fee and returns a swapRig whose target is an
+// in_arrears yearly plan: same cadence, cross interval. The close of a period
+// the swap cuts short bills the old plan's base fee for it.
+func newInArrearsBaseSwapRig(t *testing.T, r *s1Rig) *swapRig {
+	t.Helper()
+	arrMonthly, _, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+		Code: "pln_arr_m", Name: "Arrears Monthly", Currency: "USD", BillingInterval: domain.BillingMonthly,
+		BaseAmountCents: 3000, BaseBillTiming: domain.BillInArrears, Prices: []pricing.PriceInput{{MeterID: r.f.meterID, PriceShape: perUnitShape("1")}},
+	})
+	if err != nil {
+		t.Fatalf("create in_arrears monthly: %v", err)
+	}
+	arrYearly, _, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+		Code: "pln_arr_y", Name: "Arrears Yearly", Currency: "USD", BillingInterval: domain.BillingYearly,
+		BaseAmountCents: 30000, BaseBillTiming: domain.BillInArrears, Prices: []pricing.PriceInput{{MeterID: r.f.meterID, PriceShape: perUnitShape("1")}},
+	})
+	if err != nil {
+		t.Fatalf("create in_arrears yearly: %v", err)
+	}
+	tx, err := r.f.db.BeginTx(r.base, postgres.TxTenant, r.f.tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := tx.ExecContext(r.base, `UPDATE subscription_items SET plan_id = $1 WHERE id = $2`, arrMonthly.ID, r.f.itemID); err != nil {
+		t.Fatalf("re-plan item: %v", err)
+	}
+	if _, err := tx.ExecContext(r.base, `UPDATE billing_intervals SET plan_id = $1 WHERE subscription_item_id = $2`, arrMonthly.ID, r.f.itemID); err != nil {
+		t.Fatalf("re-plan interval: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit re-plan: %v", err)
+	}
+	plans := &hookedPlanReader{plans: map[string]domain.Plan{arrMonthly.ID: arrMonthly, arrYearly.ID: arrYearly}}
+	svc := subscription.NewService(r.f.subStore, nil)
+	svc.SetPlanReader(plans)
+	svc.SetBiller(r.closer.engine)
+	return &swapRig{svc: svc, plans: plans, newPlan: arrYearly, itemID: r.f.itemID}
+}
+
+// TestPlanSwap_InArrears_AtFireInstant_Refused: on a frozen clock a
+// spend-threshold fire three days into the period writes an invoice for
+// [P0, fire), usage only. An immediate in_arrears plan change to another
+// interval at the same instant would cut the period to [P0, fire), and that
+// period's invoice (the old plan's base fee for three days) takes the same key
+// (sub, P0, fire): it could not be written. Before this guard the close read
+// that as "already invoiced", advanced the period and billed the base fee
+// nowhere. The swap is now refused with 409 at that instant. A minute later it
+// goes through, and the close writes the cut period's invoice with its base
+// fee and the usage from the fire on, each instant billed once.
+//
+// A swap in the same microsecond (a nanosecond tail) is refused too: the key
+// is stored to the microsecond.
+//
+// Mutations: drop the guard's equality arm, and the swap at the fire instant
+// commits (the close then fails on invoice_billing_period_taken); compare
+// without truncating, and the swap with a nanosecond tail commits.
+func TestPlanSwap_InArrears_AtFireInstant_Refused(t *testing.T) {
+	r := newS1Rig(t, "S1 in_arrears swap at the fire instant", 200)
+	sw := newInArrearsBaseSwapRig(t, r)
+	fireAt := r.f.cycleStart.AddDate(0, 0, 3)
+	if fired, errs := r.fire.engine.ScanThresholds(r.at(fireAt), 50); fired != 1 || len(errs) != 0 {
+		t.Fatalf("fire = %d, errors %v; want 1, none", fired, errs)
+	}
+
+	assertPeriodMoved409(t, sw.swap(t, r, fireAt), "ends at the current time")
+	assertPeriodMoved409(t, sw.swap(t, r, fireAt.Add(500*time.Nanosecond)), "ends at the current time")
+	if got := r.itemPlan(t); got == sw.newPlan.ID {
+		t.Fatal("item is on the new plan after a refused swap")
+	}
+	r.assertPeriod(t, r.f.cycleStart, &r.f.cycleEnd)
+
+	later := fireAt.Add(time.Minute)
+	if err := sw.swap(t, r, later); err != nil {
+		t.Fatalf("swap a minute after the fire: %v", err)
+	}
+	if gen := r.runClose(t); gen != 1 {
+		t.Fatalf("close generated %d invoices, want 1 (the cut period's)", gen)
+	}
+	cycle, threshold, _ := r.liveInvoices(t)
+	if len(cycle) != 1 || len(threshold) != 1 {
+		t.Fatalf("invoices: cycle=%d threshold=%d, want 1 and 1", len(cycle), len(threshold))
+	}
+	if !cycle[0].BillingPeriodStart.Equal(r.f.cycleStart) || !cycle[0].BillingPeriodEnd.Equal(later) {
+		t.Errorf("cycle invoice period [%v, %v), want [P0, the swap instant %v)", cycle[0].BillingPeriodStart, cycle[0].BillingPeriodEnd, later)
+	}
+	lines, err := r.f.invStore.ListLineItems(r.base, r.f.tenantID, cycle[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var baseCents int64
+	for _, li := range lines {
+		if li.LineType == domain.LineTypeBaseFee {
+			baseCents += li.AmountCents
+		}
+	}
+	if baseCents <= 0 {
+		t.Errorf("the cut period's invoice bills a base fee of %dc, want the old plan's three days", baseCents)
+	}
+	assertUsageBilledOnce(t, r.base)
+}
+
+// TestThresholdFire_InvoiceNumberCollision_ReportsError: a fire whose invoice
+// number is taken (the counter set back out of band) is an error, reported by
+// the scan, with no invoice. Before, it was read as "a sibling fire already
+// wrote this cycle's threshold invoice" and logged at INFO. Once the counter is
+// repaired the next scan fires once.
+//
+// Mutation: thresholdSlotTaken back to the bare kind, and the scan reports
+// nothing.
+func TestThresholdFire_InvoiceNumberCollision_ReportsError(t *testing.T) {
+	r := newS1Rig(t, "S1 fire number collision", 200)
+	repair := takeNextInvoiceNumber(t, r.base, r.f.db, r.f.invStore, r.f.tenantID, r.f.customerID)
+
+	fired, scanErrs := r.fire.engine.ScanThresholds(r.at(r.t1), 50)
+	if fired != 0 || len(scanErrs) != 1 || errs.Code(scanErrs[0]) != "invoice_number_taken" {
+		t.Fatalf("scan = %d fired, errors %v; want 0 and one with code invoice_number_taken", fired, scanErrs)
+	}
+	if _, threshold, _ := r.liveInvoices(t); len(threshold) != 0 {
+		t.Fatalf("threshold invoices = %d, want 0", len(threshold))
+	}
+
+	repair()
+	if fired := r.runFire(t); fired != 1 {
+		t.Fatalf("scan after the repair fired %d, want 1", fired)
+	}
+}
+
+// TestThresholdFire_SiblingFireAtTheInsert_Skips: two fires of one cycle both
+// pass the probe, and the second lands on a slot index at its insert. That is
+// the one unique violation a fire reads as "already done": it returns no
+// error and fires nothing, and the cycle keeps one threshold invoice.
+//
+// Mutation: thresholdSlotTaken drops the code Postgres names here, and the
+// outer fire reports an error.
+func TestThresholdFire_SiblingFireAtTheInsert_Skips(t *testing.T) {
+	r := newS1Rig(t, "S1 sibling fire at the insert", 200)
+	r.fire.subs.beforeTx = func() {
+		r.fire.subs.beforeTx = nil
+		if fired, scanErrs := r.closer.engine.ScanThresholds(r.at(r.t1), 50); fired != 1 || len(scanErrs) != 0 {
+			t.Errorf("sibling fire = %d, errors %v; want 1, none", fired, scanErrs)
+		}
+	}
+
+	fired, scanErrs := r.fire.engine.ScanThresholds(r.at(r.t1), 50)
+	if fired != 0 || len(scanErrs) != 0 {
+		t.Fatalf("outer fire = %d, errors %v; want 0 and none (a sibling wrote the slot)", fired, scanErrs)
+	}
+	if _, threshold, _ := r.liveInvoices(t); len(threshold) != 1 {
+		t.Fatalf("threshold invoices = %d, want 1", len(threshold))
+	}
+	if n := r.fire.invs.alreadyExists.Load(); n != 1 {
+		t.Errorf("outer fire's slot collisions = %d, want 1: it must reach the insert", n)
+	}
+}
+
+// TestPlanSwap_InAdvance_AtFireInstant_Succeeds: the guard's equality arm is
+// for in_arrears only. An in_advance cross-interval swap at a threshold
+// fire's instant goes through: its invoice starts at that instant (the new
+// period), so it does not take the threshold invoice's key (sub, P0, fire).
+// The swap invoice bills the new period from the fire instant, and every
+// usage instant is billed once.
+//
+// Mutation: drop the in_advance exemption, and this swap is refused.
+func TestPlanSwap_InAdvance_AtFireInstant_Succeeds(t *testing.T) {
+	r := newS1Rig(t, "S1 in_advance swap at the fire instant", 200)
+	sw, _ := newInAdvanceSwapRig(t, r)
+	fireAt := r.f.cycleStart.AddDate(0, 0, 3)
+	if fired, errs := r.fire.engine.ScanThresholds(r.at(fireAt), 50); fired != 1 || len(errs) != 0 {
+		t.Fatalf("fire = %d, errors %v; want 1, none", fired, errs)
+	}
+
+	if err := sw.swap(t, r, fireAt); err != nil {
+		t.Fatalf("in_advance swap at the fire instant: %v; want it to succeed (its invoice starts at the swap instant)", err)
+	}
+	if got := r.itemPlan(t); got != sw.newPlan.ID {
+		t.Fatalf("item plan = %s, want the new plan %s", got, sw.newPlan.ID)
+	}
+	var threshold, startsAtFire int
+	for _, inv := range r.f.listInvoices(t, r.base) {
+		if inv.Status == domain.InvoiceVoided {
+			continue
+		}
+		if inv.BillingReason == domain.BillingReasonThreshold {
+			threshold++
+			continue
+		}
+		if inv.BillingPeriodStart.Equal(fireAt) {
+			startsAtFire++
+		}
+	}
+	if threshold != 1 || startsAtFire != 1 {
+		t.Errorf("threshold invoices = %d, swap invoices starting at the fire instant = %d; want 1 and 1", threshold, startsAtFire)
+	}
+	assertUsageBilledOnce(t, r.base)
+}

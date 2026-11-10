@@ -416,28 +416,105 @@ func (crashingTaxCommitter) CheckTaxCalculationUsable(context.Context, string, s
 	return nil
 }
 
-// TestRetryTax_ProcessStopsAfterFinalize_InvoiceFinalizedIsQueued: a tax
-// retry that resolves a subscription's draft finalizes it, and the finalize
-// transaction queues invoice.finalized. The process dying at the first step
-// after that commit cannot lose it.
-func TestRetryTax_ProcessStopsAfterFinalize_InvoiceFinalizedIsQueued(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "Outbox Retry Tax Stops")
-	store, svc := eventsWired(db)
-	svc.SetTaxCommitter(crashingTaxCommitter{})
-	svc.SetTaxRetrier(resolvingRetrier{db: db, store: store})
-	draft := taxPendingCycleDraft(t, db, ctx, tenantID, "HC-ORT-1")
+// stoppingStore stops the process inside a tax retry's transaction: in the
+// pause read, before the finalize (beforeFinalize), or right after the
+// finalize's writes, before the commit (afterFinalize).
+type stoppingStore struct {
+	*invoice.PostgresStore
+	beforeFinalize, afterFinalize bool
+}
 
-	survive(func() { _, _ = svc.RetryTax(ctx, tenantID, draft.ID) })
-	row, err := store.Get(ctx, tenantID, draft.ID)
-	if err != nil {
-		t.Fatal(err)
+func (s stoppingStore) CollectionPausedTx(ctx context.Context, tx *sql.Tx, invoiceID string, at time.Time) (bool, error) {
+	if s.beforeFinalize {
+		panic("process stopped in the tax retry's transaction, before the finalize")
 	}
-	if row.Status != domain.InvoiceFinalized {
-		t.Fatalf("status = %s, want finalized", row.Status)
+	return s.PostgresStore.CollectionPausedTx(ctx, tx, invoiceID, at)
+}
+
+func (s stoppingStore) FinalizeDraftTx(ctx context.Context, tx *sql.Tx, tenantID, id string, onFinalized func(*sql.Tx, domain.Invoice) error) (domain.Invoice, error) {
+	inv, err := s.PostgresStore.FinalizeDraftTx(ctx, tx, tenantID, id, onFinalized)
+	if err == nil && s.afterFinalize {
+		panic("process stopped in the tax retry's transaction, after the finalize")
 	}
-	oneEventOfTheRow(t, db, store, tenantID, domain.EventInvoiceFinalized, draft.ID, nil)
+	return inv, err
+}
+
+// TestRetryTax_ProcessStops_NeverLeavesATaxedDraft (P1-29): a tax retry
+// writes the tax and finalizes the draft in one transaction. The process
+// stopping anywhere in that transaction leaves the row as it was, a draft
+// with tax pending that the tax_retry sweep lists again; stopping after the
+// commit leaves it finalized and queued, with its token, one
+// invoice.finalized and one finalize audit row. Before, a stop between the
+// two writes left a draft with tax ok, which no sweep lists.
+//
+// Mutation: FinalizeDraftTx skips finalizedTx, and the third case has no
+// token and no event.
+func TestRetryTax_ProcessStops_NeverLeavesATaxedDraft(t *testing.T) {
+	cases := []struct {
+		name                          string
+		beforeFinalize, afterFinalize bool
+		crashCommit                   bool
+		wantFinalized                 bool
+	}{
+		{name: "in the transaction, before the finalize", beforeFinalize: true},
+		{name: "in the transaction, after the finalize", afterFinalize: true},
+		{name: "after the commit, in the Stripe Tax commit", crashCommit: true, wantFinalized: true},
+	}
+	for i, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			db := testutil.SetupTestDB(t)
+			ctx := postgres.WithLivemode(context.Background(), false)
+			tenantID := testutil.CreateTestTenant(t, db, "Outbox Retry Tax Stops")
+			store := invoice.NewPostgresStore(db)
+			store.SetOutboxEnqueuer(webhook.NewOutboxStore(db))
+			svc := invoice.NewService(stoppingStore{PostgresStore: store, beforeFinalize: c.beforeFinalize, afterFinalize: c.afterFinalize},
+				nil, tenant.NewSettingsStore(db))
+			svc.SetAuditLogger(audit.NewLogger(db))
+			if c.crashCommit {
+				svc.SetTaxCommitter(crashingTaxCommitter{})
+			}
+			svc.SetTaxRetrier(resolvingRetrier{db: db, store: store})
+			draft := taxPendingCycleDraft(t, db, ctx, tenantID, fmt.Sprintf("HC-ORT-%d", i+1))
+
+			survive(func() { _, _ = svc.RetryTax(ctx, tenantID, draft.ID) })
+			row, err := store.Get(ctx, tenantID, draft.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			finalizeRows := countRows(t, db, ctx, tenantID,
+				`SELECT count(*) FROM audit_log WHERE resource_id = $1 AND action = $2`, draft.ID, domain.AuditActionFinalize)
+			if !c.wantFinalized {
+				if row.Status != domain.InvoiceDraft || row.TaxStatus != domain.InvoiceTaxPending {
+					t.Fatalf("status = %s, tax_status = %s; want a draft with tax pending (the transaction rolled back)", row.Status, row.TaxStatus)
+				}
+				if row.PublicToken != "" || row.AutoChargePending || finalizeRows != 0 {
+					t.Errorf("token %q, queued %v, %d finalize audit rows; want none", row.PublicToken, row.AutoChargePending, finalizeRows)
+				}
+				if got := queuedEvents(t, db, tenantID, domain.EventInvoiceFinalized, draft.ID); len(got) != 0 {
+					t.Errorf("%d invoice.finalized rows, want 0", len(got))
+				}
+				listed, err := store.ListPendingTaxRetry(ctx, 100000, []string{"provider_outage"}, domain.MaxTaxRetryAttempts, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				found := false
+				for _, inv := range listed {
+					found = found || inv.ID == draft.ID
+				}
+				if !found {
+					t.Error("the tax_retry sweep does not list the draft: nothing would retry it")
+				}
+				return
+			}
+			if row.Status != domain.InvoiceFinalized || !row.AutoChargePending || row.PublicToken == "" {
+				t.Fatalf("status = %s, queued %v, token %q; want finalized, queued, with a token", row.Status, row.AutoChargePending, row.PublicToken)
+			}
+			if finalizeRows != 1 {
+				t.Errorf("%d finalize audit rows, want 1 (written with the finalize)", finalizeRows)
+			}
+			oneEventOfTheRow(t, db, store, tenantID, domain.EventInvoiceFinalized, draft.ID, nil)
+		})
+	}
 }
 
 // crashingStopper is the Stripe leg of a void, the first step after the void

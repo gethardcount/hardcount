@@ -105,8 +105,22 @@ While you work, the billing run still attempts each `retrying`
 subscription when its wait ends. It and retry-billing make the same
 attempt, so each period is billed once, whichever runs first.
 
-1. **Fix the cause.** For a subscription with no items, add one
-   (`POST /v1/subscriptions/{id}/items`).
+1. **Fix the cause.**
+   - For a subscription with no items, add one
+     (`POST /v1/subscriptions/{id}/items`).
+   - `invoice_number_taken` in the `bill subscription failed` log line: the
+     invoice-number counter was set back, so the number the close takes is
+     already used. Set `tenant_settings.invoice_next_seq_live` (or
+     `invoice_next_seq_test`) above the highest number in use.
+   - `invoice_billing_period_taken`: another invoice holds the period's
+     slot (the subscription, its period start and end). On a test clock
+     this is a spend-threshold invoice ending where a plan change cut the
+     period: void it if it is unpaid (`POST /v1/invoices/{id}/void`), and
+     the close bills the whole window; otherwise delete the clock. A period
+     set back in the database: set it forward again.
+
+   Until the cause is fixed, every change to that subscription answers
+   `unbilled_period`.
 2. **Retry the subscription.** This clears the saved failure, writes an
    audit log entry, and bills at once:
 

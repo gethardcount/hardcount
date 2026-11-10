@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"testing"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -78,4 +80,13 @@ func (e *Engine) WriteCancelReliefTx(ctx context.Context, tx *sql.Tx, canceled d
 		return domain.Relief{}, err
 	}
 	return e.writeReliefTx(ctx, tx, canceled, p)
+}
+
+// ShortenCommitBudget sets commitBudget to d for one test, so a test can run
+// a transaction past its budget without waiting 30 seconds.
+func ShortenCommitBudget(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := commitBudget
+	commitBudget = d
+	t.Cleanup(func() { commitBudget = prev })
 }

@@ -71,7 +71,7 @@ func nonAdditive(aggregation string) bool {
 //     invoices(tenant_id, subscription_id, billing_period_start) WHERE
 //     billing_reason='threshold' guarantees at most one threshold invoice
 //     per cycle. A second tick that observes the same crossed state lands
-//     on errs.ErrAlreadyExists and short-circuits.
+//     on that slot and short-circuits (thresholdSlotTaken).
 //
 //   - Mode-scoped via ctx livemode. The scheduler fans out per-mode before
 //     calling, so the candidate fetch (ListWithThresholds) honours the same
@@ -282,7 +282,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	// mechanism: two concurrent scans can both pass it, and the partial unique
 	// index (idx_invoices_threshold_unique_per_cycle, 0056: one threshold
 	// invoice per sub+period_start) remains the correctness seam — the loser
-	// lands on errs.ErrAlreadyExists and short-circuits, exactly as before.
+	// lands on the threshold slot and short-circuits (thresholdSlotTaken).
 	//
 	// The probe sees the cycle's threshold invoice in ANY status, not the
 	// watermark: the index holds the cycle's one slot whatever the status,
@@ -528,12 +528,12 @@ func (e *Engine) noteThresholdDeferred(ctx context.Context, sub domain.Subscript
 
 // healStrandedZeroDue repairs the ADR-066 crash window: an invoice committed
 // as finalized with nothing owed (born $0, or fully credited) whose MarkPaid
-// never ran because the process died between the create and the mark. Both
-// re-entry paths call it — the threshold fire-once probe and billOnePeriod's
-// ErrAlreadyExists branch — since neither ever reaches the normal MarkPaid
-// gate again. Idempotent by construction (the gate re-checks live state;
-// MarkPaid's already-paid branch is a no-op) and best-effort at the probe
-// call site: a failure WARNs and the same probe re-enters next tick.
+// never ran because the process died between the create and the mark. The
+// threshold fire-once probe calls it, since a fired cycle never reaches the
+// normal MarkPaid gate again. (A cycle invoice's $0 settle is the collector's,
+// ADR-116.) Idempotent by construction (the gate re-checks live state;
+// MarkPaid's already-paid branch is a no-op) and best-effort: a failure WARNs
+// and the same probe re-enters next tick.
 // The paidAt argument is the caller's effective now (test-clock aware) so a
 // healed simulated invoice's paid_at stays in the simulation's time domain.
 func (e *Engine) healStrandedZeroDue(ctx context.Context, tenantID string, inv domain.Invoice, paidAt time.Time) {
@@ -853,8 +853,8 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 
 	// Emit the threshold invoice. The partial unique index on
 	// (tenant, sub, billing_period_start) WHERE billing_reason='threshold'
-	// is the schema-level idempotency seam — a re-tick lands on
-	// errs.ErrAlreadyExists and we short-circuit. Note: we use periodStart as
+	// is the schema-level idempotency seam — a re-tick lands on that slot and
+	// we short-circuit (thresholdSlotTaken). Note: we use periodStart as
 	// the boundary key, not now, so two ticks fired against the same
 	// in-flight cycle dedup to the same row even though their wall-clock
 	// differs. The invoice number is allocated inside the fire tx, after the
@@ -950,7 +950,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 		})
 	})
 	if err != nil {
-		if errors.Is(err, errs.ErrAlreadyExists) {
+		if thresholdSlotTaken(err) {
 			slog.Info("threshold invoice already exists for cycle (idempotent skip)",
 				"subscription_id", sub.ID,
 				"period_start", periodStart,
@@ -1007,4 +1007,20 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 	)
 
 	return true, nil
+}
+
+// thresholdSlotTaken reports whether a fire's insert lost to a sibling fire
+// that wrote this cycle's threshold invoice first. Two fires can both pass the
+// fire's CAS, which writes unchanged values, and the second lands on an index.
+// It checks both codes: the second fire violates the threshold slot and the
+// period slot (the same start, the same instant), and Postgres names the index
+// it checks first, which depends on how the database was built (creation order
+// on a migrated one, name order on one restored from pg_dump). Any other
+// unique violation (an invoice number taken) is an error.
+func thresholdSlotTaken(err error) bool {
+	switch errs.Code(err) {
+	case errs.CodeInvoiceThresholdCycleTaken, errs.CodeInvoiceBillingPeriodTaken:
+		return true
+	}
+	return false
 }

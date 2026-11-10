@@ -14,17 +14,19 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tax"
 )
 
 // finalizeFailingStore fails the draft→finalized write, the one durable step
-// of finalize for an engine invoice.
+// of finalize for an engine invoice. A tax retry finalizes on its tax write's
+// transaction (FinalizeDraftTx).
 type finalizeFailingStore struct {
 	*memStore
 }
 
-func (s finalizeFailingStore) FinalizeDraft(context.Context, string, string, func(*sql.Tx, domain.Invoice) error) (domain.Invoice, error) {
+func (s finalizeFailingStore) FinalizeDraftTx(context.Context, *sql.Tx, string, string, func(*sql.Tx, domain.Invoice) error) (domain.Invoice, error) {
 	return domain.Invoice{}, errors.New("connection reset")
 }
 
@@ -38,22 +40,27 @@ func taxPendingCycleDraft(id string) domain.Invoice {
 	}
 }
 
-// TestRetryTax_FinalizeFailureIsAnError (G7, T3): when the tax resolves but
-// finalize fails, the row is a draft with tax ok, which no sweep lists again.
-// RetryTax must say so, so the sweep counts it as an error, not as advanced.
-func TestRetryTax_FinalizeFailureIsAnError(t *testing.T) {
-	t.Run("RetryTax returns the error; the tax result stays", func(t *testing.T) {
+// TestRetryTax_FinalizeFailure_NothingIsSaved (P1-29): the finalize rides on
+// the tax write's transaction, so a failed finalize rolls the tax write back.
+// The row stays a draft with tax pending, which a sweep lists again, and
+// RetryTax returns the error, so the sweep counts it.
+func TestRetryTax_FinalizeFailure_NothingIsSaved(t *testing.T) {
+	t.Run("RetryTax returns the error; the row is as it was", func(t *testing.T) {
 		mem := newMemStore()
 		mem.invoices["inv_1"] = taxPendingCycleDraft("inv_1")
 		svc := NewService(finalizeFailingStore{mem}, nil, nil)
 		svc.SetTaxRetrier(&stubTaxRetrier{store: mem})
 
-		if _, err := svc.RetryTax(context.Background(), "t1", "inv_1"); err == nil {
-			t.Fatal("RetryTax = nil after a failed finalize: the sweep counts a draft no sweep revisits as advanced")
+		out, err := svc.RetryTax(context.Background(), "t1", "inv_1")
+		if err == nil {
+			t.Fatal("RetryTax = nil after a failed finalize, want the error")
+		}
+		if out.ID != "" {
+			t.Errorf("RetryTax returned invoice %q with its error, want none: nothing was saved", out.ID)
 		}
 		got := mem.invoices["inv_1"]
-		if got.Status != domain.InvoiceDraft || got.TaxStatus != domain.InvoiceTaxOK {
-			t.Errorf("status = %s, tax_status = %s; want draft with tax ok (the tax write is kept)", got.Status, got.TaxStatus)
+		if got.Status != domain.InvoiceDraft || got.TaxStatus != domain.InvoiceTaxPending {
+			t.Errorf("status = %s, tax_status = %s; want draft with tax pending (the tax write rolled back with the finalize)", got.Status, got.TaxStatus)
 		}
 	})
 
@@ -70,75 +77,56 @@ func TestRetryTax_FinalizeFailureIsAnError(t *testing.T) {
 	})
 }
 
-// rivalFinalizingRetrier resolves the tax, then a rival finalizes the row
-// before RetryTax's own finalize reads it: the connect fan-out and the
-// tax_retry sweep retrying the same provider_not_configured row, or an
-// operator's Finalize click.
-type rivalFinalizingRetrier struct {
-	stubTaxRetrier
+// finalizeRefusingStore refuses the draft→finalized write as a state
+// conflict.
+type finalizeRefusingStore struct {
+	*memStore
 }
 
-func (f *rivalFinalizingRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
-	inv, err := f.stubTaxRetrier.RetryTaxForInvoice(ctx, tenantID, invoiceID)
-	if err != nil {
-		return inv, err
-	}
-	if _, err := f.store.UpdateStatus(ctx, tenantID, invoiceID, domain.InvoiceFinalized); err != nil {
-		return domain.Invoice{}, err
-	}
-	return inv, nil
+func (s finalizeRefusingStore) FinalizeDraftTx(context.Context, *sql.Tx, string, string, func(*sql.Tx, domain.Invoice) error) (domain.Invoice, error) {
+	return domain.Invoice{}, errs.InvalidState("invoice is not a draft")
 }
 
-// TestRetryTax_RivalFinalizeWonIsNotAnError: when a rival finalized the
-// invoice first, nothing is owed. RetryTax must not report it as "not
-// finalized … finalize it", and the sweep must not log an ERROR for it. The
-// draft→finalized CAS half of this race is pinned on real Postgres in
-// TestRetryTax_RivalFinalizeWinsTheCAS.
-func TestRetryTax_RivalFinalizeWonIsNotAnError(t *testing.T) {
-	mem := newMemStore()
-	mem.invoices["inv_1"] = taxPendingCycleDraft("inv_1")
-	svc := NewService(mem, nil, nil)
-	svc.SetTaxRetrier(&rivalFinalizingRetrier{stubTaxRetrier{store: mem}})
-
-	out, err := svc.RetryTax(context.Background(), "t1", "inv_1")
-	if err != nil {
-		t.Fatalf("RetryTax: %v; want nil, the invoice is finalized and nothing is owed", err)
+// TestRetryTaxHandler_FinalizeFailure_NoAuditRow: a click whose finalize
+// failed saved no tax, so it answers the error and writes no retry_tax audit
+// row. A state conflict answers 409 with a message naming the finalize; a
+// database error answers 500 internal_error (its text stays in the log).
+func TestRetryTaxHandler_FinalizeFailure_NoAuditRow(t *testing.T) {
+	cases := []struct {
+		name     string
+		store    func(*memStore) Store
+		wantCode int
+		wantBody string
+	}{
+		{"database error", func(m *memStore) Store { return finalizeFailingStore{m} }, http.StatusInternalServerError, "internal_error"},
+		{"state conflict", func(m *memStore) Store { return finalizeRefusingStore{m} }, http.StatusConflict, "could not be finalized"},
 	}
-	if out.Status != domain.InvoiceFinalized {
-		t.Errorf("returned status = %s, want finalized (the row as it is now)", out.Status)
-	}
-}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mem := newMemStore()
+			draft := taxPendingCycleDraft("inv_1")
+			draft.InvoiceNumber = "INV-001"
+			mem.invoices["inv_1"] = draft
+			svc := NewService(c.store(mem), nil, nil)
+			svc.SetTaxRetrier(&stubTaxRetrier{store: mem})
+			aud := &capturingInvoiceAudit{}
+			h := &Handler{svc: svc, auditLogger: aud}
 
-// TestRetryTaxHandler_FinalizeFailureStillAudited: a click whose tax write
-// committed and whose finalize then failed still changed the invoice's tax and
-// total, so it writes its retry_tax audit row before answering the error.
-func TestRetryTaxHandler_FinalizeFailureStillAudited(t *testing.T) {
-	mem := newMemStore()
-	draft := taxPendingCycleDraft("inv_1")
-	draft.InvoiceNumber = "INV-001"
-	mem.invoices["inv_1"] = draft
-	svc := NewService(finalizeFailingStore{mem}, nil, nil)
-	svc.SetTaxRetrier(&stubTaxRetrier{store: mem})
-	aud := &capturingInvoiceAudit{}
-	h := &Handler{svc: svc, auditLogger: aud}
+			req := httptest.NewRequest(http.MethodPost, "/v1/invoices/inv_1/retry-tax", nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", "inv_1")
+			reqCtx := auth.WithTenantID(req.Context(), "t1")
+			reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
+			rr := httptest.NewRecorder()
+			h.retryTax(rr, req.WithContext(reqCtx))
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/invoices/inv_1/retry-tax", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "inv_1")
-	reqCtx := auth.WithTenantID(req.Context(), "t1")
-	reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
-	rr := httptest.NewRecorder()
-	h.retryTax(rr, req.WithContext(reqCtx))
-
-	if rr.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500 (finalize failed on a database error). body=%s", rr.Code, rr.Body.String())
-	}
-	entry, ok := aud.firstOf(domain.AuditActionRetryTax)
-	if !ok {
-		t.Fatalf("no retry_tax audit row; got actions=%v. The click rewrote the invoice's tax and total", aud.actions())
-	}
-	if entry.label != "INV-001" || entry.meta["tax_status"] != domain.InvoiceTaxOK {
-		t.Errorf("audit label = %q, tax_status = %v; want INV-001 and ok", entry.label, entry.meta["tax_status"])
+			if rr.Code != c.wantCode || !strings.Contains(rr.Body.String(), c.wantBody) {
+				t.Errorf("status = %d, body %s; want %d containing %q", rr.Code, rr.Body.String(), c.wantCode, c.wantBody)
+			}
+			if _, ok := aud.firstOf(domain.AuditActionRetryTax); ok {
+				t.Errorf("retry_tax audit row written for a click that saved no tax; actions=%v", aud.actions())
+			}
+		})
 	}
 }
 
@@ -151,13 +139,15 @@ type cancellingRetrier struct {
 	calls  int
 }
 
-func (f *cancellingRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
+func (f *cancellingRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string,
+	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
+) (domain.Invoice, error) {
 	f.calls++
 	if err := ctx.Err(); err != nil {
 		return domain.Invoice{}, err
 	}
 	defer f.cancel()
-	return (&stubTaxRetrier{store: f.store}).RetryTaxForInvoice(ctx, tenantID, invoiceID)
+	return (&stubTaxRetrier{store: f.store}).RetryTaxForInvoice(ctx, tenantID, invoiceID, then)
 }
 
 func (f *cancellingRetrier) ComputeTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {

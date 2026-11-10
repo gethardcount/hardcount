@@ -196,7 +196,7 @@ func mapInvoiceUniqueViolation(err error, inv domain.Invoice) error {
 		}
 		return errs.AlreadyExists("billing_period",
 			fmt.Sprintf("invoice already exists for subscription %q period %s",
-				inv.SubscriptionID, period)).WithCode("invoice_billing_period_taken")
+				inv.SubscriptionID, period)).WithCode(errs.CodeInvoiceBillingPeriodTaken)
 	case idxInvoicesProrationDedup:
 		return errs.AlreadyExists("proration_source",
 			"proration invoice already exists for this item change").WithCode("invoice_proration_source_taken")
@@ -211,7 +211,7 @@ func mapInvoiceUniqueViolation(err error, inv domain.Invoice) error {
 			"public token collision — regenerate").WithCode("invoice_public_token_collision")
 	case idxInvoicesThresholdPerCycle:
 		return errs.AlreadyExists("threshold_cycle",
-			"threshold invoice already exists for this subscription cycle").WithCode("invoice_threshold_cycle_taken")
+			"threshold invoice already exists for this subscription cycle").WithCode(errs.CodeInvoiceThresholdCycleTaken)
 	}
 	// Unknown constraint — surface the constraint name in the message
 	// so the operator + logs identify what fired, instead of squashing
@@ -749,6 +749,21 @@ func (s *PostgresStore) FinalizeDraft(ctx context.Context, tenantID, id string, 
 		return domain.Invoice{}, err
 	}
 	defer postgres.Rollback(tx)
+	inv, err := s.FinalizeDraftTx(ctx, tx, tenantID, id, onFinalized)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Invoice{}, err
+	}
+	return inv, nil
+}
+
+// FinalizeDraftTx is FinalizeDraft on the caller's transaction: the flip, the
+// hook, and the token and invoice.finalized (finalizedTx). A tax retry runs it
+// inside UpdateTaxAtomic's transaction, so the tax write and the finalize
+// commit together. (See ADR-017.) The caller commits.
+func (s *PostgresStore) FinalizeDraftTx(ctx context.Context, tx *sql.Tx, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
 	inv, err := s.updateStatusInTx(ctx, tx, id, domain.InvoiceFinalized)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -756,13 +771,7 @@ func (s *PostgresStore) FinalizeDraft(ctx context.Context, tenantID, id string, 
 	if inv, err = s.runOnFinalizedTx(ctx, tx, inv, onFinalized); err != nil {
 		return domain.Invoice{}, err
 	}
-	if inv, err = s.finalizedTx(ctx, tx, tenantID, inv); err != nil {
-		return domain.Invoice{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Invoice{}, err
-	}
-	return inv, nil
+	return s.finalizedTx(ctx, tx, tenantID, inv)
 }
 
 // runOnFinalizedTx runs a finalize hook on the finalize tx and returns the row
@@ -2104,9 +2113,17 @@ func errLinesChanged() error {
 // (caller surfaces 409), invoice_lines_changed when a line was added after
 // the computation read the invoice, and errs.ErrNotFound when the invoice
 // doesn't exist (caller surfaces 404).
+//
+// then, when not nil, runs on the same transaction after the tax is written
+// and before the commit, with the taxed row; it receives the transaction's
+// ctx. A tax retry finalizes the draft there, so the tax and the finalize
+// commit together or not at all. (See ADR-017.) A then error rolls the tax write
+// back and is returned. After a then, the row is read again on the
+// transaction and that is what is returned.
 func (s *PostgresStore) UpdateTaxAtomic(
 	ctx context.Context, tenantID, invoiceID string,
 	update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem,
+	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
 ) (domain.Invoice, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2232,11 +2249,39 @@ func (s *PostgresStore) UpdateTaxAtomic(
 	if err != nil {
 		return domain.Invoice{}, err
 	}
+	if then != nil {
+		if err := then(ctx, tx, inv); err != nil {
+			return domain.Invoice{}, err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT `+invCols+` FROM invoices WHERE id = $1`, invoiceID).Scan(s.scanInvDest(&inv)...); err != nil {
+			return domain.Invoice{}, fmt.Errorf("read the invoice after its tax write's hook: %w", err)
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return domain.Invoice{}, err
 	}
 	return inv, nil
+}
+
+// RecordTaxRetryAttempt counts a tax retry whose write was rolled back
+// because the finalize that rode on it failed (UpdateTaxAtomic's then). The
+// row is still a draft with tax pending, as it was before the try. Adding the
+// try to tax_retry_count and moving tax_next_retry_at keeps the 8-try cap and
+// the backoff in force, so the row does not head the tax_retry sweep's page
+// on every tick. A row that is no longer a draft with tax pending is left
+// alone, and that is not an error.
+func (s *PostgresStore) RecordTaxRetryAttempt(ctx context.Context, tenantID, invoiceID string, nextRetryAt *time.Time) error {
+	return s.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE invoices
+			   SET tax_retry_count = tax_retry_count + 1,
+			       tax_next_retry_at = $2,
+			       updated_at = $3
+			 WHERE id = $1 AND status = 'draft' AND tax_status = 'pending'`,
+			invoiceID, postgres.NullableTime(nextRetryAt), clock.Now(ctx))
+		return err
+	})
 }
 
 // CreateWithLineItems creates an invoice and all its line items in a single
@@ -3094,6 +3139,29 @@ func notPausedForCollection(alias, at string) string {
 			   AND ps.pause_collection_behavior IS NOT NULL
 			   AND (ps.pause_collection_resumes_at IS NULL OR ps.pause_collection_resumes_at > ` + at + `)
 		)`
+}
+
+// CollectionPausedTx reports, on the caller's transaction, whether the
+// invoice's subscription has pause_collection in force at `at` (the same
+// predicate as the sweeps, notPausedForCollection). An invoice with no
+// subscription, or whose subscription is gone, is not paused. A tax retry
+// reads it inside UpdateTaxAtomic's transaction before it finalizes: a paused
+// subscription keeps its invoices as drafts.
+//
+// It takes no lock on the subscription. A cancel locks the subscription and
+// then its invoices; this transaction already holds the invoice row, so a
+// lock here would take the two in the other order.
+func (s *PostgresStore) CollectionPausedTx(ctx context.Context, tx *sql.Tx, invoiceID string, at time.Time) (bool, error) {
+	var notPaused bool
+	err := tx.QueryRowContext(ctx, `SELECT `+notPausedForCollection("i", "$2::timestamptz")+` FROM invoices i WHERE i.id = $1`,
+		invoiceID, at).Scan(&notPaused)
+	if err == sql.ErrNoRows {
+		return false, errs.ErrNotFound
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the subscription's pause_collection: %w", err)
+	}
+	return !notPaused, nil
 }
 
 // ListAutoChargePending returns one page of invoices queued for the
@@ -4398,42 +4466,6 @@ func (s *PostgresStore) thresholdInvoiceForCycleTx(ctx context.Context, tx *sql.
 		ORDER BY i.billing_period_end DESC
 		LIMIT 1
 		`+lockClause+`
-	`, subscriptionID, periodStart, periodEnd).Scan(s.scanInvDest(&inv)...)
-	if err == sql.ErrNoRows {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	return inv, err
-}
-
-// GetInvoiceForPeriod returns the invoice that holds a subscription period's
-// slot: the rows idx_invoices_billing_period_dedup covers (not voided, not a
-// proration invoice, not a manual invoice), keyed on (subscription_id,
-// period_start, period_end). The index allows one such row, so the ORDER BY
-// only makes the read deterministic. billOnePeriod's ErrAlreadyExists
-// re-entry path fetches the blocking row through this to heal the
-// $0-MarkPaid crash window (ADR-066). A manual invoice for the same period
-// never blocks the close, so it is not that row (#1331).
-func (s *PostgresStore) GetInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
-	if subscriptionID == "" {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	var inv domain.Invoice
-	err = tx.QueryRowContext(ctx, `
-		SELECT `+invCols+` FROM invoices i
-		WHERE i.subscription_id = $1
-		  AND i.billing_period_start = $2
-		  AND i.billing_period_end = $3
-		  AND i.status <> 'voided'
-		  AND i.source_plan_changed_at IS NULL
-		  AND i.billing_reason IS DISTINCT FROM 'manual'
-		ORDER BY i.created_at DESC
-		LIMIT 1
 	`, subscriptionID, periodStart, periodEnd).Scan(s.scanInvDest(&inv)...)
 	if err == sql.ErrNoRows {
 		return domain.Invoice{}, errs.ErrNotFound
