@@ -36,6 +36,21 @@ type inFlightStripe struct {
 	script  map[string][]string // card → answers for its dunning retries, in order
 	retries []string            // the card of every dunning retry charge, in order
 	lastPI  map[string]string   // card → the PaymentIntent of its latest retry
+	// processingOnce: a card whose next charge that is not a dunning retry
+	// (a Collect) Stripe answers as processing. Every other such charge is
+	// declined.
+	processingOnce map[string]bool
+}
+
+// nextOtherChargeProcessing makes Stripe answer pm's next charge that is not a
+// dunning retry as processing.
+func (s *inFlightStripe) nextOtherChargeProcessing(pm string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.processingOnce == nil {
+		s.processingOnce = map[string]bool{}
+	}
+	s.processingOnce[pm] = true
 }
 
 func installInFlightStripe(t *testing.T, script map[string][]string) *inFlightStripe {
@@ -79,6 +94,12 @@ func (s *inFlightStripe) answer(req *http.Request) *http.Response {
 		pm := form.Get("payment_method")
 		amount, _ := strconv.Atoi(form.Get("amount"))
 		if form.Get("metadata[hardcount_purpose]") != "dunning_retry" {
+			if s.processingOnce[pm] {
+				delete(s.processingOnce, pm)
+				s.lastPI[pm] = fmt.Sprintf("pi_collect_%d", n)
+				body = fmt.Sprintf(`{"id":"pi_collect_%d","object":"payment_intent","status":"processing","amount":%d,"currency":"usd"}`, n, amount)
+				break
+			}
 			// The charge at finalize is declined, so dunning starts.
 			status, body = 402, fmt.Sprintf(confirmDecline, n)
 			break
