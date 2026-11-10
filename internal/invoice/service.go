@@ -1897,7 +1897,16 @@ func (s *Service) reverseInvoiceTax(ctx context.Context, tenantID string, inv do
 			req.GrossAmountCents = remainingGross
 		}
 	}
-	if _, err := s.taxReverser.ReverseTax(ctx, tenantID, req); err != nil {
+	res, err := s.taxReverser.ReverseTax(ctx, tenantID, req)
+	if err == nil && (res == nil || res.TransactionID == "") {
+		// tax_reversed_at is stamped only on a named reversal. Stripe Tax
+		// answers with a transaction id or an error, so a result that names
+		// none comes only from a reverser that is not wired to a provider.
+		// It reversed nothing, and is a failure here as in the credit-note
+		// sweep.
+		err = errors.New("the tax provider returned no reversal transaction")
+	}
+	if err != nil {
 		// Leave tax_reversed_at NULL: RetryPendingTaxReversal (the scheduler
 		// sweep, symmetric sibling of #267's RetryPendingTaxCommit) re-drives
 		// this on the next tick. The re-drive converges via the request's
