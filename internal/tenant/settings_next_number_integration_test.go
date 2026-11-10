@@ -2,6 +2,7 @@ package tenant
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -24,8 +25,19 @@ func TestSettingsResponse_NextInvoiceSequencePerMode(t *testing.T) {
 	h := NewSettingsHandler(store)
 
 	testCtx := postgres.WithLivemode(context.Background(), false)
+	// allocate takes the next number on a transaction of its own, as an
+	// invoice writer does.
+	allocate := func() (string, error) {
+		var num string
+		err := db.WithTenantTx(testCtx, tenantID, func(tx *sql.Tx) error {
+			var err error
+			num, err = store.NextInvoiceNumberTx(testCtx, tx, tenantID)
+			return err
+		})
+		return num, err
+	}
 	for i := 0; i < 2; i++ {
-		if _, err := store.NextInvoiceNumber(testCtx, tenantID); err != nil {
+		if _, err := allocate(); err != nil {
 			t.Fatalf("allocate test invoice number: %v", err)
 		}
 	}
@@ -71,7 +83,7 @@ func TestSettingsResponse_NextInvoiceSequencePerMode(t *testing.T) {
 	if got := call(http.MethodPut, `{"invoice_prefix":"ACME"}`, false); got != 3 {
 		t.Errorf("test mode PUT next_invoice_sequence = %d, want 3", got)
 	}
-	num, err := store.NextInvoiceNumber(testCtx, tenantID)
+	num, err := allocate()
 	if err != nil {
 		t.Fatalf("allocate after prefix change: %v", err)
 	}

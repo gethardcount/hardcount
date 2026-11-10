@@ -327,10 +327,7 @@ func TestThresholdScan_Idempotent(t *testing.T) {
 	// probe means the second tick must NOT advance it; pre-fix each re-tick
 	// committed a number in its own tx before the unique index rejected the
 	// insert — a permanent gap the operator sees in their invoice sequence.
-	nextBeforeRetick, err := f.settings.NextInvoiceNumber(ctx, f.tenantID)
-	if err != nil {
-		t.Fatalf("allocate number probe: %v", err)
-	}
+	nextBeforeRetick := allocateInvoiceNumber(t, ctx, f.db, f.settings, f.tenantID)
 
 	// Second tick against the same cycle — the fire-once probe short-circuits
 	// before evaluate/fire. No additional invoice, no error returned.
@@ -351,10 +348,7 @@ func TestThresholdScan_Idempotent(t *testing.T) {
 	// the one immediately after our snapshot — i.e. the re-tick consumed none.
 	// Mutation seam: delete the probe in scanOneThreshold and fireThreshold
 	// commits a number on the doomed re-tick, so this allocation skips ahead.
-	nextAfterRetick, err := f.settings.NextInvoiceNumber(ctx, f.tenantID)
-	if err != nil {
-		t.Fatalf("allocate number probe (after): %v", err)
-	}
+	nextAfterRetick := allocateInvoiceNumber(t, ctx, f.db, f.settings, f.tenantID)
 	if seqOf(t, nextAfterRetick) != seqOf(t, nextBeforeRetick)+1 {
 		t.Fatalf("re-tick burned an invoice number: snapshot %q then %q (want consecutive) — fire-once probe leaked into fireThreshold",
 			nextBeforeRetick, nextAfterRetick)
@@ -716,10 +710,7 @@ func TestThresholdScan_DrainsWholeFleet_RealStore(t *testing.T) {
 	}
 
 	// T10 — re-scan the drained set: zero fires, zero burned numbers.
-	nextBefore, err := f.settings.NextInvoiceNumber(ctx, f.tenantID)
-	if err != nil {
-		t.Fatalf("number probe: %v", err)
-	}
+	nextBefore := allocateInvoiceNumber(t, ctx, f.db, f.settings, f.tenantID)
 	fired2, errs2 := f.engine.ScanThresholds(ctx, 50)
 	if len(errs2) > 0 {
 		t.Fatalf("re-scan errors: %v", errs2)
@@ -727,10 +718,7 @@ func TestThresholdScan_DrainsWholeFleet_RealStore(t *testing.T) {
 	if fired2 != 0 {
 		t.Fatalf("re-scan fired=%d, want 0", fired2)
 	}
-	nextAfter, err := f.settings.NextInvoiceNumber(ctx, f.tenantID)
-	if err != nil {
-		t.Fatalf("number probe (after): %v", err)
-	}
+	nextAfter := allocateInvoiceNumber(t, ctx, f.db, f.settings, f.tenantID)
 	if seqOf(t, nextAfter) != seqOf(t, nextBefore)+1 {
 		t.Fatalf("re-scan of 60 fired subs burned invoice numbers: %q then %q (want consecutive)", nextBefore, nextAfter)
 	}
