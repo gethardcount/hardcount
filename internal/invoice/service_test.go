@@ -454,13 +454,30 @@ func (m *memStore) ListPendingTaxRetry(_ context.Context, batch int, retryableCo
 	return out, nil
 }
 
+// DeferTaxWork mirrors the real store: the pending lists skip the invoice
+// until next.
+func (m *memStore) DeferTaxWork(_ context.Context, _, id string, next time.Time) error {
+	inv, ok := m.invoices[id]
+	if !ok {
+		return errs.ErrNotFound
+	}
+	inv.TaxNextRetryAt = &next
+	m.invoices[id] = inv
+	return nil
+}
+
+// taxWorkDeferred reports an invoice a failed commit or reversal has put off.
+func taxWorkDeferred(inv domain.Invoice) bool {
+	return inv.TaxNextRetryAt != nil && inv.TaxNextRetryAt.After(time.Now())
+}
+
 func (m *memStore) ListPendingTaxCommit(_ context.Context, batch int, _ bool) ([]domain.Invoice, error) {
 	if batch <= 0 {
 		batch = 50
 	}
 	var out []domain.Invoice
 	for _, inv := range m.invoices {
-		if inv.Status != domain.InvoiceFinalized || inv.TaxStatus != domain.InvoiceTaxOK {
+		if inv.Status != domain.InvoiceFinalized || inv.TaxStatus != domain.InvoiceTaxOK || taxWorkDeferred(inv) {
 			continue
 		}
 		if inv.TaxProvider != "stripe_tax" || inv.TaxCalculationID == "" || inv.TaxTransactionID != "" {
@@ -486,7 +503,7 @@ func (m *memStore) ListPendingTaxReversal(_ context.Context, batch int, _ bool) 
 		if inv.TaxProvider != "stripe_tax" || inv.TaxTransactionID == "" || inv.TaxReversedAt != nil {
 			continue
 		}
-		if inv.IsSimulated {
+		if inv.IsSimulated || taxWorkDeferred(inv) {
 			continue
 		}
 		out = append(out, inv)

@@ -138,7 +138,7 @@ stuck: [A background job is stuck](ops/runbook/background-job-stuck.md).
 
 ## Tax providers
 
-Tax is calculated by one of three providers in `internal/tax`: `none`, `manual` and `stripe_tax`. Each tenant picks one in `tenant_settings.tax_provider`. The billing engine resolves the provider when it builds the invoice, and reuses the same provider at finalize and at credit-note issue. How an operator chooses and runs them: [Tax calculation](ops/tax-calculation.md).
+Tax is calculated by one of three providers in `internal/tax`: `none`, `manual` and `stripe_tax`. Each tenant picks one in `tenant_settings.tax_provider`. The billing engine resolves the provider from that setting when it builds the invoice. A tax commit or tax reversal goes to the provider that made the document. An invoice that carries a Stripe Tax calculation or transaction goes to Stripe Tax, even if the tenant has since switched to `manual` or `none`. How an operator chooses and runs them: [Tax calculation](ops/tax-calculation.md).
 
 - **`none`** returns zero per line. `Commit` and `Reverse` do nothing. An empty `tax_provider` falls through to `none`. An unrecognised value is an error that stops invoice creation for that tenant, so a corrupted settings row stalls billing instead of taxing at zero.
 - **`manual`** applies `tenant_settings.tax_rate` (a percent: `7.25` is 7.25%) and `tenant_settings.tax_name` to every line, except a prepaid-commit purchase line, which no provider is asked to tax ([Tax on prepaid credit](ai-pricing.md#tax-on-prepaid-credit)). It handles tax-inclusive pricing (`Request.TaxInclusive`), exempt customers (`StatusExempt`) and reverse-charge customers (`StatusReverseCharge`). `Commit` and `Reverse` do nothing, because there is no state outside Hardcount to record.
@@ -153,8 +153,10 @@ Tax is calculated by one of three providers in `internal/tax`: `none`, `manual` 
 | `Commit` | invoice finalize | yes (`stripe_tax`) |
 | `Reverse` | credit-note issue | yes (`stripe_tax`) |
 
-- `Commit` makes the tax decision permanent at Stripe. A Stripe Tax calculation expires after 24 hours; a `tax_transaction` does not, and it shows in Stripe's tax reports. Its ID is saved on `invoices.tax_transaction_id`. The invoice ID is the transaction's reference, and Stripe keeps references unique per account, so a retried finalize is idempotent.
+- `Commit` makes the tax decision permanent at Stripe. A Stripe Tax calculation expires at its `expires_at`, 90 days after it is made; a `tax_transaction` does not expire, and it shows in Stripe's tax reports. Its ID is saved on `invoices.tax_transaction_id`. The invoice ID is the transaction's reference, and Stripe keeps references unique per account, so a retried finalize is idempotent.
+- A tax commit that fails is retried by a background sweep until the calculation expires. So a tax commit that failed for days, for example on a Stripe key that cannot write tax transactions, is recorded within about a day of the fix (Stripe repeats a saved answer, an error included, for 24 hours).
 - `Reverse` reverses an existing `tax_transaction` when a credit note is issued. The credit-note ID is the reversal's reference, so a retried issue is idempotent too.
+- A tax commit that fails in its sweep waits before the next try, and so does the tax reversal of a voided invoice. The wait is an eighth of the time since the invoice's last write, at least 1 hour and at most 12 hours. It is saved in `invoices.tax_next_retry_at`. Each sweep lists invoices of all tenants and takes a fixed number per run, so without the wait one tenant's failing invoices held the head of the list.
 - `none` and `manual` return an empty `ReversalResult`, so the credit-note flow needs no branch per provider.
 
 ### Failure: defer, never guess

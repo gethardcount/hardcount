@@ -34,7 +34,7 @@ type TaxFacts struct {
 	// These fields are a durable audit snapshot of the tax decision. They are
 	// written once, when the invoice is built, and never changed. So a
 	// finalized invoice can still be reconstructed after the provider's
-	// tax_calculation expires (24 h for Stripe Tax). TaxCalculationID is the
+	// tax_calculation expires (90 days for Stripe Tax). TaxCalculationID is the
 	// provider reference that Commit uses to create a tax_transaction at
 	// finalize.
 	TaxProvider      string `json:"tax_provider,omitempty"`
