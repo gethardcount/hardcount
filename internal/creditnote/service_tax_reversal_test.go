@@ -447,12 +447,15 @@ func (f *fakeCreditGranter) RetireCommitSliceForReliefTx(_ context.Context, _ *s
 	return f.commitGranted - f.commitConsumed, nil
 }
 
-// A marked note on an invoice whose tax transaction carried zero tax has
-// nothing to reverse: reversing it returns no transaction id, so the note
-// would be re-driven on every tick. The issue statement does not mark such a
-// note; a marker an earlier version left on one is cleared, with no provider
-// call.
-func TestRetryPendingCreditNoteTaxReversal_ZeroTaxInvoice_ClearsAStaleMarkerWithoutCallingTheProvider(t *testing.T) {
+// An invoice Stripe Tax recorded with no tax still has a tax transaction: it
+// records the sale in Stripe's tax reports, and Stripe reverses it like any
+// other (checked in test mode, 2026-11-10: a full and a partial reversal of a
+// zero-tax transaction each return a reversal with an id). So a credit note
+// on it owes its reversal: the issue statement marks it, and the sweep makes
+// the reversal and stores it. Before, the sweep cleared the marker with no
+// call, on the belief that Stripe returns no id for such a reversal, and an
+// inline reversal that failed at issue was never made.
+func TestRetryPendingCreditNoteTaxReversal_ZeroTaxInvoice_IsReversedLikeAnyOther(t *testing.T) {
 	t.Parallel()
 	store := newMemStore()
 	invoices := &memInvoiceReader{
@@ -468,9 +471,10 @@ func TestRetryPendingCreditNoteTaxReversal_ZeroTaxInvoice_ClearsAStaleMarkerWith
 			},
 		},
 	}
-	rev := &fakeTaxReverser{returnID: ""}
+	rev := &fakeTaxReverser{returnID: "tx_reversal_zero_tax"}
 	svc := NewService(store, invoices, &fakeRefunder{}, &fakeCreditGranter{})
 	svc.SetTaxReverser(rev)
+	store.invoices = invoices
 
 	cn, err := store.Create(context.Background(), "t1", domain.CreditNote{
 		InvoiceID: "inv_zero_tax", CustomerID: "cus_1", Status: domain.CreditNoteIssued,
@@ -481,25 +485,27 @@ func TestRetryPendingCreditNoteTaxReversal_ZeroTaxInvoice_ClearsAStaleMarkerWith
 	}
 
 	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10)
-	if len(sweepErrs) != 0 || n != 0 {
-		t.Fatalf("sweep: reversed=%d errs=%v, want 0 and none", n, sweepErrs)
+	if len(sweepErrs) != 0 || n != 1 {
+		t.Fatalf("sweep: reversed=%d errs=%v, want 1 and none", n, sweepErrs)
 	}
-	if len(rev.calls) != 0 {
-		t.Errorf("reverse calls: got %d, want 0 — a zero-tax invoice has nothing to reverse", len(rev.calls))
+	if len(rev.calls) != 1 || rev.calls[0].OriginalTransactionID != "tx_upstream_zero_tax" || rev.calls[0].GrossAmountCents != 1000 ||
+		rev.calls[0].Mode != tax.ReversalModePartial {
+		t.Fatalf("reverse calls = %+v, want one partial reversal against the invoice's transaction for the note's total", rev.calls)
 	}
-	if got, _ := store.Get(context.Background(), "t1", cn.ID); got.TaxReversalPending {
-		t.Error("the stale marker must be cleared, or the note is listed on every tick")
+	got, _ := store.Get(context.Background(), "t1", cn.ID)
+	if got.TaxTransactionID != "tx_reversal_zero_tax" || got.TaxReversalPending {
+		t.Errorf("after the sweep: tx=%q pending=%v, want the reversal stored and the marker cleared", got.TaxTransactionID, got.TaxReversalPending)
 	}
 
-	// A note on the same invoice, issued now, is not marked at all.
-	store.invoices = invoices
+	// A note on the same invoice, issued now, is marked as owing its reversal.
 	svc.SetNumberGenerator(&fakeCNNumbers{})
-	fresh, err := svc.CreateRefund(context.Background(), "t1", RefundInput{InvoiceID: "inv_zero_tax", Reason: "fraudulent"})
+	rev.failWith = errors.New("stripe: 500")
+	fresh, err := svc.CreateRefund(context.Background(), "t1", RefundInput{InvoiceID: "inv_zero_tax", Reason: "fraudulent", AmountCents: 2000})
 	if err != nil {
 		t.Fatalf("CreateRefund: %v", err)
 	}
-	if fresh.TaxReversalPending {
-		t.Error("issuing a note on a zero-tax invoice must not mark a reversal as owed")
+	if !fresh.TaxReversalPending {
+		t.Error("a note on a zero-tax invoice whose inline reversal failed must stay marked, so the sweep makes it")
 	}
 }
 
@@ -523,6 +529,7 @@ func TestRetryPendingCreditNoteTaxReversal_OneWriteStoresTheReversalAndClearsThe
 	rev := &fakeTaxReverser{returnID: "tx_reversal_ok"}
 	svc := NewService(store, invoices, &fakeRefunder{}, &fakeCreditGranter{})
 	svc.SetTaxReverser(rev)
+	store.invoices = invoices
 
 	cn, err := store.Create(context.Background(), "t1", domain.CreditNote{
 		InvoiceID: "inv_tax", CustomerID: "cus_1", Status: domain.CreditNoteIssued,
@@ -581,8 +588,10 @@ func TestRetryPendingCreditNoteTaxReversal_AFailedReDriveWritesNothing(t *testin
 	t.Parallel()
 	store := newMemStore()
 	rev := &fakeTaxReverser{failWith: errors.New("stripe 503")}
-	svc := NewService(store, taxInvoiceReader(), &fakeRefunder{}, &fakeCreditGranter{})
+	invoices := taxInvoiceReader()
+	svc := NewService(store, invoices, &fakeRefunder{}, &fakeCreditGranter{})
 	svc.SetTaxReverser(rev)
+	store.invoices = invoices
 	cn := seedTaxOrphan(t, store, true)
 
 	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10); len(sweepErrs) != 1 {
@@ -604,8 +613,10 @@ func TestRetryPendingCreditNoteTaxReversal_EmptyResultOnTaxBearingInvoiceIsFailu
 	t.Parallel()
 	store := newMemStore()
 	rev := &fakeTaxReverser{emptyResult: true} // provider returned no transaction
-	svc := NewService(store, taxInvoiceReader(), &fakeRefunder{}, &fakeCreditGranter{})
+	invoices := taxInvoiceReader()
+	svc := NewService(store, invoices, &fakeRefunder{}, &fakeCreditGranter{})
 	svc.SetTaxReverser(rev)
+	store.invoices = invoices
 	cnPending := seedTaxOrphan(t, store, true)
 
 	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10)
