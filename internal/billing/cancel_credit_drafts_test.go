@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,7 +76,9 @@ func TestBillOnCancelDraftsTx_AllPaid_CreatesDrafts(t *testing.T) {
 	if len(adjuster.issued) != 0 {
 		t.Errorf("nothing may be issued before the cancel commits; issued=%v", adjuster.issued)
 	}
-	e.FinishRelief(context.Background(), sub, r)
+	if err := e.FinishRelief(context.Background(), sub, r); err != nil {
+		t.Fatalf("FinishRelief: %v", err)
+	}
 	if len(adjuster.issued) != 1 || adjuster.issued[0] != r.DraftIDs[0] {
 		t.Errorf("FinishRelief issued=%v, want %v", adjuster.issued, r.DraftIDs)
 	}
@@ -145,7 +148,9 @@ func TestBillOnCancelDraftsTx_UnpaidFullyUnused_VoidsInTx(t *testing.T) {
 	if r.CreditedCents != 0 {
 		t.Errorf("credited=%d, want 0 (nothing was paid)", r.CreditedCents)
 	}
-	e.FinishRelief(context.Background(), sub, r)
+	if err := e.FinishRelief(context.Background(), sub, r); err != nil {
+		t.Fatalf("FinishRelief: %v", err)
+	}
 	if len(voider.afterVoids) != 1 {
 		t.Errorf("AfterVoid ran %d time(s), want 1", len(voider.afterVoids))
 	}
@@ -360,4 +365,51 @@ func TestReliefTx_PartialHeadroom_PlacesWhatFits(t *testing.T) {
 	if r.UncreditedCents != 3000 {
 		t.Errorf("uncredited = %d, want 3000 (the 5000 unused minus the 2000 that fit)", r.UncreditedCents)
 	}
+}
+
+// FinishRelief runs every leg whatever another did, and reports only the
+// drafts that are not issued. Two drafts and one void: the first draft's
+// Issue fails and it is still a draft when read back, so it is reported and
+// the second is still issued, and the void's legs run once. A draft whose
+// Issue failed but that reads back issued (the clawback sweep issued it
+// first, or Issue's read after its commit failed) is a success.
+func TestFinishRelief_EveryLegRuns_OnlyAnUnissuedNoteIsReported(t *testing.T) {
+	sub := domain.Subscription{ID: "sub_1", TenantID: "t1"}
+	r := domain.Relief{
+		DraftIDs: []string{"cn_fails", "cn_ok"},
+		Voided:   []domain.Invoice{{ID: "inv_voided", TenantID: "t1"}},
+	}
+
+	t.Run("a draft that stays a draft is reported; the rest still run", func(t *testing.T) {
+		adjuster := &fakeCreditNoteAdjuster{issueErr: map[string]error{"cn_fails": errors.New("issue: deadlock detected")}}
+		voider := &fakeInvoiceVoider{}
+		e := &Engine{}
+		e.SetCreditNoteAdjuster(adjuster)
+		e.SetInvoiceVoider(voider)
+
+		err := e.FinishRelief(context.Background(), sub, r)
+		if err == nil || !strings.Contains(err.Error(), "cn_fails") || strings.Contains(err.Error(), "cn_ok") {
+			t.Fatalf("FinishRelief error = %v, want one naming cn_fails only", err)
+		}
+		if len(adjuster.issued) != 1 || adjuster.issued[0] != "cn_ok" {
+			t.Errorf("issued = %v, want cn_ok issued after cn_fails failed", adjuster.issued)
+		}
+		if len(voider.afterVoids) != 1 || voider.afterVoids[0] != "inv_voided" {
+			t.Errorf("AfterVoid ran for %v, want inv_voided once", voider.afterVoids)
+		}
+	})
+
+	t.Run("a failed Issue whose note reads back issued is a success", func(t *testing.T) {
+		adjuster := &fakeCreditNoteAdjuster{
+			issueErr:    map[string]error{"cn_fails": errors.New("can only issue draft credit notes")},
+			statusOnGet: map[string]domain.CreditNoteStatus{"cn_fails": domain.CreditNoteIssued},
+		}
+		e := &Engine{}
+		e.SetCreditNoteAdjuster(adjuster)
+		e.SetInvoiceVoider(&fakeInvoiceVoider{})
+
+		if err := e.FinishRelief(context.Background(), sub, r); err != nil {
+			t.Fatalf("FinishRelief = %v, want nil: the note is issued, so the change's invoice may be collected", err)
+		}
+	})
 }
