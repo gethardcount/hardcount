@@ -51,7 +51,7 @@ original text.
   - A confirm request that Stripe refuses outright (not a card decline) marks the invoice `failed` and starts dunning, with no email to the customer.
   - A payment that succeeded and was refunded in Stripe before Hardcount recorded it is recorded as paid, with the refund shown as a refund made in Stripe. Before, the invoice could be charged again.
   - If Stripe refuses your API key while a payment is being confirmed, Collect payment says the outcome is not known yet, and the invoice is `unknown` until Hardcount has read the payment with a working key.
-- **Hardcount warns at start-up when the limited database user has no idle-transaction timeout.** The warning `the app database role has no idle-transaction timeout` means `idle_in_transaction_session_timeout` is `0` for that user. Hardcount still starts. Set it as [Postgres requirements](docs/ops/postgres-requirements.md#timeouts-on-the-limited-user) says, then restart.
+- **Hardcount warns at start-up when the limited database user has no idle-transaction timeout.** The warning `the app database role has no idle-transaction timeout` means `idle_in_transaction_session_timeout` is `0` for that user. Hardcount still starts. Set it as [Postgres requirements](docs/ops/postgres-requirements.md#timeouts-on-the-limited-user) says, then restart. ([#1680](https://github.com/gethardcount/hardcount/pull/1680))
 
 ### Added
 
