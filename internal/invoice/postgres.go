@@ -2630,8 +2630,15 @@ func (s *PostgresStore) EndUnstampedAttempt(ctx context.Context, tenantID, id st
 	}
 	clearCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), chargeHoldReleaseTimeout)
 	defer cancel()
-	if moved, err := s.ClearStaleChargeHold(clearCtx, tenantID, id, hold.Until, attemptSeq, true); err == nil && moved {
+	moved, err := s.ClearStaleChargeHold(clearCtx, tenantID, id, hold.Until, attemptSeq, true)
+	if err == nil && moved {
 		return nil
+	}
+	if err != nil {
+		// The release below may still free the hold. The counter then stays
+		// where it was, and the next charge sends the old key.
+		slog.WarnContext(ctx, "ending a charge attempt that confirmed nothing: the hold and counter could not be cleared together; releasing the hold only, so the next charge reuses its idempotency key",
+			"invoice_id", id, "error", err)
 	}
 	return s.ReleaseChargeHold(ctx, tenantID, id, hold)
 }
