@@ -43,8 +43,10 @@ import (
 // structural branch is not optional.
 //
 // One known bound, deliberate rather than accidental: tax_commit's structural
-// branch carries a 24h freshness window (anti-churn, #310); cn_tax_reversal
-// has none, an owed reversal stays listed until it is made. payment_unknown's state sync
+// branch ends when the Stripe Tax calculation expires (90 days after it is
+// made; nothing can commit it later). tax_reversal and cn_tax_reversal have
+// none, an owed reversal stays listed until it is made. payment_unknown's
+// state sync
 // covers a charge whose result was lost too, by a CO-TRANSACTIONAL marker: the
 // charge puts its PaymentIntent on the invoice as an unknown outcome, in its
 // own commit, before the confirm that moves money (ADR-137), and that outlives

@@ -279,6 +279,12 @@ type Invoice struct {
 	// failed with a retryable code, and the next attempt waits until then,
 	// per the exponential backoff curve in internal/billing/tax_retry.go
 	// (migration 0074, ADR-017).
+	//
+	// On a finalized invoice (any status after draft) the same column is the
+	// next attempt of a tax commit or tax reversal that failed in its sweep
+	// (invoice.DeferTaxWork): an eighth of the time since the invoice's last
+	// write, at least 1 hour and at most 12 hours. It is cleared when the tax
+	// transaction is recorded or the reversal is stamped.
 	TaxNextRetryAt *time.Time `json:"tax_next_retry_at,omitempty"`
 	// TaxReversedAt records when the upstream tax transaction was reversed
 	// on void or mark-uncollectible, or when there was nothing left to
@@ -521,6 +527,10 @@ type InvoiceTaxRetryUpdate struct {
 	// tax outcome happens at the service layer, not inside this atomic
 	// update. That way it shares the public-token and tax-commit side
 	// effects of a manual Finalize.
+	//
+	// This update writes the column only on a draft. On a finalized invoice
+	// the same column is the next attempt of a failed tax commit or tax
+	// reversal, written by invoice.DeferTaxWork (see Invoice.TaxNextRetryAt).
 	TaxNextRetryAt *time.Time
 	// InitialAttempt marks the first tax computation of an
 	// operator-composed invoice, at finalize. It is not a retry, so it must

@@ -746,19 +746,19 @@ type TaxProviderResolver interface {
 // tax_calculations audit table. Separate interface so engine tests can
 // skip persistence without wiring a full postgres store.
 //
-// LookupCalculationCreatedAt powers the CommitTax expiry guard.
-// Stripe Tax calculations expire 24h after creation — operator-finalized
-// drafts held longer than that quietly fail at commit time and leave
-// the invoice with tax_calculation_id but no tax_transaction_id (i.e.
-// Stripe Tax reporting silently broken). Returning the calc's age lets
-// CommitTax fail loud before calling Stripe so the operator knows to
-// retry tax first. Returns errs.ErrNotFound when no row matches —
+// LookupCalculationUsableUntil powers the CommitTax expiry guard.
+// A Stripe Tax calculation expires (90 days after it is made, the
+// expires_at Stripe returns with it) — an operator-finalized draft held
+// longer than that fails at commit time and leaves the invoice with
+// tax_calculation_id but no tax_transaction_id (i.e. Stripe Tax reporting
+// silently broken). Returning the calc's expiry lets CommitTax fail loud
+// before calling Stripe so the operator knows to retry tax first. Returns errs.ErrNotFound when no row matches —
 // caller treats as "skip the guard" (manual / none provider produces
 // no row; defensive against tests that wire a fake store without the
 // row pre-loaded).
 type TaxCalculationWriter interface {
 	Record(ctx context.Context, tenantID, invoiceID string, req tax.Request, res *tax.Result) (string, error)
-	LookupCalculationCreatedAt(ctx context.Context, tenantID, invoiceID, providerRef string) (time.Time, error)
+	LookupCalculationUsableUntil(ctx context.Context, tenantID, invoiceID, providerRef string) (time.Time, error)
 	// LinkInvoice backfills invoice_id on the audit row once the invoice
 	// exists. Record runs before the invoice is persisted (invoice_id NULL);
 	// CommitTax calls this with the known id so audit joins + the expiry
@@ -766,11 +766,12 @@ type TaxCalculationWriter interface {
 	LinkInvoice(ctx context.Context, tenantID, invoiceID, providerRef string) error
 }
 
-// taxCalculationMaxAge is the Stripe Tax calculation window. Stripe's
-// own docs put it at 24h; we use 23h to leave a safety buffer so a
-// near-expiry calc isn't sent to Stripe just to bounce. Operator
-// guidance on expiry: "Retry tax to refresh, then finalize."
-const taxCalculationMaxAge = 23 * time.Hour
+// taxCalculationExpiryMargin is how long before a calculation's expiry the
+// commit guard stops using it, so one about to expire isn't sent to Stripe
+// just to bounce. The expiry itself is the calculation's own: Stripe Tax's
+// expires_at, 90 days after it was made (tax.CalculationUsableUntilSQL).
+// Operator guidance on expiry: "Retry tax to refresh, then finalize."
+const taxCalculationExpiryMargin = time.Hour
 
 // SetTaxProviderResolver wires the per-tenant tax provider resolver. When
 // nil, the engine skips tax calculation entirely and invoices carry zero
@@ -790,8 +791,8 @@ func (e *Engine) SetTaxCalculationStore(s TaxCalculationWriter) {
 // provider that made it: a calculation id is a Stripe Tax reference, so the
 // commit goes to Stripe Tax whatever provider the tenant has selected since
 // (settingsForTaxDocument). Used after invoice finalize to finalize Stripe Tax
-// reporting. Returns nil when no resolver is wired; an error when the
-// tenant's settings can't be loaded or the commit fails. The invoice still
+// reporting. Returns nil when no resolver or settings reader is wired; an
+// error when the tenant's settings can't be loaded or the commit fails. The invoice still
 // exists either way, so the caller logs and does not unwind.
 //
 // On success, the returned upstream transaction id (Stripe: tx_xxx) is
@@ -836,21 +837,22 @@ func (e *Engine) CommitTax(ctx context.Context, tenantID, invoiceID, calculation
 }
 
 // CheckTaxCalculationUsable is the Stripe-Tax calc expiry guard, callable
-// on its own. Stripe Tax calculations are valid for 24h after creation;
-// a draft held longer fails at Stripe's CreateFromCalculation with
-// "calculation expired". Non-nil means: this calculation can NEVER be
-// committed — only a fresh calculation (retry tax) fixes it.
+// on its own. A Stripe Tax calculation is valid until its expires_at, 90
+// days after creation; a draft held longer fails at Stripe's
+// CreateFromCalculation with "calculation expired". Non-nil means: this
+// calculation can NEVER be committed — only a fresh calculation (retry tax)
+// fixes it.
 //
 // Two callers, deliberately: CommitTax (so an expired calc is refused at
 // the commit) and invoice.Service.Finalize's PRE-transition check. The
 // finalize check is the load-bearing one — the post-finalize commit
 // failure is swallowed BY DECISION (transient provider errors defer to
-// the orphan reconciler, which re-commits idempotently within its 24h
-// window), and that decision is only sound when deferral can succeed.
-// An expired calc is the one failure the reconciler can never heal: the
-// same age rule blocks its re-commit, and after the scan's 24h bound the
-// orphan exits silently — an invoice collected with tax printed on the
-// PDF but never reported to Stripe. So expiry must refuse the finalize
+// the orphan reconciler, which re-commits idempotently until the
+// calculation expires), and that decision is only sound when deferral can
+// succeed. An expired calc is the one failure the reconciler can never
+// heal: the same expiry blocks its re-commit and drops the orphan from the
+// scan — an invoice collected with tax printed on the PDF but never
+// reported to Stripe. So expiry must refuse the finalize
 // UP FRONT, while the invoice is still a draft and "retry tax" is still
 // available. That is also what this guard's message has promised the
 // operator all along.
@@ -888,31 +890,28 @@ func (e *Engine) CheckTaxCalculationUsable(ctx context.Context, tenantID, invoic
 	if linkErr := e.taxCalcStore.LinkInvoice(ctx, tenantID, invoiceID, calculationID); linkErr != nil {
 		return fmt.Errorf("tax expiry guard: link calculation %s to invoice: %w", calculationID, linkErr)
 	}
-	createdAt, lookupErr := e.taxCalcStore.LookupCalculationCreatedAt(ctx, tenantID, invoiceID, calculationID)
+	usableUntil, lookupErr := e.taxCalcStore.LookupCalculationUsableUntil(ctx, tenantID, invoiceID, calculationID)
 	if lookupErr == nil {
-		// REAL wall-clock on BOTH sides — never clock.Now(ctx). The
-		// calc's 24h TTL lives at Stripe, which knows nothing about a
-		// Hardcount test clock; the row's created_at is stamped by the DB
-		// (now(), real time). Using the ctx-bound simulated clock here
-		// conflated the two: a customer pinned to a test clock advanced
-		// >23h past real wall-clock (e.g. a mid-period proration after
-		// advancing the clock 15 days) made clock.Now(ctx) - createdAt
-		// exceed the window, so the guard falsely "expired" a calc that
-		// was created seconds ago in real time. The commit was skipped
-		// and the proration invoice kept tax_calculation_id but no
-		// tax_transaction_id — and the wall-clock reconciler excludes
-		// clock-pinned invoices, so nothing recovered it. Real elapsed
-		// time is the only correct measure of a Stripe-side TTL.
-		if age := time.Now().UTC().Sub(createdAt); age > taxCalculationMaxAge { //nolint:forbidigo // wall-clock: Stripe's calc TTL is a real-world 24h, never the simulated clock
+		// REAL wall-clock — never clock.Now(ctx). The calculation expires at
+		// Stripe, which knows nothing about a Hardcount test clock, and
+		// usableUntil is Stripe's own instant. Using the ctx-bound simulated
+		// clock here conflated the two: a customer pinned to a test clock
+		// advanced past the window (e.g. a mid-period proration after
+		// advancing the clock) made a calc created seconds ago in real time
+		// read as expired. The commit was skipped and the proration invoice
+		// kept tax_calculation_id but no tax_transaction_id — and the
+		// wall-clock reconciler excludes clock-pinned invoices, so nothing
+		// recovered it.
+		if now := time.Now().UTC(); now.After(usableUntil.Add(-taxCalculationExpiryMargin)) { //nolint:forbidigo // wall-clock: the calculation expires at Stripe in real time, never on the simulated clock
 			de := errs.InvalidState(fmt.Sprintf(
-				"tax calculation expired (age %s, max %s) — retry tax to refresh, then finalize",
-				age.Truncate(time.Minute), taxCalculationMaxAge))
+				"tax calculation expired (usable until %s) — retry tax to refresh, then finalize",
+				usableUntil.UTC().Format(time.RFC3339)))
 			// Stable machine code: integrators and the dashboard branch on
 			// this, never on the message text.
 			return de.WithCode("tax_calculation_expired")
 		}
 	} else if !errors.Is(lookupErr, errs.ErrNotFound) {
-		return fmt.Errorf("tax expiry guard: look up calculation age: %w", lookupErr)
+		return fmt.Errorf("tax expiry guard: look up calculation expiry: %w", lookupErr)
 	}
 	return nil
 }
@@ -5228,8 +5227,9 @@ func (e *Engine) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID str
 	}
 	// pending is the classic retry shape. The second admitted shape
 	// is a draft whose calculation SUCCEEDED at build time but has since
-	// aged past the provider's 24h TTL — a paused-collection sub's cycle
-	// invoice is the common way a draft sits that long. Finalize refuses
+	// expired at the provider (a Stripe Tax calculation lasts 90 days) — a
+	// paused-collection sub's cycle invoice is the way a draft sits that
+	// long. Finalize refuses
 	// those with "retry tax to refresh, then finalize" (the expiry
 	// pre-check), so the refresh it names must be performable; recomputing
 	// a DRAFT's tax is always safe, its totals are not yet issued.
