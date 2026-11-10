@@ -56,8 +56,9 @@ type TaxRetrier interface {
 // removed/downgraded item until manual reconciliation (ADR-056 follow-up).
 type ClawbackRetrier interface {
 	RetryPendingClawbackIssue(ctx context.Context, batch int) (int, []error)
-	// RetryPendingCreditNoteTaxReversal re-drives credit-note upstream tax
-	// reversals whose POST-COMMIT inline attempt failed (tax_reversal_pending).
+	// RetryPendingCreditNoteTaxReversal makes the upstream tax reversal for
+	// issued credit notes that still owe one (tax_reversal_pending, set when
+	// the note is issued).
 	// The CN-path counterpart to RetryPendingTaxReversal, which only scans
 	// voided/uncollectible invoices and so can't see a reversal stamped on a
 	// finalized/paid invoice by an issued credit note. Implemented by
