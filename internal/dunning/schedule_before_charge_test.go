@@ -151,3 +151,60 @@ func TestProcessRun_TransientSkipOnACancelledTick_StillRewinds(t *testing.T) {
 		t.Fatalf("next_action_at = %v, want it restored to %v so the next tick retries", got.NextActionAt, before.NextActionAt)
 	}
 }
+
+// reArmStore fails the resolve once, and fails UpdateRunIfActive on a
+// cancelled context as the database does.
+type reArmStore struct {
+	*memStore
+	resolveFailures int
+}
+
+func (r *reArmStore) ResolveRun(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, fromActivity bool) (bool, error) {
+	if r.resolveFailures > 0 {
+		r.resolveFailures--
+		return false, errors.New("write: connection reset by peer")
+	}
+	return r.memStore.ResolveRun(ctx, tenantID, run, fromActivity)
+}
+
+func (r *reArmStore) UpdateRunIfActive(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, then func(tx *sql.Tx) error) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return r.memStore.UpdateRunIfActive(ctx, tenantID, run, expectedAttempts, then)
+}
+
+// The re-arm after a failed resolve covers both retries that settle the
+// matter, a paid one and one Stripe refused as below its minimum, and it
+// lands although the pass's context was cancelled during the retry.
+func TestProcessRun_ResolveFailsOnAStoppingPass_RunIsStillMadeDue(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		retryErr error
+	}{
+		{"the retry paid the invoice", nil},
+		{"Stripe refused the amount as below its minimum", domain.ErrBelowMinimumCharge},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := newMemStore()
+			store := &reArmStore{memStore: mem, resolveFailures: 1}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			svc := NewService(store, funcRetrier{fn: func() error {
+				cancel() // the pass is stopping while Stripe is being asked
+				return tc.retryErr
+			}}, nil)
+			run := dueRunAt(t, mem, svc, 0)
+
+			svc.ProcessDueRuns(ctx, "t1", 20)
+
+			got := mem.runs[run.ID]
+			if got.State != domain.DunningActive {
+				t.Fatalf("setup: state = %q, want active (the resolve failed)", got.State)
+			}
+			if got.NextActionAt == nil || got.NextActionAt.After(time.Now().Add(time.Minute)) {
+				t.Fatalf("next_action_at = %v, want due now: the run must not wait the policy's interval on a settled invoice", got.NextActionAt)
+			}
+		})
+	}
+}
