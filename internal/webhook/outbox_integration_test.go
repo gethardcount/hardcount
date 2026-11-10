@@ -1,11 +1,14 @@
 package webhook_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -190,6 +193,52 @@ func TestOutbox_ProcessBatch_RetryBackoff(t *testing.T) {
 	}
 	if n2 != 0 {
 		t.Errorf("processed on second pass: got %d, want 0 (next_attempt_at not due)", n2)
+	}
+}
+
+// TestOutbox_ProcessBatch_PanicIsRetried: a handler that panics is one
+// failed attempt on the backoff ramp, and the panic is logged at ERROR with
+// its stack. The stack exists only in that log line: last_error keeps the
+// panic value alone.
+//
+// Mutation-verify: drop the stack from the recover's log line, and this
+// test fails.
+func TestOutbox_ProcessBatch_PanicIsRetried(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	db := testutil.SetupTestDB(t)
+	ctx, cancel := context.WithTimeout(leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleWebhookOutbox, leader.RoleWebhookDelivery), 15*time.Second)
+	defer cancel()
+
+	tenantID := testutil.CreateTestTenant(t, db, "Outbox Panic")
+	store := webhook.NewOutboxStore(db)
+
+	id, err := store.EnqueueCommitted(ctx, tenantID, "evt.panics", map[string]any{})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	n, err := store.ProcessBatch(ctx, 10, func(_ context.Context, _ webhook.OutboxRow) error {
+		panic("event: nil dereference")
+	})
+	if err != nil || n != 1 {
+		t.Fatalf("process batch: n=%d err=%v", n, err)
+	}
+
+	status, attempts, _ := readOutbox(t, db, id)
+	if status != webhook.OutboxPending || attempts != 1 {
+		t.Fatalf("after the panic: status %q attempts %d, want pending/1", status, attempts)
+	}
+	lastErr, nextAt := readOutboxRetry(t, db, id)
+	if !strings.Contains(lastErr, "panic: event: nil dereference") || !nextAt.After(time.Now().UTC()) {
+		t.Fatalf("after the panic: last_error %q next_attempt_at %v, want the panic and a future retry", lastErr, nextAt)
+	}
+	out := logs.String()
+	if !strings.Contains(out, `level=ERROR msg="webhook outbox: handler panicked; counting a failed attempt"`) ||
+		!strings.Contains(out, "outbox_id="+id) || !strings.Contains(out, "runtime/debug.Stack") {
+		t.Fatalf("the panic was not logged at ERROR with its row and stack:\n%s", out)
 	}
 }
 
