@@ -786,11 +786,13 @@ func (e *Engine) SetTaxCalculationStore(s TaxCalculationWriter) {
 	e.taxCalcStore = s
 }
 
-// CommitTax resolves the tenant's tax provider and commits the named
-// calculation to a tax_transaction. Used after invoice finalize to
-// finalize Stripe Tax reporting. Returns nil when no resolver is wired
-// or the tenant's settings can't be loaded — the invoice still exists,
-// so the caller should log but not unwind.
+// CommitTax commits the named calculation to a tax_transaction, at the
+// provider that made it: a calculation id is a Stripe Tax reference, so the
+// commit goes to Stripe Tax whatever provider the tenant has selected since
+// (settingsForTaxDocument). Used after invoice finalize to finalize Stripe Tax
+// reporting. Returns nil when no resolver is wired; an error when the
+// tenant's settings can't be loaded or the commit fails. The invoice still
+// exists either way, so the caller logs and does not unwind.
 //
 // On success, the returned upstream transaction id (Stripe: tx_xxx) is
 // persisted onto the invoice so a later credit note can issue a tax
@@ -807,7 +809,7 @@ func (e *Engine) CommitTax(ctx context.Context, tenantID, invoiceID, calculation
 	if err != nil {
 		return fmt.Errorf("load tenant settings: %w", err)
 	}
-	provider, err := e.taxProviders.Resolve(ctx, ts)
+	provider, err := e.taxProviders.Resolve(ctx, settingsForTaxDocument(ts, calculationID))
 	if err != nil {
 		return fmt.Errorf("resolve provider: %w", err)
 	}
@@ -854,8 +856,7 @@ func (e *Engine) CommitTax(ctx context.Context, tenantID, invoiceID, calculation
 // operator all along.
 //
 // Returns nil when there is nothing to guard: store unwired, no
-// calculation, a tenant with no committing provider (none/manual), or no
-// audit row for the calculation. A read ERROR fails closed (2026-10-11): it
+// calculation, or no audit row for the calculation. A read ERROR fails closed (2026-10-11): it
 // used to return nil — "never block an invoice on a DB blip" — but a
 // finalize let through on an unreadable guard could finalize an expired
 // calculation, which is the one failure nothing heals. A refused finalize
@@ -866,9 +867,9 @@ func (e *Engine) CheckTaxCalculationUsable(ctx context.Context, tenantID, invoic
 		return nil
 	}
 	ctx = auth.WithTenantID(ctx, tenantID)
-	// Mirror CommitTax's provider short-circuit: a tenant whose provider
-	// resolves to nil (none/manual, or since disconnected) skips the commit
-	// entirely, so an aged calc must not block THEIR finalize either.
+	// The age rule applies whatever provider the tenant has selected: the
+	// calculation is Stripe Tax's. The resolver never returns a nil provider,
+	// so the nil check below only serves a stub resolver in tests.
 	ts, err := e.settings.Get(ctx, tenantID)
 	if err != nil {
 		return fmt.Errorf("tax expiry guard: read settings: %w", err)
@@ -916,13 +917,15 @@ func (e *Engine) CheckTaxCalculationUsable(ctx context.Context, tenantID, invoic
 	return nil
 }
 
-// ReverseTax resolves the tenant's tax provider and issues a reversal
-// against a previously committed tax_transaction. Called from the credit
-// note issue path after the refund / credit-grant / invoice-reduction
-// side-effects have succeeded. Returns an empty ReversalResult when no
-// resolver is wired, no provider is configured, or the provider has no
-// durable upstream state (none, manual) — the caller treats an empty
-// TransactionID as "nothing to record" and proceeds.
+// ReverseTax issues a reversal against a previously committed
+// tax_transaction, at the provider that made it: a transaction id is a Stripe
+// Tax reference, so the reversal goes to Stripe Tax whatever provider the
+// tenant has selected since (settingsForTaxDocument). Called from the void
+// path, the credit note issue path and their sweeps. Stripe Tax answers a
+// reversal with a transaction id or an error, for a zero-tax transaction too
+// (checked in test mode, 2026-11-10). An empty ReversalResult comes back only
+// when no resolver is wired or the request names no transaction; a caller
+// that holds a committed transaction treats it as a failure.
 func (e *Engine) ReverseTax(ctx context.Context, tenantID string, req tax.ReversalRequest) (*tax.ReversalResult, error) {
 	if e.taxProviders == nil || e.settings == nil {
 		return &tax.ReversalResult{}, nil
@@ -933,7 +936,7 @@ func (e *Engine) ReverseTax(ctx context.Context, tenantID string, req tax.Revers
 	if err != nil {
 		return nil, fmt.Errorf("load tenant settings: %w", err)
 	}
-	provider, err := e.taxProviders.Resolve(ctx, ts)
+	provider, err := e.taxProviders.Resolve(ctx, settingsForTaxDocument(ts, req.OriginalTransactionID))
 	if err != nil {
 		return nil, fmt.Errorf("resolve provider: %w", err)
 	}
@@ -941,6 +944,19 @@ func (e *Engine) ReverseTax(ctx context.Context, tenantID string, req tax.Revers
 		return &tax.ReversalResult{}, nil
 	}
 	return provider.Reverse(ctx, req)
+}
+
+// settingsForTaxDocument makes a commit or a reversal go to the provider that
+// made the document, not the one the tenant has selected today. upstreamRef is
+// the document's Stripe Tax reference: the calculation to commit, or the
+// transaction to reverse. Only Stripe Tax has upstream state (the manual and
+// none providers return no reference), so a non-empty one means the document
+// is Stripe Tax's, and it is committed and reversed there.
+func settingsForTaxDocument(ts domain.TenantSettings, upstreamRef string) domain.TenantSettings {
+	if upstreamRef != "" {
+		ts.TaxProvider = "stripe_tax"
+	}
+	return ts
 }
 
 // SetTestClockReader wires the test-clock resolver. Optional: when nil, the

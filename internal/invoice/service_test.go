@@ -809,12 +809,18 @@ func TestFinalizeAndVoid(t *testing.T) {
 type fakeTaxReverser struct {
 	calls   []tax.ReversalRequest
 	failErr error
+	// empty returns a result naming no transaction, with no error: what the
+	// engine answers when it resolves no provider.
+	empty bool
 }
 
 func (f *fakeTaxReverser) ReverseTax(_ context.Context, _ string, req tax.ReversalRequest) (*tax.ReversalResult, error) {
 	f.calls = append(f.calls, req)
 	if f.failErr != nil {
 		return nil, f.failErr
+	}
+	if f.empty {
+		return &tax.ReversalResult{}, nil
 	}
 	return &tax.ReversalResult{TransactionID: "tax_rev_" + req.Reference}, nil
 }
