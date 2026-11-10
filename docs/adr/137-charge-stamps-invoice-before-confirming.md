@@ -1,13 +1,14 @@
 # ADR-137: A charge puts its PaymentIntent on the invoice before confirming it
 
 **Date:** 2026-11-10
-**Status:** Proposed
+**Status:** Accepted
 **Supersedes:** [ADR-107](107-unknown-is-terminal-until-a-human.md)'s parked
 state and [ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md)'s customer-list
 check, for charges this version makes.
 **Amends:** [ADR-001](001-paymentintent-only-stripe.md) (a charge is two
 PaymentIntent calls), [ADR-105](105-charge-idempotency-key-seed.md) (the
-counter moves only on PaymentIntent stamps and the stale-hold clear),
+counter moves only on PaymentIntent stamps and on the clear of a hold whose
+charge confirmed nothing),
 [ADR-117](117-one-payment-intent-per-invoice-deferred.md) (option C, below).
 
 ## Summary
@@ -67,14 +68,28 @@ which is why the hold stays.
    attempt row is written in the same transaction.
 3. `ConfirmPaymentIntent` only if the stamp applied.
 
-After the confirm: a success settles the invoice; a decline is reported
-through the settlement primitive; anything else needs no write, because the
-invoice already says `unknown` on the PaymentIntent. The unknown sweep reads
-it once the hold has ended: succeeded is recorded (unless refunded in full at
-Stripe); processing is followed; one still awaiting its confirm is canceled,
-read again, and ended with no customer email (`EndAttemptWithoutPayment`:
-back to pending, or failed for a dunning retry); a decline is recorded as the
-decline it was.
+A stamp that does not apply ends the attempt (`EndUnstampedAttempt`): the
+hold is cleared and the counter moved in one compare-and-set, so the next
+charge sends a new key. The stamp is refused when the amount due changed
+since the charge read the invoice, and Stripe answers the old key with a new
+amount as an idempotency error, which reads as an unclear charge. The
+PaymentIntent the create made stays unconfirmed at Stripe.
+
+After the confirm: a success settles the invoice; a decline (a card error)
+is reported through the settlement primitive; a confirm request Stripe
+refuses outright (an invalid request, told by its type and not by whether
+the error names the PaymentIntent) marks the invoice failed with no
+PaymentIntent, sends no customer email, and cancels the PaymentIntent.
+Anything else needs no write, because the invoice already says `unknown` on
+the PaymentIntent. The unknown sweep reads it once the hold has ended:
+succeeded is recorded, also when the payment was refunded at Stripe since
+(the refund is recorded by its own webhook, ADR-134), so the result does not
+depend on whether the sweep or the payment's webhook comes first; processing
+is followed; one still awaiting its confirm is canceled, read again, and
+ended with no customer email (`EndAttemptWithoutPayment`: back to pending, or
+failed for a dunning retry); a decline is recorded as the decline it was. A
+payment error with no charge (the payment needs the customer to
+authenticate) is a decline too, and the customer is told.
 
 The stale-hold sweep makes no Stripe call. Every claim writes
 `invoices.charge_hold_token` equal to the hold. A stale hold carrying its
@@ -85,9 +100,22 @@ wins. On any other invoice the hold is a leftover and is cleared. A hold
 without its token, or a park, was left by the one-call version: kept and
 reported, never resolved on a guess.
 
+The token is transition code. The upgrade check below is the upgrade path;
+the token covers the one case that check cannot see: a copy of the previous
+version still running against the new schema (a rolling deploy, where the
+old copies are being stopped while they may be mid-charge) takes a hold
+after the check passed. Without the token the sweep would clear that hold
+and the invoice would be charged again while the old copy's one-call charge
+may have taken money. The column, its write in the claim, the sweep's
+"earlier version" branch and the parked surface can all be removed in the
+release after the one that ships this.
+
 Write-off is allowed on any `unknown` invoice while no charge holds it.
-Migration 00225 adds the token column and refuses to run while any invoice
-still open has a charge hold or a parked charge from the previous version.
+Migration 00225 adds the token column and refuses to run while any open or
+written-off invoice has a charge hold or a parked charge from the previous
+version. Written-off invoices count because the previous version still
+settles those (it records a payment it finds, and ends a park) and this
+version does not.
 
 ## Why this design
 
@@ -138,7 +166,9 @@ gives no cancel.
   and parks through its customer-list search.** Built and tested, then
   dropped: Hardcount has no production deployments, so the upgrade check
   replaces about 330 lines of code that would protect state that does not
-  exist and be deleted a release later.
+  exist and be deleted a release later. What remains of a transition is the
+  hold token (Decision): a column, one write, one list predicate and one
+  sweep branch that keeps such a hold for a person.
 
 ## Consequences
 
@@ -177,8 +207,19 @@ gives no cancel.
   upgrade check did not turn the row-level-security bypass on; a late note
   could reopen a closed attempt row.
 - The parked-invoice surface (the gate's parked branch, the dashboard banner,
-  `hardcount_parked_invoices`) can no longer trigger after the upgrade and is
-  removed in a follow-up change.
+  `hardcount_parked_invoices`) triggers after the upgrade only for a hold or
+  a park that a copy of the previous version left by running beside this
+  one. It is removed with the hold token in a follow-up change.
+- A fifth review, of the pull request (four reviewers, 2026-11-10), found no
+  path to a double charge or to a confirm without the stamp, and these,
+  fixed with tests: a refused confirm request whose error names the
+  PaymentIntent was still reported as a decline; a refused stamp left the
+  key to be reused with another amount; the upgrade check let written-off
+  holds and parks through; the store still accepted a park; the stamp's
+  amount predicate had no test.
+- A written-off invoice whose charge is `unknown` is reached more often (a
+  write-off is allowed once the hold ends). Its relief drafts wait for the
+  unknown sweep (ADR-050 amendment).
 - Upgrade: keep the previous version running until it has finished its
   charges, then stop it and start the new one; one version at a time.
 

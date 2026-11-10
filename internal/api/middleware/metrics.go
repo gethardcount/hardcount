@@ -577,11 +577,12 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 	// whose number had resolved.
 	//
 	// Only an earlier Hardcount version parked an invoice (ADR-137), and the
-	// upgrade refuses to run over a park, so this stays 0. It still counts
+	// upgrade refuses to run over a park, open or written off, so this stays
+	// 0 unless a copy of that version ran beside this one. It still counts
 	// parks past the 24 hours the earlier version waited (a hold more than 26
 	// hours old, or none), as before; a follow-up change removes the gauge.
 	// TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay pins the window.
-	parkedHelp := "Invoices an earlier Hardcount version parked (an unclear answer from Stripe that named no payment, ADR-107) still parked 26 hours after the charge's hold, or with no hold. By disposition: open (finalized) or written_off (uncollectible). Since ADR-137 nothing parks an invoice and the upgrade refuses to run over a park, so this stays 0; alert on open > 0: a person must check the customer's payments in Stripe. -1 = metric query failed."
+	parkedHelp := "Invoices an earlier Hardcount version parked (an unclear answer from Stripe that named no payment, ADR-107) still parked 26 hours after the charge's hold, or with no hold. By disposition: open (finalized) or written_off (uncollectible). Since ADR-137 nothing parks an invoice and the upgrade refuses to run over a park, so this stays 0 unless a copy of an earlier version ran against the upgraded database; alert on open > 0: a person must check the customer's payments in Stripe. -1 = metric query failed."
 	for _, m := range []struct {
 		label string
 		live  bool
