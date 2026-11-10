@@ -629,6 +629,82 @@ func TestCancel_SnapshotMoved_ReplansOnce(t *testing.T) {
 		requireOneCancel(t, r.ctx, r.db, r.tenantID, r.subID)
 	})
 
+	// An item removed: its billing interval only gets an end, which the
+	// interval check leaves out, so only the items read on the transaction
+	// show it. Mutation M4 (drop sameItems) → one plan.
+	t.Run("item removed", func(t *testing.T) {
+		r := newReliefCancelRig(t, db, "P1-23 replan removal", reliefRigOpts{usageUnits: 3000})
+		evidenced(r)
+		addOn, _, err := pricing.NewService(pricing.NewPostgresStore(r.db)).CreatePlan(r.ctx, r.tenantID, pricing.CreatePlanInput{
+			Code: "add-on", Name: "Add-on", Currency: "USD", BillingInterval: domain.BillingMonthly,
+			BaseAmountCents: 1000, BaseBillTiming: domain.BillInArrears,
+		})
+		if err != nil {
+			t.Fatalf("create add-on plan: %v", err)
+		}
+		added, err := r.subSvc.AddItem(clock.WithEffectiveNow(r.ctx, reliefPeriodStart), r.tenantID, r.subID, subscription.AddItemInput{PlanID: addOn.ID, Quantity: 1})
+		if err != nil {
+			t.Fatalf("add the add-on: %v", err)
+		}
+		var pe probeErrs
+		p := changeDuringFirstCall(r, &pe, "remove an item", func(ctx context.Context) error {
+			return r.subSvc.RemoveItem(ctx, r.tenantID, r.subID, added.ID)
+		})
+		r.cancelImmediately(t)
+		pe.check(t)
+		if n := p.count(); n != 2 {
+			t.Errorf("tax calculations = %d, want 2: the cancel must plan again without the removed item", n)
+		}
+		requireOneCancel(t, r.ctx, r.db, r.tenantID, r.subID)
+	})
+
+	// The billing run closes the period while the cancel is priced: the
+	// period moves and no item does. The cancel's instant is bound before the
+	// boundary, as dunning's is, so the next attempt finds a period that
+	// starts after it and does not plan: the cancel returns ErrWatermarkMoved
+	// with nothing written, and June's usage is billed once, on the period's
+	// own invoice. Mutation M3 (drop the period predicates from the cancel's
+	// compare-and-set) → the cancel commits a final invoice for the closed
+	// period and bills June's usage twice.
+	t.Run("period closed by the billing run", func(t *testing.T) {
+		r := newReliefCancelRig(t, db, "P1-23 close during pricing", reliefRigOpts{usageUnits: 3000})
+		evidenced(r)
+		var pe probeErrs
+		changeDuringFirstCall(r, &pe, "the period close", func(ctx context.Context) error {
+			closeCtx := clock.WithEffectiveNow(context.WithoutCancel(ctx), reliefPeriodEnd.Add(time.Hour))
+			cctx, cancel := context.WithTimeout(closeCtx, raceTimeout)
+			defer cancel()
+			if n, failures := r.engine.RunCycleForTenant(cctx, r.tenantID, 50); n != 1 || len(failures) != 0 {
+				return fmt.Errorf("closed %d periods, failures %v", n, failures)
+			}
+			return nil
+		})
+		beforeBoundary := clock.WithEffectiveNow(r.ctx, reliefPeriodEnd.Add(-time.Hour))
+		if _, _, err := r.subSvc.Cancel(beforeBoundary, r.tenantID, r.subID); !errors.Is(err, subscription.ErrWatermarkMoved) {
+			t.Errorf("cancel: %v, want ErrWatermarkMoved: its instant is before the period the close opened", err)
+		}
+		pe.check(t)
+		sub, err := subscription.NewPostgresStore(r.db).Get(r.ctx, r.tenantID, r.subID)
+		if err != nil {
+			t.Fatalf("read subscription: %v", err)
+		}
+		if sub.Status != domain.SubscriptionActive || sub.CurrentBillingPeriodStart == nil || !sub.CurrentBillingPeriodStart.Equal(reliefPeriodEnd) {
+			t.Errorf("subscription status=%s period start=%v, want active in the period from %v", sub.Status, sub.CurrentBillingPeriodStart, reliefPeriodEnd)
+		}
+		invs, _, err := r.invStore.List(r.ctx, invoice.ListFilter{TenantID: r.tenantID, Limit: 50})
+		if err != nil {
+			t.Fatalf("list invoices: %v", err)
+		}
+		for _, inv := range invs {
+			if inv.BillingReason == domain.BillingReasonSubscriptionCancel {
+				t.Errorf("a final cancel invoice was written (%dc): June's usage is on the period's own invoice", inv.TotalAmountCents)
+			}
+		}
+		if ev, au := cancelEvidence(t, r.ctx, r.db, r.tenantID, r.subID); ev != 0 || au != 0 {
+			t.Errorf("subscription.canceled events = %d, cancel audit rows = %d; want none", ev, au)
+		}
+	})
+
 	// (d) A collection pause: it moves nothing the plan priced, so there is no
 	// second plan, and the final invoice follows the locked row's pause: a
 	// draft. Mutation M14 (status from the pause read before the
