@@ -45,6 +45,12 @@ func TestP5_WebhookOutboxLeaseInvariant(t *testing.T) {
 	if lease := retryClaimLease(10); lease <= 10*perRetryRowBudget {
 		t.Errorf("retryClaimLease(10) (%v) has no margin over 10×perRetryRowBudget (%v)", lease, 10*perRetryRowBudget)
 	}
+	// A row's mark runs after its budget, under its own timeout. The lease
+	// must cover both for every row, or a mark lands on a row another worker
+	// has claimed again.
+	if lease, worst := retryClaimLease(10), 10*(perRetryRowBudget+deliveryMarkTimeout); lease <= worst {
+		t.Errorf("retryClaimLease(10) (%v) does not cover 10×(perRetryRowBudget+deliveryMarkTimeout) (%v)", lease, worst)
+	}
 }
 
 // TestP5_EventAndDeliveriesOneTx_BornLeased: Dispatch's fan-out rows

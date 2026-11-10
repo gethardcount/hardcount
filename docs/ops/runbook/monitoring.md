@@ -49,7 +49,7 @@ alerting tier: what should page someone, and what is only informational.
 | `hardcount_billing_oldest_due_age_seconds{mode}` | > 2× billing interval | A subscription has been due that long, and it is not counted in `hardcount_billing_failing_subscriptions`. See [A subscription is due but not billed](background-job-stuck.md#a-subscription-is-due-but-not-billed) |
 | `hardcount_billing_failing_subscriptions{state="parked",mode="live"}` | > 0 | A subscription has not been invoiced and nothing will retry it. Eight billing attempts failed. See [Billing failing](billing-failing.md) |
 | `hardcount_dunning_runs_processed_total{outcome="failed"}` | rate > 0.5/s | Dunning (the automatic retries of failed payments) is struggling |
-| `hardcount_webhook_deliveries_total{status="failed"}` | sustained failure | Customer's webhook endpoint down, redirecting, or signature wrong. See [A webhook endpoint keeps failing](webhook-endpoint-failing.md) |
+| `hardcount_webhook_deliveries_total{status="failed"}` | sustained failure | Customer's webhook endpoint down, redirecting, or signature wrong. Or Hardcount gave up a delivery it could not finish. See [A webhook endpoint keeps failing](webhook-endpoint-failing.md) |
 | `hardcount_stripe_breaker_state` | == 2 (open; 0=closed, 1=half_open) | Stripe API circuit breaker tripped |
 | `hardcount_email_outbox_pending` | > 1000 | Email dispatcher stuck or SMTP provider issue (−1 = the metric query itself failed) |
 | `hardcount_webhook_outbox_pending` | > 1000 | Webhook dispatcher stuck (−1 = metric query failed) |
@@ -129,6 +129,11 @@ grep "auto-charge retry error" log
 # Webhook deliveries that gave up, and ones that will retry
 grep "webhook delivery permanently failed" log
 grep "webhook delivery scheduled for retry" log
+
+# Webhook deliveries that failed inside Hardcount: an attempt that panicked
+# (with its stack), and one given up while still pending after 50h36m
+grep "webhook delivery attempt panicked" log
+grep "webhook delivery given up" log
 
 # Tax provider failures (the invoice waits for its tax retry)
 grep "stripe tax failed, deferring invoice for retry" log

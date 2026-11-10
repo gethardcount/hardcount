@@ -120,6 +120,15 @@ The next tick starts one interval after it ends.
    - **`webhook_outbox`, `email_outbox` and `webhook_delivery`:** the
      stack is in the `scheduler panic recovered` line. These roles stop
      the tick at the panic.
+   - **A `webhook_delivery` panic while it sends one delivery** is not in
+     that line. Only that delivery stops: the tick goes on, and
+     `hardcount_leader_lease_lost_total{reason="panicked"}` does not move.
+     The stack is in the `webhook delivery attempt panicked` line. The
+     delivery counts one failed attempt and runs again at its next retry,
+     not one interval later. See
+     [The failure is Hardcount's own](webhook-endpoint-failing.md#the-failure-is-hardcounts-own).
+     The bullet above still covers a `webhook_delivery` panic outside a
+     delivery, such as in the read that claims the batch.
 
    The panicking step or row runs again one interval later on whichever
    replica leads, so a restart does not fix it: find the input in the
