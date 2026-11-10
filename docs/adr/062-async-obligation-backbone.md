@@ -308,11 +308,14 @@ promote-on-detect. A third option needed neither: set the boolean that already
 exists, in the statement that already issues the note.
 
 - `TransitionStatusTx` (the only writer of `status='issued'`) sets
-  `tax_reversal_pending` when the note has an amount and its invoice was taxed
-  by Stripe Tax. (Until 2026-11-10 also only when the invoice carried tax: a
-  transaction with no tax was taken to have nothing to reverse. It records
-  the sale in Stripe's tax reports, and Stripe reverses it like any other, so
-  the condition is gone; see the CHANGELOG.)
+  `tax_reversal_pending` when the note has an amount and Stripe Tax
+  calculated or recorded its invoice (the invoice has a calculation id or a
+  transaction id), with or without tax. A transaction with no tax records
+  the sale in Stripe's tax reports, and Stripe reverses it like any other.
+  The provider alone is not the test: an invoice of a Stripe Tax tenant that
+  Stripe was never asked to calculate (an exempt or reverse-charge customer,
+  a credit-only invoice) never gets a transaction, and a marker on its note
+  would never clear.
 - `SetTaxTransaction` stores the reversal and clears the marker in one write.
 - `ListPendingCreditNoteTaxReversal` lists marked notes whose invoice has a tax
   transaction. The structural branch, its 24-hour window and the promote step

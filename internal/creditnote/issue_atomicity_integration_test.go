@@ -160,15 +160,35 @@ func newReversalFixture(t *testing.T, name string) *reversalFixture {
 }
 
 // invoice makes a paid invoice taxed by provider, with taxCents of tax and,
-// when taxTx is set, a recorded upstream tax transaction.
+// when taxTx is set, a recorded upstream tax transaction. A stripe_tax
+// invoice carries its calculation id, as every invoice Stripe Tax
+// calculated does.
 func (f *reversalFixture) invoice(num, provider string, taxCents int64, taxTx string) domain.Invoice {
+	f.t.Helper()
+	calc := ""
+	if provider == "stripe_tax" {
+		calc = "taxcalc_" + num
+	}
+	return f.invoiceWith(num, provider, taxCents, calc, taxTx)
+}
+
+// uncalculatedInvoice makes a paid invoice of a Stripe Tax tenant that Stripe
+// Tax never calculated: no calculation, no transaction, no tax. Hardcount
+// stores it so for an exempt or reverse-charge customer, an invoice with no
+// taxable lines, and an invoice that only sells prepaid credit.
+func (f *reversalFixture) uncalculatedInvoice(num string) domain.Invoice {
+	f.t.Helper()
+	return f.invoiceWith(num, "stripe_tax", 0, "", "")
+}
+
+func (f *reversalFixture) invoiceWith(num, provider string, taxCents int64, calc, taxTx string) domain.Invoice {
 	f.t.Helper()
 	now := time.Now().UTC()
 	inv, err := f.invoices.CreateWithLineItems(f.ctx, f.tenantID, domain.Invoice{
 		CustomerID: f.custID, InvoiceNumber: num,
 		Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
 		Currency: "USD", SubtotalCents: 10000,
-		TaxFacts:         domain.TaxFacts{TaxAmountCents: taxCents, TaxProvider: provider},
+		TaxFacts:         domain.TaxFacts{TaxAmountCents: taxCents, TaxProvider: provider, TaxCalculationID: calc},
 		TotalAmountCents: 10000 + taxCents, AmountPaidCents: 10000 + taxCents,
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now,
 		IssuedAt: &now,
@@ -267,6 +287,16 @@ func TestIssue_MarksTheTaxReversalOwed_InTheIssueStatement(t *testing.T) {
 		cn := f.issue("CN-MARK-3", f.invoice("INV-MARK-3", "manual", 1000, ""), 5500)
 		if cn.TaxReversalPending {
 			t.Fatal("a manual-tax invoice has nothing at Stripe to reverse")
+		}
+	})
+
+	// Stripe Tax was never asked, so the invoice has no calculation and will
+	// never have a transaction: nothing to reverse, and a marker would never
+	// clear. The provider alone is not the test.
+	t.Run("Stripe Tax tenant, invoice Stripe Tax never calculated (exempt, reverse charge, credit only): not marked", func(t *testing.T) {
+		cn := f.issue("CN-MARK-7", f.uncalculatedInvoice("INV-MARK-7"), 5500)
+		if cn.TaxReversalPending {
+			t.Fatal("a note on an invoice Stripe Tax never calculated owes no reversal: the marker would never clear")
 		}
 	})
 

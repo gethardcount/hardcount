@@ -474,6 +474,7 @@ func TestRetryPendingCreditNoteTaxReversal_ZeroTaxInvoice_IsReversedLikeAnyOther
 	rev := &fakeTaxReverser{returnID: "tx_reversal_zero_tax"}
 	svc := NewService(store, invoices, &fakeRefunder{}, &fakeCreditGranter{})
 	svc.SetTaxReverser(rev)
+	store.invoices = invoices
 
 	cn, err := store.Create(context.Background(), "t1", domain.CreditNote{
 		InvoiceID: "inv_zero_tax", CustomerID: "cus_1", Status: domain.CreditNoteIssued,
@@ -487,8 +488,9 @@ func TestRetryPendingCreditNoteTaxReversal_ZeroTaxInvoice_IsReversedLikeAnyOther
 	if len(sweepErrs) != 0 || n != 1 {
 		t.Fatalf("sweep: reversed=%d errs=%v, want 1 and none", n, sweepErrs)
 	}
-	if len(rev.calls) != 1 || rev.calls[0].OriginalTransactionID != "tx_upstream_zero_tax" || rev.calls[0].GrossAmountCents != 1000 {
-		t.Fatalf("reverse calls = %+v, want one against the invoice's transaction for the note's total", rev.calls)
+	if len(rev.calls) != 1 || rev.calls[0].OriginalTransactionID != "tx_upstream_zero_tax" || rev.calls[0].GrossAmountCents != 1000 ||
+		rev.calls[0].Mode != tax.ReversalModePartial {
+		t.Fatalf("reverse calls = %+v, want one partial reversal against the invoice's transaction for the note's total", rev.calls)
 	}
 	got, _ := store.Get(context.Background(), "t1", cn.ID)
 	if got.TaxTransactionID != "tx_reversal_zero_tax" || got.TaxReversalPending {
@@ -496,7 +498,6 @@ func TestRetryPendingCreditNoteTaxReversal_ZeroTaxInvoice_IsReversedLikeAnyOther
 	}
 
 	// A note on the same invoice, issued now, is marked as owing its reversal.
-	store.invoices = invoices
 	svc.SetNumberGenerator(&fakeCNNumbers{})
 	rev.failWith = errors.New("stripe: 500")
 	fresh, err := svc.CreateRefund(context.Background(), "t1", RefundInput{InvoiceID: "inv_zero_tax", Reason: "fraudulent", AmountCents: 2000})
@@ -528,6 +529,7 @@ func TestRetryPendingCreditNoteTaxReversal_OneWriteStoresTheReversalAndClearsThe
 	rev := &fakeTaxReverser{returnID: "tx_reversal_ok"}
 	svc := NewService(store, invoices, &fakeRefunder{}, &fakeCreditGranter{})
 	svc.SetTaxReverser(rev)
+	store.invoices = invoices
 
 	cn, err := store.Create(context.Background(), "t1", domain.CreditNote{
 		InvoiceID: "inv_tax", CustomerID: "cus_1", Status: domain.CreditNoteIssued,
@@ -586,8 +588,10 @@ func TestRetryPendingCreditNoteTaxReversal_AFailedReDriveWritesNothing(t *testin
 	t.Parallel()
 	store := newMemStore()
 	rev := &fakeTaxReverser{failWith: errors.New("stripe 503")}
-	svc := NewService(store, taxInvoiceReader(), &fakeRefunder{}, &fakeCreditGranter{})
+	invoices := taxInvoiceReader()
+	svc := NewService(store, invoices, &fakeRefunder{}, &fakeCreditGranter{})
 	svc.SetTaxReverser(rev)
+	store.invoices = invoices
 	cn := seedTaxOrphan(t, store, true)
 
 	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10); len(sweepErrs) != 1 {
@@ -609,8 +613,10 @@ func TestRetryPendingCreditNoteTaxReversal_EmptyResultOnTaxBearingInvoiceIsFailu
 	t.Parallel()
 	store := newMemStore()
 	rev := &fakeTaxReverser{emptyResult: true} // provider returned no transaction
-	svc := NewService(store, taxInvoiceReader(), &fakeRefunder{}, &fakeCreditGranter{})
+	invoices := taxInvoiceReader()
+	svc := NewService(store, invoices, &fakeRefunder{}, &fakeCreditGranter{})
 	svc.SetTaxReverser(rev)
+	store.invoices = invoices
 	cnPending := seedTaxOrphan(t, store, true)
 
 	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10)

@@ -851,17 +851,10 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 			errsOut = append(errsOut, fmt.Errorf("get invoice for pending tax reversal %s: %w", cn.ID, err))
 			continue
 		}
-		// Nothing to reverse: the invoice has no upstream transaction. The list
-		// takes only notes whose invoice has one, so this is a marker an
-		// earlier version left; it is cleared. A transaction that carried no
-		// tax is reversed like any other: it records the sale in Stripe's tax
+		// The list takes only notes whose invoice has a tax transaction, and
+		// nothing clears that column. A transaction that carried no tax is
+		// reversed like any other: it records the sale in Stripe's tax
 		// reports, and Stripe returns a reversal for it.
-		if inv.TaxTransactionID == "" {
-			if err := s.store.SetTaxReversalPending(ctx, cn.TenantID, cn.ID, false); err != nil {
-				errsOut = append(errsOut, fmt.Errorf("clear stale tax_reversal_pending for %s: %w", cn.ID, err))
-			}
-			continue
-		}
 		res, err := s.taxRev.ReverseTax(ctx, cn.TenantID, tax.ReversalRequest{
 			OriginalTransactionID: inv.TaxTransactionID,
 			CreditNoteID:          cn.ID,
