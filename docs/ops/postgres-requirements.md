@@ -125,7 +125,7 @@ With RDS Proxy, size it for the number of copies × `DB_MAX_OPEN_CONNS` connecti
 
 | Setting | Default | When to change it |
 |---|---|---|
-| `DB_MAX_OPEN_CONNS` | 20 | Raise it if requests wait for a connection and Postgres has room (`max_connections` is often 100 to 200) |
+| `DB_MAX_OPEN_CONNS` | 20 | Raise it if requests wait for a connection and Postgres has room (`max_connections` is often 100 to 200). They wait when the metric `go_sql_wait_count_total{db_name="app"}` keeps rising ([alert](runbook/monitoring.md#warn-slack-or-email-not-page)) |
 | `DB_MAX_IDLE_CONNS` | 5 | Raise it to match `DB_MAX_OPEN_CONNS` for spiky traffic |
 | `DB_CONN_MAX_LIFETIME_MIN` | 30 | Lower it to 5 to 10 behind a pooler with a short `server_lifetime` |
 | `DB_CONN_MAX_IDLE_TIME_SEC` | 120 | Lower it where connections are scarce |
