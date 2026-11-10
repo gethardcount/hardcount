@@ -1102,12 +1102,14 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A paid invoice ends its dunning run as recovered: Collect went around
-	// the retry schedule. Only a paid one. The charge also returns without an
-	// error when Stripe is still processing the payment, and that run must
-	// stay: the payment's settle resolves it if it succeeds, and dunning goes
-	// on if it fails. Resolved here, a processing payment that later failed
-	// left the invoice failed with no dunning run, so nothing retried it.
+	// A paid invoice ends its dunning run as recovered. Only a paid one: the
+	// charge also returns without an error when Stripe is still processing
+	// the payment, or when another writer settled the invoice first. A
+	// processing payment keeps its run. Its settle resolves the run if it
+	// succeeds, and the run continues on its schedule if it fails; resolving
+	// it here would leave a payment that later fails with no dunning run.
+	// For a paid invoice this is a second try: the settle has already
+	// resolved the run, best effort.
 	if charged.Status == domain.InvoicePaid {
 		h.resolveDunningRecovered(r.Context(), tenantID, id)
 	}
@@ -1115,8 +1117,10 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	// Explicit audit row for the money-movement action — "Collected payment on
 	// INV-NNN", the row an auditor looks for when money left the customer's card
 	// outside a billing run. Written for a payment still processing too: it is
-	// the only record that an operator sent this charge, and a later settle
-	// writes no operator row. payment_status says which it was.
+	// the audit log's only row for this charge (a later settle writes no
+	// operator row). payment_status says which outcome the click had. A
+	// declined Collect returns above and writes no row here; its charge
+	// attempt records the actor.
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(h.svc.AuditCtx(r.Context(), charged), tenantID, domain.AuditActionCollect, "invoice", charged.ID, charged.InvoiceNumber, map[string]any{
 			"invoice_number": charged.InvoiceNumber,

@@ -141,6 +141,31 @@ func TestCollect_CardCharge_ResolvesDunningOnlyWhenPaid(t *testing.T) {
 			charger: func(s *memStore) PaymentCharger { return &processingCharger{store: s} },
 			want:    nil,
 		},
+		{
+			// The charge's stamp was refused because a decline for this
+			// invoice was recorded first: it returns the row as it stands.
+			name: "returned failed, no error: run left open",
+			charger: func(s *memStore) PaymentCharger {
+				return chargerFunc(func(inv domain.Invoice) (domain.Invoice, error) {
+					inv.PaymentStatus = domain.PaymentFailed
+					s.invoices[inv.ID] = inv
+					return inv, nil
+				})
+			},
+			want: nil,
+		},
+		{
+			// The invoice was voided during the call.
+			name: "returned voided, no error: run left open",
+			charger: func(s *memStore) PaymentCharger {
+				return chargerFunc(func(inv domain.Invoice) (domain.Invoice, error) {
+					inv.Status = domain.InvoiceVoided
+					s.invoices[inv.ID] = inv
+					return inv, nil
+				})
+			},
+			want: nil,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newMemStore()
@@ -152,13 +177,15 @@ func TestCollect_CardCharge_ResolvesDunningOnlyWhenPaid(t *testing.T) {
 				t.Fatalf("seed: %v", err)
 			}
 			dun := &recordingDunning{}
+			audit := &capturingInvoiceAudit{}
 			h := &Handler{
 				svc:     NewService(store, nil, nil),
 				charger: tc.charger(store),
 				paymentSetups: &fakePaymentSetups{setup: domain.CustomerPaymentSetup{
 					StripeCustomerID: "cus_stripe_1", StripePaymentMethodID: "pm_1", SetupStatus: domain.PaymentSetupReady,
 				}},
-				dunning: dun,
+				dunning:     dun,
+				auditLogger: audit,
 			}
 			rr := collectReq(t, h, inv.ID)
 			if rr.Code != http.StatusOK {
@@ -166,6 +193,14 @@ func TestCollect_CardCharge_ResolvesDunningOnlyWhenPaid(t *testing.T) {
 			}
 			if len(dun.resolutions) != len(tc.want) || (len(tc.want) > 0 && dun.resolutions[0] != tc.want[0]) {
 				t.Errorf("dunning resolutions = %v, want %v", dun.resolutions, tc.want)
+			}
+			// The Collect audit row says which outcome the click had.
+			row, ok := audit.firstOf(domain.AuditActionCollect)
+			if !ok {
+				t.Fatal("no Collect audit row")
+			}
+			if got, want := row.meta["payment_status"], string(store.invoices[inv.ID].PaymentStatus); got != want {
+				t.Errorf("audit payment_status = %v, want %q", got, want)
 			}
 		})
 	}
