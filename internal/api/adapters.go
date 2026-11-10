@@ -568,7 +568,7 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 	if err != nil {
 		return err
 	}
-	return a.chargedOutcome(ctx, tenantID, charged, hold, release)
+	return a.chargedOutcome(ctx, tenantID, charged)
 }
 
 // definiteRetryFailure wraps a charge that Stripe definitely refused, for
@@ -608,21 +608,18 @@ func definiteRetryFailure(err error) *dunning.RetryError {
 //
 //   - Paid: nil. The retry recovered the invoice.
 //   - Payment in flight: dunning.ErrPaymentInFlight. It names the
-//     PaymentIntent the run now waits on, and carries the hold the charge
-//     kept. Dunning releases that hold if the payment settles before it
-//     records the wait.
+//     PaymentIntent the run now waits on. The charge keeps its hold; the
+//     settle that ends the payment frees it (ADR-137).
 //   - Failed: the payment_intent.payment_failed webhook recorded the failure
 //     first. The result is a definite decline, built from that attempt's own
 //     row (its decline code gives the Ask), so dunning counts it and warns
 //     as for any decline. The invoice's last_payment_error is never the
-//     reason. The round trip is over, so the hold is released (release, by
-//     its token), as for a decline the charge itself answered. If the hold
-//     were kept, the next retry and the final action would wait for the
-//     stale-hold sweep.
+//     reason. The round trip is over, and the failure settle freed the
+//     hold with the write that recorded the failure.
 //   - Anything else (pending, void, written off): a loud error, which
 //     RetryPayment turns into an uncounted skip. The next tick reads the
 //     invoice again.
-func (a *paymentRetrierAdapter) chargedOutcome(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, release func()) error {
+func (a *paymentRetrierAdapter) chargedOutcome(ctx context.Context, tenantID string, inv domain.Invoice) error {
 	switch {
 	case inv.Status == domain.InvoicePaid || inv.PaymentStatus == domain.PaymentSucceeded:
 		return nil
@@ -632,9 +629,8 @@ func (a *paymentRetrierAdapter) chargedOutcome(ctx context.Context, tenantID str
 				"invoice_id", inv.ID, "payment_status", inv.PaymentStatus)
 			return fmt.Errorf("dunning retry: invoice %s is %s with no PaymentIntent after the charge", inv.ID, inv.PaymentStatus)
 		}
-		return &dunning.RetryError{PaymentIntentID: inv.StripePaymentIntentID, Err: dunning.ErrPaymentInFlight, Hold: hold}
+		return &dunning.RetryError{PaymentIntentID: inv.StripePaymentIntentID, Err: dunning.ErrPaymentInFlight}
 	case inv.PaymentStatus == domain.PaymentFailed && inv.StripePaymentIntentID != "":
-		release()
 		return a.retryFailure(ctx, tenantID, inv.ID, inv.StripePaymentIntentID)
 	}
 	slog.ErrorContext(ctx, "dunning retry: the charge returned no error but left the invoice neither paid, in flight nor failed; skipping this attempt uncounted",
