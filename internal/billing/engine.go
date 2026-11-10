@@ -3108,7 +3108,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	nextPeriodEnd := domain.NextBillingPeriodEnd(periodEnd, sub.BillingTime, plans[sub.Items[0].PlanID].BillingInterval, billingLoc, sub.BillingAnchorDay)
 
 	// Skip empty cycle-close invoices — matches BillOnCreate's and
-	// BillFinalOnImmediateCancel's existing zero-subtotal guards and
+	// priceFinalOnCancel's existing zero-subtotal guards and
 	// the Stripe / Lago / Chargebee / Orb convention of NOT emitting
 	// a $0 invoice when there's literally nothing to bill. Common
 	// triggers in practice:
@@ -3185,7 +3185,8 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 
 	// Single source of truth for the draft/finalized decision —
 	// shared across all four invoice-emitting paths (cycle close,
-	// BillOnCreate, BillFinalOnImmediateCancel, handleItemProration).
+	// BillOnCreate, the cancel's final invoice that priceFinalOnCancel
+	// prices, handleItemProration).
 	// Encodes: tax pending → draft; collection paused at the period's
 	// end → draft; otherwise finalized. See
 	// domain.InvoiceFinalizationStatus.
@@ -3845,59 +3846,6 @@ func (e *Engine) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscri
 	e.CollectInvoice(ctx, sub.TenantID, inv.ID, nil)
 }
 
-// BillFinalOnImmediateCancel emits the final partial-period invoice
-// for a sub that was canceled mid-period via the operator's immediate
-// Cancel action. Pre-PR-10, mid-period immediate cancels generated NO
-// final invoice — partial-period usage was never billed (revenue leak:
-// customer could rack up usage and cancel for free). For in_arrears
-// plans, the partial-period base was also never billed.
-//
-// Scope of the invoice:
-//   - Period: [current_period_start, canceled_at] — the elapsed
-//     portion of the just-canceled cycle.
-//   - Lines:
-//   - in_arrears base items: prorated by `elapsed / full_cycle`.
-//   - in_advance base items: skipped (already paid up-front; the
-//     relief for the unused portion is BillOnCancelDraftsTx's job).
-//   - Usage: aggregated for [periodStart, canceled_at] across every
-//     meter referenced by every item. Same shape as a normal cycle
-//     invoice's usage section, just with a truncated period_end.
-//   - billing_reason = subscription_cancel (distinguishes from the
-//     normal subscription_cycle invoice and from subscription_create).
-//
-// No-op when:
-//   - sub.Status != canceled (defensive — caller should have flipped it)
-//   - no current period set / canceled_at missing
-//   - canceled_at AT or BEFORE current_period_start (defensive)
-//   - a never-activated trial (trials are free, ADR-069)
-//   - computed subtotal rounds to zero (no in_arrears base AND no
-//     usage events; matches BillOnCreate's $0-invoice-skip pattern)
-//
-// Refuses (InvalidState, code unbilled_period) when canceled_at is AT or
-// AFTER current_period_end: the period ended and its close has not run.
-// The cycle close skips a canceled subscription, so letting the cancel
-// through would leave that period uninvoiced for good.
-//
-// Idempotent via the standard (subscription_id, period_start,
-// period_end) UNIQUE constraint — the period_end is canceled_at which
-// is durably stamped, so a retry against the same canceled sub
-// returns the existing-invoice idempotent skip.
-//
-// Auto-charge: attempted synchronously when a PM is ready, mirrors
-// BillOnCreate's post-finalize path. Without a PM, the invoice is
-// marked auto_charge_pending and the no-PM notifier fires. Dunning
-// takes over from there on a failed charge.
-func (e *Engine) BillFinalOnImmediateCancel(ctx context.Context, sub domain.Subscription) (domain.Invoice, error) {
-	ctx, span := startFinalOnCancelSpan(ctx, "billing.BillFinalOnImmediateCancel", sub)
-	defer span.End()
-	unpriced := unpricedUsage{}
-	p, err := e.priceFinalOnCancel(ctx, nil, sub, unpriced)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	return e.writeFinalOnCancel(ctx, nil, sub, p, unpriced)
-}
-
 // BillCancelTx writes a cancel's final invoice and its relief on the cancel's
 // transaction (ADR-056, ADR-118), so a failure of either rolls the cancel
 // back. It runs three steps, in this order:
@@ -3936,14 +3884,14 @@ func (e *Engine) BillCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscr
 	if r, err = e.BillOnCancelDraftsTx(ctx, tx, sub); err != nil {
 		return domain.Invoice{}, domain.Relief{}, afterCommit, fmt.Errorf("cancel proration relief: %w", err)
 	}
-	if inv, err = e.writeFinalOnCancel(ctx, tx, sub, p, unpriced); err != nil {
+	if inv, err = e.writeFinalOnCancel(ctx, tx, sub, p); err != nil {
 		return domain.Invoice{}, domain.Relief{}, afterCommit, fmt.Errorf("final-on-cancel invoice: %w", err)
 	}
 	return inv, r, afterCommit, nil
 }
 
-// startFinalOnCancelSpan starts a trace span for billing a cancel: the final
-// invoice, and in BillCancelTx also the relief.
+// startFinalOnCancelSpan starts the trace span for billing a cancel: its final
+// invoice and its relief (BillCancelTx).
 func startFinalOnCancelSpan(ctx context.Context, name string, sub domain.Subscription) (context.Context, trace.Span) {
 	return telemetry.Tracer("billing").Start(ctx, name,
 		trace.WithAttributes(
@@ -3965,10 +3913,9 @@ const (
 // base fees over the partial period [periodStart, canceledAt] (skipped
 // entirely when a threshold fire already billed the unprorated base)
 // plus segment-aware usage, honoring the threshold watermark's
-// clamped/full dual-window protocol. Extracted whole from
-// billFinalOnImmediateCancelImpl (behavior-preserving) to separate the
-// pricing computation from the cancel-invoice orchestration; it is the
-// cancel-path analog of buildLineItems and shares its segment model.
+// clamped/full dual-window protocol. It holds the pricing computation
+// apart from the cancel-invoice orchestration in priceFinalOnCancel; it is
+// the cancel-path analog of buildLineItems and shares its segment model.
 // Usage left unpriced is added to unpriced, and usage below zero to
 // belowZero, as in buildLineItems. usageSuffix ends each usage line's
 // description and says why the window ended early: cancelUsageSuffix or
@@ -4116,7 +4063,6 @@ const (
 // what writeFinalOnCancel needs, with nothing written yet.
 type finalOnCancel struct {
 	kind            finalOnCancelKind
-	live            bool
 	periodStart     time.Time
 	canceledAt      time.Time
 	billingLoc      *time.Location
@@ -4131,15 +4077,11 @@ type finalOnCancel struct {
 
 // priceFinalOnCancel runs the guards of a cancel's final invoice and prices
 // it: the threshold watermark, the lines and the tax. It writes nothing and
-// takes neither the tenant's number row nor a credit-note lock. With tx it
-// reads the watermark on tx. It refuses (InvalidState, code unbilled_period)
-// a cancel at or after current_period_end.
+// takes neither the tenant's number row nor a credit-note lock. It reads the
+// watermark on tx, the cancel's transaction. It refuses (InvalidState, code
+// unbilled_period) a cancel at or after current_period_end.
 func (e *Engine) priceFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.Subscription, unpriced unpricedUsage) (finalOnCancel, error) {
-	live, err := postgres.Livemode(ctx)
-	if err != nil {
-		return finalOnCancel{}, err
-	}
-	p := finalOnCancel{live: live}
+	p := finalOnCancel{}
 
 	if sub.Status != domain.SubscriptionCanceled {
 		return p, nil
@@ -4208,9 +4150,9 @@ func (e *Engine) priceFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 	// as with no fire (a fire bills no base), except behind a fire made
 	// before that change, which billed it in full.
 	//
-	// Read on the cancel's tx when there is one: after the cancel's UPDATE
-	// locked the subscription, and holding the threshold invoice FOR KEY
-	// SHARE until the cancel commits. A void of that invoice after this read then
+	// Read on the cancel's tx: after the cancel's UPDATE locked the
+	// subscription, and holding the threshold invoice FOR KEY SHARE until
+	// the cancel commits. A void of that invoice after this read then
 	// lands after the final invoice and the window is forgiven; a void that
 	// commits first is seen here, and the final invoice bills the window
 	// (ADR-066 amendment 2026-10-23).
@@ -4259,10 +4201,9 @@ func (e *Engine) priceFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 		return finalOnCancel{}, err
 	}
 	// The cancel's final invoice is the last one for this period, so usage
-	// it leaves unpriced is billed nowhere. Without tx, writeFinalOnCancel
-	// counts it once the decision is durable: no invoice, or the invoice
-	// written. With tx, the caller's transaction can still roll back, so it
-	// is left in unpriced for the caller to count after its commit.
+	// it leaves unpriced is billed nowhere. It is left in unpriced for the
+	// caller to count after its commit, because the cancel's transaction can
+	// still roll back.
 	belowZero := netNegativeUsage{}
 	lineItems, subtotal, err := e.buildCancelLineItems(ctx, sub, wm, plans, invoiceCurrency, periodStart, canceledAt, billingLoc, unpriced, belowZero, cancelUsageSuffix)
 	if err != nil {
@@ -4287,16 +4228,15 @@ func (e *Engine) priceFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 	return p, nil
 }
 
-// writeFinalOnCancel writes what priceFinalOnCancel priced: the invoice with
-// its number, finalize audit row and usage-below-zero row, or, for a zero
-// subtotal, only that row. With tx it writes on tx and leaves the tax commit
-// and collection to the caller's post-commit FinalizeOnCreateInvoice. Without
-// tx it writes in its own transaction, then commits the tax and collects.
-func (e *Engine) writeFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.Subscription, p finalOnCancel, unpriced unpricedUsage) (domain.Invoice, error) {
-	// Usage below zero billed 0 (#1193). Its row rides the transaction that
-	// makes this decision final: the caller's, the invoice's, or (no tx and
-	// no invoice) one of its own.
-	noteBelowZero := func(tx *sql.Tx, inv domain.Invoice) error {
+// writeFinalOnCancel writes on tx, the cancel's transaction, what
+// priceFinalOnCancel priced: the invoice with its number, finalize audit row
+// and usage-below-zero row, or, for a zero subtotal, only that row. It leaves
+// the tax commit and collection to the caller's post-commit
+// FinalizeOnCreateInvoice.
+func (e *Engine) writeFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.Subscription, p finalOnCancel) (domain.Invoice, error) {
+	// Usage below zero billed 0 (#1193). Its row rides tx, the transaction
+	// that makes this decision final.
+	noteBelowZero := func(inv domain.Invoice) error {
 		return e.noteNetNegativeTx(ctx, tx, sub, p.belowZero, domain.BillingReasonSubscriptionCancel, p.periodStart, p.canceledAt, inv)
 	}
 	switch p.kind {
@@ -4306,20 +4246,9 @@ func (e *Engine) writeFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 		// Nothing to bill — no in_arrears base AND no usage. The
 		// customer canceled before they consumed anything billable.
 		// Skip the $0 invoice (matches BillOnCreate's behavior).
-		if tx != nil {
-			if err := noteBelowZero(tx, domain.Invoice{}); err != nil {
-				return domain.Invoice{}, fmt.Errorf("usage below zero row (cancel tx): %w", err)
-			}
-			return domain.Invoice{}, nil
+		if err := noteBelowZero(domain.Invoice{}); err != nil {
+			return domain.Invoice{}, fmt.Errorf("usage below zero row (cancel tx): %w", err)
 		}
-		if len(p.belowZero) > 0 {
-			if err := e.subs.WithTenantTx(ctx, sub.TenantID, func(tx *sql.Tx) error {
-				return noteBelowZero(tx, domain.Invoice{})
-			}); err != nil {
-				return domain.Invoice{}, fmt.Errorf("usage below zero row (cancel): %w", err)
-			}
-		}
-		unpriced.record(p.live, sub)
 		return domain.Invoice{}, nil
 	}
 
@@ -4358,68 +4287,24 @@ func (e *Engine) writeFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 		BillingReason:      domain.BillingReasonSubscriptionCancel,
 		IsSimulated:        sub.TestClockID != "",
 	}
-	if tx != nil {
-		// Atomic path (CancelAtomicWithBill): insert on the caller's coordinator
-		// tx. No idempotent-skip — a unique violation poisons the caller's tx, so
-		// surface it and let the cancel roll back (same contract as the swap
-		// path's BillOnPlanSwapTx). The external finalize (tax commit +
-		// auto-charge) runs post-commit via FinalizeOnCreateInvoice; the AUDIT row
-		// and invoice.finalized ride THIS coordinator tx, so they commit
-		// atomically with the cancel.
-		created, err := e.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, sub.TenantID, invToCreate, p.lineItems)
-		if err != nil {
-			return domain.Invoice{}, err
-		}
-		if err := e.emitFinalizeAuditTx(ctx, tx, created); err != nil {
-			return domain.Invoice{}, fmt.Errorf("finalize audit (cancel tx): %w", err)
-		}
-		if err := noteBelowZero(tx, created); err != nil {
-			return domain.Invoice{}, fmt.Errorf("usage below zero row (cancel tx): %w", err)
-		}
-		return created, nil
-	}
-
-	inv, err := e.invoices.CreateInvoiceWithLineItemsAudited(ctx, sub.TenantID, invToCreate, p.lineItems, func(tx *sql.Tx, out domain.Invoice) error {
-		if err := e.emitFinalizeAuditTx(ctx, tx, out); err != nil {
-			return err
-		}
-		return noteBelowZero(tx, out)
-	})
+	// Insert on the caller's coordinator tx (CancelAtomicWithBill). No
+	// idempotent-skip — a unique violation poisons the caller's tx, so
+	// surface it and let the cancel roll back (same contract as the swap
+	// path's BillOnPlanSwapTx). The external finalize (tax commit +
+	// auto-charge) runs post-commit via FinalizeOnCreateInvoice; the AUDIT row
+	// and invoice.finalized ride THIS coordinator tx, so they commit
+	// atomically with the cancel.
+	created, err := e.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, sub.TenantID, invToCreate, p.lineItems)
 	if err != nil {
-		if errors.Is(err, errs.ErrAlreadyExists) {
-			slog.Info("subscription_cancel final invoice already exists (idempotent skip)",
-				"subscription_id", sub.ID,
-				"period_start", p.periodStart,
-				"canceled_at", p.canceledAt,
-			)
-			return domain.Invoice{}, nil
-		}
-		return domain.Invoice{}, fmt.Errorf("create final-on-cancel invoice: %w", err)
+		return domain.Invoice{}, err
 	}
-	unpriced.record(p.live, sub)
-
-	// The finalize AUDIT row and invoice.finalized already committed inside
-	// the create tx above.
-	if inv.TaxProvider != "" && inv.TaxCalculationID != "" {
-		if err := e.CommitTax(ctx, sub.TenantID, inv.ID, inv.TaxCalculationID); err != nil {
-			slog.Warn("tax: commit failed after final-on-cancel invoice",
-				"error", err, "tenant_id", sub.TenantID, "invoice_id", inv.ID)
-		}
+	if err := e.emitFinalizeAuditTx(ctx, tx, created); err != nil {
+		return domain.Invoice{}, fmt.Errorf("finalize audit (cancel tx): %w", err)
 	}
-
-	// Collect now (credits first, ADR-088); dunning takes over on a real
-	// decline. The invoice was queued in its create tx.
-	e.CollectInvoice(ctx, sub.TenantID, inv.ID, nil)
-
-	slog.Info("subscription_cancel final invoice generated",
-		"invoice_id", inv.ID,
-		"subscription_id", sub.ID,
-		"period_start", p.periodStart,
-		"canceled_at", p.canceledAt,
-		"total_cents", totalWithTax,
-		"line_items", len(p.lineItems),
-	)
-	return inv, nil
+	if err := noteBelowZero(created); err != nil {
+		return domain.Invoice{}, fmt.Errorf("usage below zero row (cancel tx): %w", err)
+	}
+	return created, nil
 }
 
 // cancelCreditInputs is the shared setup for the in_advance cancel-proration

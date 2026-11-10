@@ -187,9 +187,9 @@ func TestBillFinalOnImmediateCancel_FirstPeriod_SameDayCancel(t *testing.T) {
 		pricing, invoices, nil, &tzSettings{tz: "Asia/Kolkata"}, nil, nil,
 		clock.NewFake(cancelAt.Add(time.Minute))))
 
-	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
+	inv, err := engine.BillFinalOnCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
-		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
+		t.Fatalf("BillFinalOnCancel: %v", err)
 	}
 	if inv.ID == "" {
 		t.Fatal("no final invoice — the consumed signup day went unbilled (pre-clamp roundDays(6h)=0 shape)")

@@ -164,7 +164,7 @@ func TestBillFinalOnImmediateCancel_EverySettingsReadFailsClosed(t *testing.T) {
 	failEachSettingsRead(t, func(s *flakySettings, taxCalcs *recordingTaxCalcs) (int, error) {
 		engine, sub, invoices := cancelFixture(s)
 		engine.SetTaxCalculationStore(taxCalcs)
-		_, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
+		_, err := engine.BillFinalOnCancel(postgres.WithLivemode(context.Background(), true), sub)
 		return len(invoices.invoices), err
 	})
 }
