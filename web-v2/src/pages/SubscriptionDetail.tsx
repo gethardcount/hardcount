@@ -1953,7 +1953,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
         <DialogHeader>
           <DialogTitle>{existing ? 'Edit spend thresholds' : 'Set spend thresholds'}</DialogTitle>
           <DialogDescription>
-            When this period's usage total, or an item's usage, reaches a level you set, the usage so far is invoiced early at the next hourly billing run. The period keeps running. The base fee is billed as it would be with no threshold, and the period's next invoice bills the rest of the usage. Usage is not stopped. Set at least one level.
+            When this period's usage total, or an item's usage, reaches a level you set, that usage is invoiced early, at the first billing run once the invoice grace period (1 hour unless your server sets it) has passed. The period keeps running. The base fee is billed as it would be with no threshold, and the period's next invoice bills the rest of the usage. Usage is not stopped. Set at least one level.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-5">

@@ -228,9 +228,11 @@ func TestPostgresStore_Record_TenantIsolation(t *testing.T) {
 }
 
 // A calculation reused by a retried billing step (its idempotency key) is
-// recorded twice. Its age — what the finalize expiry guard checks — runs from
-// the FIRST record; reading the newest made an expired calculation look fresh.
-func TestPostgresStore_LookupCalculationCreatedAt_OldestRecord(t *testing.T) {
+// recorded twice. With no expiry in its response, its life — what the finalize
+// expiry guard checks — runs from the FIRST record; reading the newest made an
+// expired calculation look fresh. Then the response names Stripe's own
+// expires_at, and that instant is the answer whatever the record's age.
+func TestPostgresStore_LookupCalculationUsableUntil(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	tenantID := testutil.CreateTestTenant(t, db, "Tax Store Oldest")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 10*time.Second)
@@ -284,11 +286,59 @@ func TestPostgresStore_LookupCalculationCreatedAt_OldestRecord(t *testing.T) {
 	if err := store.LinkInvoice(ctx, tenantID, invoiceID, "calc_reused"); err != nil {
 		t.Fatalf("LinkInvoice: %v", err)
 	}
-	got, err := store.LookupCalculationCreatedAt(ctx, tenantID, invoiceID, "calc_reused")
+	got, err := store.LookupCalculationUsableUntil(ctx, tenantID, invoiceID, "calc_reused")
 	if err != nil {
-		t.Fatalf("LookupCalculationCreatedAt: %v", err)
+		t.Fatalf("LookupCalculationUsableUntil: %v", err)
 	}
-	if !got.Equal(first) {
-		t.Errorf("created_at = %v, want the first record's %v (the calculation's real age)", got, first)
+	if want := first.Add(tax.CalculationFallbackLifetime); !got.Equal(want) {
+		t.Errorf("usable until = %v, want %v: with no expiry in the response, the fallback lifetime after the FIRST record", got, want)
+	}
+
+	// The provider's own expiry, as Stripe Tax returns it: 90 days out.
+	expires := time.Now().UTC().Add(90 * 24 * time.Hour).Truncate(time.Second)
+	func() {
+		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		if _, err := tx.ExecContext(ctx, `UPDATE tax_calculations SET response = jsonb_build_object('id', 'calc_reused', 'expires_at', $1::bigint) WHERE provider_ref = 'calc_reused'`, expires.Unix()); err != nil {
+			t.Fatalf("store the provider's expiry: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+	}()
+	got, err = store.LookupCalculationUsableUntil(ctx, tenantID, invoiceID, "calc_reused")
+	if err != nil {
+		t.Fatalf("LookupCalculationUsableUntil: %v", err)
+	}
+	if !got.Equal(expires) {
+		t.Errorf("usable until = %v, want the response's expires_at %v", got, expires)
+	}
+
+	// The Stripe provider stores the calculation as the SDK marshals it: a
+	// missing or null expires_at is written as 0. Read as a time that is
+	// 1970, and every commit and finalize would be refused; it must read as
+	// "no expiry stored".
+	func() {
+		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		if _, err := tx.ExecContext(ctx, `UPDATE tax_calculations SET response = '{"id":"calc_reused","expires_at":0}'::jsonb WHERE provider_ref = 'calc_reused'`); err != nil {
+			t.Fatalf("store a zero expiry: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+	}()
+	got, err = store.LookupCalculationUsableUntil(ctx, tenantID, invoiceID, "calc_reused")
+	if err != nil {
+		t.Fatalf("LookupCalculationUsableUntil: %v", err)
+	}
+	if want := first.Add(tax.CalculationFallbackLifetime); !got.Equal(want) {
+		t.Errorf("usable until = %v with expires_at 0, want the fallback %v, not 1970", got, want)
 	}
 }

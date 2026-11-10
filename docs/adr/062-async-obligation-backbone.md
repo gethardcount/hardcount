@@ -308,8 +308,14 @@ promote-on-detect. A third option needed neither: set the boolean that already
 exists, in the statement that already issues the note.
 
 - `TransitionStatusTx` (the only writer of `status='issued'`) sets
-  `tax_reversal_pending` when the note has an amount and its invoice was taxed
-  by Stripe Tax and carries tax.
+  `tax_reversal_pending` when the note has an amount and Stripe Tax
+  calculated or recorded its invoice (the invoice has a calculation id or a
+  transaction id), with or without tax. A transaction with no tax records
+  the sale in Stripe's tax reports, and Stripe reverses it like any other.
+  The provider alone is not the test: an invoice of a Stripe Tax tenant that
+  Stripe was never asked to calculate (an exempt or reverse-charge customer,
+  a credit-only invoice) never gets a transaction, and a marker on its note
+  would never clear.
 - `SetTaxTransaction` stores the reversal and clears the marker in one write.
 - `ListPendingCreditNoteTaxReversal` lists marked notes whose invoice has a tax
   transaction. The structural branch, its 24-hour window and the promote step
@@ -353,3 +359,12 @@ yet recorded at Stripe. The CHANGELOG gives one UPDATE that marks those too.
 An earlier version running beside this one clears markers this version set:
 its sweep reads a marked note whose invoice has no tax transaction as stale.
 So that UPDATE is run after the last earlier replica has stopped.
+
+## Note 2026-11-10 — the tax-commit window was not a provider TTL
+
+"Status: build deferred" says `tax_commit` and `tax_reversal` have
+"TTL-encoding windows no queue can delete". The 24-hour tax-commit window
+encoded no provider TTL: 24 hours is the life of a Stripe idempotency key. A
+Stripe Tax calculation is usable until its own `expires_at`, 90 days after it
+is made, and the tax-commit sweep now stops at that expiry (see the
+2026-11-10 amendment of [ADR-111](111-a-write-off-has-no-tax-leg.md)).

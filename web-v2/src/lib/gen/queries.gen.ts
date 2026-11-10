@@ -6960,9 +6960,11 @@ export const getSetSubscriptionBillingThresholdsUrl = (id: string,) => {
  * first threshold reached triggers the invoice.
  *
  * The threshold invoice bills the period's usage so far, and no base
- * fee. The period keeps its dates, the base fee is billed as it would
- * be with no threshold, and the period's next invoice bills the rest
- * of the usage.
+ * fee. "So far" ends one `INVOICE_GRACE_PERIOD` before the invoice is
+ * built (its `billing_period_end`), so usage that arrives late is
+ * still billed. The period keeps its dates, the base fee is billed as
+ * it would be with no threshold, and the period's next invoice bills
+ * the rest of the usage.
  * `reset_billing_cycle`, which started a new period at the threshold
  * invoice, was removed; a body that sends it is refused with 422.
  *
@@ -10945,9 +10947,9 @@ export const getRetryInvoiceTaxUrl = (id: string,) => {
 /**
  * Calculates tax again on a draft invoice whose `tax_status` is
  * `pending`, after you fixed the cause (for example the customer's
- * address). It also refreshes a draft whose Stripe Tax calculation is
- * more than 23 hours old and was never recorded, which finalize
- * refuses. The route takes no body.
+ * address). It also refreshes a draft whose Stripe Tax calculation
+ * expires within 1 hour or has expired, and was never recorded, which
+ * finalize refuses. The route takes no body.
  *
  * Each call rewrites the tax on the lines and the invoice. A retry of
  * pending tax adds one to `tax_retry_count`; refreshing an expired

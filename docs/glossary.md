@@ -171,7 +171,8 @@ follows.
   [the decision](adr/050-unpaid-source-proration-policy.md)
 - **spend threshold**: A limit on one subscription that issues an invoice
   early. It is either a money amount (`amount_gte`) checked against the
-  period's usage so far, or a usage count on one item (`usage_gte`).
+  period's usage so far, or a usage count on one item (`usage_gte`). "So
+  far" ends one `INVOICE_GRACE_PERIOD` before the check.
   Crossing it issues an invoice with `billing_reason` "threshold" for that
   usage, and no base fee. The period keeps its dates, and the base fee is
   billed as it would be with no threshold.
@@ -280,7 +281,8 @@ follows.
   retries and **Collect payment** all share it. A charge with a clear answer
   lifts it at once. After an unclear answer (a crash, a shutdown, a timeout)
   it stays for the rest of the 5 minutes, and the reconciler reads the
-  payment once it has ended. A hold left by a charge that stopped before it
+  payment once it has ended. A result recorded sooner (the payment's webhook)
+  lifts it then. A hold left by a charge that stopped before it
   asked Stripe to take the money stays until the reconciler clears it.
   [More](concepts/payments.md#when-the-answer-is-unclear)
 - **reconciler**: The check that asks Stripe what happened to payments

@@ -72,9 +72,11 @@ hand, can bill it.
 - Usage on a canceled subscription is not flagged `after_close`, even for
   a period that was invoiced: it counts as `outside_subscription`. The
   steps below find it too.
-- A spend-threshold invoice bills a period's usage early, and the period's
-  own invoice then bills only the usage stamped after it. Usage stamped
-  before the spend-threshold invoice but arriving after it is on neither.
+- A spend-threshold invoice bills a period's usage early, up to one
+  `INVOICE_GRACE_PERIOD` before it is built (its `billing_period_end`), and
+  the period's own invoice then bills only the usage stamped from that
+  instant on. Usage stamped before it but arriving after the
+  spend-threshold invoice is built is on neither.
   While that invoice is not paid (open or written off), such usage is not
   flagged, so the counter misses it
   ([Spend thresholds](../../concepts/invoices.md#spend-thresholds-an-invoice-made-early)).
@@ -265,7 +267,7 @@ rows of `PLAN`, this subscription's plan.
 **To stop it happening again:** if a pipeline often delivers later than
 the grace, raise `INVOICE_GRACE_PERIOD` above its worst delay (a duration
 such as `3h`, at most `72h`) and restart. Every period-end invoice then
-comes that much later.
+comes that much later, and so does every spend-threshold invoice.
 
 **Verify:** step 1's list shows the one-off invoice, `finalized` or `paid`,
 with its memo.
@@ -287,5 +289,9 @@ with its memo.
 - **The subscription's period.** During the grace the subscription still
   shows the ended period. Spend thresholds and the current credit balance
   do not count the new period's usage until the invoice is built.
+- **A spend-threshold invoice.** It bills usage up to one grace before it is
+  built, so it comes at least one grace after the usage that crossed the
+  threshold. A crossing within the last grace of a period makes no
+  threshold invoice; the period's own invoice bills it.
 
 Related: [ADR-120](../../adr/120-invoice-grace-period-for-late-usage.md).

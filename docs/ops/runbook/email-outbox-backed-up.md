@@ -90,6 +90,35 @@ so it failed at once with
 no retry. Retrying the row sends the same address and fails again. Fix the
 customer's email or CC list (or the member's email) and send again.
 
+A `last_error` that begins `email outbox: handler panic` is a bug in
+Hardcount, not a provider problem. The email is retried with growing waits,
+like any other error.
+
+1. Find the ERROR line `email outbox: handler panicked; counting a failed
+   attempt` with the row's `outbox_id`. Its `stack` field shows where.
+2. Report the stack as a bug. A row that keeps panicking fails after 15
+   tries. Once a version that fixes the bug runs, step 4 of the fix sends
+   it again, unless it is a password reset or payment setup email (see
+   step 4). If the row was queued more than 7 days ago, widen step 4's
+   `created_at` window to include it.
+
+An email that panicked on an earlier version failed on its first try. Its
+`last_error` begins `email outbox: payload decode failed: handler panic`,
+and step 4 leaves it out. To send one again:
+
+```sql
+SET app.bypass_rls = 'on';
+UPDATE email_outbox
+SET status = 'pending', attempts = 0, next_attempt_at = now()
+WHERE status = 'failed' AND id = '<the row id>'
+  AND email_type NOT IN ('password_reset', 'payment_setup_link', 'payment_setup_request');
+```
+
+The `email_type` filter leaves out password resets and payment setup
+emails, as step 4 does. Their links expire: a reset link after 1 hour, a
+setup link after 24 hours. For those, follow step 4: the user asks for a
+new reset, or you send a new setup link.
+
 ## Fix
 
 1. Fix the cause in `last_error`. Verify the sender with the relay, correct

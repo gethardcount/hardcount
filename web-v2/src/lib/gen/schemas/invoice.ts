@@ -99,8 +99,8 @@ export interface Invoice {
   tax_provider?: string;
   /**
      * The tax provider's calculation reference (Stripe Tax only). A
-     * Stripe Tax calculation expires after 24 hours; Hardcount keeps
-     * the reference so a finalized invoice can still be traced.
+     * Stripe Tax calculation expires 90 days after it is made; Hardcount
+     * keeps the reference so a finalized invoice can still be traced.
      * Absent for the manual and none providers.
      */
   tax_calculation_id?: string;
@@ -152,7 +152,11 @@ export interface Invoice {
      * The earliest time the background retry may calculate tax again,
      * after a failed attempt. Absent when a retry may run now, and when
      * none is scheduled: an error code Hardcount does not retry, or the
-     * automatic retries are used up.
+     * automatic retries are used up. After the invoice is finalized, it
+     * is the earliest time Hardcount retries a tax commit or tax
+     * reversal that failed. It can hold a past time with nothing left
+     * to retry, when the Stripe Tax calculation expired while a commit
+     * was waiting.
      */
   tax_next_retry_at?: string;
   /**

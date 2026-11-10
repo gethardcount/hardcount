@@ -43,8 +43,9 @@ func (g *guardCalcStore) Record(context.Context, string, string, tax.Request, *t
 	return "taxcalc_x", g.recordErr
 }
 func (g *guardCalcStore) LinkInvoice(context.Context, string, string, string) error { return g.linkErr }
-func (g *guardCalcStore) LookupCalculationCreatedAt(context.Context, string, string, string) (time.Time, error) {
-	return g.createdAt, g.lookupErr
+func (g *guardCalcStore) LookupCalculationUsableUntil(context.Context, string, string, string) (time.Time, error) {
+	// A calculation recorded at createdAt whose response names no expiry.
+	return g.createdAt.Add(tax.CalculationFallbackLifetime), g.lookupErr
 }
 
 // The finalize expiry guard fails closed on a read error (it returned nil, so
@@ -131,7 +132,7 @@ func TestEvaluateThresholds_PriceReadFails(t *testing.T) {
 	mp.pricesErr = errors.New("db down")
 	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
 	periodStart := *sub.CurrentBillingPeriodStart
-	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5)); err == nil {
+	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5), periodStart.AddDate(0, 0, 5)); err == nil {
 		t.Fatal("evaluateThresholds with a failed price read must fail, not drop the line")
 	}
 }
@@ -178,7 +179,7 @@ func TestEvaluateThresholds_NegativeRunningUsageCountsAsZero(t *testing.T) {
 	engine, _, _ := setupThresholdEngine(thresholds, -500)
 	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
 	periodStart := *sub.CurrentBillingPeriodStart
-	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5)); err != nil {
+	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5), periodStart.AddDate(0, 0, 5)); err != nil {
 		t.Fatalf("a net-negative running total must not fail the evaluation: %v", err)
 	}
 }

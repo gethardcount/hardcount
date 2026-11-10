@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -145,4 +146,69 @@ func TestFinalizeCrossIntervalSwap_PostCommitLegsOutliveCallerContext(t *testing
 	if !slices.Equal(fb.postCommit, wantReliefThenFinalize) || !slices.Equal(fb.postCommitCtxErr, wantLegsLive) {
 		t.Errorf("post-commit legs %v saw ctx.Err() = %v, want %v: the caller's cancellation must not reach them", fb.postCommit, fb.postCommitCtxErr, wantLegsLive)
 	}
+}
+
+// A relief credit note that was not issued has reduced nothing yet. The
+// change's invoice must then not be collected in the call: collection would
+// charge the card the whole of it, and the credit would land on the balance
+// later. The billing run issues the note and then collects the invoice.
+// On each of the three callers.
+func TestReliefNotIssued_TheChangesInvoiceIsNotCollectedInTheCall(t *testing.T) {
+	wantReliefOnly := []string{"relief"}
+	notIssued := errors.New("issue relief credit note cn_relief: database is shutting down")
+
+	t.Run("immediate cancel", func(t *testing.T) {
+		svc := NewService(newMemStore(), nil)
+		fb := &fakeBiller{}
+		svc.SetBiller(fb)
+		id := seedActiveSub(t, svc, fb)
+		fb.postCommit = nil
+		fb.finalCancelInv = domain.Invoice{ID: "inv_final", Currency: "USD"}
+		fb.draftIDs = []string{"cn_relief"}
+		fb.draftCredit = 2450
+		fb.finishErr = notIssued
+
+		if _, _, err := svc.Cancel(context.Background(), "t1", id); err != nil {
+			t.Fatalf("Cancel: %v (the cancel committed; a relief left for the sweep is not its error)", err)
+		}
+		if !slices.Equal(fb.postCommit, wantReliefOnly) {
+			t.Errorf("post-commit legs = %v, want %v: the final invoice must wait for the relief", fb.postCommit, wantReliefOnly)
+		}
+	})
+
+	t.Run("scheduled cancel", func(t *testing.T) {
+		store := newMemStore()
+		cancelAt := time.Date(2027, 8, 16, 0, 0, 0, 0, time.UTC)
+		dueCancelSub(t, store, cancelAt)
+		fb := &fakeBiller{
+			finalCancelInv: domain.Invoice{ID: "inv_final", Currency: "USD"},
+			draftIDs:       []string{"cn_relief"},
+			draftCredit:    2450,
+			finishErr:      notIssued,
+		}
+		svc := NewService(store, nil)
+		svc.SetBiller(fb)
+
+		if err := svc.FireDueScheduledCancel(context.Background(), "t1", "sub_due", cancelAt); err != nil {
+			t.Fatalf("FireDueScheduledCancel: %v", err)
+		}
+		if !slices.Equal(fb.postCommit, wantReliefOnly) {
+			t.Errorf("post-commit legs = %v, want %v", fb.postCommit, wantReliefOnly)
+		}
+	})
+
+	t.Run("cross-interval swap", func(t *testing.T) {
+		fb := &fakeBiller{finishErr: notIssued}
+		svc := NewService(newMemStore(), nil)
+		svc.SetBiller(fb)
+		inv := domain.Invoice{ID: "inv_final"}
+
+		svc.FinalizeCrossIntervalSwap(context.Background(), "t1", domain.Subscription{ID: "sub_1", TenantID: "t1"}, ItemChangeResult{
+			swapRelief:          domain.Relief{DraftIDs: []string{"cn_relief"}},
+			crossAxisNewInvoice: &inv,
+		})
+		if !slices.Equal(fb.postCommit, wantReliefOnly) {
+			t.Errorf("post-commit legs = %v, want %v", fb.postCommit, wantReliefOnly)
+		}
+	})
 }
