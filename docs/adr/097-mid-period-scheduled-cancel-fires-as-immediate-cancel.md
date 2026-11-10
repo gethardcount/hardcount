@@ -100,6 +100,8 @@ immediate-cancel surfaces as `InvalidState` (status no longer active) and
 is treated as success — the sub is canceled, and the CAS guarantees exactly
 one biller ever ran.
 
+> **2026-11-10 ([ADR-139](139-cancel-prices-before-its-transaction.md)):** the fire is priced before its transaction, and its CAS also matches the period it was priced from (`current_billing_period_start`, `next_billing_at`). A period that moved in between answers `ErrWatermarkMoved` with nothing written, and the billing run fires again.
+
 **Scan-arm scoping (livelock guard).** The `OR` arm admits only rows the
 executor can make progress on: `s.status = 'active'` in SQL (trialing
 cancels belong to the trial scan — ADR-069), parenthesized inside every

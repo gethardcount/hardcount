@@ -16154,9 +16154,11 @@ paths:
             could not be invoiced; retry billing first. Code
             `funding_invoice_tax_pending`: an invoice the relief would credit
             is a draft whose tax is not calculated yet; retry once it is.
-            Code `concurrent_change`: Postgres stopped the cancel because of
-            another change to the same records (it broke a deadlock, or ended a
-            wait for a lock), so the subscription is not canceled; send the same
+            Code `concurrent_change`: another change to the same records
+            stopped the cancel, so the subscription is not canceled: Postgres
+            broke a deadlock or ended a wait for a lock, or the subscription
+            changed twice while the cancel priced its final invoice (the cancel
+            prices once more on its own after the first change). Send the same
             request again, with the same `Idempotency-Key`. A period that had
             ended and was billed first stays billed.
           content:

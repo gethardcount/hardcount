@@ -177,6 +177,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [135](135-restore-refuses-to-serve-until-caught-up.md) | 2026-11-09 | Accepted | Platform & ops | A restored database is marked, and serve refuses to start until `hardcount restore catch-up` has applied Stripe's events since the backup; a payment whose invoice was lost is listed for the operator |
 | [136](136-deadlock-loser-answers-409-at-its-handler.md) | 2026-11-09 | Accepted (amended 2026-11-10) | Platform & ops | A request that loses a database deadlock, or whose lock wait Postgres ended, answers `409` `concurrent_change` on twelve routes, so the same idempotency key runs again; Hardcount does not retry it itself |
 | [137](137-charge-stamps-invoice-before-confirming.md) | 2026-11-10 | Accepted | Payments | A charge creates its PaymentIntent unconfirmed, puts it on the invoice as an unknown outcome in one compare-and-set, then confirms; an unclear answer always names the payment, so nothing is parked, nothing waits 24 hours, and the stale-hold sweep asks Stripe nothing |
+| [139](139-cancel-prices-before-its-transaction.md) | 2026-11-10 | Accepted | Billing | A cancel prices its final invoice and plans its relief before its transaction, proves the plan on it (period compare-and-set, items, billing intervals, watermark) and plans again once when it moved; the tax call holds no lock or connection |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified
 > across every ref). It is a skipped number, not a lost decision.

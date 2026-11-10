@@ -136,3 +136,7 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
 - `internal/api/deadlock_conflict_e2e_test.go`: a real deadlock between a cancel and a payment.
 - [ADR-066](066-threshold-money-semantics.md): the D2 deadlock.
 - [Idempotency](../api/idempotency.md) and [Errors](../api/errors.md#409-conflict).
+
+## Amendment 2026-11-10: the cancel's second plan is not a deadlock retry
+
+The cancel now plans its bill before its transaction and plans it again once when the subscription moved in between ([ADR-139](139-cancel-prices-before-its-transaction.md)). That second plan follows a compare-and-set that wrote nothing, not a deadlock: a 40P01 or a 55P03 still answers `409` here, and is not run again in the process. Before a cancel's second plan, or its `409` `concurrent_change` after a second move, only an ended period's invoice and a `tax_calculations` row with no invoice can have been saved, as before a lost deadlock.
