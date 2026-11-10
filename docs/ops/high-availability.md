@@ -86,6 +86,8 @@ The worst case is `SHUTDOWN_DRAIN_DELAY` plus 90 seconds. Usually the three stag
 
 A grace period shorter than that can kill a copy (SIGKILL) halfway through. Hardcount is built to survive that. Queued webhooks and emails that a copy had claimed are picked up again when its claim on them runs out. The next copy to start recovers a killed test-clock advance. The cost is that a few webhooks or emails can be sent twice.
 
+One job is not waited for at all: the retry of invoices stuck on Stripe settings that runs after you connect Stripe. A stop leaves each invoice it was working on either still waiting for tax or finalized, never in between. The invoices it did not reach stay in the needs-attention list: those waiting for Stripe to be connected are retried by the background tax retry, and those with a rejected key wait for a **Retry tax** click or the next connect.
+
 ## Upgrades
 
 [Upgrade two or more copies](../upgrades.md#upgrade-two-or-more-copies) says in which order to upgrade the copies, and [Going back](../upgrades.md#going-back) how to undo an upgrade.
