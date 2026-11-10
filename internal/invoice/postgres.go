@@ -349,9 +349,17 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, id string) (domain.In
 		return domain.Invoice{}, err
 	}
 	defer postgres.Rollback(tx)
+	return s.GetTx(ctx, tx, tenantID, id)
+}
 
+// GetTx is Get on the caller's tenant transaction, with no lock. A credit
+// note written on a cancel's or an item change's transaction reads its
+// invoice here, so that transaction asks for no second connection while it
+// holds its locks (ADR-139). tenantID is the transaction's own; RLS scopes
+// the read.
+func (s *PostgresStore) GetTx(ctx context.Context, tx *sql.Tx, _ string, id string) (domain.Invoice, error) {
 	var inv domain.Invoice
-	err = tx.QueryRowContext(ctx, `SELECT `+invCols+`, `+invClockCol+` FROM invoices WHERE id = $1`, id).
+	err := tx.QueryRowContext(ctx, `SELECT `+invCols+`, `+invClockCol+` FROM invoices WHERE id = $1`, id).
 		Scan(append(s.scanInvDest(&inv), &inv.TestClockID)...)
 	if err == sql.ErrNoRows {
 		return domain.Invoice{}, errs.ErrNotFound
@@ -1783,7 +1791,12 @@ func (s *PostgresStore) ListLineItems(ctx context.Context, tenantID, invoiceID s
 		return nil, err
 	}
 	defer postgres.Rollback(tx)
+	return s.ListLineItemsTx(ctx, tx, tenantID, invoiceID)
+}
 
+// ListLineItemsTx is ListLineItems on the caller's tenant transaction, for
+// the same callers as GetTx.
+func (s *PostgresStore) ListLineItemsTx(ctx context.Context, tx *sql.Tx, _ string, invoiceID string) ([]domain.InvoiceLineItem, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, invoice_id, tenant_id, line_type, COALESCE(meter_id,''), description,
 			quantity, unit_amount_cents, amount_cents, tax_rate, tax_amount_cents,

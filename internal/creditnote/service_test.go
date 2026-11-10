@@ -522,6 +522,16 @@ func (m *memInvoiceReader) ListLineItems(_ context.Context, _, invoiceID string)
 	return m.lineItems[invoiceID], nil
 }
 
+// GetTx and ListLineItemsTx ignore the tx: the in-memory double has one copy
+// of each invoice.
+func (m *memInvoiceReader) GetTx(ctx context.Context, _ *sql.Tx, tenantID, id string) (domain.Invoice, error) {
+	return m.Get(ctx, tenantID, id)
+}
+
+func (m *memInvoiceReader) ListLineItemsTx(ctx context.Context, _ *sql.Tx, tenantID, invoiceID string) ([]domain.InvoiceLineItem, error) {
+	return m.ListLineItems(ctx, tenantID, invoiceID)
+}
+
 func (m *memInvoiceReader) LockForCreditNoteTx(ctx context.Context, _ *sql.Tx, tenantID, id string) (domain.Invoice, error) {
 	return m.Get(ctx, tenantID, id)
 }

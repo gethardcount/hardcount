@@ -566,11 +566,14 @@ func (s *Service) ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, in
 // so the error (code credit_reversal_source_taken) is returned, not
 // swallowed: the caller must fail, not carry on.
 //
-// bindForCustomer stamps the grant in simulated time when the customer is
-// clock-pinned, and the same instant decides which source grants are past
-// their expiry.
+// It binds no clock: both callers bind ctx to the invoice's time domain
+// before they open tx (invoice.Service.Void through bindForInvoice; the
+// cancel and the plan swap through the subscription's bindForSub), and a
+// bind here would read the customer's clock on another connection while tx
+// holds the invoice row (ADR-139). clock.Now(ctx) stamps the grant in
+// simulated time when the customer is clock-pinned, and the same instant
+// decides which source grants are past their expiry.
 func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string) (domain.CreditReturn, error) {
-	ctx = s.bindForCustomer(ctx, tenantID, customerID)
 	sums, err := s.store.InvoiceCreditsTx(ctx, tx, tenantID, customerID, invoiceID)
 	if err != nil {
 		return domain.CreditReturn{}, fmt.Errorf("reverse credits for invoice %s: %w", invoiceID, err)
