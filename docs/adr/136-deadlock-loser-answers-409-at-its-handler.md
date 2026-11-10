@@ -1,7 +1,7 @@
 # ADR-136: A deadlock loser answers 409 at its handler; no in-process retry
 
 **Date:** 2026-11-09
-**Status:** Accepted (amended 2026-11-10: a lock wait that Postgres ended answers the same `409`, and six more routes answer it; [amendment](#amendment-2026-11-10-a-lock-wait-postgres-ended-answers-the-same-409-on-six-more-routes))
+**Status:** Accepted (amended 2026-11-10: a lock wait that Postgres ended answers the same `409`, and six more routes answer it; [amendment](#amendment-2026-11-10-a-lock-wait-postgres-ended-answers-the-same-409-on-six-more-routes); manual invoice create converts too, [amendment](#amendment-2026-11-10-later-manual-invoice-create-converts))
 
 ## Summary
 
@@ -116,7 +116,7 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
 
 5. **Routes left out.** They keep the stored `500` for a 55P03:
    - `POST /v1/subscriptions/{id}/schedule-cancel`, `PUT /v1/subscriptions/{id}/pause-collection`, `POST /v1/subscriptions/{id}/end-trial`, `POST /v1/subscriptions/{id}/extend-trial`, `POST /v1/subscriptions/{id}/retry-billing`, `PUT /v1/subscriptions/{id}/billing-thresholds`, and the plan and meter writes. They wait behind one writer of one subscription or plan, so their wait passes a lock limit only when one tax call or one usage read does.
-   - The routes that number a document: credit-note create (`POST /v1/credit-notes`, before its `auto_issue` step), the refund route (`POST /v1/invoices/{id}/refund`) and manual invoice create (`POST /v1/invoices`). They wait on the account's number row (`tenant_settings`). An immediate plan change across billing intervals holds that row across its usage read and its Stripe Tax call, because it numbers its refund credit note before it prices (`subscription.Service.applyCrossIntervalPlanSwapTx`). Until that swap prices first, these routes can wait behind it.
+   - The routes that number a document: credit-note create (`POST /v1/credit-notes`, before its `auto_issue` step) and the refund route (`POST /v1/invoices/{id}/refund`). (Manual invoice create, `POST /v1/invoices`, was here until 2026-11-10; see the amendment below.) They wait on the account's number row (`tenant_settings`). An immediate plan change across billing intervals holds that row across its usage read and its Stripe Tax call, because it numbers its refund credit note before it prices (`subscription.Service.applyCrossIntervalPlanSwapTx`). Until that swap prices first, these routes can wait behind it.
    - Every other route.
 
 **Why the cause need not be known.** A 55P03 and a 40P01 both abort the transaction, so nothing it wrote is kept, and the answer depends only on what committed before it. The WARN lines tell the two apart for an operator.
@@ -137,6 +137,22 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
 - [ADR-066](066-threshold-money-semantics.md): the D2 deadlock.
 - [Idempotency](../api/idempotency.md) and [Errors](../api/errors.md#409-conflict).
 
-## Amendment 2026-11-10: the cancel's second plan is not a deadlock retry
+## Amendment 2026-11-10 (later): manual invoice create converts
+
+Manual invoice create (`POST /v1/invoices`) was left out because it took its
+invoice number on its own connection before its insert, and the number
+stayed taken. Since #1681 the number is taken inside the insert's one
+transaction (`CreateNumberedAudited`), and everything before that
+transaction only reads (the customer's test clock, the subscription check,
+the tenant settings, the currency). So a lost lock wait or deadlock leaves
+nothing behind, and the handler answers `409` `concurrent_change` through
+`respond.ConcurrentChangeAsConflict`, for a bare header and for a create with
+lines alike. A resend with the same key creates the invoice once.
+
+Tests: `TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain`, cases
+`invoice_create` and `invoice_create_with_lines` (a second session holds the
+account's invoice-number row).
+
+## Amendment 2026-11-10 (ADR-139): the cancel's second plan is not a deadlock retry
 
 The cancel now plans its bill before its transaction and plans it again once when the subscription moved in between ([ADR-139](139-cancel-prices-before-its-transaction.md)). That second plan follows a compare-and-set that wrote nothing, not a deadlock: a 40P01 or a 55P03 still answers `409` here, and is not run again in the process. Before a cancel's second plan, or its `409` `concurrent_change` after a second move, only an ended period's invoice and a `tax_calculations` row with no invoice can have been saved, as before a lost deadlock.

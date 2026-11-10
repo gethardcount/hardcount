@@ -107,8 +107,8 @@ These routes answer `concurrent_change`:
 
 - Subscriptions: create, activate, cancel, and add, change or remove an item.
 - Customers: update, and write the billing profile.
-- Invoices: record payment, and collect when it settles the invoice without
-  a card charge.
+- Invoices: create, record payment, and collect when it settles the invoice
+  without a card charge.
 - Credit notes: issue, and the issue step of create with `auto_issue`. The
   create step itself answers `500`.
 

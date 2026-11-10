@@ -28,7 +28,9 @@ import (
 // subscription create and activate, item add and item remove (both branches
 // of each), and customer update and billing profile. A second session holds
 // that lock. The cancel, a route that already converted a deadlock, waits for
-// the subscription row instead.
+// the subscription row instead. Manual invoice create (a bare header, and
+// with lines) waits for the account's invoice-number row, which it takes in
+// its one transaction.
 //
 // The server runs on a pool whose role has lock_timeout = 300ms, as an
 // operator's ALTER ROLE hardcount_app SET lock_timeout does today. So the
@@ -83,6 +85,19 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 		if _, err := tx.ExecContext(t.Context(), `SELECT 1 FROM subscriptions WHERE id = $1 FOR UPDATE`, r.subID); err != nil {
 			t.Fatalf("hold the subscription row: %v", err)
 		}
+	}
+	// holdNumberRow holds the account's invoice-number row, which a manual
+	// invoice create takes inside its one transaction (#1681). The upsert
+	// locks it whether or not a row exists yet.
+	holdNumberRow := func(t *testing.T, tx *sql.Tx, r *lagRig) {
+		if _, err := tx.ExecContext(t.Context(), `
+			INSERT INTO tenant_settings (tenant_id) VALUES ($1)
+			ON CONFLICT (tenant_id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id`, r.tenantID); err != nil {
+			t.Fatalf("hold the invoice-number row: %v", err)
+		}
+	}
+	manualInvoices := func(t *testing.T, r *lagRig) int {
+		return flowCount(t, r.db, `SELECT count(*) FROM invoices WHERE customer_id = $1 AND billing_reason = 'manual'`, r.custID)
 	}
 	items := func(t *testing.T, r *lagRig) int {
 		return flowCount(t, r.db, `SELECT count(*) FROM subscription_items WHERE subscription_id = $1 AND deleted_at IS NULL`, r.subID)
@@ -268,6 +283,49 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 			once: func(t *testing.T, r *lagRig) {
 				if got := customer(r)["display_name"]; got != "Renamed Customer" {
 					t.Fatalf("display_name %v, want Renamed Customer", got)
+				}
+			},
+		},
+		{
+			name: "invoice_create", rig: func(t *testing.T) *lagRig { return newLagRigBare(t, "in_advance", 0) },
+			hold:   holdNumberRow,
+			method: http.MethodPost, path: func(*lagRig) string { return "/v1/invoices" },
+			body: func(r *lagRig) any { return map[string]any{"customer_id": r.custID, "currency": "USD"} },
+			at:   addAt, want: http.StatusCreated,
+			unchanged: func(t *testing.T, r *lagRig) {
+				if n := manualInvoices(t, r); n != 0 {
+					t.Fatalf("manual invoices %d, want 0", n)
+				}
+			},
+			once: func(t *testing.T, r *lagRig) {
+				if n := manualInvoices(t, r); n != 1 {
+					t.Fatalf("manual invoices %d, want 1", n)
+				}
+			},
+		},
+		{
+			name: "invoice_create_with_lines", rig: func(t *testing.T) *lagRig { return newLagRigBare(t, "in_advance", 0) },
+			hold:   holdNumberRow,
+			method: http.MethodPost, path: func(*lagRig) string { return "/v1/invoices" },
+			body: func(r *lagRig) any {
+				return map[string]any{
+					"customer_id": r.custID, "currency": "USD",
+					"line_items": []map[string]any{{"description": "Setup", "quantity": 1, "unit_amount_cents": 5000}},
+				}
+			},
+			at: addAt, want: http.StatusCreated,
+			unchanged: func(t *testing.T, r *lagRig) {
+				if n := manualInvoices(t, r); n != 0 {
+					t.Fatalf("manual invoices %d, want 0", n)
+				}
+			},
+			once: func(t *testing.T, r *lagRig) {
+				if n := manualInvoices(t, r); n != 1 {
+					t.Fatalf("manual invoices %d, want 1", n)
+				}
+				if n := flowCount(t, r.db, `SELECT count(*) FROM invoice_line_items li JOIN invoices i ON i.id = li.invoice_id
+					WHERE i.customer_id = $1 AND i.billing_reason = 'manual'`, r.custID); n != 1 {
+					t.Fatalf("line items %d, want 1", n)
 				}
 			},
 		},
