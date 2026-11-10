@@ -17488,7 +17488,10 @@ paths:
             an unpaid invoice for the current period (a written-off invoice
             is unpaid); settle or void it first. Code `subscription_period_moved`: the billing period
             changed while the request ran; read the subscription again and
-            retry. Code `item_changed`: a plan change found the
+            retry. It is also returned for an immediate change to a plan
+            with another billing interval when a spend-threshold invoice
+            has billed past the current time, or, for plans billed in
+            arrears, up to it; on a test clock, advance the clock first. Code `item_changed`: a plan change found the
             subscription's items changed by another request that finished
             first; read the subscription again and retry. Code
             `unbilled_period`: a billing period ended and could not be

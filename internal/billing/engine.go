@@ -641,12 +641,6 @@ type InvoiceWriter interface {
 	// threshold invoice FOR KEY SHARE until the tx ends, so a void after the
 	// read lands after the closer's commit; a payment does not wait for it.
 	GetLatestThresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error)
-	// GetInvoiceForPeriod returns the invoice holding the period slot of
-	// idx_invoices_billing_period_dedup (subscription, period_start,
-	// period_end; manual and proration invoices hold none) — the row
-	// billOnePeriod's ErrAlreadyExists re-entry path heals ($0 MarkPaid
-	// crash window, ADR-066).
-	GetInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error)
 	ListLineItems(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceLineItem, error)
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
 	// SetNoPMNotifiedAt stamps the send-once marker for the no-PM setup-link
@@ -1469,10 +1463,8 @@ type periodCloseOutcome struct {
 // invoice). No network I/O inside: tax ran before, CommitTax / credits /
 // charge run after. The invoice store queues the invoice's invoice.finalized
 // on this tx. Error contract: subscription.ErrWatermarkMoved
-// → errPeriodMoved (nothing written); errs.ErrAlreadyExists (the cycle
-// index — reachable only for a pre-cutover row whose invoice exists while
-// the sub is still due, since the CAS now runs before the insert) propagates
-// for the heal path; anything else is an error.
+// → errPeriodMoved (nothing written); anything else, a unique violation
+// included, is an error and nothing is written.
 func (e *Engine) commitPeriodClose(ctx context.Context, sub domain.Subscription, expected subscription.PeriodSnapshot,
 	periodStart, periodEnd, nextStart, nextEnd, now time.Time, builtAgainst *time.Time,
 	inv domain.Invoice, lines []domain.InvoiceLineItem, belowZero netNegativeUsage) (periodCloseOutcome, error) {
@@ -3291,58 +3283,14 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		return false, err
 	}
 	if err != nil {
-		// Idempotency: if this invoice already exists (UNIQUE violation on the
-		// per-subscription+period constraint), the store returns errs.ErrAlreadyExists.
-		// Match on the sentinel, not err.Error() substrings — translated messages,
-		// wrapped errors, or DB driver changes would silently break substring matches
-		// and cause duplicate charges in multi-worker retries.
-		//
-		// Reachable only for a PRE-ADR-115 row: an invoice a crashed tick
-		// committed while the sub stayed due (the old create-then-advance
-		// shape). A racing closer never lands here now — its CAS misses
-		// before the insert.
-		if errors.Is(err, errs.ErrAlreadyExists) {
-			slog.Info("invoice already exists for billing period (idempotent skip)",
-				"subscription_id", sub.ID,
-				"period_start", periodStart,
-				"period_end", periodEnd,
-			)
-			// Two pieces of state can still be missing:
-			//
-			// 1. A zero-due MarkPaid (ADR-066): an invoice born $0 or fully
-			//    credited whose MarkPaid never ran. Best-effort — a MarkPaid
-			//    failure WARNs and the invoice stays visible in the attention
-			//    queue (operator backstop) rather than blocking the advance
-			//    below: stalling all future billing over a $0 paid-mark would
-			//    be the worse trade. Runs before the advance so the one
-			//    re-entry this sub gets still attempts it. ErrNotFound
-			//    (blocking row voided since) skips the heal; other fetch
-			//    errors stay loud.
-			//    The slot is the invoice's own window: for an in-advance
-			//    close that is the period it opens, not the one it closes.
-			if existing, gErr := e.invoices.GetInvoiceForPeriod(ctx, sub.TenantID, sub.ID, invoicePeriodStart, invoicePeriodEnd); gErr == nil {
-				e.healStrandedZeroDue(ctx, sub.TenantID, existing, now)
-			} else if !errors.Is(gErr, errs.ErrNotFound) {
-				return false, fmt.Errorf("fetch existing invoice (heal path): %w", gErr)
-			}
-			// 2. The cycle advance. Re-drive it through the same closer (no
-			//    invoice this time) and surface a failure LOUDLY, matching the
-			//    happy path. A swallowed error here strands the watermark: the
-			//    sub stays due, every subsequent tick re-hits this skip, and
-			//    nothing ever alerts. No usage note: the lines built
-			//    here are discarded, the existing invoice is the bill.
-			healed, err := e.commitPeriodClose(ctx, sub, expected, periodStart, periodEnd, nextPeriodStart, nextPeriodEnd, now, thresholdBilledThrough, domain.Invoice{}, nil, nil)
-			if errors.Is(err, errPeriodMoved) {
-				return false, err
-			}
-			if err != nil {
-				return false, fmt.Errorf("advance billing cycle (heal path): %w", err)
-			}
-			if healed.canceled != nil {
-				e.afterScheduledCancel(ctx, sub, *healed.canceled, now)
-			}
-			return false, nil
-		}
+		// Every unique violation is an error, the period's own key included.
+		// The period's CAS, its invoice and its advance are one transaction, so
+		// a racing closer misses its CAS before it inserts. A threshold invoice
+		// ending at an in_arrears swap's instant would hold this key, and
+		// applyCrossIntervalPlanSwapTx refuses that swap. A close with no
+		// invoice would bill nothing for the period, so the bill fails, the
+		// period stays, and the run saves a counted failure (ADR-119). (See
+		// ADR-115.)
 		return false, fmt.Errorf("create invoice: %w", err)
 	}
 	inv := out.inv
@@ -3413,9 +3361,9 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 //
 // Idempotent via the standard (subscription_id, period_start,
 // period_end) UNIQUE constraint: if BillOnCreate runs twice (e.g. a
-// retry after a transient failure), the second call gets
-// ErrAlreadyExists and returns the existing invoice's nil state — no
-// duplicate. Auto-charge is best-effort: PM ready → synchronous
+// retry after a transient failure), the second call hits the period
+// slot (errs.CodeInvoiceBillingPeriodTaken) and returns the zero
+// invoice — no duplicate. Any other unique violation is an error. Auto-charge is best-effort: PM ready → synchronous
 // charge with 30s timeout; no PM → queue auto_charge_pending and
 // fire the no-PM notifier email (same path as the cycle invoice).
 func (e *Engine) BillOnCreate(ctx context.Context, sub domain.Subscription) (domain.Invoice, error) {
@@ -3444,7 +3392,7 @@ func (e *Engine) BillOnCreate(ctx context.Context, sub domain.Subscription) (dom
 
 	created, err := e.invoices.CreateInvoiceWithLineItemsAudited(ctx, sub.TenantID, inv, lineItems, e.finalizeAuditEmit(ctx))
 	if err != nil {
-		if errors.Is(err, errs.ErrAlreadyExists) {
+		if errs.Code(err) == errs.CodeInvoiceBillingPeriodTaken {
 			slog.Info("subscription_create invoice already exists (idempotent skip)",
 				"subscription_id", sub.ID,
 				"period_start", inv.BillingPeriodStart,
@@ -3490,7 +3438,7 @@ func (e *Engine) nextInvoiceNumber(ctx context.Context, tx *sql.Tx, tenantID str
 // atomically with the subscription write. (The cross-interval plan swap uses
 // BillOnPlanSwapTx, which also bills the old period's usage.)
 // Returns ok=false (nil error) for the no-op cases (no in_advance items / zero
-// subtotal) and for an idempotent-skip on the period-uniqueness constraint.
+// subtotal). A unique violation is an error: it poisons the caller's tx.
 //
 // startAt is the instant the billed period began for this subscription: the
 // trial end on a trial flip, the request's now on create, activate and early
