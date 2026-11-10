@@ -1039,6 +1039,16 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 			postgres.NullableString(report.Message), pi, now, id,
 		).Scan(s.scanInvDest(&inv)...)
 	} else {
+		// A failure that ends the attempt the invoice was in flight on
+		// (unknown or processing on this PaymentIntent) frees that attempt's
+		// hold: no claim admits an in-flight invoice, so the hold is its
+		// own. In any other state the hold may be a charger's that has
+		// claimed and not yet stamped, and stays. So does a hold without its
+		// token (an earlier version's), which the stale-hold sweep keeps for
+		// a person. (See ADR-137.)
+		endsInFlightAttempt := holdsThisPI &&
+			(domain.InvoicePaymentStatus(paymentStatus) == domain.PaymentUnknown ||
+				domain.InvoicePaymentStatus(paymentStatus) == domain.PaymentProcessing)
 		err = tx.QueryRowContext(ctx, `
 			UPDATE invoices SET
 				payment_status = 'failed',
@@ -1047,10 +1057,13 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 				failure_notified_pi = $1,
 				below_minimum_at = NULL,
 				charge_attempt_seq = charge_attempt_seq + 1,
+				auto_charge_claimed_until = CASE
+					WHEN $5 AND charge_hold_token = auto_charge_claimed_until THEN NULL
+					ELSE auto_charge_claimed_until END,
 				updated_at = $3
 			WHERE id = $4
 			RETURNING `+invCols,
-			pi, postgres.NullableString(report.Message), now, id,
+			pi, postgres.NullableString(report.Message), now, id, endsInFlightAttempt,
 		).Scan(s.scanInvDest(&inv)...)
 	}
 	if err != nil {
@@ -1440,6 +1453,10 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 			amount_paid_cents = amount_due_cents,
 			amount_due_cents = 0,
 			auto_charge_pending = FALSE,
+			-- A paid invoice admits no charge, so no hold has a use on it:
+			-- the write that pays it frees the hold (a charger between its
+			-- claim and its stamp is refused by the stamp's compare-and-set).
+			auto_charge_claimed_until = NULL,
 			updated_at = $3
 		WHERE id = $4
 		RETURNING `+invCols,
@@ -2492,12 +2509,11 @@ func lockInvoiceForChargeClaim(ctx context.Context, tx *sql.Tx, id string) (bool
 }
 
 // chargeHoldFree is the claim predicate on the hold (ADR-127): only a NULL
-// hold is free. An expired hold is NOT free — it means a charge may have been
-// sent and its result was not saved, and only the stale-hold sweep, after
-// asking Stripe, may clear it. Before ADR-127 the claims took an expired hold
-// as free (`IS NULL OR < now()`), so an interrupted charge left the invoice
-// looking exactly like one never charged and the next initiator charged it
-// again (#976). Shared by every claim so they cannot drift apart.
+// hold is free. An expired hold is NOT free: a charge may have been sent and
+// its result not saved. The stale-hold sweep clears it, or the settle that
+// records the result (ADR-137). A claim that took an expired hold as free
+// would charge again an invoice whose charge was interrupted (#976). Shared
+// by every claim so they cannot drift apart.
 const chargeHoldFree = `auto_charge_claimed_until IS NULL`
 
 // chargeHoldReleaseTimeout bounds a release detached from its caller's
@@ -2671,40 +2687,6 @@ func (s *PostgresStore) EndUnstampedAttempt(ctx context.Context, tenantID, id st
 			"invoice_id", id, "error", err)
 	}
 	return s.ReleaseChargeHold(ctx, tenantID, id, hold)
-}
-
-// ReleaseRetryChargeHoldTx frees the charge hold a dunning retry kept while
-// its payment was processing, once that payment has failed (#1289). It runs
-// on the failure settle's transaction (MarkPaymentFailedReportingTransition's
-// hook), which holds the invoice's row lock, and only for the PaymentIntent
-// the invoice now records as failed.
-//
-// Why the hold is that retry's: until this transaction the invoice was
-// processing on paymentIntentID, and no claim admits a processing invoice, so
-// no other owner can have taken a hold since the retry's. The one other
-// writer of a hold in that state is the stale-hold sweep, which looks only at
-// holds that ended at least domain.StaleChargeHoldWait ago, so this releases
-// only a hold younger than that, which the sweep has not looked at. An older
-// one stays for the sweep,
-// whose next check clears it. Reports whether it released. No updated_at
-// write (see ClaimAutoCharge).
-func (s *PostgresStore) ReleaseRetryChargeHoldTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (bool, error) {
-	if paymentIntentID == "" {
-		return false, nil
-	}
-	res, err := tx.ExecContext(ctx, `
-		UPDATE invoices SET auto_charge_claimed_until = NULL
-		WHERE id = $1 AND stripe_payment_intent_id = $2 AND payment_status = 'failed'
-		  AND auto_charge_claimed_until > now() - make_interval(secs => $3)`,
-		invoiceID, paymentIntentID, domain.StaleChargeHoldWait.Seconds())
-	if err != nil {
-		return false, fmt.Errorf("release the retry's charge hold: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n == 1, nil
 }
 
 // ChargeHeldTx reports the invoice's hold: none, live, or stale (ADR-127),

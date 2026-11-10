@@ -1414,7 +1414,9 @@ func billOnCancel(e *Engine, ctx context.Context, sub domain.Subscription) (int6
 	if err != nil {
 		return 0, err
 	}
-	e.FinishRelief(ctx, sub, r)
+	if err := e.FinishRelief(ctx, sub, r); err != nil {
+		return 0, err
+	}
 	return r.CreditedCents, nil
 }
 
@@ -1424,7 +1426,9 @@ func billOnPlanSwap(e *Engine, ctx context.Context, sub domain.Subscription, at 
 	if err != nil {
 		return 0, err
 	}
-	e.FinishRelief(ctx, sub, r)
+	if err := e.FinishRelief(ctx, sub, r); err != nil {
+		return 0, err
+	}
 	return r.CreditedCents, nil
 }
 
@@ -1442,6 +1446,10 @@ type fakeCreditNoteAdjuster struct {
 	lockedBeforeDrafts []string
 	err                error
 	draftErr           error
+	// issueErr makes Issue fail for a draft id; statusOnGet is what Get then
+	// reads for it (draft when unset).
+	issueErr    map[string]error
+	statusOnGet map[string]domain.CreditNoteStatus
 }
 
 func (a *fakeCreditNoteAdjuster) CreateAndIssueAdjustment(_ context.Context, _, invoiceID string, grossCents int64, _, _ string) (domain.CreditNote, error) {
@@ -1474,8 +1482,20 @@ func (a *fakeCreditNoteAdjuster) CreateAdjustmentDraftTx(_ context.Context, _ *s
 }
 
 func (a *fakeCreditNoteAdjuster) Issue(_ context.Context, _, id string) (domain.CreditNote, error) {
+	if a.issueErr[id] != nil {
+		return domain.CreditNote{}, a.issueErr[id]
+	}
 	a.issued = append(a.issued, id)
-	return domain.CreditNote{ID: id}, nil
+	return domain.CreditNote{ID: id, Status: domain.CreditNoteIssued}, nil
+}
+
+func (a *fakeCreditNoteAdjuster) Get(_ context.Context, _, id string) (domain.CreditNote, error) {
+	for _, got := range a.issued {
+		if got == id {
+			return domain.CreditNote{ID: id, Status: domain.CreditNoteIssued}, nil
+		}
+	}
+	return domain.CreditNote{ID: id, Status: a.statusOnGet[id]}, nil
 }
 
 func (m *mockInvoices) FindBaseInvoiceForPeriod(_ context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error) {

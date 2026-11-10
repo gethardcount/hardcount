@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"log/slog"
+	"runtime/debug"
 	"time"
 
 	mw "github.com/gethardcount/hardcount/internal/api/middleware"
@@ -256,6 +257,17 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 	hErr := func() (err error) {
 		defer func() {
 			if r := recover(); r != nil {
+				// The stack exists only here, so it is logged here. The
+				// error carries the panic value and counts one failed
+				// attempt on the backoff ramp.
+				slog.ErrorContext(ctx, "webhook outbox: handler panicked; counting a failed attempt",
+					"outbox_id", row.ID,
+					"tenant_id", row.TenantID,
+					"event_type", row.EventType,
+					"attempts", row.Attempts,
+					"panic", r,
+					"stack", string(debug.Stack()),
+				)
 				err = fmt.Errorf("outbox handler panic: %v", r)
 			}
 		}()

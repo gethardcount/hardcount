@@ -615,7 +615,9 @@ func TestBillTiming_InAdvance_E2E(t *testing.T) {
 	if err := reliefTx.Commit(); err != nil {
 		t.Fatalf("commit relief: %v", err)
 	}
-	engine.FinishRelief(ctx, subRefreshed, relief)
+	if err := engine.FinishRelief(ctx, subRefreshed, relief); err != nil {
+		t.Fatalf("FinishRelief: %v", err)
+	}
 
 	// Read the customer's credit ledger; should have a grant entry for
 	// the unused portion. July has 31 days; unused = 15 days =
@@ -957,6 +959,8 @@ func cancelRelief(t *testing.T, ctx context.Context, db *postgres.DB, tenantID s
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit relief: %v", err)
 	}
-	e.FinishRelief(ctx, sub, r)
+	if err := e.FinishRelief(ctx, sub, r); err != nil {
+		t.Fatalf("FinishRelief: %v", err)
+	}
 	return r
 }

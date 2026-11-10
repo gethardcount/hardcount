@@ -785,11 +785,16 @@ func (s *PostgresStore) TransitionStatusTx(ctx context.Context, tx *sql.Tx, tena
 	// issue_pending=true on issued CNs forever (FLOW B17 walk, 2026-07-21).
 	//
 	// Issuing also records that a tax reversal is owed, in this statement:
-	// a note with an amount, on an invoice that Stripe Tax taxed and that
-	// carries tax, owes Stripe a reversal from the moment it is issued. The
-	// invoice's tax_provider is the test: only Stripe Tax records a tax
-	// transaction, and it records itself as the provider on every invoice it
-	// taxes, so a transaction id adds no case. The reversal itself is a Stripe
+	// a note with an amount owes Stripe a reversal from the moment it is
+	// issued when Stripe Tax calculated or recorded its invoice (a
+	// calculation id, or a transaction id), with or without tax on it. A
+	// transaction with no tax still records the sale in Stripe's tax reports,
+	// and Stripe reverses it like any other (checked in test mode,
+	// 2026-11-10). The provider alone is not the test: an invoice of a tenant
+	// on Stripe Tax carries tax_provider 'stripe_tax' also when Stripe was
+	// never asked (an exempt or reverse-charge customer, no taxable lines, a
+	// credit-only invoice), and such an invoice never gets a transaction, so
+	// a marker on its note would never clear. The reversal itself is a Stripe
 	// call made after the commit; with the marker written only when that call
 	// failed, a stop between the commit and the call (or a failed marker
 	// write) left an issued note that nothing listed. The marker is cleared
@@ -806,7 +811,8 @@ func (s *PostgresStore) TransitionStatusTx(ctx context.Context, tx *sql.Tx, tena
 					WHERE i.id = credit_notes.invoice_id
 					  AND i.tenant_id = credit_notes.tenant_id
 					  AND i.tax_provider = 'stripe_tax'
-					  AND i.tax_amount_cents > 0))
+					  AND (COALESCE(i.tax_calculation_id, '') <> ''
+					       OR COALESCE(i.tax_transaction_id, '') <> '')))
 				ELSE tax_reversal_pending END
 		WHERE id=$5 AND status=$6
 		RETURNING customer_id`,
