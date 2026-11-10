@@ -278,7 +278,11 @@ func serve() {
 		// to 1,000 events over a slow link is not cut off. WriteTimeout must be
 		// longer than the 30s request Timeout middleware, so the server writes
 		// its JSON 504 before the socket closes. Equal values race and reset
-		// the connection.
+		// the connection. A refund (POST /v1/invoices/{id}/refund, or
+		// POST /v1/credit-notes with auto_issue) runs past the request timeout
+		// on its own 5-minute budget, up to about 90s with a slow Stripe; its
+		// answer can miss this limit, and a caller that sent an
+		// Idempotency-Key gets it back by sending the key again.
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      35 * time.Second,
@@ -385,7 +389,10 @@ func serve() {
 
 	// Stage 1 (at most 30s): stop accepting HTTP requests and finish the ones
 	// in flight. RegisterOnShutdown above closes the SSE subscribers first,
-	// so an open live tail does not hold this stage to its limit.
+	// so an open live tail does not hold this stage to its limit. A refund
+	// waiting on a slow Stripe can outlive it and be stopped mid-call: its
+	// note is then issued with no refund outcome recorded, which Retry
+	// refund settles (it finds the refund at Stripe by its key).
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownHTTPDrain)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

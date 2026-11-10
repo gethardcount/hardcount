@@ -44,8 +44,12 @@ const (
 	idempotencyPollTimeout  = 5 * time.Second
 
 	// idempotencyOrphanAfter is the age at which a pending reservation has
-	// no live owner. The longest handler this middleware wraps is the
-	// 5-minute export group (router.go), and every other one gets 30 s. The
+	// no live owner. The longest handlers this middleware wraps are the
+	// 5-minute export group (router.go) and a refund (POST
+	// /v1/invoices/{id}/refund, or POST /v1/credit-notes with auto_issue),
+	// whose work runs on its own 5-minute budget past the request timeout, so
+	// a resend just past this limit can be told the owner may have died while
+	// it is still finishing; every other one gets 30 s. The
 	// owner died (OOM, SIGKILL, node loss) or panicked (Recoverer is mounted
 	// outside this middleware) between reserving and finalizing. Without
 	// this limit, the row would sit at status 0 for its 24 h TTL, and every

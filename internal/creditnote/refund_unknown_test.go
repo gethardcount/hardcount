@@ -327,8 +327,11 @@ func safeMessage(err error) string {
 	return ""
 }
 
-// A refund asked for through the API runs on the request's context, which
-// chi's middleware.Timeout ends after 30 seconds (internal/api/router.go).
+// Issue and Retry refund asked for through the API (POST
+// /v1/credit-notes/{id}/issue, /retry-refund) run on the request's context,
+// which the route's Timeout middleware ends after 30 seconds
+// (internal/api/router.go). (A refund, CreateRefund, runs on its own steps
+// budget; its last subtest below.)
 // The Stripe client also allows 30 seconds, but its clock starts later, so
 // when Stripe hangs, the request context ends first, during the Stripe call.
 // The write that records the unclear result must still land. A database write
@@ -400,19 +403,28 @@ func TestRefund_RequestEndsDuringTheStripeCall(t *testing.T) {
 		}
 	})
 
+	// The issue endpoint (POST /v1/credit-notes/{id}/issue) runs Issue on
+	// the request's context.
 	t.Run("Issue records unknown with its key and returns the issued note", func(t *testing.T) {
 		t.Parallel()
 		svc, store, _, refunder := setupRefundSvc(t)
 		svc.SetAuditLogger(ctxAudit{})
+		draft, err := svc.Create(context.Background(), "t1", CreateInput{
+			InvoiceID: "inv_paid", Reason: "fraudulent", RefundAmountCents: 1000,
+			Lines: []CreditLineInput{{Description: "Refund", Quantity: 1, UnitAmountCents: 1000}},
+		})
+		if err != nil {
+			t.Fatalf("create the draft: %v", err)
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		refunder.duringCreate = cancel
 
 		// The API answers with this note, so the caller sees "unknown"
 		// rather than an error after the note was issued.
-		cn, err := svc.CreateRefund(ctx, "t1", RefundInput{InvoiceID: "inv_paid", Reason: "fraudulent"})
+		cn, err := svc.Issue(ctx, "t1", draft.ID)
 		if err != nil {
-			t.Fatalf("CreateRefund: %v (want the issued note with refund_status unknown)", err)
+			t.Fatalf("Issue: %v (want the issued note with refund_status unknown)", err)
 		}
 		if cn.Status != domain.CreditNoteIssued || cn.RefundStatus != refundUnknown {
 			t.Fatalf("returned note = (%q, %q), want (issued, unknown)", cn.Status, cn.RefundStatus)
@@ -420,6 +432,27 @@ func TestRefund_RequestEndsDuringTheStripeCall(t *testing.T) {
 		got := store.notes[cn.ID]
 		if got.RefundStatus != refundUnknown || got.RefundUnknownKey != "hardcount_cn_"+cn.ID {
 			t.Fatalf("stored refund leg = (%q, key %q), want (unknown, hardcount_cn_%s)", got.RefundStatus, got.RefundUnknownKey, cn.ID)
+		}
+	})
+
+	// A refund (CreateRefund) runs its create, issue and Stripe call on a
+	// context the request cannot cancel, so the request ending during the
+	// Stripe call does not cut it: the refund completes and its outcome is
+	// recorded.
+	t.Run("a refund whose request ends during the Stripe call completes", func(t *testing.T) {
+		t.Parallel()
+		svc, store, _, refunder := setupRefundSvc(t)
+		svc.SetAuditLogger(ctxAudit{})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		refunder.duringCreate = cancel
+
+		cn, err := svc.CreateRefund(ctx, "t1", RefundInput{InvoiceID: "inv_paid", Reason: "fraudulent"})
+		if err != nil {
+			t.Fatalf("CreateRefund: %v (want the issued note with the refund made)", err)
+		}
+		if cn.Status != domain.CreditNoteIssued || cn.RefundStatus != domain.RefundSucceeded || store.notes[cn.ID].RefundStatus != domain.RefundSucceeded {
+			t.Fatalf("note = (%q, %q), stored %q; want issued and succeeded", cn.Status, cn.RefundStatus, store.notes[cn.ID].RefundStatus)
 		}
 	})
 }
