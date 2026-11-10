@@ -40,10 +40,10 @@
  * - `mark_uncollectible`:
  *   `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
  *   parked invoice (payment status `unknown` with no payment intent
- *   recorded), for a customer who paid another way. After the
- *   write-off, Hardcount still records a payment that Stripe shows,
- *   but it no longer charges the invoice. The dashboard shows it as a
- *   secondary action.
+ *   recorded, left by an earlier version), for a customer who paid
+ *   another way. After the write-off, a payment whose Stripe event
+ *   arrives later is still recorded, and nothing charges the invoice.
+ *   The dashboard shows it as a secondary action.
  */
 export type AttentionAction = typeof AttentionAction[keyof typeof AttentionAction];
 

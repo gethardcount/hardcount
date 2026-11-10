@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -19,15 +20,25 @@ func (fixedCreds) GetPlaintext(context.Context, string, bool) (tenantstripe.Plai
 	return tenantstripe.PlaintextSecrets{SecretKey: "sk_test_FAKE_rate_limit"}, nil
 }
 
-// cannedStripe answers every request with one fixed HTTP response.
+// cannedStripe answers every request with one fixed HTTP response. With
+// createID set it first answers a PaymentIntent create with that unconfirmed
+// PaymentIntent, so the fixed response is the confirm's (withCannedConfirm).
 type cannedStripe struct {
-	status int
-	body   string
-	calls  int
+	status   int
+	body     string
+	calls    int
+	createID string
 }
 
-func (c *cannedStripe) RoundTrip(*http.Request) (*http.Response, error) {
+func (c *cannedStripe) RoundTrip(req *http.Request) (*http.Response, error) {
 	c.calls++
+	if c.createID != "" && req.Method == http.MethodPost && req.URL.Path == "/v1/payment_intents" {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"` + c.createID + `","object":"payment_intent","status":"requires_confirmation"}`)),
+		}, nil
+	}
 	return &http.Response{
 		StatusCode: c.status,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
@@ -40,6 +51,21 @@ func (c *cannedStripe) RoundTrip(*http.Request) (*http.Response, error) {
 const stripe429 = `{"error":{"code":"rate_limit","doc_url":"https://stripe.com/docs/error-codes/rate-limit","message":"Request rate limit exceeded. You can learn more about rate limits here https://stripe.com/docs/rate-limits.","type":"rate_limit_error"}}`
 
 const stripeDecline = `{"error":{"code":"card_declined","decline_code":"generic_decline","message":"Your card was declined.","type":"card_error"}}`
+
+// withCannedConfirm is a charge as Stripe answers it: the create returns an
+// unconfirmed PaymentIntent, and the confirm gets the fixed response (a
+// decline, a refusal, a 500). The PaymentIntent is the one the fixed response
+// names, or pi_canned.
+func withCannedConfirm(t *testing.T, status int, body string) *cannedStripe {
+	t.Helper()
+	id := regexp.MustCompile(`pi_[A-Za-z0-9_]+`).FindString(body)
+	if id == "" {
+		id = "pi_canned"
+	}
+	c := withCannedStripe(t, status, body)
+	c.createID = id
+	return c
+}
 
 func withCannedStripe(t *testing.T, status int, body string) *cannedStripe {
 	t.Helper()
@@ -59,7 +85,7 @@ func TestCreatePaymentIntent_RateLimitIsTransient(t *testing.T) {
 	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	c := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
 
-	_, err := c.CreatePaymentIntent(ctx, PaymentIntentParams{AmountCents: 100, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
+	_, err := c.CreateUnconfirmedPaymentIntent(ctx, PaymentIntentParams{AmountCents: 100, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
 	if !errors.Is(err, ErrPaymentTransient) {
 		t.Fatalf("err = %v, want ErrPaymentTransient", err)
 	}
@@ -71,18 +97,19 @@ func TestCreatePaymentIntent_RateLimitIsTransient(t *testing.T) {
 	}
 }
 
-// Control: a real decline is still a definite failure, not a skip.
-func TestCreatePaymentIntent_DeclineStaysDefinite(t *testing.T) {
+// Control: a real decline (it comes back from the confirm) is still a
+// definite failure, not a skip, and it names the PaymentIntent.
+func TestConfirmPaymentIntent_DeclineStaysDefinite(t *testing.T) {
 	withCannedStripe(t, http.StatusPaymentRequired, stripeDecline)
 	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	c := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
 
-	_, err := c.CreatePaymentIntent(ctx, PaymentIntentParams{AmountCents: 100, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
+	_, err := c.ConfirmPaymentIntent(ctx, "pi_x", PaymentIntentParams{AmountCents: 100, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
 	if errors.Is(err, ErrPaymentTransient) {
 		t.Fatalf("a decline was treated as a transient skip: %v", err)
 	}
 	var pe *PaymentError
-	if !errors.As(err, &pe) || pe.Unknown || pe.DeclineCode != "generic_decline" {
-		t.Fatalf("err = %#v, want a definite decline with code generic_decline", err)
+	if !errors.As(err, &pe) || pe.Unknown || pe.DeclineCode != "generic_decline" || pe.PaymentIntentID == "" {
+		t.Fatalf("err = %#v, want a definite decline with code generic_decline naming its PaymentIntent", err)
 	}
 }

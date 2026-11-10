@@ -459,11 +459,27 @@ type mockInvoiceUpdaterHandler struct {
 	markPaidErr error             // when set, MarkPaid returns this (simulates a transient DB failure)
 }
 
+func (m *mockInvoiceUpdaterHandler) StampPendingConfirm(_ context.Context, tenantID string, a domain.InvoiceChargeAttempt, hold domain.ChargeHold, _ int64) (domain.Invoice, bool, error) {
+	inv, ok := m.invoices[a.InvoiceID]
+	if !ok || !hold.Held() {
+		return domain.Invoice{}, false, nil
+	}
+	inv.paymentStatus = string(domain.PaymentUnknown)
+	inv.stripePI = a.StripePaymentIntentID
+	m.invoices[a.InvoiceID] = inv
+	m.byPI[a.StripePaymentIntentID] = a.InvoiceID
+	return domain.Invoice{ID: a.InvoiceID, TenantID: tenantID, Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentUnknown, StripePaymentIntentID: a.StripePaymentIntentID}, true, nil
+}
+
 func (m *mockInvoiceUpdaterHandler) RecordChargeAttempt(_ context.Context, _ string, _ domain.InvoiceChargeAttempt) error {
 	return nil
 }
 
 func (m *mockInvoiceUpdaterHandler) ReleaseChargeHold(_ context.Context, _, _ string, _ domain.ChargeHold) error {
+	return nil
+}
+
+func (m *mockInvoiceUpdaterHandler) EndUnstampedAttempt(_ context.Context, _, _ string, _ domain.ChargeHold, _ int64) error {
 	return nil
 }
 

@@ -1683,15 +1683,19 @@ components:
         - `succeeded`: the invoice is paid.
         - `failed`: the last charge was declined or refused. Dunning, when
           a policy is on, retries it.
-        - `unknown`: a Stripe charge got an unclear answer (a 5xx, a timeout
-          or a dropped connection), so Hardcount cannot tell whether Stripe
-          took the money. With a payment intent recorded, Hardcount asks
-          Stripe for it after a short wait. With none (a parked invoice),
-          Hardcount lists the customer's payments at Stripe on every billing
-          tick: it records a payment for the invoice that appears, and if
-          none has appeared 24 hours after the attempt the invoice goes back
-          to `pending` (`failed` after a dunning retry) and is charged again
-          as usual.
+        - `unknown`: a Stripe charge is being confirmed, or its answer was
+          unclear. Every card charge shows it for the moment the charge
+          takes: Hardcount records the Stripe payment on the invoice
+          (`stripe_payment_intent_id`) before any money moves, then confirms
+          it. If the answer is unclear (a 5xx, a timeout or a dropped
+          connection), the invoice stays `unknown`, and Hardcount cannot yet
+          tell whether Stripe took the money. A few minutes later it reads
+          that payment from Stripe and records what happened: paid,
+          declined, or nothing charged. After "nothing charged" the invoice
+          goes back to `pending` (`failed` after a dunning retry) and is
+          charged again as usual. An `unknown` invoice with no
+          `stripe_payment_intent_id` was left by an earlier version (a parked
+          invoice); it is not resolved or charged again automatically.
 
     InvoiceTaxStatus:
       type: string
@@ -1906,10 +1910,10 @@ components:
         - `mark_uncollectible`:
           `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
           parked invoice (payment status `unknown` with no payment intent
-          recorded), for a customer who paid another way. After the
-          write-off, Hardcount still records a payment that Stripe shows,
-          but it no longer charges the invoice. The dashboard shows it as a
-          secondary action.
+          recorded, left by an earlier version), for a customer who paid
+          another way. After the write-off, a payment whose Stripe event
+          arrives later is still recorded, and nothing charges the invoice.
+          The dashboard shows it as a secondary action.
 
     AttentionActionItem:
       type: object
@@ -2191,8 +2195,8 @@ components:
           type: string
           description: |
             The tax provider's calculation reference (Stripe Tax only). A
-            Stripe Tax calculation expires after 24 hours; Hardcount keeps
-            the reference so a finalized invoice can still be traced.
+            Stripe Tax calculation expires 90 days after it is made; Hardcount
+            keeps the reference so a finalized invoice can still be traced.
             Absent for the manual and none providers.
         tax_transaction_id:
           type: string
@@ -2255,7 +2259,11 @@ components:
             The earliest time the background retry may calculate tax again,
             after a failed attempt. Absent when a retry may run now, and when
             none is scheduled: an error code Hardcount does not retry, or the
-            automatic retries are used up.
+            automatic retries are used up. After the invoice is finalized, it
+            is the earliest time Hardcount retries a tax commit or tax
+            reversal that failed. It can hold a past time with nothing left
+            to retry, when the Stripe Tax calculation expired while a commit
+            was waiting.
         tax_reversed_at:
           type: string
           format: date-time
@@ -19791,8 +19799,9 @@ paths:
             `invalid_state` (already paid or already voided),
             `payment_in_flight` (a charge is still running or being
             confirmed with Stripe), or
-            `payment_unidentifiable` (Stripe's answer to a charge was unclear
-            and named no payment; Hardcount finds out from Stripe within a day).
+            `payment_unidentifiable` (an earlier version left a charge on the
+            invoice unclear with no payment named; it is not resolved
+            automatically).
           content:
             application/json:
               schema:
@@ -19947,10 +19956,12 @@ paths:
         tied to a subscription's period, does not affect subscription
         changes.
 
-        An invoice whose last charge got an unclear answer from Stripe with
-        no payment named (payment status `unknown`, no
-        `stripe_payment_intent_id`) can be written off; if the charge did
-        succeed, the invoice is still marked paid when Stripe shows it.
+        An invoice whose payment is `unknown` (a charge whose answer from
+        Stripe was unclear) can be written off once that charge is no longer
+        being sent, a few minutes after it started; until then the call
+        answers `409 payment_in_flight`. If the charge did succeed, the
+        invoice is still marked paid when Hardcount reads the payment from
+        Stripe or its event arrives.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
@@ -20455,11 +20466,10 @@ paths:
           description: |
             An earlier charge must be resolved first. Code
             `payment_in_flight`: a charge on the invoice is running, or its
-            result was lost and Hardcount is confirming it with Stripe (within
-            about an hour). Code `payment_unidentifiable`: Stripe's answer
-            to the earlier charge was unclear and named no payment; Hardcount
-            records a payment that appears, and the invoice is charged again
-            as usual if none has appeared 24 hours after that charge. Code
+            result is not known yet and Hardcount is reading the payment from
+            Stripe (within about an hour). Code `payment_unidentifiable`: an
+            earlier version left a charge on the invoice unclear with no
+            payment named; Hardcount does not charge the invoice again. Code
             `amount_below_minimum`: the amount is below Stripe's minimum
             charge, so nothing was charged; the invoice stays open with
             `payment_status` `pending`, and no dunning starts. Collect
@@ -20513,7 +20523,11 @@ paths:
             words. Code `stripe_key_unusable`: Stripe refused this account's
             API key, or none is connected for this mode; nothing was charged
             and the invoice is unchanged. Update the key under Settings →
-            Payments, then retry. Code `payment_outcome_unknown`: Stripe never
+            Payments, then retry. If Stripe refused the key while the payment
+            was being confirmed, the message says so: the invoice's payment
+            is `unknown`, and a retry is refused with `409 payment_in_flight`
+            until Hardcount has read the payment with a working key. Code
+            `payment_outcome_unknown`: Stripe never
             answered, so the card may have been charged; Hardcount checks with
             Stripe and updates the invoice. Do not retry until it does.
           content:
@@ -21993,11 +22007,12 @@ paths:
             The invoice cannot be finalized now, and nothing changed. Code
             `invalid_state`: it is not a draft, or its tax is still pending
             (the message says whether Hardcount retries it or you must act).
-            Code `tax_calculation_expired`: its Stripe Tax calculation is
-            more than 23 hours old and its tax was never recorded with Stripe
-            (Stripe keeps a calculation for 24 hours); retry tax, then
-            finalize. Code `invoice_lines_changed`: a line was added to the
-            invoice while its tax was being calculated; finalize again.
+            Code `tax_calculation_expired`: its Stripe Tax calculation
+            expires within 1 hour or has expired, and its tax was never
+            recorded with Stripe (Stripe keeps a calculation for 90 days);
+            retry tax, then finalize. Code `invoice_lines_changed`: a line
+            was added to the invoice while its tax was being calculated;
+            finalize again.
           content:
             application/json:
               schema:
@@ -22038,9 +22053,9 @@ paths:
       description: |
         Calculates tax again on a draft invoice whose `tax_status` is
         `pending`, after you fixed the cause (for example the customer's
-        address). It also refreshes a draft whose Stripe Tax calculation is
-        more than 23 hours old and was never recorded, which finalize
-        refuses. The route takes no body.
+        address). It also refreshes a draft whose Stripe Tax calculation
+        expires within 1 hour or has expired, and was never recorded, which
+        finalize refuses. The route takes no body.
 
         Each call rewrites the tax on the lines and the invoice. A retry of
         pending tax adds one to `tax_retry_count`; refreshing an expired

@@ -3,8 +3,8 @@ package payment
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -76,21 +76,24 @@ func TestChargeInvoice_DeclineAfterMidChargePayment_NoDunning(t *testing.T) {
 	}
 }
 
-// A processing PaymentIntent whose invoice was paid during the call returns
-// the paid row, not a processing one, so the caller sees what is on disk.
-func TestChargeInvoice_ProcessingAfterMidChargePayment_ReturnsPaidRow(t *testing.T) {
+// An invoice paid after the charge read it is never confirmed: the stamp
+// before the confirm is a compare-and-set on the invoice, so it does not
+// apply, and no money moves. (The one-call charge took the money and then
+// found the invoice paid.)
+func TestChargeInvoice_PaidBeforeTheStamp_ConfirmsNothing(t *testing.T) {
 	invoices, snapshot := paidMidCharge()
 	client := &mockStripeClient{piID: "pi_async", chargeStatus: "processing"}
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 
-	got, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", snapshot, testHold, "cus_stripe", "pm_test")
-	if err != nil {
-		t.Fatalf("ChargeInvoice: %v", err)
+	_, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", snapshot, testHold, "cus_stripe", "pm_test")
+	if !errors.Is(err, ErrPaymentTransient) {
+		t.Fatalf("err = %v, want ErrPaymentTransient (nothing confirmed)", err)
 	}
-	if got.Status != domain.InvoicePaid || got.PaymentStatus != domain.PaymentSucceeded ||
-		got.StripePaymentIntentID != "" || !got.PaidOutOfBand {
-		t.Fatalf("returned %s/%s/%q out-of-band %v; want the offline payment's paid row, with no PaymentIntent",
-			got.Status, got.PaymentStatus, got.StripePaymentIntentID, got.PaidOutOfBand)
+	if client.confirmCalls != 0 {
+		t.Fatalf("confirms = %d on an invoice paid before the stamp, want 0", client.confirmCalls)
+	}
+	if got := invoices.invoices["inv_1"]; got.Status != domain.InvoicePaid || got.StripePaymentIntentID != "" || !got.PaidOutOfBand {
+		t.Fatalf("paid row changed: %s/%s/%q", got.Status, got.PaymentStatus, got.StripePaymentIntentID)
 	}
 }
 
@@ -121,45 +124,39 @@ func captureLogs(t *testing.T) *lockedBuf {
 	return out
 }
 
-// The "invoice is parked" CRITICAL tells an operator to go find a charge in
-// Stripe. It is announced only once the park is on disk: a timed-out, unnamed
-// charge whose invoice was paid during the call parks nothing.
-func TestChargeInvoice_UnnamedTimeout_ParkAnnouncedOnlyWhenParked(t *testing.T) {
-	const parked = "this invoice is parked"
+// A confirm that timed out is an unclear outcome on the PaymentIntent the
+// charge saved. It never overwrites an outcome recorded during the call (P13),
+// and with nothing recorded it leaves the invoice unknown on that
+// PaymentIntent, which the reconciler reads by id: nothing is parked.
+func TestChargeInvoice_ConfirmTimeout_NeverOverwritesARecordedOutcome(t *testing.T) {
 	timeout := &PaymentError{Message: "context deadline exceeded", Unknown: true}
 
-	t.Run("paid during the call: not announced", func(t *testing.T) {
-		logs := captureLogs(t)
+	t.Run("paid during the call: stays paid", func(t *testing.T) {
 		invoices, snapshot := paidMidCharge()
-		stripe := NewStripe(&mockStripeClient{shouldFail: true, failErr: timeout}, invoices, newMockWebhookStore(), nil, nil)
+		stripe := NewStripe(&mockStripeClient{piID: "pi_T", shouldFail: true, failErr: timeout}, invoices, newMockWebhookStore(), nil, nil)
 		_, _ = stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", snapshot, testHold, "cus_stripe", "pm_test")
-		if strings.Contains(logs.String(), parked) {
-			t.Fatalf("park announced for an invoice that was paid, not parked:\n%s", logs)
+		if got := invoices.invoices["inv_1"]; got.PaymentStatus != domain.PaymentSucceeded {
+			t.Fatalf("paid invoice overwritten: %s, want succeeded", got.PaymentStatus)
 		}
 	})
 
-	t.Run("own decline recorded during the call: not parked, not announced", func(t *testing.T) {
-		logs := captureLogs(t)
+	t.Run("own decline recorded during the call: not overwritten", func(t *testing.T) {
 		invoices, snapshot := declinedMidCharge()
-		stripe := NewStripe(&mockStripeClient{shouldFail: true, failErr: timeout}, invoices, newMockWebhookStore(), nil, nil)
+		stripe := NewStripe(&mockStripeClient{piID: "pi_T", shouldFail: true, failErr: timeout}, invoices, newMockWebhookStore(), nil, nil)
 		_, _ = stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 		if got := invoices.invoices["inv_1"]; got.PaymentStatus != domain.PaymentFailed || got.StripePaymentIntentID != "pi_X" {
 			t.Fatalf("recorded decline overwritten: %s/%q, want failed/pi_X (still retryable by dunning)", got.PaymentStatus, got.StripePaymentIntentID)
 		}
-		if strings.Contains(logs.String(), parked) {
-			t.Fatalf("park announced for an invoice whose decline was recorded:\n%s", logs)
-		}
 	})
 
-	t.Run("control, nothing recorded during the call: parked and announced", func(t *testing.T) {
-		logs := captureLogs(t)
+	t.Run("nothing recorded during the call: unknown on the saved PaymentIntent", func(t *testing.T) {
 		invoices := newMockInvoiceUpdater()
 		snapshot := pendingSnapshot()
 		invoices.invoices["inv_1"] = snapshot
-		stripe := NewStripe(&mockStripeClient{shouldFail: true, failErr: timeout}, invoices, newMockWebhookStore(), nil, nil)
+		stripe := NewStripe(&mockStripeClient{piID: "pi_T", shouldFail: true, failErr: timeout}, invoices, newMockWebhookStore(), nil, nil)
 		_, _ = stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", snapshot, testHold, "cus_stripe", "pm_test")
-		if !strings.Contains(logs.String(), parked) {
-			t.Fatalf("park not announced for an invoice that did park:\n%s", logs)
+		if got := invoices.invoices["inv_1"]; got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != "pi_T" || got.Parked() {
+			t.Fatalf("after the timeout: %s on %q, want unknown on pi_T, not parked", got.PaymentStatus, got.StripePaymentIntentID)
 		}
 	})
 }
@@ -180,7 +177,77 @@ func TestChargeInvoice_RetryAfterEarlierAttempts_StampLands(t *testing.T) {
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 
 	_, _ = stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", snapshot, testHold, "cus_stripe", "pm_test")
-	if got := invoices.invoices["inv_1"]; got.StripePaymentIntentID != "pi_X" || got.ChargeAttemptSeq != 4 {
-		t.Fatalf("row %s/%q/seq %d, want failed/pi_X/seq 4 — the retry's decline was not recorded", got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq)
+	if got := invoices.invoices["inv_1"]; got.StripePaymentIntentID != "pi_X" || got.ChargeAttemptSeq != 5 {
+		t.Fatalf("row %s/%q/seq %d, want failed/pi_X/seq 5 (the stamp, then the decline) — the retry's decline was not recorded", got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq)
+	}
+}
+
+// takenOverStore answers the processing stamp as the real store does when
+// another writer moved the invoice first: refused, with the row as it stands.
+// then is that row's state and PaymentIntent.
+type takenOverStore struct {
+	*mockInvoiceUpdater
+	then func(inv *domain.Invoice)
+}
+
+func (s *takenOverStore) StampChargeOutcome(ctx context.Context, tenantID, id string, attemptSeq int64, ps domain.InvoicePaymentStatus, piID, errMsg string) (domain.Invoice, bool, error) {
+	if ps != domain.PaymentProcessing {
+		return s.mockInvoiceUpdater.StampChargeOutcome(ctx, tenantID, id, attemptSeq, ps, piID, errMsg)
+	}
+	inv := s.invoices[id]
+	s.then(&inv)
+	inv.ChargeAttemptSeq = attemptSeq + 2
+	s.invoices[id] = inv
+	return inv, false, nil
+}
+
+// A charge's payment comes back processing. Before its stamp lands, the
+// payment's failure is settled by its webhook, which frees the charge hold,
+// and another attempt puts its own PaymentIntent on the invoice. The refused
+// stamp then finds the invoice naming that other PaymentIntent: in flight on
+// it, or already failed on it. That row is not this charge's outcome:
+// returned as such, a dunning retry would wait on a payment it did not make,
+// or count that payment's decline as its own. A row the other writer paid is
+// the invoice's outcome and is returned.
+func TestChargeInvoice_ProcessingStampRefused_InvoiceNamesAnotherAttempt(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		then    func(inv *domain.Invoice)
+		wantErr bool
+	}{
+		{"in flight on another PaymentIntent: an error", func(inv *domain.Invoice) {
+			inv.PaymentStatus, inv.StripePaymentIntentID = domain.PaymentUnknown, "pi_other_attempt"
+		}, true},
+		{"failed on another PaymentIntent: an error", func(inv *domain.Invoice) {
+			inv.PaymentStatus, inv.StripePaymentIntentID = domain.PaymentFailed, "pi_other_attempt"
+		}, true},
+		{"paid on another PaymentIntent: the row is returned", func(inv *domain.Invoice) {
+			inv.Status, inv.PaymentStatus, inv.StripePaymentIntentID = domain.InvoicePaid, domain.PaymentSucceeded, "pi_other_attempt"
+		}, false},
+		{"failed on this charge's own PaymentIntent: the row is returned", func(inv *domain.Invoice) {
+			inv.PaymentStatus, inv.StripePaymentIntentID = domain.PaymentFailed, "pi_mine"
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := newMockInvoiceUpdater()
+			inv := domain.Invoice{
+				ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", Status: domain.InvoiceFinalized,
+				PaymentStatus: domain.PaymentPending, AmountDueCents: 5000, Currency: "USD",
+			}
+			base.invoices["inv_1"] = inv
+			client := &mockStripeClient{piID: "pi_mine", chargeStatus: "processing"}
+			stripe := NewStripe(client, &takenOverStore{mockInvoiceUpdater: base, then: tc.then}, newMockWebhookStore(), nil, &recordingDunningStarter{})
+
+			got, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", inv, testHold, "cus_stripe", "pm_test")
+			if tc.wantErr && err == nil {
+				t.Fatalf("ChargeInvoice returned the other attempt's row (%s on %q) as this charge's outcome; want an error", got.PaymentStatus, got.StripePaymentIntentID)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("ChargeInvoice: %v, want the row as it stands", err)
+			}
+			if client.confirmCalls != 1 {
+				t.Fatalf("confirms = %d, want 1", client.confirmCalls)
+			}
+		})
 	}
 }

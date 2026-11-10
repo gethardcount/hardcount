@@ -12,11 +12,14 @@ import (
 	"github.com/gethardcount/hardcount/internal/tax"
 )
 
-// fakeCalcStore is a minimal TaxCalculationWriter that returns a fixed
-// created_at, so the CommitTax expiry guard can be exercised without postgres.
+// fakeCalcStore is a minimal TaxCalculationWriter for a calculation recorded
+// at createdAt whose response names no expiry, so the CommitTax expiry guard
+// can be exercised without postgres. usableUntil, when set, is the
+// calculation's own expiry instead.
 type fakeCalcStore struct {
-	createdAt time.Time
-	lookedUp  bool
+	createdAt   time.Time
+	usableUntil time.Time
+	lookedUp    bool
 }
 
 func (f *fakeCalcStore) Record(_ context.Context, _, _ string, _ tax.Request, _ *tax.Result) (string, error) {
@@ -25,9 +28,12 @@ func (f *fakeCalcStore) Record(_ context.Context, _, _ string, _ tax.Request, _ 
 
 func (f *fakeCalcStore) LinkInvoice(_ context.Context, _, _, _ string) error { return nil }
 
-func (f *fakeCalcStore) LookupCalculationCreatedAt(_ context.Context, _, _, _ string) (time.Time, error) {
+func (f *fakeCalcStore) LookupCalculationUsableUntil(_ context.Context, _, _, _ string) (time.Time, error) {
 	f.lookedUp = true
-	return f.createdAt, nil
+	if !f.usableUntil.IsZero() {
+		return f.usableUntil, nil
+	}
+	return f.createdAt.Add(tax.CalculationFallbackLifetime), nil
 }
 
 // TestCommitTax_ExpiryGuardIgnoresSimulatedClock locks the fix for the
@@ -128,4 +134,35 @@ func TestCheckTaxCalculationUsable_DirectContract(t *testing.T) {
 			t.Fatalf("nil provider must pass even with an aged calc: %v", err)
 		}
 	})
+}
+
+// A calculation is usable until its own expiry, which for Stripe Tax is 90
+// days after it was made. The guard used a fixed 23 hours from a mistaken
+// reading of Stripe's limit, so a commit that had failed for more than a day
+// was refused by Hardcount although Stripe would still have accepted it, and
+// the invoice's tax was never reported.
+func TestCommitTax_ExpiryGuardUsesTheCalculationsOwnExpiry(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		usableUntil time.Duration // from now
+		wantExpired bool
+	}{
+		{"made three days ago, expires in 87 days: usable", 87 * 24 * time.Hour, false},
+		{"expires in two hours: usable", 2 * time.Hour, false},
+		{"expires in half an hour: inside the margin, refused", 30 * time.Minute, true},
+		{"expired yesterday: refused", -24 * time.Hour, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &Engine{
+				settings:     &taxSettings{provider: "stripe_tax"},
+				taxProviders: stubResolver(&stubProvider{}),
+				// created 3 days ago either way: the age no longer decides.
+				taxCalcStore: &fakeCalcStore{createdAt: time.Now().UTC().Add(-72 * time.Hour), usableUntil: time.Now().UTC().Add(tc.usableUntil)},
+			}
+			err := e.CommitTax(context.Background(), "t1", "inv_1", "taxcalc_1")
+			if tc.wantExpired != errors.Is(err, errs.ErrInvalidState) {
+				t.Fatalf("CommitTax = %v, want expired=%v", err, tc.wantExpired)
+			}
+		})
+	}
 }

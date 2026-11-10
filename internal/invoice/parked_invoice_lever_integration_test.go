@@ -33,7 +33,7 @@ func TestParkedInvoiceHasExactlyOneWayOut(t *testing.T) {
 
 	park := func(num string) domain.Invoice {
 		inv := seedClaimableInvoice(t, db, ctx, tenantID, num)
-		stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, "", "ambiguous: no payment_intent_id")
+		seedPark(t, db, inv.ID, "ambiguous: no payment_intent_id")
 		return inv
 	}
 

@@ -1,7 +1,7 @@
 # ADR-001: PaymentIntent-Only Stripe Integration
 
 **Date:** 2026-04-15
-**Status:** Accepted
+**Status:** Accepted (amended 2026-11-10: ADR-137)
 
 ## Status
 Accepted
@@ -45,3 +45,7 @@ The `payment.Stripe` adapter creates PaymentIntents with idempotency keys derive
 - **Stripe Subscriptions API**: Rejected because Hardcount handles its own subscription lifecycle with usage-based metering. Stripe Subscriptions would fight our pricing models (tiered, graduated, volume, package).
   - **Correction (2026-10-23):** Hardcount has no volume mode. Its usage pricing modes are `flat` (a price per unit), `graduated` (tiers) and `package`; the database allows only these three (`rating_rule_versions_mode_check` in `internal/platform/migrate/baseline/00180_baseline.sql:1259`, and `internal/domain/pricing.go:15-19`).
 - **Abstract payment provider interface**: Rejected for v1. Hardcount is Stripe-native today. Premature abstraction would add complexity without a concrete second provider to validate the interface against.
+
+## Amendment 2026-11-10
+
+A charge is now two PaymentIntent calls, create unconfirmed then confirm, with the attempt saved between them ([ADR-137](137-charge-stamps-invoice-before-confirming.md)). Still PaymentIntents only.

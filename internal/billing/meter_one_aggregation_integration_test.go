@@ -120,7 +120,7 @@ func TestOneAggregationPerMeter_EveryPathUnchanged(t *testing.T) {
 						if err != nil {
 							t.Fatalf("get sub: %v", err)
 						}
-						if inv, err := lf.engine.BillFinalOnImmediateCancel(ctx, sub); err != nil || inv.ID == "" {
+						if inv, err := lf.engine.BillFinalOnCancel(ctx, sub); err != nil || inv.ID == "" {
 							t.Fatalf("cancel final invoice: inv=%q err=%v", inv.ID, err)
 						}
 					} else {

@@ -56,7 +56,7 @@ func TestChargeDecline_IncorrectNumberAsErrorCode_IsAHardDecline(t *testing.T) {
 	invoices := newMockInvoiceUpdater()
 	snapshot := pendingSnapshot()
 	invoices.invoices["inv_1"] = snapshot
-	withCannedStripe(t, http.StatusPaymentRequired, `{"error": `+incorrectNumberErrorJSON+`}`)
+	withCannedConfirm(t, http.StatusPaymentRequired, `{"error": `+incorrectNumberErrorJSON+`}`)
 	email := &recordingFailedEmail{}
 	s := NewStripe(NewLiveStripeClient(NewStripeClients(fixedCreds{})), invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 	s.SetEmailPaymentFailed(email, staticCustomerEmail{})
@@ -101,7 +101,7 @@ func TestChargeDecline_OtherErrorCodeWithoutDeclineCode_StaysOrdinary(t *testing
 	    "last_payment_error": {"code": "expired_card", "message": "Your card has expired.", "type": "card_error",
 	      "payment_method": {"id": "pm_on_file", "object": "payment_method"}}},
 	  "type": "card_error"}}`
-	withCannedStripe(t, http.StatusPaymentRequired, body)
+	withCannedConfirm(t, http.StatusPaymentRequired, body)
 	email := &recordingFailedEmail{}
 	s := NewStripe(NewLiveStripeClient(NewStripeClients(fixedCreds{})), invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 	s.SetEmailPaymentFailed(email, staticCustomerEmail{})

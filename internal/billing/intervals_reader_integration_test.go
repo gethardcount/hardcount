@@ -287,7 +287,7 @@ func runIntervalScenario(t *testing.T, db *postgres.DB, sc intervalScenario) []s
 		}
 		eng := f.engine(t, at.Add(time.Minute))
 		// The in_arrears final-on-cancel invoice (the segment-walk path).
-		if _, err := eng.BillFinalOnImmediateCancel(f.ctx, canceled); err != nil {
+		if _, err := eng.BillFinalOnCancel(f.ctx, canceled); err != nil {
 			t.Fatalf("bill final on cancel: %v", err)
 		}
 		return f.invoiceLines(t, sub.ID)

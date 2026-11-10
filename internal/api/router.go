@@ -522,10 +522,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// When a dunning retry's payment comes back processing, the run waits on
 	// that PaymentIntent. If the payment later fails, the failure settle's
 	// transaction records the failure on the run, with the retry's warning
-	// email and the release of its charge hold (#1289). dunningSvc implements
-	// RetryPaymentFailed, and the invoice store releases the hold.
+	// email (#1289). dunningSvc implements RetryPaymentFailed. The settle's
+	// own write frees the retry's charge hold.
 	stripeAdapter.SetDunningRetryFailure(dunningSvc)
-	dunningSvc.SetRetryHoldReleaser(invoiceStore)
 	// A charge Stripe refuses for the key (401/403) shows on the Settings →
 	// Payments card, as a failed Connect check does.
 	stripeAdapter.SetKeyHealth(tenantStripeSvc)

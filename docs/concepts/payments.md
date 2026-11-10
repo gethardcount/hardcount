@@ -51,7 +51,7 @@ beside the invoice's own `status`.
 | `processing` | Stripe accepted the charge but has not finished it, as with some bank debits. |
 | `succeeded` | The money arrived. The invoice is `paid`. |
 | `failed` | Stripe declined the charge. Dunning retries it. |
-| `unknown` | Hardcount did not get a clear answer, so it cannot tell if money moved. See [When the answer is unclear](#when-the-answer-is-unclear). |
+| `unknown` | A charge is at Stripe and Hardcount has no answer yet. Every charge is `unknown` for a second or so. It stays `unknown` when the answer is unclear. See [When the answer is unclear](#when-the-answer-is-unclear). |
 
 ## Retries: dunning
 
@@ -83,28 +83,43 @@ policies**.
 
 ## When the answer is unclear
 
+Each charge first creates its PaymentIntent at Stripe, which moves no
+money, and puts it on the invoice with the payment status `unknown`. Only
+then does Hardcount ask Stripe to take the money. So an invoice is `unknown`
+for the second or so its charge takes. Then it is `succeeded`, `failed` or
+`processing`.
+
 A charge can end without a clear answer: a timeout, a Stripe server error
-or a dropped connection. Then the payment status is `unknown`, and
-Hardcount never guesses.
+or a dropped connection. Hardcount never guesses. If Stripe was already
+asked to take the money, the payment status stays `unknown`. The invoice
+already names the payment, so Hardcount can look it up.
 
 - **Nothing charges the invoice again** until Stripe's answer is known, so
   the customer is never charged twice. A charge hold makes sure only one
   charge runs at a time. It is a 5-minute claim on the invoice. After an
-  unclear answer, the hold stays until the reconciler (next item) has asked
-  Stripe what happened.
+  unclear answer, the hold stays until its 5 minutes end, or until the
+  payment's result is recorded, whichever comes first.
 - **The reconciler finds the answer.** It is a check that asks Stripe what
   happened to payments Hardcount did not hear back about. It runs with
   every billing run: hourly, or every 5 minutes when `APP_ENV` is `local`
-  or not set. A Stripe webhook can also settle the payment sooner.
-- **A parked invoice** is one whose unclear charge left no PaymentIntent
-  ID, so Hardcount cannot look it up directly. The reconciler looks through
-  the customer's payments in Stripe. If no payment appears within 24 hours
-  of the charge, the invoice is charged again as usual.
+  or not set. It reads the payment by its ID once the charge hold has
+  ended, usually within about an hour. A Stripe webhook can also settle the
+  payment sooner.
+- **A payment that Stripe was never asked to take is canceled there**, so
+  it can never go through. The invoice is then charged again as usual, and
+  the customer gets no payment-failed email.
+- **An unclear answer to the first step charged nothing.** Stripe had not
+  been asked to take the money yet. The invoice keeps its payment status,
+  and the reconciler frees it for the next charge without asking Stripe, on
+  the first billing run at least 15 minutes after the charge began.
 
 While a payment is `processing` or `unknown`, Hardcount refuses to void the
-invoice or to record a payment on it, so money cannot arrive on an invoice
-that no longer asks for it. It also refuses to write the invoice off,
-except a parked one, whose write-off waits only a few minutes.
+invoice, to record a payment on it or to issue a credit note on it, and the
+hosted invoice page offers no **Pay**. So the customer cannot pay twice, and
+money cannot arrive on an invoice that no longer asks for it. That includes
+the moment a charge is running. It also refuses to write off a `processing`
+payment. An `unknown` one can be written off once no charge holds the
+invoice, 5 minutes after the charge began.
 
 More: [Card payment failure handling](../payments.md), every case in
 detail.

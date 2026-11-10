@@ -26,7 +26,7 @@ const stripeBadParam = `{"error":{"code":"parameter_invalid_integer","message":"
 func TestCreatePaymentIntent_BelowMinimumIsItsOwnOutcome(t *testing.T) {
 	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	withCannedStripe(t, http.StatusBadRequest, stripeAmountTooSmall)
-	_, err := NewLiveStripeClient(NewStripeClients(fixedCreds{})).CreatePaymentIntent(ctx, createParams())
+	_, err := NewLiveStripeClient(NewStripeClients(fixedCreds{})).CreateUnconfirmedPaymentIntent(ctx, createParams())
 
 	var bm *BelowMinimumError
 	if !errors.As(err, &bm) || !strings.Contains(bm.Message, "at least $0.50") {
@@ -48,7 +48,7 @@ func TestCreatePaymentIntent_BelowMinimumIsItsOwnOutcome(t *testing.T) {
 
 	t.Run("another 400 stays a definite failure", func(t *testing.T) {
 		withCannedStripe(t, http.StatusBadRequest, stripeBadParam)
-		_, err := NewLiveStripeClient(NewStripeClients(fixedCreds{})).CreatePaymentIntent(ctx, createParams())
+		_, err := NewLiveStripeClient(NewStripeClients(fixedCreds{})).CreateUnconfirmedPaymentIntent(ctx, createParams())
 		var pe *PaymentError
 		if !errors.As(err, &pe) || pe.Unknown || errors.Is(err, domain.ErrBelowMinimumCharge) {
 			t.Fatalf("err = %#v, want a definite PaymentError that is not below-minimum", err)

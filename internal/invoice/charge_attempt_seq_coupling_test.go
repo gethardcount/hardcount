@@ -18,25 +18,27 @@ import (
 // charge_attempt_seq in the SAME statement.
 //
 // Why a source-scanning test and not a convention: this is a class-C2 hazard
-// (playbook §1) — the invariant is spread across THREE writers today
-// (StampChargeOutcome, MarkPaymentFailedReportingTransition,
-// markPaidReportingTransition), and a fourth added later would fail silently in
-// the worst direction. Missing the bump means a RECORDED decline reuses its
-// key, Stripe hands back the declined PaymentIntent forever, and the invoice
-// can never be paid — a liveness sink (class G) with no error anywhere.
+// (playbook §1) — the invariant is spread across FOUR writers today
+// (StampPendingConfirm, StampChargeOutcome,
+// MarkPaymentFailedReportingTransition, markPaidReportingTransition), and a
+// fifth added later would fail silently in the worst direction. Missing the
+// bump means a RECORDED decline reuses its key, Stripe hands back the declined
+// PaymentIntent forever, and the invoice can never be paid — a liveness sink
+// (class G) with no error anywhere.
 //
 // The reverse direction is checked too: a bump without a PI stamp means some
 // unrelated write is re-seeding the key, which is the exact drift this column
 // was introduced to end (#677 → #678).
 //
-// Two writes move the seq with no PaymentIntent, both the stale-hold sweep's
-// "Stripe holds nothing" (ADR-127; ADR-105 amendments 2026-10-19 and
-// 2026-10-20): ClearStaleChargeHold for a lost charge, and
-// UnparkAfterNoPayment for a parked one 24 hours after the attempt. "No
-// payment was created" is that attempt's recorded outcome, and the next charge
-// needs a fresh key: Stripe may have saved a 500 under the old one. Each is a
-// statement that also clears the charge hold (auto_charge_claimed_until =
-// NULL); the scanner admits them and requires exactly two.
+// One write moves the seq with no PaymentIntent: ClearStaleChargeHold, for a
+// charge that confirmed nothing (ADR-127; ADR-105 amendment 2026-10-19). The
+// stale-hold sweep calls it for a hold whose charger never stamped, and a
+// charger calls it through EndUnstampedAttempt when its own stamp did not
+// apply. "Nothing was confirmed" is that attempt's recorded outcome, and the
+// next charge needs a fresh key: Stripe may have saved a 500 under the old
+// one, or the amount changed. It is a statement that also clears the charge
+// hold (auto_charge_claimed_until = NULL); the scanner admits it and requires
+// exactly one.
 //
 // The scan covers every non-test .go file of this package, not one file: a
 // writer added in a new file would otherwise escape it.
@@ -104,9 +106,9 @@ func TestChargeAttemptSeqBumpedByEveryPIStamp(t *testing.T) {
 		t.Errorf("expected at least 3 PI-stamping UPDATEs (StampChargeOutcome, MarkPaymentFailedReportingTransition, "+
 			"markPaidReportingTransition), found %d — did the scanner stop matching?", stamps)
 	}
-	if clears != 2 {
-		t.Errorf("found %d stale-hold clears that move the seq (an UPDATE that bumps it and clears the charge hold), want exactly 2: "+
-			"ClearStaleChargeHold and UnparkAfterNoPayment are the writes ADR-105's amendments let move the seq without a PaymentIntent", clears)
+	if clears != 1 {
+		t.Errorf("found %d stale-hold clears that move the seq (an UPDATE that bumps it and clears the charge hold), want exactly 1: "+
+			"ClearStaleChargeHold is the write ADR-105's amendments let move the seq without a PaymentIntent", clears)
 	}
 	if bumps != stamps+clears {
 		t.Errorf("seq bumps (%d) are not PI stamps (%d) plus the stale-hold clear (%d)", bumps, stamps, clears)

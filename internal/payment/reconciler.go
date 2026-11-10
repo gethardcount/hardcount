@@ -40,10 +40,14 @@ type ReconcileInvoiceStore interface {
 	RecordProviderSync(ctx context.Context, tenantID, id, providerStatus string) error
 	MarkPaymentFailedReportingTransition(ctx context.Context, tenantID, id string, report domain.PaymentFailureReport, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, domain.PaymentFailureResult, error)
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
-	// The stale-hold sweep's reads and writes (ADR-127). Required, not
-	// optional: a stale hold blocks every charge and the irreversible
-	// actions, and this sweep is the only thing that clears one or finishes a
-	// parked invoice.
+	// EndAttemptWithoutPayment puts an invoice left unknown on a PaymentIntent
+	// that took no payment (never confirmed and canceled, or refunded in
+	// full) back where a charge picks it up, with no customer email; reason
+	// goes on the attempt's row (ADR-137).
+	EndAttemptWithoutPayment(ctx context.Context, tenantID, id, paymentIntentID, reason string) (domain.InvoicePaymentStatus, bool, error)
+	// The stale-hold sweep's reads and writes (ADR-127, ADR-137). Required,
+	// not optional: a stale hold blocks every charge and the irreversible
+	// actions, and this sweep is the only thing that clears one.
 	StaleChargeHoldStore
 }
 
@@ -100,11 +104,6 @@ type Reconciler struct {
 	hostedLedger HostedSessionLedger
 	hostedReader CheckoutSessionReader
 	hostedCards  CheckoutCardRecorder
-	// staleHoldTimeout and staleHoldBudget bound the stale-hold sweep
-	// (reconciler_stale_hold.go): one check's Stripe calls, and one run.
-	// Fields, not constants, so tests can shrink them.
-	staleHoldTimeout time.Duration
-	staleHoldBudget  time.Duration
 }
 
 // NewReconciler constructs a Reconciler. If olderThan <= 0, defaults to 60s
@@ -120,8 +119,6 @@ func NewReconciler(client StripeClient, invoices ReconcileInvoiceStore, olderTha
 		olderThan:           olderThan,
 		olderThanProcessing: 30 * time.Minute,
 		now:                 func() time.Time { return time.Now().UTC() },
-		staleHoldTimeout:    staleHoldCheckTimeout,
-		staleHoldBudget:     staleHoldSweepBudget,
 	}
 }
 
@@ -156,11 +153,9 @@ func (r *Reconciler) SetBreaker(b *breaker.Breaker) {
 func (r *Reconciler) SetResolver(res clock.Resolver) { r.resolver = res }
 
 // Run reconciles unresolved payments against Stripe:
-//   - stale charge holds (ADR-127, reconciler_stale_hold.go): a charge whose
-//     result was lost, and a parked invoice (an unclear answer that named no
-//     PaymentIntent). First, so an invoice it clears is charged by the same
-//     tick's auto-charge sweep, and a payment it finds is recorded before
-//     anything else looks at the invoice;
+//   - stale charge holds (ADR-127, ADR-137, reconciler_stale_hold.go): holds
+//     whose charger is gone. It asks Stripe nothing. First, so an invoice it
+//     releases is charged by the same tick's auto-charge sweep;
 //   - 'unknown' (ambiguous charge outcomes) past the short cool-off,
 //   - stale 'processing' (the dropped-webhook backstop, ADR-049 Phase 2) past
 //     the longer processing cool-off, and
@@ -282,18 +277,16 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 		// payment_status into a claimable state, so the next retry opens a
 		// SECOND PaymentIntent beside the live one (ADR-107).
 		//
-		// Such an invoice is parked, and the stale-hold sweep finishes it: it
-		// lists the customer's PaymentIntents at Stripe, records or follows a
-		// payment for this invoice, and with none 24 hours after the attempt
-		// puts the invoice back where a charge picks it up (REC-5, ADR-127
-		// amendment 2026-10-20).
+		// Such an invoice is parked. Only an earlier version parked one
+		// (ADR-137: every unclear answer now names its PaymentIntent), and the
+		// stale-hold sweep keeps it for a person (earlierVersionHold).
 		//
 		// UNREACHABLE FROM THE SWEEP since #682: ListUnknownPayments excludes
 		// empty-PI rows at SQL. This branch is kept as defense-in-depth so a
 		// future widening of the sweep's predicate cannot silently resurrect
 		// the give-up write ADR-107 deleted — if it ever logs, the sweep's SQL
 		// has drifted.
-		slog.ErrorContext(ctx, "reconcile: an unknown charge outcome with no PaymentIntent id reached the unknown sweep, whose list should exclude it; nothing written. The stale-hold sweep finishes parked invoices",
+		slog.ErrorContext(ctx, "reconcile: an unknown charge outcome with no PaymentIntent id reached the unknown sweep, whose list should exclude it; nothing written. Only an earlier version left such an invoice; a person settles it",
 			"invoice_id", inv.ID, "tenant_id", inv.TenantID,
 			"customer_id", inv.CustomerID, "amount_due_cents", inv.AmountDueCents,
 			"invoice_number", inv.InvoiceNumber)
@@ -320,13 +313,23 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 		res, err = r.client.GetPaymentIntent(ctx, inv.StripePaymentIntentID)
 	}
 	if err != nil {
-		// Stripe itself returned 5xx on the reconcile query — leave the
-		// invoice in its current state, try again next tick.
+		// Stripe did not answer the read (a 5xx, the network, a refused key,
+		// the PaymentIntent not in this account): leave the invoice as it is
+		// and try again later. Stamp the observation time, keeping the status
+		// last seen, so the row moves to the back of the queue: the sweep
+		// reads oldest-stamped first, one page a tick, and unstamped rows that
+		// fail every time (one account with a revoked key) would otherwise
+		// head it forever and starve every newer unclear charge.
+		r.recordSync(ctx, inv, inv.ProviderPaymentStatus)
 		return false, fmt.Errorf("get payment intent %s: %w", inv.StripePaymentIntentID, err)
 	}
 
 	switch res.Status {
 	case "succeeded":
+		// A payment that succeeded pays the invoice, whichever of this sweep
+		// and its webhook records it first. One refunded at Stripe since is
+		// still a payment: the refund is recorded by its own webhook as a
+		// refund made in Stripe (ADR-134).
 		// Carry the charge's contracted instant into the settle, exactly as the
 		// inline and webhook paths do. Without it SettleSucceeded falls back to
 		// the invoice pin, which resolves the clock's CURRENT frozen_time — so a
@@ -341,22 +344,53 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 		return r.settle(settleCtx, inv, res.ID, res.AmountReceivedCents, res.Purpose, "", terminalSucceeded, res.Status, "", "", "")
 
 	case "canceled", "requires_payment_method":
-		// The PI purpose travels with the report, as on the webhook: it
-		// decides the customer email (failureEmailSuppressed). The anchor does
-		// too, as on the succeeded branch: a decline starts dunning, whose
-		// first retry counts from the instant the charge fired.
-		settleCtx := ctx
-		if !res.AnchorAt.IsZero() {
-			settleCtx = withSettleAnchor(ctx, res.AnchorAt)
+		if res.Status == "canceled" && !answered(res) && res.Purpose != PurposeHostedInvoicePay && inv.PaymentStatus == domain.PaymentUnknown {
+			// Canceled with no answer: no confirm ever reached a bank (a
+			// two-step charge canceled below, whose end was not saved). That is
+			// not a failed payment: end the attempt with no customer email.
+			return r.endWithoutPayment(ctx, inv, res.ID, res.Status, domain.AttemptReasonNeverConfirmed)
 		}
-		// The decline code and card ride along too (#966): a hard decline
-		// the charge response never reported must still stop the next
-		// dunning retry from charging that card. So does Stripe's card
-		// message, the customer email's reason, as on the webhook; the
-		// "reconciled:" text is the invoice's only.
-		return r.settle(settleCtx, inv, res.ID, 0, res.Purpose, "reconciled: "+res.Status, terminalFailed, res.Status, res.DeclineCode, res.PaymentMethodID, res.CardMessage)
+		return r.settleDeclined(ctx, inv, res)
 
-	case "processing", "requires_action", "requires_confirmation", "requires_capture":
+	case "requires_confirmation", "requires_action", "requires_capture":
+		// An unknown invoice on one of Hardcount's own PaymentIntents that
+		// never finished. Still awaiting its confirm: the confirm never
+		// reached Stripe (a crash, a passed deadline, a failed connection).
+		// Awaiting the customer or a capture: neither is expected (Hardcount's
+		// charges set error_on_requires_action and capture at once, in every
+		// version), and Hardcount shows no way to finish one. None ends on
+		// its own. Cancel it first, so a confirm arriving later is
+		// refused and can take no money, then end the attempt with no
+		// customer email: no bank took a charge. A cancel Stripe refuses
+		// means a confirm got there first; the next tick reads what it did.
+		// The hosted page's PaymentIntent is the customer's to finish.
+		if res.Purpose != PurposeHostedInvoicePay && inv.PaymentStatus == domain.PaymentUnknown {
+			if err := r.client.CancelPaymentIntent(ctx, res.ID); err != nil {
+				// Stamped so the row rotates: a cancel refused every tick (a
+				// key that may read but not write) must not head the queue.
+				r.recordSync(ctx, inv, res.Status)
+				return false, fmt.Errorf("cancel unfinished payment intent %s: %w", res.ID, err)
+			}
+			// The charge's own confirm may have landed between the read and
+			// the cancel, as a decline Stripe then let the cancel follow. Read
+			// it again: an answer on it (answered) is recorded as the
+			// decline it was (its code stops dunning re-charging a lost or
+			// stolen card, and the customer is told); none means no bank was
+			// asked, ended with no email.
+			after, err := r.client.GetPaymentIntent(ctx, res.ID)
+			if err != nil {
+				r.recordSync(ctx, inv, "canceled")
+				return false, fmt.Errorf("read payment intent %s after canceling it: %w", res.ID, err)
+			}
+			if answered(after) {
+				return r.settleDeclined(ctx, inv, after)
+			}
+			return r.endWithoutPayment(ctx, inv, res.ID, "canceled", domain.AttemptReasonNeverConfirmed)
+		}
+		r.recordSync(ctx, inv, res.Status)
+		return false, nil
+
+	case "processing":
 		// Not terminal, so nothing settles here — but RECORD WHAT WE OBSERVED
 		// (migration 0167). This branch used to return with no write at all.
 		//
@@ -379,6 +413,45 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 	default:
 		return false, fmt.Errorf("unexpected stripe PI status %q", res.Status)
 	}
+}
+
+// settleDeclined reports a PaymentIntent that asked a bank and took no money
+// (declined, or canceled after a decline) through the settlement primitive,
+// as the webhook does. The PI purpose travels with the report: it decides the
+// customer email (failureEmailSuppressed). The anchor does too, as on the
+// succeeded branch: a decline starts dunning, whose first retry counts from
+// the instant the charge fired. The decline code and card ride along (#966):
+// a hard decline the charge response never reported must still stop the next
+// dunning retry from charging that card. So does Stripe's card message, the
+// customer email's reason, as on the webhook; the "reconciled:" text is the
+// invoice's only.
+func (r *Reconciler) settleDeclined(ctx context.Context, inv domain.Invoice, res PaymentIntentResult) (bool, error) {
+	settleCtx := ctx
+	if !res.AnchorAt.IsZero() {
+		settleCtx = withSettleAnchor(ctx, res.AnchorAt)
+	}
+	return r.settle(settleCtx, inv, res.ID, 0, res.Purpose, "reconciled: "+res.Status, terminalFailed, res.Status, res.DeclineCode, res.PaymentMethodID, res.CardMessage)
+}
+
+// endWithoutPayment ends an unknown invoice's attempt whose PaymentIntent
+// took no payment: the invoice goes back where a charge picks it up
+// (EndAttemptWithoutPayment), with no email and no dunning. A write that
+// fails or does not apply stamps the row with what Stripe showed, so it
+// rotates instead of heading the queue every tick.
+func (r *Reconciler) endWithoutPayment(ctx context.Context, inv domain.Invoice, paymentIntentID, providerStatus, reason string) (bool, error) {
+	status, applied, err := r.invoices.EndAttemptWithoutPayment(ctx, inv.TenantID, inv.ID, paymentIntentID, reason)
+	if err != nil || !applied {
+		r.recordSync(ctx, inv, providerStatus)
+	}
+	if err != nil {
+		return false, fmt.Errorf("end attempt %s without a payment: %w", paymentIntentID, err)
+	}
+	if applied {
+		slog.InfoContext(ctx, "reconcile: the charge's PaymentIntent took no payment; the invoice can be charged again",
+			"invoice_id", inv.ID, "tenant_id", inv.TenantID, "stripe_payment_intent_id", paymentIntentID,
+			"payment_status", string(status), "reason", reason)
+	}
+	return applied, nil
 }
 
 // recordSync stamps the provider's verbatim status and the moment we observed
@@ -478,4 +551,14 @@ func (r *Reconciler) settle(ctx context.Context, inv domain.Invoice, piID string
 		}
 		return true, nil
 	}
+}
+
+// answered reports whether a confirm of the PaymentIntent got an answer about
+// the payment: it has a charge (the card network was asked), or Stripe
+// recorded a payment error on it. A payment that needs the customer to
+// authenticate is refused with a payment error and no charge
+// (error_on_requires_action), and the customer must be told, so a charge
+// alone does not decide it.
+func answered(res PaymentIntentResult) bool {
+	return res.Charged || res.DeclineCode != "" || res.CardMessage != ""
 }

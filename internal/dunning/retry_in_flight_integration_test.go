@@ -49,12 +49,11 @@ func (r *processingRetry) RetryPayment(ctx context.Context, _, _, _ string) erro
 	if r.settle != nil {
 		r.settle(r.t, ctx, f, pi)
 	}
-	return &dunning.RetryError{PaymentIntentID: pi, Err: dunning.ErrPaymentInFlight, Hold: hold}
+	return &dunning.RetryError{PaymentIntentID: pi, Err: dunning.ErrPaymentInFlight}
 }
 
 // newInFlightFixture is the exhaust fixture with a fresh run (no retry used,
-// two to come), the email outbox and the hold release wired as router.go
-// wires them.
+// two to come) and the email outbox wired as router.go wires it.
 func newInFlightFixture(t *testing.T, db *postgres.DB, name string, retry *processingRetry) *exhaustFixture {
 	t.Helper()
 	var f *exhaustFixture
@@ -62,7 +61,6 @@ func newInFlightFixture(t *testing.T, db *postgres.DB, name string, retry *proce
 	f = newExhaustFixture(t, db, name, finalActions{name: "none", sub: domain.SubActionNone, inv: domain.InvActionNone}, 0, nil, retry)
 	f.svc.SetEmailNotifier(email.NewOutboxSender(email.NewOutboxStore(db)))
 	f.svc.SetCustomerEmailFetcher(fixedEmailFetcher{email: "slow@retry-in-flight.test", name: "Slow"})
-	f.svc.SetRetryHoldReleaser(f.invoices)
 	return f
 }
 
@@ -106,7 +104,9 @@ func (f *exhaustFixture) getRun(t *testing.T) domain.InvoiceDunningRun {
 }
 
 // setHold sets the invoice's charge hold to a live value, as the retry's own
-// claim left it while its payment was processing.
+// claim left it while its payment was processing: the hold and, equal to it,
+// its token (a hold without its token is an earlier version's, which the
+// failure settle leaves for a person).
 func (f *exhaustFixture) setHold(t *testing.T) {
 	t.Helper()
 	tx, err := f.db.BeginTx(f.ctx, postgres.TxBypass, "")
@@ -114,7 +114,7 @@ func (f *exhaustFixture) setHold(t *testing.T) {
 		t.Fatalf("begin: %v", err)
 	}
 	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(f.ctx, `UPDATE invoices SET auto_charge_claimed_until = now() + interval '4 minutes' WHERE id = $1 AND tenant_id = $2`, f.invoiceID, f.tenantID); err != nil {
+	if _, err := tx.ExecContext(f.ctx, `UPDATE invoices SET auto_charge_claimed_until = now() + interval '4 minutes', charge_hold_token = now() + interval '4 minutes' WHERE id = $1 AND tenant_id = $2`, f.invoiceID, f.tenantID); err != nil {
 		t.Fatalf("set hold: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -367,8 +367,8 @@ func TestRetryInFlight_PaymentSettledBeforeTheRunWrite(t *testing.T) {
 		if _, err := f.runs.GetRunAwaitingPayment(f.ctx, f.tenantID, f.invoiceID, "pi_slow_1"); !errors.Is(err, errs.ErrNotFound) {
 			t.Errorf("the run waits on a payment that already failed (err=%v)", err)
 		}
-		// The failure settle found no run waiting and released nothing; the
-		// retry releases its own hold (review finding F2).
+		// The failure settle freed the hold with the write that recorded the
+		// failure.
 		if f.held(t) {
 			t.Error("the retry's charge hold is still set: the next retry and the final action would wait for the stale-hold sweep")
 		}

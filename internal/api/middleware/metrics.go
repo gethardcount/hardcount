@@ -163,7 +163,7 @@ var (
 	staleChargeHoldResolutions = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hardcount_stale_charge_hold_resolutions_total",
-			Help: "Stale charge holds checked with Stripe (ADR-127), by result: settled, adopted, canceled, waiting, released, cleared, failed, cannot_ask, lost_race.",
+			Help: "Stale charge holds cleared by the stale-hold sweep, which asks Stripe nothing (ADR-127, ADR-137), by result: released (the charge never confirmed; the invoice can be charged again), cleared (a leftover hold), failed (the write failed), earlier (a hold or park an earlier version left, kept for a person), lost_race.",
 		},
 		[]string{"result"},
 	)
@@ -378,11 +378,10 @@ func RecordStripeBreakerState(state string) {
 	stripeBreakerState.Set(v)
 }
 
-// RecordStaleChargeHoldResolution counts one stale-hold check (ADR-127).
-// "cannot_ask" is a hold Stripe will not answer about (disconnected, key
-// rejected, customer missing): those invoices stay blocked from charging
-// until someone writes them off or fixes the connection, so alert on it
-// being non-zero. A steady "failed" is Stripe unreachable.
+// RecordStaleChargeHoldResolution counts one stale-hold check (ADR-127,
+// ADR-137). "earlier" is a hold or park an earlier version left on an open
+// invoice: it stays blocked from charging until a person settles it, so alert
+// on it being non-zero. A steady "failed" is the database refusing the clear.
 func RecordStaleChargeHoldResolution(result string) {
 	staleChargeHoldResolutions.WithLabelValues(result).Inc()
 }
@@ -577,17 +576,13 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 	// exporting a stale copy. The runbook's alert would then fire from replicas
 	// whose number had resolved.
 	//
-	// The stale-hold sweep ends a park at the first hourly tick 24 hours after
-	// its charge's hold (domain.ParkedNothingWait; ADR-127, amendment REC-5).
-	// So the gauge counts only the parks the sweep has not ended on schedule.
-	// Those have a hold more than 26 hours old (one tick plus an hour for a
-	// late one), or no hold, which nothing checks. A count of every park
-	// would stay above 0 for as long as parks kept arriving. A Stripe incident
-	// that parked invoices over a few hours would then page on parks that were
-	// on schedule. This package imports no domain package, so it keeps a hand
-	// copy of the 24 hours, which
-	// TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay pins.
-	parkedHelp := "Invoices whose last charge got an unclear answer from Stripe that named no payment (ADR-107) and that Hardcount has not ended on schedule: still parked 26 hours after the charge's hold, or with no hold. By disposition: open (finalized) or written_off (uncollectible). Hardcount records a payment that appears at Stripe and, with none 24 hours after the hold, ends the park at the next hourly tick (an open invoice is charged again); parks inside that are not counted. Alert on open > 0: Stripe cannot be asked or read about it, or nothing is checking it. -1 = metric query failed."
+	// Only an earlier Hardcount version parked an invoice (ADR-137), and the
+	// upgrade refuses to run over a park, open or written off, so this stays
+	// 0 unless a copy of that version ran beside this one. It still counts
+	// parks past the 24 hours the earlier version waited (a hold more than 26
+	// hours old, or none), as before; a follow-up change removes the gauge.
+	// TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay pins the window.
+	parkedHelp := "Invoices an earlier Hardcount version parked (an unclear answer from Stripe that named no payment, ADR-107) still parked 26 hours after the charge's hold, or with no hold. By disposition: open (finalized) or written_off (uncollectible). Since ADR-137 nothing parks an invoice and the upgrade refuses to run over a park, so this stays 0 unless a copy of an earlier version ran against the upgraded database; alert on open > 0: a person must check the customer's payments in Stripe. -1 = metric query failed."
 	for _, m := range []struct {
 		label string
 		live  bool

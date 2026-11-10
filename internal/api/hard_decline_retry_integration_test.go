@@ -19,9 +19,10 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// scriptedCharges is the Stripe side of the charge path: each
-// CreatePaymentIntent takes the next scripted answer and records which card
-// it was asked to charge.
+// scriptedCharges is the Stripe side of the charge path: each charge (its
+// create) records which card and amount it was asked to charge, and its
+// confirm takes that charge's scripted answer. A charge beyond the script is
+// still recorded, then refused, so "no further charge" assertions can fail.
 type scriptedCharges struct {
 	answers []scriptedCharge
 	charged []string // PaymentMethodID of every charge Stripe received
@@ -33,12 +34,24 @@ type scriptedCharge struct {
 	err error // a *payment.PaymentError for a decline; nil = succeeded
 }
 
-func (s *scriptedCharges) CreatePaymentIntent(_ context.Context, p payment.PaymentIntentParams) (payment.PaymentIntentResult, error) {
+func (s *scriptedCharges) CreateUnconfirmedPaymentIntent(_ context.Context, p payment.PaymentIntentParams) (payment.PaymentIntentResult, error) {
 	s.charged = append(s.charged, p.PaymentMethodID)
 	s.amounts = append(s.amounts, p.AmountCents)
 	if len(s.charged) > len(s.answers) {
 		return payment.PaymentIntentResult{}, errors.New("scriptedCharges: unexpected charge")
 	}
+	// The PaymentIntent this charge's answer is about: its pi, or the one its
+	// decline names.
+	a := s.answers[len(s.charged)-1]
+	id := a.pi
+	var pe *payment.PaymentError
+	if id == "" && errors.As(a.err, &pe) {
+		id = pe.PaymentIntentID
+	}
+	return payment.PaymentIntentResult{ID: id, Status: "requires_confirmation"}, nil
+}
+
+func (s *scriptedCharges) ConfirmPaymentIntent(context.Context, string, payment.PaymentIntentParams) (payment.PaymentIntentResult, error) {
 	a := s.answers[len(s.charged)-1]
 	if a.err != nil {
 		return payment.PaymentIntentResult{}, a.err
@@ -48,9 +61,6 @@ func (s *scriptedCharges) CreatePaymentIntent(_ context.Context, p payment.Payme
 func (s *scriptedCharges) CancelPaymentIntent(context.Context, string) error { return nil }
 func (s *scriptedCharges) GetPaymentIntent(_ context.Context, id string) (payment.PaymentIntentResult, error) {
 	return payment.PaymentIntentResult{ID: id, Status: "requires_payment_method"}, nil
-}
-func (s *scriptedCharges) ListPaymentIntentsForCustomer(context.Context, string, time.Time) ([]payment.PaymentIntentResult, error) {
-	return nil, nil
 }
 
 // stripeDeclined is the PaymentError classifyStripeError makes of Stripe's
