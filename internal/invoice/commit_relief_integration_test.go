@@ -304,3 +304,33 @@ func TestCommitRelief_ExpiredGrant(t *testing.T) {
 		t.Fatalf("expired-grant relief: err = %v, want fully-consumed/lapsed 409", err)
 	}
 }
+
+// A commit-relief credit note is issued through the same issue statement as
+// any other. On a Stripe Tax tenant, an invoice that only sells prepaid credit
+// is stored with tax_provider 'stripe_tax' but Stripe Tax never calculates it
+// (no calculation, no transaction), so its relief owes no tax reversal. Keyed
+// on the provider alone, the note carried tax_reversal_pending for good, with
+// nothing to reverse.
+func TestCommitRelief_OnAStripeTaxTenant_OwesNoTaxReversal(t *testing.T) {
+	h, ctx := newCommitHarness(t, "Relief Stripe Tax Tenant")
+	inv := h.createCommitInvoice(t, ctx, 9000, 10000, nil)
+	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	execBypassStamp(t, h.db, `UPDATE invoices SET tax_provider = 'stripe_tax', tax_calculation_id = '', tax_transaction_id = NULL WHERE id = $1`, inv.ID)
+	payOffline(t, h, ctx, inv.ID)
+	drain(t, h, ctx, 4000, 1)
+
+	cn, err := newReliefCNService(h).CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{
+		InvoiceID: inv.ID, RetireAll: true, Reason: "customer churned",
+	})
+	if err != nil {
+		t.Fatalf("relief: %v", err)
+	}
+	if cn.Status != domain.CreditNoteIssued {
+		t.Fatalf("status = %s, want issued", cn.Status)
+	}
+	if cn.TaxReversalPending {
+		t.Fatal("the relief of a credit-only invoice Stripe Tax never calculated is marked as owing a tax reversal; nothing would ever clear it")
+	}
+}

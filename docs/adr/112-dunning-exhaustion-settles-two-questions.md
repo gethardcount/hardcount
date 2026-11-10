@@ -491,9 +491,16 @@ it leaves behind is paid.
 - The in-flight stamp is saved on a context detached from the caller's
   deadline, as the unclear-outcome save already was.
 - Pinned by `internal/api/dunning_retry_in_flight_e2e_test.go` (the router,
-  signed webhooks and a test clock), `internal/dunning/retry_in_flight_integration_test.go`
-  and `internal/invoice/retry_hold_release_integration_test.go` on real
-  Postgres, and `internal/dunning/retry_in_flight_test.go`.
+  signed webhooks and a test clock) and `internal/dunning/retry_in_flight_integration_test.go`
+  on real Postgres, and `internal/dunning/retry_in_flight_test.go`.
+- 2026-11-10: the hook no longer releases the charge hold. The failure
+  settle frees it in the write that marks the invoice failed, for every
+  charge and not only a dunning retry, so the two statements above about the
+  hold release ("releases the charge hold the retry kept", "frees only a hold
+  younger than the stale-hold sweep's wait") no longer describe the code. See
+  the 2026-11-10 amendment of
+  [ADR-137](137-charge-stamps-invoice-before-confirming.md), pinned by
+  `internal/invoice/settle_frees_hold_integration_test.go`.
 
 ## Amendment 2026-11-09 — the write-off and the escalation commit together (P1-26)
 

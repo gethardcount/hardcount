@@ -39,13 +39,6 @@ type RetryError struct {
 	// (#1289): the attempt row keeps Stripe's decline code, which gives the
 	// Ask, but not its card message.
 	NoReason bool
-	// Hold is the charge hold the retry's charge took, set when its payment
-	// came back in flight (ErrPaymentInFlight): the charge keeps it then. A
-	// payment that settled before the in-flight write could be recorded is
-	// over, so retrySettledFirst releases this hold by its own token
-	// (ChargeHoldClaimer.ReleaseChargeHold); otherwise the next retry and the
-	// final action waited for the stale-hold sweep.
-	Hold domain.ChargeHold
 }
 
 func (e *RetryError) Error() string { return e.Err.Error() }
@@ -133,16 +126,6 @@ type InvoiceGetter interface {
 type ChargeHoldClaimer interface {
 	ClaimChargeHoldForFinalAction(ctx context.Context, tenantID, invoiceID string) (domain.ChargeHold, error)
 	ReleaseChargeHold(ctx context.Context, tenantID, invoiceID string, hold domain.ChargeHold) error
-}
-
-// RetryHoldReleaser frees the charge hold a dunning retry kept while its
-// payment was processing (#1289), on the failure settle's transaction, which
-// holds the invoice's row lock. The in-flight charge keeps its hold (an
-// unclear outcome never releases, ADR-127), and the due-run pickers skip a
-// held run, so without this the next retry waited for the stale-hold sweep.
-// Implemented by *invoice.PostgresStore.
-type RetryHoldReleaser interface {
-	ReleaseRetryChargeHoldTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (bool, error)
 }
 
 // SubscriptionTerminalState reports whether a subscription can still be
@@ -233,7 +216,6 @@ type Service struct {
 	invoiceUncollect InvoiceUncollectibleMarker
 	invoiceGet       InvoiceGetter
 	chargeHolds      ChargeHoldClaimer
-	retryHolds       RetryHoldReleaser
 	emailNotifier    EmailNotifier
 	customerEmail    CustomerEmailFetcher
 	custPolicy       CustomerPolicyReader
@@ -338,13 +320,6 @@ func (s *Service) SetSubscriptionStateReader(r SubscriptionStateReader) {
 // without the hold, as before ADR-127.
 func (s *Service) SetChargeHoldClaimer(c ChargeHoldClaimer) {
 	s.chargeHolds = c
-}
-
-// SetRetryHoldReleaser wires the release of a processing retry's charge hold
-// when its payment fails (RetryPaymentFailed). The producer always wires it;
-// unwired (narrow tests) the hold waits for the stale-hold sweep.
-func (s *Service) SetRetryHoldReleaser(r RetryHoldReleaser) {
-	s.retryHolds = r
 }
 
 // SetInvoiceUncollectibleMarker configures the write-off terminal action.
@@ -1180,10 +1155,9 @@ func (s *Service) resolveAfterRetry(ctx context.Context, tenantID string, run do
 // has already decided the attempt; retrySettledFirst reads which way.
 func (s *Service) retryInFlight(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErr error, now time.Time) error {
 	var pi string
-	var hold domain.ChargeHold
 	var re *RetryError
 	if errors.As(retryErr, &re) {
-		pi, hold = re.PaymentIntentID, re.Hold
+		pi = re.PaymentIntentID
 	}
 	next, err := nextActionAfterRetry(policy, run.AttemptCount, now)
 	if err != nil {
@@ -1211,7 +1185,7 @@ func (s *Service) retryInFlight(ctx context.Context, tenantID string, run domain
 			"run_id", run.ID, "invoice_id", run.InvoiceID, "payment_intent_id", pi)
 		return nil
 	case RetryInFlightPaymentMoved:
-		return s.retrySettledFirst(ctx, tenantID, run, policy, pi, hold, now)
+		return s.retrySettledFirst(ctx, tenantID, run, policy, pi, now)
 	}
 	slog.Info("dunning retry is processing — the run waits for the payment's outcome",
 		"run_id", run.ID, "invoice_id", run.InvoiceID, "attempt", run.AttemptCount, "payment_intent_id", pi)
@@ -1235,12 +1209,12 @@ var errRetryPaymentFailed = errors.New("payment failed")
 // found no run waiting on it. The invoice says which way it went. Paid closes
 // the run as a recovered retry. Failed on this PaymentIntent is a counted
 // failure, with its warning email, as if the charge had answered the decline.
-// Either way the payment is over, so the hold its charge kept is released by
-// its own token: the failure settle's hook found no run waiting and released
-// nothing. Anything else is loud: the attempt stays counted and the run keeps
-// the schedule the pre-charge persist wrote (the next retry, or the final
-// action after the last), and the hold stays for the stale-hold sweep.
-func (s *Service) retrySettledFirst(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, pi string, hold domain.ChargeHold, now time.Time) error {
+// Either way the payment is over, and the settle that recorded it freed the
+// hold its charge kept (ADR-137). Anything else is loud: the attempt stays
+// counted and the run keeps the schedule the pre-charge persist wrote (the
+// next retry, or the final action after the last), and the hold stays for
+// the stale-hold sweep.
+func (s *Service) retrySettledFirst(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, pi string, now time.Time) error {
 	if s.invoiceGet == nil {
 		return fmt.Errorf("dunning retry %d of run %s: its payment settled before the run write, and no invoice reader is wired to say how", run.AttemptCount, run.ID)
 	}
@@ -1250,10 +1224,8 @@ func (s *Service) retrySettledFirst(ctx context.Context, tenantID string, run do
 	}
 	switch {
 	case inv.Status == domain.InvoicePaid || inv.PaymentStatus == domain.PaymentSucceeded:
-		s.releaseRetryHold(ctx, tenantID, run, hold)
 		return s.retrySucceeded(ctx, tenantID, run, now)
 	case inv.PaymentStatus == domain.PaymentFailed && inv.StripePaymentIntentID == pi:
-		s.releaseRetryHold(ctx, tenantID, run, hold)
 		failure := error(&RetryError{PaymentIntentID: pi, Err: errRetryPaymentFailed, NoReason: true})
 		if ex, ok := s.retrier.(RetryFailureExplainer); ok {
 			if ferr := ex.ExplainRetryFailure(ctx, tenantID, run.InvoiceID, pi); ferr != nil {
@@ -1264,18 +1236,6 @@ func (s *Service) retrySettledFirst(ctx context.Context, tenantID string, run do
 	}
 	return fmt.Errorf("dunning retry %d of run %s: its payment %s left flight before the run write, and the invoice reads %s/%s; the run continues on its schedule",
 		run.AttemptCount, run.ID, pi, inv.Status, inv.PaymentStatus)
-}
-
-// releaseRetryHold releases the hold a retry's charge kept, by its own token.
-// A failed release leaves it for the stale-hold sweep (logged).
-func (s *Service) releaseRetryHold(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, hold domain.ChargeHold) {
-	if s.chargeHolds == nil || !hold.Held() {
-		return
-	}
-	if err := s.chargeHolds.ReleaseChargeHold(ctx, tenantID, run.InvoiceID, hold); err != nil {
-		slog.WarnContext(ctx, "dunning retry: releasing the charge hold of a payment that settled first failed — the stale-hold sweep clears it",
-			"run_id", run.ID, "invoice_id", run.InvoiceID, "error", err)
-	}
 }
 
 // exhaustRun finalizes a dunning run after its last retry failed (or
@@ -2121,9 +2081,6 @@ type warningRecipient struct {
 //     (TakeAwaitedRetryTx). The webhook, a redelivery and the reconciler can
 //     each report the failure; one wins, so the attempt gets one failed row
 //     and one email;
-//   - releases the charge hold the retry kept while the payment was
-//     processing, so the next retry is not left waiting for the stale-hold
-//     sweep;
 //   - records the failed attempt, at the failure's instant, with its
 //     PaymentIntent, so the timeline matches it to its charge attempt;
 //   - on any attempt but the last, moves the next retry to the failure plus
@@ -2174,11 +2131,6 @@ func (s *Service) retryPaymentFailedTx(ctx context.Context, tx *sql.Tx, tenantID
 	}
 	if !won {
 		return nil
-	}
-	if s.retryHolds != nil {
-		if _, err := s.retryHolds.ReleaseRetryChargeHoldTx(ctx, tx, inv.ID, pi); err != nil {
-			return fmt.Errorf("release the retry's charge hold: %w", err)
-		}
 	}
 	// The failure's instant: the settle's ctx is bound to the invoice's
 	// clock, so on a test clock this is the simulated time it was learned.

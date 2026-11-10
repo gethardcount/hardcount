@@ -97,7 +97,8 @@ already names the payment, so Hardcount can look it up.
 - **Nothing charges the invoice again** until Stripe's answer is known, so
   the customer is never charged twice. A charge hold makes sure only one
   charge runs at a time. It is a 5-minute claim on the invoice. After an
-  unclear answer, the hold stays until its 5 minutes end.
+  unclear answer, the hold stays until its 5 minutes end, or until the
+  payment's result is recorded, whichever comes first.
 - **The reconciler finds the answer.** It is a check that asks Stripe what
   happened to payments Hardcount did not hear back about. It runs with
   every billing run: hourly, or every 5 minutes when `APP_ENV` is `local`

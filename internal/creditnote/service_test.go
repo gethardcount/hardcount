@@ -273,12 +273,14 @@ func (m *memStore) TransitionStatus(ctx context.Context, tenantID, id string, fr
 	if to == domain.CreditNoteIssued {
 		cn.IssuedAt = &now
 		// As the real issue statement: a note with an amount, on an invoice
-		// Stripe Tax taxed, is marked as owing its tax reversal. Tests that
+		// Stripe Tax calculated or recorded (with or without tax), is marked
+		// as owing its tax reversal. Tests that
 		// depend on it hand the store their invoices (m.invoices).
 		cn.TaxReversalPending = false
 		if m.invoices != nil && cn.TotalCents > 0 {
 			if inv, ok := m.invoices.invoices[cn.InvoiceID]; ok {
-				cn.TaxReversalPending = inv.TaxProvider == "stripe_tax" && inv.TaxAmountCents > 0
+				cn.TaxReversalPending = inv.TaxProvider == "stripe_tax" &&
+					(inv.TaxCalculationID != "" || inv.TaxTransactionID != "")
 			}
 		}
 	}
@@ -476,11 +478,12 @@ func (m *memStore) ListPendingCreditNoteTaxReversal(_ context.Context, _ int, _ 
 		if cn.Status != domain.CreditNoteIssued {
 			continue
 		}
-		// The marker alone, as in the real store. The store also requires the
-		// invoice to have a tax transaction; this double has no invoices, and
-		// the service re-checks the invoice per row. That join, and the issue
-		// statement setting the marker, are covered by the real-Postgres tests.
-		if cn.TaxReversalPending {
+		// As the real store: marked, and the invoice has a tax transaction.
+		// Tests that list hand the store their invoices (m.invoices).
+		if !cn.TaxReversalPending || m.invoices == nil {
+			continue
+		}
+		if inv, ok := m.invoices.invoices[cn.InvoiceID]; ok && inv.TaxTransactionID != "" {
 			out = append(out, cn)
 		}
 	}

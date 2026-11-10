@@ -178,7 +178,7 @@ func TestTwoStep_ConfirmFails_ResolvedByReadingTheStampedPaymentIntent(t *testin
 		r.assertNoSecondCharge(inv.ID)
 		r.ageUpdated(inv.ID, 6*time.Minute)
 		r.runClean()
-		r.assertPaidNowHoldClearedLater(inv.ID, piA.id)
+		r.assertPaidAndHoldFreed(inv.ID, piA.id)
 		if ids := r.succeededFor(inv.ID); len(ids) != 1 {
 			t.Fatalf("succeeded PaymentIntents = %v, want only %s", ids, piA.id)
 		}
@@ -208,7 +208,7 @@ func TestTwoStep_Reconciler_CancelRefused_DoesNotEndTheAttempt(t *testing.T) {
 	r.assertNoSecondCharge(inv.ID)
 	r.ageUpdated(inv.ID, 5*time.Minute)
 	r.runClean()
-	r.assertPaidNowHoldClearedLater(inv.ID, pi.id)
+	r.assertPaidAndHoldFreed(inv.ID, pi.id)
 }
 
 // A dunning retry whose confirm never reached Stripe goes back to 'failed' (the

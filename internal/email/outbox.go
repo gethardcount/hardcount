@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"log/slog"
+	"runtime/debug"
 	"time"
 
 	mw "github.com/gethardcount/hardcount/internal/api/middleware"
@@ -356,7 +357,7 @@ type OutboxHandler func(ctx context.Context, row OutboxRow) error
 //     loop stops starting new rows when the batch ctx has less than one
 //     budget remaining (unattempted rows just wait out their lease). A
 //     panicking row is recovered per-row so it cannot strand the rest of
-//     the batch.
+//     the batch, and its panic counts as one retryable failed attempt.
 //  3. MARK (per row, short tx on a ctx DETACHED from the batch deadline):
 //     work already performed must always be recorded — a mark that dies
 //     with the tick deadline is exactly the delivered-email-re-sent bug
@@ -491,10 +492,21 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 	hErr := func() (err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				// A poisoned row (pathological payload) must not strand
-				// the rest of the batch or cycle lease-long forever with
-				// no attempt record.
-				err = fmt.Errorf("%w: handler panic: %v", ErrPayloadDecode, r)
+				// A panic is one failed attempt on the retry ramp, like any
+				// other error. It is not permanent: a panic can come from a
+				// bug that a deploy fixes before the ramp ends. A payload
+				// that cannot be decoded is refused by the handler itself,
+				// with ErrPayloadDecode. The stack exists only here, so it
+				// is logged here, and the error carries the panic value.
+				slog.ErrorContext(ctx, "email outbox: handler panicked; counting a failed attempt",
+					"outbox_id", row.ID,
+					"tenant_id", row.TenantID,
+					"email_type", row.EmailType,
+					"attempts", row.Attempts,
+					"panic", r,
+					"stack", string(debug.Stack()),
+				)
+				err = fmt.Errorf("email outbox: handler panic: %v", r)
 			}
 		}()
 		return handler(rowCtx, row)

@@ -204,7 +204,14 @@ func TestThresholdInArrearsBase_LegacyFireWithBase_BilledOnce(t *testing.T) {
 // in_arrears base off the fire: the threshold invoices lost their base line,
 // and the close and the cancel gained it (3000c full, 2400c prorated). Every
 // usage line stayed the same. Since ADR-130 §3 (PR-3) the label of a line
-// priced per unit is mode=per_unit, not mode=flat: the only edit since.
+// priced per unit is mode=per_unit, not mode=flat. Rewritten on purpose a
+// third time by #1673, where a fire bills usage up to one grace before it
+// (the late-usage watermark, ADR-120): in the two cases whose rig has a
+// grace (e2eGrace, 1h), the threshold invoice and its usage line end at
+// 04-19T23:00, not 04-20T00:00, and the close's or cancel's usage line starts
+// there. No quantity or amount changed. The in_advance and item-threshold
+// cases run with no grace and did not move. The name still says what this
+// guards: no change the golden does not record.
 //
 // The cases cover each reader of the threshold watermark: the fire's line
 // build (usage only, a max bucket left for the close, a prepaid in_advance

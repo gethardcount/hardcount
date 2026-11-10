@@ -15,7 +15,8 @@ import type { SubscriptionItemThreshold } from './subscriptionItemThreshold';
 
 /**
  * Limits that make Hardcount invoice before the period ends. A threshold
- * invoice bills the period's usage so far, and no base fee. The period
+ * invoice bills the period's usage so far (up to one
+ * `INVOICE_GRACE_PERIOD` before it is built), and no base fee. The period
  * keeps its dates, the base fee is billed as it would be with no
  * threshold, and the period's next invoice bills the rest of the usage.
  * Absent on a subscription with no thresholds. Set them with
@@ -24,8 +25,9 @@ import type { SubscriptionItemThreshold } from './subscriptionItemThreshold';
 export interface SubscriptionBillingThresholds {
   /**
      * Usage threshold in the subscription currency's minor unit
-     * (cents for USD), compared with the period's usage so far (the
-     * base fee is not counted). Absent when not set.
+     * (cents for USD), compared with the period's usage so far, up to
+     * one `INVOICE_GRACE_PERIOD` before the check (the base fee is not
+     * counted). Absent when not set.
      */
   amount_gte?: number;
   /** Per-item usage quantity thresholds. Empty when only `amount_gte` is set. */
